@@ -5,6 +5,12 @@
  *   node scripts/db-push-evals.mjs --dry-run              → ensaio contra a nuvem (faz tudo e dá ROLLBACK)
  *   node scripts/db-push-evals.mjs --target=<pg-url>      → ensaio contra outro banco (ex.: cloudsim local)
  *   node scripts/db-push-evals.mjs --yes                  → escreve de verdade na nuvem
+ *   node scripts/db-push-evals.mjs --skip-missing         → empurra só as obras que existem nos DOIS lados
+ *
+ * `--skip-missing` existe porque o caso normal de quem cura no local é ter, ao mesmo tempo,
+ * avaliações novas de obras antigas E obras criadas do zero. Sem a flag, uma obra nova bloqueia
+ * o push inteiro — inclusive avaliações que a nuvem está esperando há semanas. Com ela, as obras
+ * ausentes ficam listadas e de fora, e o resto viaja na mesma transação única.
  *
  * Contexto: em 2026-07-29 o projeto da nuvem foi restrito por cota de egress e o dev migrou pro
  * stack local ([[project-supabase-local-dev]]). O banco local é DESCARTÁVEL — o próximo
@@ -29,6 +35,9 @@ const ROOT = path.resolve(import.meta.dirname, "..")
 const args = process.argv.slice(2)
 const DRY = args.includes("--dry-run")
 const YES = args.includes("--yes")
+// Empurra só as obras que existem nos dois lados, em vez de abortar por causa das que foram
+// criadas localmente. Ver o bloco "as obras têm de existir no destino".
+const SKIP_MISSING = args.includes("--skip-missing")
 const targetArg = args.find((a) => a.startsWith("--target="))?.slice("--target=".length)
 
 const parseEnv = (file) => {
@@ -124,16 +133,41 @@ console.log(`  → ${newEvals.length} avaliação(ões) nova(s), em ${workIds.le
 // ── 2. as obras têm de existir no destino ───────────────────────────────────────────────
 // Se uma obra foi CRIADA localmente ela não está aqui — é outro problema (exige inserir em
 // `works` + upsert de `tags` com remap). Abortamos em vez de empurrar meia solução.
-const idArray = `'{${workIds.join(",")}}'::uuid[]`
-const presentInTarget = new Set(lines(psql(TARGET, `select id from public.works where id = any(${idArray})`)))
+const idArrayAll = `'{${workIds.join(",")}}'::uuid[]`
+const presentInTarget = new Set(lines(psql(TARGET, `select id from public.works where id = any(${idArrayAll})`)))
 const missing = workIds.filter((id) => !presentInTarget.has(id))
 if (missing.length) {
   console.error(`\n✗ ${missing.length} obra(s) não existe(m) no destino — foram criadas localmente:`)
   for (const id of missing.slice(0, 10)) {
     console.error(`   • ${id}  ${psql(SOURCE, `select title from public.works where id='${id}'`)}`)
   }
-  die("este script só empurra avaliação de obra que já existe nos dois lados. Criar obra é outro fluxo.")
+  if (!SKIP_MISSING) {
+    die(
+      "este script só empurra avaliação de obra que já existe nos dois lados. Criar obra é outro fluxo.\n" +
+        "  Pra empurrar mesmo assim SÓ o que dá, repita com --skip-missing (as obras acima ficam de fora).",
+    )
+  }
+  // `--skip-missing`: as obras acima ficam de fora e o resto viaja. Continua sendo tudo-ou-nada
+  // sobre o subconjunto — a transação única não muda; o que muda é o que entra nela.
+  //
+  // Por que isto não é afrouxar a guarda: a recusa existia pra não empurrar "meia solução" numa
+  // MESMA obra (avaliação sem a obra). Aqui a separação é POR OBRA — cada uma entra inteira ou
+  // não entra. Uma obra criada localmente não tem nada de meio caminho no destino: ela
+  // simplesmente ainda não existe lá, e continua não existindo depois.
+  console.error(`\n⚠️  --skip-missing: as ${missing.length} obra(s) acima ficam FORA deste push.`)
 }
+
+const skipped = new Set(missing)
+const pushableWorkIds = workIds.filter((id) => !skipped.has(id))
+const pushableEvals = newEvals.filter(([, workId]) => !skipped.has(workId))
+if (!pushableEvals.length) {
+  console.log(`\n✓ nada a empurrar depois de excluir as obras ausentes.`)
+  process.exit(0)
+}
+if (missing.length) {
+  console.log(`  → seguem ${pushableEvals.length} avaliação(ões) em ${pushableWorkIds.length} obra(s)`)
+}
+const idArray = `'{${pushableWorkIds.join(",")}}'::uuid[]`
 
 // ── 3. plano de transferência, em ordem de FK ───────────────────────────────────────────
 const cols = (table) =>
@@ -234,7 +268,7 @@ for (const step of PLAN) {
   console.log(`  ${step.table.padEnd(22)} ${String(n).padStart(6)} linha(s)`)
   staged.push({ ...step, cols: list, file, n: Number(n) })
 }
-console.log(`  ${"works (só o status)".padEnd(22)} ${String(workIds.length).padStart(6)} obra(s)`)
+console.log(`  ${"works (só o status)".padEnd(22)} ${String(pushableWorkIds.length).padStart(6)} obra(s)`)
 if (Number(willOverwrite) > 0) {
   console.log(`\n  ⚠️ ${willOverwrite} linha(s) de category_scores já existem no destino e serão SOBRESCRITAS`)
   console.log(`     (é o mesmo upsert que o app faz em ai.ts:555 — mas se você editou nota na nuvem, ela se vai)`)
@@ -318,8 +352,8 @@ if (problems.length) {
   process.exit(1)
 }
 
-console.log(`\n✓ push conferido: ${newEvals.length} avaliação(ões) de ${workIds.length} obra(s) na nuvem.`)
+console.log(`\n✓ push conferido: ${pushableEvals.length} avaliação(ões) de ${pushableWorkIds.length} obra(s) na nuvem.`)
 console.log(`\nFalta 1 passo manual: \`calculated_scores\` NÃO foi empurrada (é TS determinístico e`)
 console.log(`depende de recalc). Rode "Recalcular" nessas obras na nuvem — ou o recalc geral — pra`)
 console.log(`Nota.Calc e Nota Prevista saírem do zero. Obras:`)
-for (const id of workIds) console.log(`  ${id}  ${psql(SOURCE, `select title from public.works where id='${id}'`)}`)
+for (const id of pushableWorkIds) console.log(`  ${id}  ${psql(SOURCE, `select title from public.works where id='${id}'`)}`)
