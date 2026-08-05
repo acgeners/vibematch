@@ -2,6 +2,7 @@
 
 import { getCuradoriaBadgeUnreadCount, getRecommendationBadgeUnreadCount } from "@/server/queries/ai-eval-read"
 import { getSettingsItemUnread } from "@/server/queries/settings-read"
+import { countOpenCurationRequests } from "@/server/queries/curation-requests"
 import { SETTINGS_GROUPS } from "@/app/settings/sections"
 import { maybeTriggerStaleRecalc } from "@/server/recalc/queue"
 import { getComixStatus } from "@/lib/external/comix-gate"
@@ -14,6 +15,13 @@ export interface SidebarBadgeCounts {
   recQueue: number
   /** Soma de todas as pendências acionáveis de /settings (todos os tópicos). */
   settings: number
+  /**
+   * Pedidos do leitor em aberto (atualizar dados, revisar avaliação, cadastrar pelo nome).
+   *
+   * Parcela NOVA do badge de curadoria, não um badge novo: para quem olha, "tem coisa
+   * esperando decisão minha" é uma informação só. Ver migration 177.
+   */
+  requests: number
   /**
    * O mesmo não-lido, QUEBRADO por tópico de /settings (`grupo -> contagem`).
    *
@@ -59,7 +67,7 @@ export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
     lastEditAt: null,
   }))
 
-  const [curadoria, recQueue, settingsUnread, recalc] = await Promise.all([
+  const [curadoria, recQueue, settingsUnread, recalc, requests] = await Promise.all([
     getCuradoriaBadgeUnreadCount().catch((err) => {
       console.warn(
         "[getSidebarBadgeCounts] contagem de Curadoria da Obra falhou:",
@@ -76,12 +84,20 @@ export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
     }),
     getSettingsBadges(),
     recalcStatePromise,
+    countOpenCurationRequests().catch((err) => {
+      console.warn(
+        "[getSidebarBadgeCounts] contagem de pedidos falhou:",
+        err instanceof Error ? err.message : err,
+      )
+      return 0
+    }),
   ])
 
   return {
     curadoria,
     recQueue,
     settings: settingsUnread.total,
+    requests,
     settingsByGroup: settingsUnread.byGroup,
     recalcPending: recalc.pending,
     comixHealth,

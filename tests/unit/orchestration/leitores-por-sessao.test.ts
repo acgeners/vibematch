@@ -49,6 +49,10 @@ const READERS = [
   { file: "server/queries/lists.ts", fn: "countWorksInLists" },
   { file: "server/queries/imports.ts", fn: "getImportHistory" },
   { file: "server/queries/filter-presets.ts", fn: "getFilterPresets" },
+  // Pedidos de curadoria (migration 177): "os pedidos que EU fiz". Entra aqui no mesmo dia em
+  // que nasce — a lista existe pra registrar a invariante ANTES do vazamento, não depois.
+  { file: "server/queries/curation-requests.ts", fn: "getMyOpenRequestsByWork" },
+  { file: "server/queries/curation-requests.ts", fn: "getMyOpenRequestsForWork" },
   { file: "server/actions/enrich.ts", fn: "getPendingReviewWorks" },
   // Conversas do chat. Estas duas não tinham como filtrar até a migration 175 —
   // `recommendation_chats` não tinha coluna de dono. Eram invisíveis à auditoria que

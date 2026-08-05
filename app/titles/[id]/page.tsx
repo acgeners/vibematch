@@ -2,6 +2,12 @@ import type { Metadata } from "next"
 import { notFound, redirect } from "next/navigation"
 import { Archive, BarChart3, Ban, ChevronDown, Compass, Heart, LayoutDashboard, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash, ExternalLink } from "lucide-react"
 import { ArchivedBanner } from "@/components/titles/archived-banner"
+import {
+  CurationRequestActions,
+  IncompleteWorkBanner,
+} from "@/components/titles/curation-request-panel"
+import { getMyOpenRequestsForWork } from "@/server/queries/curation-requests"
+import { formatTimeAgo } from "@/lib/date-utils"
 import { AdultGate } from "@/components/titles/adult-gate"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { ComixResolutionWatcher } from "@/components/titles/comix-resolution-watcher"
@@ -379,6 +385,17 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   const interestReadiness = genReadiness?.["predict_interest_potential"] ?? null
   const alignmentReadiness = genReadiness?.["run_alignment"] ?? null
 
+  // Pedidos de curadoria em aberto DESTA pessoa sobre ESTA obra (migration 177). Vazio sem
+  // sessão — `getMyOpenRequestsForWork` sai por `getSessionUserId()`, então anônimo não vê
+  // pedido de ninguém. O rótulo de tempo é formatado AQUI, no servidor: calculá-lo no cliente
+  // faria o HTML do SSR discordar do primeiro render e quebrar a hidratação.
+  const meusPedidos = (await getMyOpenRequestsForWork(work.id as string)).map((p) => ({
+    id: p.id,
+    kind: p.kind,
+    quando: formatTimeAgo(p.createdAt),
+  }))
+  const fichaIncompleta = work.ai_eval_status === "pending"
+
   // Canal ÚNICO de review manual (externas) — para o diálogo "Avaliar" e o card de exibição.
   // Só editável com o gate local aberto (as Server Actions reexecutam o gate).
   const externalEditorEnabled = await isLocalExternalReviewEditorAllowed()
@@ -731,6 +748,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       </header>
 
       {work.is_archived && <ArchivedBanner workId={work.id} />}
+      {fichaIncompleta && <IncompleteWorkBanner />}
 
       <ComixResolutionWatcher workId={work.id} createdAt={work.created_at} />
       <UpdateProgressWatcher workId={work.id} />
@@ -929,6 +947,14 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           <div className="min-w-0">
             <TabsContent value="overview" className="mt-0 space-y-4">
               <div className="flex flex-wrap items-center gap-2">
+                {/* O espelho do leitor para os botões do curador desta mesma faixa: quem não
+                    pode raspar fonte externa em produção enfileira o pedido aqui, no lugar
+                    onde o curador tem "Atualizar dados". Some para o curador. */}
+                <CurationRequestActions
+                  workId={work.id}
+                  pedidosAbertos={meusPedidos}
+                  fichaIncompleta={fichaIncompleta}
+                />
                 <UpdateDataActionButton
                   workId={work.id}
                   currentWork={{

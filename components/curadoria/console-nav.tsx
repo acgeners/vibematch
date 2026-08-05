@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Gauge,
   Globe,
+  Inbox,
   LayoutDashboard,
   Palette,
   Scale,
@@ -59,6 +60,7 @@ const ICONS: Record<string, LucideIcon> = {
   ChartNoAxesCombined,
   Activity,
   LayoutDashboard,
+  Inbox,
 }
 
 interface ConsoleEntry {
@@ -106,6 +108,13 @@ const ENTRIES: ConsoleEntry[] = [
     accent: "violet",
   },
   {
+    href: "/curadoria/pedidos",
+    label: "Pedidos",
+    hint: "o que o leitor pediu",
+    iconName: "Inbox",
+    accent: "amber",
+  },
+  {
     href: "/settings",
     label: "Configurações",
     hint: "",
@@ -136,10 +145,11 @@ function isEntryActive(href: string, pathname: string): boolean {
 
 export function ConsoleNav({ settingsGroups, defaultSettingsGroup }: ConsoleNavProps) {
   const pathname = usePathname() ?? ""
-  const { settings, settingsByGroup, curadoria } = useChromeBadges()
+  const { settings, settingsByGroup, curadoria, requests } = useChromeBadges()
 
   const counts: Record<string, number> = {
     "/ai-evaluation": curadoria,
+    "/curadoria/pedidos": requests,
     "/settings": settings,
   }
 

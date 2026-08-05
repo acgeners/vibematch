@@ -41,6 +41,26 @@ export function formatPredictedDate(input: DateInput): string | null {
   return `${format(d, "dd/MM")} (${rel})`
 }
 
+/**
+ * Há quanto tempo, em prosa e minúsculo, pra encaixar no meio de uma frase:
+ * "Enviado ontem.", "Enviado há 3 dias.".
+ *
+ * Irmão de `formatRelativeDate`, não substituto: aquele é um RÓTULO de coluna ("Ontem",
+ * "Quarta", "12/03") e por isso vem capitalizado e vira dia da semana na semana corrente —
+ * "Enviado quarta" seria ambíguo (que quarta?) onde "há 3 dias" não é.
+ *
+ * Acima de 30 dias vira data: "há 412 dias" é preciso e inútil.
+ */
+export function formatTimeAgo(input: DateInput): string {
+  const d = toDate(input)
+  if (!d) return "—"
+  const days = differenceInCalendarDays(new Date(), d)
+  if (days <= 0) return "hoje"
+  if (days === 1) return "ontem"
+  if (days <= 30) return `há ${days} dias`
+  return `em ${format(d, isSameYear(d, new Date()) ? "dd/MM" : "dd/MM/yy")}`
+}
+
 export function formatRelativeDateTime(input: DateInput): string {
   const d = toDate(input)
   if (!d) return "—"

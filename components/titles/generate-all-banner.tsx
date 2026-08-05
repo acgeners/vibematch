@@ -7,6 +7,7 @@ import { Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { runTask } from "@/lib/tasks-store"
 import { Button } from "@/components/ui/button"
+import { useCan } from "@/components/layout/admin-context"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
 import { generateAllWorkData } from "@/server/actions/generate-all"
@@ -50,6 +51,13 @@ export function GenerateAllBanner({
   /** Modo botão inline (linha de ações da aba Geral) em vez do banner cheio. */
   compact?: boolean
 }) {
+  // A cascata é IA que ESCREVE no catálogo (`curate_ai`) e raspa fonte externa — as duas coisas
+  // que a curadoria centralizada põe no curador. `generateAllWorkData` já recusa por
+  // `ensureAdmin()`, então isto não é proteção: é parar de OFERECER um clique que o servidor
+  // nega. O leitor via "Gerar tudo" ao lado de "Pedir atualização dos dados" — um pedindo
+  // favor, o outro prometendo fazer sozinho a mesma coisa.
+  const canCurateAi = useCan("curate_ai")
+
   const [status, setStatus] = useState<CascadeStatus>(initialStatus)
   const [dialog, setDialog] = useState<Dialog>(null)
   // Passo de escolha de fontes+capas (UpdateDataDialog) que precede a cascata.
@@ -163,6 +171,9 @@ export function GenerateAllBanner({
       />
     </>
   )
+
+  // Depois de todos os hooks — retorno antecipado acima deles mudaria a ordem entre renders.
+  if (!canCurateAi) return null
 
   if (compact) {
     return (

@@ -28,6 +28,7 @@ const ZERO: SidebarBadgeCounts = {
   curadoria: 0,
   recQueue: 0,
   settings: 0,
+  requests: 0,
   settingsByGroup: {},
   recalcPending: false,
   comixHealth: "unknown",
