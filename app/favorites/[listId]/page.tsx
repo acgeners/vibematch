@@ -21,6 +21,7 @@ import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
 import { getFilterPresets } from "@/server/queries/filter-presets"
+import { getCriterionMomentsSafe } from "@/server/queries/criterion-moments"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
@@ -199,7 +200,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     allUrl: buildHideUrl("all"),
   }
 
-  const [entries, allGenres, allTags, statusOptions, favSummary, scoreThresholds, savedPresets, criterionPrefs, canAi, catalog, recentRecs, allGroups] =
+  const [entries, allGenres, allTags, statusOptions, favSummary, scoreThresholds, savedPresets, criterionPrefs, canAi, catalog, recentRecs, allGroups, criterionMoments] =
     await Promise.all([
       getRanking(filters),
       getAllGenres(),
@@ -213,6 +214,10 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
       isPseudo ? Promise.resolve([]) : getWorksLiteForPicker(),
       isPseudo ? Promise.resolve([]) : getListRecommendations(listId),
       getListsForPicker(),
+      // Habilita a lente σ do filtro de critério. Nada mais muda aqui: a query
+      // string continua em pontos, então esta página não sabe (nem precisa saber)
+      // o que é σ — a conversão é toda de exibição, dentro do componente.
+      getCriterionMomentsSafe(),
     ])
 
   // Destinos do "Adicionar a grupo": todos os grupos, menos o atual (numa página de grupo).
@@ -323,6 +328,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         defaultPersonalStatus="all"
         defaultTopN={null}
         basePath={basePath}
+        criterionMoments={criterionMoments}
         savedPresets={savedPresets}
         showTopN={false}
         showTierBand={false}
