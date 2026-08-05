@@ -56,6 +56,7 @@ import { ScoreBadge, getScoreTextColor, pickCriterionTierByRange, criterionTierP
 import type { CriterionTier } from "@/components/ui/score-badge"
 import { ForceMeters } from "@/components/ranking/force-meters"
 import { computeWorkForces } from "@/lib/calculations/forces"
+import { balanceScoreCardColumns } from "@/lib/ui/score-card-columns"
 import { PublicationStatusBadge } from "@/components/ui/status-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { SimilarWorksCard } from "@/components/titles/similar-works-card"
@@ -567,8 +568,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   // o total é ímpar, pra não deixar uma coluna vazia ao lado.
   const lastVerdict = deepDivePresent ? "deep" : alignPresent ? "align" : fitPresent ? "fit" : null
   const spanLastVerdict = verdictCount % 2 === 1
-  // Quantos cards aparecem em "Notas calculadas". Com ≤2 cada um ocupa a linha
-  // toda (grid 1 coluna); com ≥3 volta a 2 colunas.
+  // Quantos cards aparecem em "Notas calculadas".
   const calcCardCount = verdictCount + (work.user_score != null ? 1 : 0)
 
   const sourceOrder = new Map(
@@ -584,6 +584,15 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     if (aOrder !== bOrder) return aOrder - bOrder
     return a.platform.localeCompare(b.platform)
   })
+
+  // Os dois cards ficam lado a lado num grid que os estica à mesma altura: quem decide
+  // qual deles quebra em 2 colunas é a CONTAGEM dos dois lados, não a largura (essa entra
+  // só como guarda na classe). Ver lib/ui/score-card-columns.ts.
+  const scoreColumns = balanceScoreCardColumns({
+    calcCount: calcCardCount,
+    externalCount: platformRatings.length,
+  })
+  const calcTwoCols = scoreColumns.calc === 2
 
   const totalVotes = platformRatings.reduce((sum, pr) => sum + (pr.vote_count ?? 0), 0)
   const ratedPlatforms = platformRatings.filter((pr) => pr.rating != null && pr.vote_count > 0)
@@ -1219,19 +1228,28 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             </div>
           </CardHeader>
           <CardContent className="@container pt-0">
-            {/* Container query (@md = card ≥ 448px): as colunas dependem da largura REAL
-                do card — que varia com o grid externo (side-by-side com "Avaliações
-                externas") e a sidebar — não do viewport. Com `sm:` o grid abria 2
-                colunas com o card a ~350px e cada célula ficava estreita demais pro
-                próprio conteúdo (selos não encolhem → sobreposição). */}
-            <div className={cn("grid grid-cols-1 gap-4", calcCardCount >= 3 && "@md:grid-cols-2")}>
+            {/* QUANDO abrir em 2 colunas é decisão de contagem (`scoreColumns`, pra
+                equilibrar a altura com "Avaliações externas"); o `@md` (card ≥ 448px) é só
+                a GUARDA de largura. Container query, não `sm:`: a largura que importa é a
+                REAL do card, que varia com o grid externo — com `sm:` o grid abria 2
+                colunas com o card a ~350px e cada célula ficava estreita demais pro próprio
+                conteúdo (selos não encolhem → sobreposição). Aqui a guarda é mais alta que
+                a das fontes externas porque a célula carrega descrição longa + selo w-14 —
+                a 179px (o que sobraria lado a lado) "Posição no catálogo pelo seu perfil
+                (percentil)" quebra em 4 linhas e a coluna dupla não economiza altura
+                nenhuma. Na prática, então, este `@md` só dispara quando NÃO há avaliações
+                externas e o card fica sozinho em `max-w-3xl`. */}
+            <div className={cn("grid grid-cols-1 gap-4", calcTwoCols && "@md:grid-cols-2")}>
               {work.calculated_scores?.personal_fit != null && (
                 <div className={cn(
                   // min-w-0: sem isso o item do grid tem min-width:auto e transborda a
                   // trilha em vez de encolher. gap-3: o badge encostava no texto.
+                  // ⚠️ Todo `col-span-2` daqui pra baixo tem que usar a MESMA condição e o
+                  // MESMO breakpoint do grid acima (`calcTwoCols` + `@md`): num grid de 1
+                  // coluna, `col-span-2` cria uma segunda coluna IMPLÍCITA e estoura o card.
                   "flex min-w-0 items-center justify-between gap-3 p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
                   // Última célula de veredito numa contagem ímpar → ocupa a linha toda.
-                  calcCardCount >= 3 && spanLastVerdict && lastVerdict === "fit" && "@md:col-span-2",
+                  calcTwoCols && spanLastVerdict && lastVerdict === "fit" && "@md:col-span-2",
                 )}>
                   <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
                     <span className="text-xs font-medium text-muted-foreground">Alinhamento</span>
@@ -1287,7 +1305,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     stale
                       ? "border-amber-500/55 hover:border-amber-500/70"
                       : "border-border/80 hover:border-border",
-                    calcCardCount >= 3 && spanLastVerdict && lastVerdict === "align" && "@md:col-span-2",
+                    calcTwoCols && spanLastVerdict && lastVerdict === "align" && "@md:col-span-2",
                   )}>
                     <div className="flex min-w-0 items-center justify-between gap-3">
                       <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
@@ -1336,7 +1354,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               {deepDivePresent && (
                 <div className={cn(
                   "flex min-w-0 items-center justify-between gap-3 p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
-                  calcCardCount >= 3 && spanLastVerdict && lastVerdict === "deep" && "@md:col-span-2",
+                  calcTwoCols && spanLastVerdict && lastVerdict === "deep" && "@md:col-span-2",
                 )}>
                   <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
                     <span className="text-xs font-medium text-muted-foreground">Deep Dive</span>
@@ -1376,7 +1394,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 hasPostReadingScores ? (
                   <details className={cn(
                     "group rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm overflow-hidden",
-                    calcCardCount >= 3 && "@md:col-span-2",
+                    calcTwoCols && "@md:col-span-2",
                   )}>
                     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
                       <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
@@ -1404,7 +1422,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 ) : (
                   <div className={cn(
                     "flex min-w-0 items-center justify-between gap-3 p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
-                    calcCardCount >= 3 && "@md:col-span-2",
+                    calcTwoCols && "@md:col-span-2",
                   )}>
                     <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
                       <span className="text-xs font-medium text-muted-foreground">Pessoal</span>
@@ -1450,9 +1468,18 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               </div>
             </CardHeader>
             <CardContent className="@container pt-0">
-              {/* Mesmo racional do card "Notas calculadas": 2 colunas só quando o CARD
-                  tem largura pra isso (container query), não o viewport. */}
-              <div className="grid grid-cols-1 @md:grid-cols-2 gap-3">
+              {/* Duas colunas SÓ quando há bem mais fontes do que notas calculadas
+                  (`scoreColumns`) — senão a lista desce em coluna única e as alturas dos
+                  dois cards ficam parecidas.
+                  🔴 A guarda é `@min-[22rem]` (352px), NÃO `@md`: a página é `max-w-6xl` com
+                  trilha de abas de 260px, então lado a lado o card empaca em 424px e o
+                  conteúdo em 374px — MEDIDO. O `@md:grid-cols-2` (448px) que estava aqui era
+                  letra morta no desktop (só disparava com os cards empilhados, abaixo de
+                  `lg`), e era por isso que 9 fontes desciam em coluna única ao lado de 2
+                  notas. O 352 também é medido: abaixo de ~345px de conteúdo a célula fica
+                  com menos de 167px e "MyAnimeList"/"Manga Updates" passam a truncar. Ao
+                  mexer no max-width da página ou no nome das fontes, remeça. */}
+              <div className={cn("grid grid-cols-1 gap-3", scoreColumns.external === 2 && "@min-[22rem]:grid-cols-2")}>
                 {platformRatings.map((pr) => (
                   <div key={pr.platform} className="flex items-center justify-between p-3 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
                     <div className="flex flex-col min-w-0">
