@@ -6,6 +6,7 @@ import {
   CurationRequestActions,
   IncompleteWorkBanner,
 } from "@/components/titles/curation-request-panel"
+import { ApprovalBadge, ApprovalActions } from "@/components/titles/approval-controls"
 import { getMyOpenRequestsForWork } from "@/server/queries/curation-requests"
 import { formatTimeAgo } from "@/lib/date-utils"
 import { AdultGate } from "@/components/titles/adult-gate"
@@ -395,6 +396,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     quando: formatTimeAgo(p.createdAt),
   }))
   const fichaIncompleta = work.ai_eval_status === "pending"
+  // ⚠️ `!== false` e não `=== true`: obra gravada antes da migration 178, ou por um caminho que
+  // não seta a coluna, vem `undefined` aqui — e tratar isso como "não aprovada" encheria a tela
+  // de selo em obra que ninguém questionou. O default do BANCO é quem decide (false para linha
+  // nova); este operador só cobre a ausência da coluna no payload.
+  const aprovada = (work as { approved?: boolean }).approved !== false
 
   // Canal ÚNICO de review manual (externas) — para o diálogo "Avaliar" e o card de exibição.
   // Só editável com o gate local aberto (as Server Actions reexecutam o gate).
@@ -735,6 +741,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               Arquivada
             </span>
           )}
+          {!aprovada && <ApprovalBadge />}
           {isAdult && (
             <span
               className="inline-flex items-center gap-2 rounded-full border border-red-500/40 bg-red-50 px-3.5 py-1.5 text-base font-bold text-red-800 dark:bg-red-950/40 dark:text-red-200"
@@ -749,6 +756,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
 
       {work.is_archived && <ArchivedBanner workId={work.id} />}
       {fichaIncompleta && <IncompleteWorkBanner />}
+      {/* Os botões ficam junto do selo, não no menu "Mais": aprovar é a decisão principal
+          numa obra que chega assim, e item escondido em dropdown vira item não usado. */}
+      {!aprovada && <ApprovalActions workId={work.id} />}
 
       <ComixResolutionWatcher workId={work.id} createdAt={work.created_at} />
       <UpdateProgressWatcher workId={work.id} />

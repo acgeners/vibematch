@@ -1102,7 +1102,16 @@ async function persistNewWork(
    * dele passava a aprender o gosto dela. Sem erro, sem log; medido no banco antes de existir
    * este parâmetro (scripts/e2e/verify-create-ownership.mjs).
    */
-  opts: { skipAiCascade?: boolean; creatorId: string },
+  /**
+   * `approvedByRole` — a obra já nasce validada? Vem do PAPEL de quem cria
+   * (`ensurePermission("curate_ai")`), resolvido pelo chamador (migration 178).
+   *
+   * ⚠️ Explícito, e não derivado de `skipAiCascade`. Os dois hoje valem `isCurator`, mas
+   * significam coisas diferentes — "pular a cascata paga" é decisão de CUSTO (o Flow B do
+   * popup deixa até o curador pular) e "aprovada" é decisão de CONFIANÇA. Amarrar uma na
+   * outra faria o curador que escolhe não gastar tokens criar obra não-aprovada.
+   */
+  opts: { skipAiCascade?: boolean; creatorId: string; approvedByRole: boolean },
 ): Promise<
   | { ok: true; workId: string }
   | { ok: false; error: Record<string, string[]> }
@@ -1186,6 +1195,8 @@ async function persistNewWork(
         data.publication_status_id ?? getPublicationStatusIdByName(data.publication_status),
       total_chapters: data.total_chapters ?? null,
       ai_eval_status: "pending",
+      approved: opts.approvedByRole,
+      approved_at: opts.approvedByRole ? new Date().toISOString() : null,
     })
     .select("id")
     .single()
@@ -1382,6 +1393,7 @@ export async function createWork(
   const result = await persistNewWork(safeValues, isCurator ? aiMeta : undefined, {
     skipAiCascade: !isCurator,
     creatorId: session.userId,
+    approvedByRole: isCurator,
   })
   if (!result.ok) return { error: result.error }
   // `skipAiEnrichment`: o usuário optou por salvar SEM o enriquecimento pago
@@ -1544,9 +1556,14 @@ export async function createWorkPending(values: WorkFormValues) {
   if (!gate.ok) return { error: { _root: [gate.error] } }
 
   const isOwner = await canWriteSharedWorkRow(session.userId)
+  // `curate_ai` e não `isOwner`: aprovar é decisão de PAPEL (migration 178), e `isOwner` responde
+  // outra pergunta ("pode escrever na linha compartilhada"). Hoje coincidem; se um dia deixarem
+  // de coincidir, o certo aqui é o papel.
+  const isCurator = (await ensurePermission("curate_ai")).ok
   const result = await persistNewWork(values, undefined, {
     skipAiCascade: !isOwner,
     creatorId: session.userId,
+    approvedByRole: isCurator,
   })
   if (!result.ok) return { error: result.error }
 
@@ -1596,7 +1613,12 @@ export async function createWorksBatch(
   const needEdgeReviews: string[] = []
   let saveWorkReviewsFn: typeof import("@/lib/external/persist-reviews").saveWorkReviews | null = null
   for (const { values, aiMeta, externalReviews } of normalized) {
-    const result = await persistNewWork(values, aiMeta, { creatorId: session.userId })
+    // O lote é `ensureAdmin()` lá em cima, então isto é sempre true hoje. Calculado mesmo assim,
+    // e não fixado: se o gate do lote afrouxar um dia, `approved` acompanha em vez de mentir.
+    const result = await persistNewWork(values, aiMeta, {
+      creatorId: session.userId,
+      approvedByRole: (await ensurePermission("curate_ai")).ok,
+    })
     if (!result.ok) return { error: result.error, data: { created } }
     if (externalReviews && externalReviews.length > 0) {
       if (!saveWorkReviewsFn) {
@@ -1959,6 +1981,41 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
   revalidatePath("/")
   revalidateFavorites()
   return { data: { id, slug: nextSlug } }
+}
+
+/**
+ * O curador decide sobre uma obra criada por não-curador (migration 178).
+ *
+ * `aprovar` → `approved = true`, carimba `approved_at`, o badge some.
+ * `rejeitar` → ARQUIVA em vez de apagar. Reversível (`unarchiveWork` já existe), tira do
+ *   ranking/recomendações/estatísticas, e não destrói o que a pessoa cadastrou — apagar seria
+ *   irreversível num banco cujo backup é semanal. `approved` fica false: a obra não passou.
+ *
+ * ⚠️ `approved` NÃO é campo de formulário e não pode virar um. Toda função exportada daqui é
+ * endpoint HTTP público; se a coluna entrasse no `workFormSchema`, qualquer pessoa faria POST
+ * de `approved: true` na própria obra. Este é o único caminho de escrita, e ele é `ensureAdmin`.
+ */
+export async function setWorkApproval(id: string, aprovar: boolean) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
+  const supabase = createAdminClient()
+
+  const { error } = await supabase
+    .from("works")
+    .update(
+      aprovar
+        ? { approved: true, approved_at: new Date().toISOString() }
+        : { approved: false, approved_at: null, is_archived: true },
+    )
+    .eq("id", id)
+
+  if (error) return { error: error.message }
+  revalidatePath(`/titles/${id}`)
+  revalidatePath("/titles")
+  revalidateTag("works-slug-index", "max")
+  revalidatePath("/")
+  revalidateFavorites()
+  return { data: null }
 }
 
 export async function archiveWork(id: string) {

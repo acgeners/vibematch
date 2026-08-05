@@ -4,6 +4,7 @@ import { revalidatePath, revalidateTag } from "next/cache"
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { ensureReadingStateWriter, writeReadingState } from "@/server/queries/user-work-state"
+import { ensurePermission } from "@/server/queries/current-user"
 import { markRecalcPending } from "@/server/recalc/queue"
 import { recalculateForUser } from "@/server/recalc/user-recalc"
 import {
@@ -202,7 +203,14 @@ async function applyUpdate(
 async function createWorkFromEntry(
   supabase: AnySupabaseClient,
   userId: string,
-  entry: ExternalListEntry
+  entry: ExternalListEntry,
+  /**
+   * Papel de quem importa (migration 178). ⚠️ Este é o SEGUNDO caminho que insere em `works`, e
+   * ele não passa por `createWork`: monta a linha na mão e nunca viu `ensurePermission`. Sem
+   * este argumento toda obra importada nasceria não-aprovada — inclusive as do próprio curador,
+   * que importa a lista dele e veria 300 obras marcadas como pendentes de aprovação.
+   */
+  approvedByRole: boolean
 ): Promise<string> {
   const personal = {
     personal_status_id: getPersonalStatusIdByName(entry.personalStatus ?? DEFAULT_PERSONAL_STATUS),
@@ -216,6 +224,8 @@ async function createWorkFromEntry(
       title: entry.title,
       publication_status_id: getPublicationStatusIdByName("Unknown"),
       ai_eval_status: "pending",
+      approved: approvedByRole,
+      approved_at: approvedByRole ? new Date().toISOString() : null,
     })
     .select("id")
     .single()
@@ -264,6 +274,9 @@ export async function commitExternalListImport(
   try {
     const gate = await ensureReadingStateWriter()
     if (!gate.ok) return { error: gate.error }
+    // Mesma pergunta que `createWork` faz (migration 178): obra importada por curador já nasce
+    // aprovada; a de qualquer outro papel espera revisão. Resolvido UMA vez para o lote inteiro.
+    const approvedByRole = (await ensurePermission("curate_ai")).ok
     const { source, entries } = await resolveEntries(input)
     const supabase = createAdminClient()
     const ctx = await buildMatchContext(supabase, gate.userId)
@@ -332,7 +345,7 @@ export async function commitExternalListImport(
               result.skippedCount++
             }
           } else if (decision.action === "create") {
-            const workId = await createWorkFromEntry(supabase, gate.userId, entry)
+            const workId = await createWorkFromEntry(supabase, gate.userId, entry, approvedByRole)
             await upsertExternalId(supabase, workId, entry)
             result.createdCount++
             result.createdWorkIds.push(workId)
@@ -348,7 +361,7 @@ export async function commitExternalListImport(
           result.skippedCount++
           continue
         }
-        const workId = await createWorkFromEntry(supabase, gate.userId, entry)
+        const workId = await createWorkFromEntry(supabase, gate.userId, entry, approvedByRole)
         await upsertExternalId(supabase, workId, entry)
         result.createdCount++
         result.createdWorkIds.push(workId)

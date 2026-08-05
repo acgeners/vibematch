@@ -8,6 +8,30 @@ import { useCan, useIsSignedIn } from "@/components/layout/admin-context"
 import { createCurationRequest, cancelCurationRequest } from "@/server/actions/curation-requests"
 import type { CurationRequestKind } from "@/server/queries/curation-requests"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+
+/**
+ * O rótulo diz o VERBO, a tooltip diz o CUSTO e o que muda na ficha — os dois pedidos parecem
+ * intercambiáveis pelo nome, e não são: um raspa fonte externa, o outro queima tokens.
+ *
+ * ⚠️ `TooltipContent` já é `bg-foreground` + `text-background` (fundo invertido). Não pôr
+ * `text-foreground` aqui dentro, que é como o texto some ([[project_inverted_tooltip_text_foreground]]).
+ *
+ * 🔴 O `TooltipProvider` vai AQUI DENTRO porque **não existe um global** neste app — cada
+ * componente traz o seu (`attr-color-mode-toggle` faz igual). Sem ele o Radix não avisa: ele
+ * LANÇA "`Tooltip` must be used within `TooltipProvider`" no render, o que derrubaria a página
+ * inteira da obra, não só o botão.
+ */
+function ComTooltip({ texto, children }: { texto: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>{children}</TooltipTrigger>
+        <TooltipContent className="max-w-[260px] text-center">{texto}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
 
 /**
  * O lado do LEITOR da curadoria centralizada (ver `project-curadoria-centralizada-solicitacoes`).
@@ -126,14 +150,29 @@ export function RequestByNameBanner({ query }: { query: string }) {
   )
 }
 
-const ROTULO: Record<Exclude<CurationRequestKind, "create_by_name">, { botao: string; feito: string }> = {
+const ROTULO: Record<
+  Exclude<CurationRequestKind, "create_by_name">,
+  { botao: string; feito: string; ajuda: React.ReactNode }
+> = {
   update_data: {
     botao: "Pedir atualização dos dados",
     feito: "Você pediu uma atualização desta obra",
+    ajuda: (
+      <>
+        O curador rebusca nas <strong>9 fontes</strong> e atualiza capa, sinopse, capítulos e
+        status de publicação. Não mexe nas notas.
+      </>
+    ),
   },
   review_eval: {
     botao: "Pedir revisão da avaliação",
     feito: "Você pediu uma revisão da avaliação desta obra",
+    ajuda: (
+      <>
+        Para quando você <strong>discorda das notas</strong> dos 9 critérios. O curador reexecuta
+        a avaliação de IA sobre as reviews. Não altera os dados da ficha.
+      </>
+    ),
   },
 }
 
@@ -243,6 +282,7 @@ export function CurationRequestActions({
                 size="sm"
                 disabled={isPending}
                 onClick={() => cancelar(p.id)}
+                title="Retira o pedido da fila do curador. Você pode pedir de novo depois."
                 className="bg-background font-semibold text-amber-900 hover:bg-amber-100 hover:text-amber-950 dark:text-amber-200 dark:hover:bg-amber-950/50 dark:hover:text-amber-100"
               >
                 {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -260,21 +300,22 @@ export function CurationRequestActions({
       {kindsPendentes.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           {kindsPendentes.map((k) => (
-            <Button
-              key={k}
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={isPending}
-              onClick={() => pedir(k)}
-            >
-              {k === "update_data" ? (
-                <RefreshCw className="h-4 w-4" />
-              ) : (
-                <Sparkles className="h-4 w-4" />
-              )}
-              {ROTULO[k].botao}
-            </Button>
+            <ComTooltip key={k} texto={ROTULO[k].ajuda}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isPending}
+                onClick={() => pedir(k)}
+              >
+                {k === "update_data" ? (
+                  <RefreshCw className="h-4 w-4" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {ROTULO[k].botao}
+              </Button>
+            </ComTooltip>
           ))}
         </div>
       )}
