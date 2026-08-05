@@ -25,6 +25,7 @@ import {
   readCriterionUnit,
   scoreToSigma,
   sigmaToScore,
+  snapToScoreGrid,
   SD_MAX,
   SD_MIN,
   SD_PRESETS,
@@ -626,11 +627,17 @@ function toDisplay(def: ScoreDef, points: number | undefined): number | undefine
   return scoreToSigma(points, def.moment) ?? undefined
 }
 
-/** Domínio de exibição → pontos, que é o que vai pra URL. */
-function toPoints(def: ScoreDef, display: number): number | null {
+/**
+ * Domínio de exibição → pontos, que é o que vai pra URL.
+ *
+ * Encaixa na grade de 0,5 (o passo real das notas) porque um limiar fracionário
+ * faz o pill em Pontos mentir: `+0,5σ` em romance dá 8,01, o pill mostra "≥ 8" e
+ * o filtro exclui as 421 obras com romance exatamente 8,0. Ver snapToScoreGrid.
+ */
+function toPoints(def: ScoreDef, display: number, bound: "min" | "max"): number | null {
   if (def.unit !== "sd") return display
   const p = sigmaToScore(display, def.moment)
-  return p == null ? null : parseFloat(p.toFixed(2))
+  return p == null ? null : snapToScoreGrid(p, bound)
 }
 
 /** Estado/rótulo atual de uma nota: Qualquer / ≥X / X–Y / ≤X. */
@@ -713,24 +720,30 @@ function ScoreThresholdEditor({
   const display = dragValue ?? committed
   // O slider trabalha no domínio de EXIBIÇÃO (σ quando a lente está ligada), mas
   // o que vai pra URL é sempre ponto — ver a nota em ScoreDef.unit.
-  const write = (v: number | null) => {
+  const write = (v: number | null, bound: "min" | "max") => {
     if (v == null) return null
-    const p = toPoints(def, v)
+    const p = toPoints(def, v, bound)
     return p == null ? null : String(p)
   }
   const commit = (next: number[]) => {
     const [lo, hi] = next as [number, number]
     updateParams({
-      [def.minKey]: lo > def.min ? write(lo) : null,
-      [def.maxKey]: hi < def.max ? write(hi) : null,
+      [def.minKey]: lo > def.min ? write(lo, "min") : null,
+      [def.maxKey]: hi < def.max ? write(hi, "max") : null,
     })
     setDragValue(null)
   }
   const setMinPreset = (p: number | null) => {
     setDragValue(null)
-    updateParams({ [def.minKey]: p != null ? write(p) : null, [def.maxKey]: null })
+    updateParams({ [def.minKey]: p != null ? write(p, "min") : null, [def.maxKey]: null })
   }
-  const presetActive = (p: number) => !info.hasMax && info.vMin === p
+  // Em σ o preset não bate exato: ele é gravado em pontos e encaixado na grade
+  // de 0,5, então "+0,5σ" volta como +0,49σ. Comparar por igualdade deixaria o
+  // chip que o usuário acabou de clicar apagado.
+  const presetActive = (p: number) =>
+    !info.hasMax &&
+    info.vMin != null &&
+    (def.unit === "sd" ? Math.abs(info.vMin - p) < SD_STEP / 2 : info.vMin === p)
   return (
     <>
       <div className="flex flex-wrap gap-1.5">
@@ -1973,7 +1986,9 @@ export function RankingFilters({
   const appliedSearchString = appliedSearchParams.toString()
   const [draftSearch, setDraftSearch] = useState(appliedSearchString)
   const searchParams = useMemo(() => new URLSearchParams(draftSearch), [draftSearch])
-  const criterionUnit = readCriterionUnit(searchParams)
+  // Sem momentos a lente não funciona: força Pontos em vez de deixar o seletor
+  // dizer σ enquanto os pills mostram pontos.
+  const criterionUnit = criterionMoments ? readCriterionUnit(searchParams) : "points"
   const criterionScoreDefs = useMemo(
     () =>
       buildCriterionScoreDefs(
@@ -2807,11 +2822,18 @@ export function RankingFilters({
               searchParams={searchParams}
               updateParams={updateParams}
               headerAction={
-                <CriterionUnitToggle
-                  unit={criterionUnit}
-                  updateParams={updateParams}
-                  moments={criterionMoments}
-                />
+                // `undefined` = a página não oferece a lente (ex: /favorites, que
+                // não busca os momentos) → some com o seletor. `null` = ela
+                // oferece mas a leitura falhou → seletor desabilitado, com a
+                // explicação. Um estado só pros dois fazia o /favorites acusar
+                // uma falha que nunca houve.
+                criterionMoments !== undefined ? (
+                  <CriterionUnitToggle
+                    unit={criterionUnit}
+                    updateParams={updateParams}
+                    moments={criterionMoments}
+                  />
+                ) : undefined
               }
             />
             <ScorePillGroup

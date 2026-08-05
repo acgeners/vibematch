@@ -46,6 +46,31 @@ export function scoreToSigma(score: number, m: { mean: number; sd: number } | un
   return (score - m.mean) / m.sd
 }
 
+/** Passo REAL da escala de notas: as avaliações saem em meios-pontos. */
+export const SCORE_GRID = 0.5
+
+/**
+ * Encaixa um limiar convertido de σ na grade de 0,5 em que as notas realmente
+ * existem — piso no mínimo, teto no máximo.
+ *
+ * 🔴 Sem isto o limiar fica fracionário e o controle MENTE. Medido: o preset
+ * `≥ +0,5σ` em romance dá 8,01 pontos; o pill em Pontos renderiza sem casas
+ * decimais e mostra "≥ 8", mas o filtro aplicado exclui as **421 obras que têm
+ * romance exatamente 8,0**. Um limiar entre dois valores possíveis não recorta
+ * nada a mais que o valor abaixo dele — só desalinha o que a tela promete do
+ * que a query faz.
+ *
+ * Direcional pelo mesmo motivo de sempre: arredondar pode ALARGAR o recorte,
+ * nunca apertá-lo em silêncio.
+ */
+export function snapToScoreGrid(points: number, bound: "min" | "max"): number {
+  const snapped =
+    bound === "min"
+      ? Math.floor(points / SCORE_GRID) * SCORE_GRID
+      : Math.ceil(points / SCORE_GRID) * SCORE_GRID
+  return Math.min(10, Math.max(0, parseFloat(snapped.toFixed(2))))
+}
+
 export interface MoodThresholds {
   criterionMin?: Partial<Record<string, number>>
   criterionMax?: Partial<Record<string, number>>

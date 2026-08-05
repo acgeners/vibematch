@@ -5,6 +5,7 @@ import {
   scoreToSigma,
   resolveMoodThresholds,
   sigmaToScore,
+  snapToScoreGrid,
 } from "@/lib/ranking/criterion-unit"
 import { MOOD_PRESETS } from "@/lib/constants/mood-presets"
 import type { CriterionMoments } from "@/lib/ranking/criterion-unit"
@@ -81,6 +82,47 @@ describe("unidade dos limiares de critério", () => {
     it("sem momentos não há lente — a conversão devolve null e o controle fica em pontos", () => {
       expect(scoreToSigma(7, undefined)).toBeNull()
       expect(sigmaToScore(1, { mean: 5, sd: 0 })).toBeNull()
+    })
+  })
+
+  describe("snapToScoreGrid — o limiar tem que existir na escala real", () => {
+    it("🔴 +0,5σ em romance vira 8,0, não 8,01 — senão some com 421 obras", () => {
+      // As notas saem em meios-pontos, e 8,0 é a nota de romance mais comum do
+      // catálogo (421 obras). Um limiar em 8,01 não recorta nada a mais que 8,0:
+      // só faz o pill mostrar "≥ 8" enquanto a query exclui todas elas.
+      const bruto = sigmaToScore(0.5, MOMENTS.romance)!
+      expect(bruto).toBeCloseTo(8.01, 2)
+      expect(snapToScoreGrid(bruto, "min")).toBe(8)
+    })
+
+    it("mínimo desce e máximo sobe — a faixa nunca encolhe pelo encaixe", () => {
+      expect(snapToScoreGrid(7.3, "min")).toBe(7)
+      expect(snapToScoreGrid(7.3, "max")).toBe(7.5)
+      expect(snapToScoreGrid(6.7, "min")).toBe(6.5)
+      expect(snapToScoreGrid(6.7, "max")).toBe(7)
+    })
+
+    it("valor que já está na grade não se mexe", () => {
+      for (const v of [0, 2.5, 6, 7.5, 10]) {
+        expect(snapToScoreGrid(v, "min")).toBe(v)
+        expect(snapToScoreGrid(v, "max")).toBe(v)
+      }
+    })
+
+    it("não escapa da escala 0–10", () => {
+      expect(snapToScoreGrid(10.4, "max")).toBe(10)
+      expect(snapToScoreGrid(-0.3, "min")).toBe(0)
+    })
+
+    it("o limiar encaixado é sempre o que o pill em Pontos exibe", () => {
+      // A invariante que faltava: exibição sem casas decimais só é honesta se o
+      // valor gravado for redondo na grade das notas.
+      for (const [slug, m] of Object.entries(MOMENTS)) {
+        for (const z of [0.5, 1, 1.25, 2]) {
+          const p = snapToScoreGrid(sigmaToScore(z, m)!, "min")
+          expect(p * 2, `${slug} @ +${z}σ → ${p} não está na grade de 0,5`).toBe(Math.round(p * 2))
+        }
+      }
     })
   })
 
