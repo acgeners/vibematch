@@ -25,11 +25,16 @@ export const SYNOPSIS_QUALITIES = ["♥", "♥♥", "♥♥♥", "♥♥♥♥"]
 export type SynopsisQuality = (typeof SYNOPSIS_QUALITIES)[number]
 
 /**
- * Proveniência do Interesse na Obra manual (`works.synopsis_quality_source`).
- * `human_manual` = você definiu à mão; `prediction_applied` = copiado da
- * previsão da IA (ainda não confirmado à mão); `legacy_unknown` = legado/limpo.
+ * Proveniência do Interesse na Obra manual (`user_work_state.synopsis_quality_source`).
+ * `human_manual` = há ♥ e ele não veio da IA (não importa de onde veio);
+ * `prediction_applied` = há ♥, copiado da previsão da IA.
+ *
+ * ⚠️ NULL é um estado legítimo e significa "não há ♥" — sem valor não há origem. Um
+ * CHECK no banco garante o par: `(synopsis_quality IS NULL) = (source IS NULL)`.
+ * `legacy_unknown` foi aposentado na migration 179: ele misturava 296 obras COM ♥
+ * (histórico anterior à migration 108) com 133 SEM ♥ (só o default da coluna).
  */
-export const SYNOPSIS_QUALITY_SOURCES = ["human_manual", "prediction_applied", "legacy_unknown"] as const
+export const SYNOPSIS_QUALITY_SOURCES = ["human_manual", "prediction_applied"] as const
 export type SynopsisQualitySource = (typeof SYNOPSIS_QUALITY_SOURCES)[number]
 
 export const AI_EVAL_STATUSES = ["pending", "review_pending", "done", "skipped"] as const

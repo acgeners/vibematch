@@ -5,12 +5,15 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
+  ArrowDown,
+  ArrowUp,
   Ban,
   Bookmark,
   BookOpen,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronsUpDown,
   Compass,
   ExternalLink,
   GripVertical,
@@ -73,7 +76,10 @@ import {
 const HIDDEN_ROWS_STORAGE_KEY = "compare_hidden_rows_v1"
 // v3 → v4: adiciona as linhas "Prioridade" (decision) e "Alinhamento"
 // (personal_fit) ao grupo Notas, posicionadas na ordem canônica.
-const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v4"
+// v4 → v5: "Votos" sai de dentro da célula da Média externa e vira linha própria.
+// O bump é obrigatório: `normalizeRowsConfig` completa chave nova no FIM da ordem
+// salva, então sem ele quem já usou o drawer veria "Votos" depois de Gêneros·Tags.
+const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v5"
 // Tabela (grid) ⇄ Bússola (plano 2D das 3 forças). Persistido entre aberturas.
 const COMPARE_VIEW_STORAGE_KEY = "compare_view_v1"
 type CompareView = "table" | "bussola"
@@ -108,6 +114,7 @@ const COMPARE_ROW_GROUPS: CompareRowGroup[] = [
       { key: "score:personalFit", label: "Alinhamento" },
       { key: "score:alignmentScore", label: "Veredito" },
       { key: "score:platformAvg", label: "Média externa" },
+      { key: "score:totalVotes", label: "Votos" },
       { key: "score:userScore", label: "Pessoal" },
     ],
   },
@@ -137,7 +144,7 @@ const COMPARE_ROW_COLUMN_DEFS: ColumnPickerColumnDef[] = COMPARE_ROW_GROUPS.flat
 )
 
 // Default enxuto: visíveis = Capítulos, Ano, Nota Prevista, Veredito IA, Média externa,
-// todos os atributos e Gêneros/Tags. Escondidos por padrão: Status e Pessoal.
+// Votos, todos os atributos e Gêneros/Tags. Escondidos por padrão: Status e Pessoal.
 const DEFAULT_ROWS_CONFIG: ColumnPickerConfig = {
   order: ALL_ROW_KEYS,
   hidden: [
@@ -382,14 +389,16 @@ export function WorkCompareDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, parentIdsSortedKey, reloadKey])
 
-  const moveColumn = (fromIndex: number, toIndex: number) => {
-    if (fromIndex === toIndex) return
-    const nextWorks = [...works]
-    const [draggedItem] = nextWorks.splice(fromIndex, 1)
-    nextWorks.splice(toIndex, 0, draggedItem)
+  // Commita uma ordem de colunas vinda do grid (arrasto). Recebe ids porque a
+  // ordem exibida lá pode estar ordenada por uma linha — índice de tela não
+  // corresponde a índice deste array.
+  const reorderIds = (nextIds: string[]) => {
+    const byId = new Map(works.map((w) => [w.id, w]))
+    const nextWorks = nextIds
+      .map((id) => byId.get(id))
+      .filter((w): w is CompareWork => Boolean(w))
+    if (nextWorks.length !== works.length) return
     setWorks(nextWorks)
-
-    const nextIds = nextWorks.map((w) => w.id)
     setOrderedIds(nextIds)
   }
 
@@ -611,7 +620,7 @@ export function WorkCompareDrawer({
             <CompareGrid
               works={works}
               onRemoveId={onRemoveId}
-              onMoveColumn={moveColumn}
+              onReorderIds={reorderIds}
               scoreThresholds={scoreThresholds}
               diffOnly={diffOnly}
               highlightBestWorst={showBestWorst}
@@ -844,7 +853,10 @@ function getUniqueBestWorst(
 interface CompareGridProps {
   works: CompareWork[]
   onRemoveId: (id: string) => void
-  onMoveColumn?: (fromIndex: number, toIndex: number) => void
+  /** Commita uma nova ordem de colunas (arrasto). Recebe os ids já na ordem
+   *  final — e não índices — porque a ordem exibida pode estar ordenada por
+   *  uma linha, caso em que índice de exibição ≠ índice do array do pai. */
+  onReorderIds?: (ids: string[]) => void
   scoreThresholds: ColumnThresholds | null
   diffOnly: boolean
   /** Liga/desliga o destaque visual de melhor (verde) / pior (vermelho) por linha. */
@@ -862,6 +874,38 @@ interface CompareGridProps {
 }
 
 type SectionKey = "notas" | "criterios" | "tags-generos"
+
+/** Ordenação das COLUNAS (obras) por uma linha do grid. `null` = ordem manual
+ *  (arrasto / ordem herdada da página de origem, incl. o refino por mood). */
+type ColumnSort = { key: string; dir: "asc" | "desc" }
+
+/** Ciclo do clique no rótulo: maior→menor, menor→maior, manual. Começa em
+ *  "desc" porque toda linha ordenável aqui é "quanto maior, mais interessante"
+ *  (nota, votos, capítulos, ano) — exceto drama/tragédia, que o usuário inverte
+ *  num clique a mais. */
+function nextColumnSort(current: ColumnSort | null, key: string): ColumnSort | null {
+  if (current?.key !== key) return { key, dir: "desc" }
+  if (current.dir === "desc") return { key, dir: "asc" }
+  return null
+}
+
+/** Ordena as obras por uma linha. Nulo (—) vai SEMPRE pro fim, nas duas
+ *  direções: obra sem o dado não é "a menor", é ausente. */
+function sortWorksBy(
+  works: CompareWork[],
+  sort: ColumnSort,
+  getValue: (w: CompareWork) => number | null,
+): CompareWork[] {
+  const mul = sort.dir === "desc" ? -1 : 1
+  return [...works].sort((a, b) => {
+    const av = getValue(a)
+    const bv = getValue(b)
+    if (av == null && bv == null) return 0
+    if (av == null) return 1
+    if (bv == null) return -1
+    return (av - bv) * mul
+  })
+}
 
 const NEGATIVE_CRITERIA = new Set<string>(["drama", "tragedy"])
 
@@ -886,7 +930,7 @@ function sortByOrder<T>(items: T[], getKey: (item: T) => string, order: string[]
 function CompareGrid({
   works,
   onRemoveId,
-  onMoveColumn,
+  onReorderIds,
   scoreThresholds,
   diffOnly,
   highlightBestWorst,
@@ -917,6 +961,7 @@ function CompareGrid({
   }, [works, moodActive, moodRefine, criterionPrefs])
   const [collapsed, setCollapsed] = useState<Set<SectionKey>>(new Set())
   const [draggedOverIndex, setDraggedOverIndex] = useState<number | null>(null)
+  const [sort, setSort] = useState<ColumnSort | null>(null)
 
   const toggleSection = (key: SectionKey) =>
     setCollapsed((prev) => {
@@ -1038,12 +1083,16 @@ function CompareGrid({
       get: (w) => w.platformAvg,
       thresholds: null,
       formatScore: (v) => v.toFixed(2),
-      renderExtra: (w) =>
-        w.totalVotes > 0 ? (
-          <span className="text-[11px] text-muted-foreground">
-            {formatVotes(w.totalVotes)} votos
-          </span>
-        ) : null,
+    },
+    {
+      // Votos é VOLUME (confiança da média), não nota — por isso linha própria,
+      // e não mais um sufixo dentro da célula da Média externa. Zero votos vira
+      // null pra cair no "—" e ficar fora do melhor/pior e do "Só diferenças".
+      key: "score:totalVotes",
+      label: "Votos",
+      get: (w) => (w.totalVotes > 0 ? w.totalVotes : null),
+      thresholds: null,
+      formatScore: (v) => formatVotes(v),
     },
   ]
 
@@ -1074,6 +1123,53 @@ function CompareGrid({
   const showNotasSection = visibleNotasRows.length > 0
   const showCriteriosSection = visibleCritSlugs.length > 0
 
+  // Linhas ordenáveis: só as de grandeza comparável. Status e Gêneros·Tags
+  // ficam de fora (não são escala), e por isso o rótulo delas não ganha a
+  // affordance de clique. Usa TODAS as linhas de Notas — não só as visíveis —
+  // pra que esconder a linha ordenada não desfaça a ordem em silêncio.
+  const sortableRows: Array<{
+    key: string
+    label: string
+    get: (w: CompareWork) => number | null
+  }> = [
+    { key: "chapters", label: "Capítulos", get: (w: CompareWork) => w.totalChapters },
+    { key: "ano", label: "Ano", get: (w: CompareWork) => w.year },
+    ...(moodRow ? [moodRow] : []),
+    ...orderedNotasRows,
+    ...CRITERION_SLUGS.map((slug) => ({
+      key: `crit:${slug}`,
+      label: CRITERIA_INFO[slug]?.name ?? slug,
+      get: (w: CompareWork) => w.criteria.find((c) => c.slug === slug)?.score ?? null,
+    })),
+  ].map((r) => ({ key: r.key, label: r.label, get: r.get }))
+
+  // Sort só vale enquanto a linha existir (o mood some → a "Prioridade
+  // ajustada" some com ele); caso contrário volta pro manual sem chip órfão.
+  const activeRow = sort ? sortableRows.find((r) => r.key === sort.key) ?? null : null
+  // Ordem EXIBIDA. Toda a renderização abaixo usa `displayed` — inclusive o
+  // melhor/pior, cujo índice é posicional e precisa casar com as colunas.
+  const displayed = sort && activeRow ? sortWorksBy(works, sort, activeRow.get) : works
+
+  const sortControl = (key: string) =>
+    sortableRows.some((r) => r.key === key)
+      ? {
+          dir: activeRow?.key === key ? sort!.dir : null,
+          onToggle: () => setSort((cur) => nextColumnSort(cur, key)),
+        }
+      : undefined
+
+  // Arrasto commita a ordem EXIBIDA (já com a movida aplicada) e desliga a
+  // ordenação: com sort ativo, o índice da coluna na tela não é o índice no
+  // array do pai — mandar ids resolve os dois de uma vez.
+  const handleDrop = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return
+    const next = [...displayed]
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(toIndex, 0, moved)
+    setSort(null)
+    onReorderIds?.(next.map((w) => w.id))
+  }
+
   const gridStyle: React.CSSProperties = {
     gridTemplateColumns: `120px repeat(${n}, minmax(180px, 240px))`,
   }
@@ -1082,13 +1178,35 @@ function CompareGrid({
     <TooltipProvider delayDuration={150}>
       {/* O sumário "Onde elas se diferenciam" foi movido pra barra superior
           (renderizado no WorkCompareDrawer, abaixo do header). */}
+      {activeRow && sort && (
+        <div className="mx-auto flex w-fit items-center gap-2 px-4 pt-3 text-xs sm:px-6">
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-primary">
+            {sort.dir === "desc" ? (
+              <ArrowDown className="h-3.5 w-3.5" />
+            ) : (
+              <ArrowUp className="h-3.5 w-3.5" />
+            )}
+            <span className="font-medium">Ordenado por {activeRow.label}</span>
+            <span className="text-primary/70">
+              {sort.dir === "desc" ? "maior primeiro" : "menor primeiro"}
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setSort(null)}
+            className="rounded px-1.5 py-1 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Ordem manual
+          </button>
+        </div>
+      )}
       <div
         className="mx-auto grid w-fit gap-x-2 px-4 py-4 text-sm sm:px-6"
         style={gridStyle}
       >
         {/* Header */}
         <div className="sticky left-0 top-0 z-30 bg-background/95 backdrop-blur-md" />
-        {works.map((w, index) => (
+        {displayed.map((w, index) => (
           <div
             key={w.id}
             draggable
@@ -1108,8 +1226,8 @@ function CompareGrid({
             onDrop={(e) => {
               e.preventDefault()
               const fromIndex = Number(e.dataTransfer.getData("text/plain"))
-              if (!isNaN(fromIndex) && fromIndex !== index) {
-                onMoveColumn?.(fromIndex, index)
+              if (!isNaN(fromIndex)) {
+                handleDrop(fromIndex, index)
               }
               setDraggedOverIndex(null)
             }}
@@ -1129,7 +1247,7 @@ function CompareGrid({
         {statusVisible && (
           <>
             <SectionLabel label="Status" />
-            {works.map((w) => (
+            {displayed.map((w) => (
               <CompareCell key={w.id}>
                 <div className="flex flex-wrap items-center gap-1">
                   <PublicationStatusBadge statusId={w.publicationStatusId ?? undefined} />
@@ -1143,8 +1261,8 @@ function CompareGrid({
         {/* Capítulos */}
         {chaptersVisible && (
           <>
-            <SectionLabel label="Capítulos" />
-            {works.map((w) => (
+            <SectionLabel label="Capítulos" sort={sortControl("chapters")} />
+            {displayed.map((w) => (
               <CompareCell key={w.id} horizontalAlign="center">
                 <span className="font-mono text-sm">
                   {w.totalChapters ?? "—"}
@@ -1157,8 +1275,8 @@ function CompareGrid({
         {/* Ano */}
         {yearVisible && (
           <>
-            <SectionLabel label="Ano" />
-            {works.map((w) => (
+            <SectionLabel label="Ano" sort={sortControl("ano")} />
+            {displayed.map((w) => (
               <CompareCell key={w.id} horizontalAlign="center">
                 <span className="tabular-nums text-xs text-muted-foreground">
                   {w.year ?? "—"}
@@ -1179,14 +1297,15 @@ function CompareGrid({
          {showNotasSection && !isCollapsed("notas") &&
           visibleNotasRows.map((row) => {
             const { bestIndex, worstIndex } = highlightBestWorst
-              ? getUniqueBestWorst(works, row.get)
+              ? getUniqueBestWorst(displayed, row.get)
               : { bestIndex: null, worstIndex: null }
             return (
               <ScoreRow
                 key={row.key}
                 label={row.label}
-                works={works}
+                works={displayed}
                 getScore={row.get}
+                sort={sortControl(row.key)}
                 bestIndex={bestIndex}
                 worstIndex={worstIndex}
                 thresholds={row.thresholds}
@@ -1218,7 +1337,7 @@ function CompareGrid({
             const useRange = range != null && range.weight >= 0.05
             const { bestIndex, worstIndex } = highlightBestWorst
               ? getUniqueBestWorst(
-                  works,
+                  displayed,
                   (w) => {
                     const s = w.criteria.find((c) => c.slug === slug)?.score ?? null
                     if (s == null) return null
@@ -1233,7 +1352,8 @@ function CompareGrid({
                 slug={slug}
                 label={info.name}
                 emoji={info.emoji}
-                works={works}
+                works={displayed}
+                sort={sortControl(`crit:${slug}`)}
                 bestIndex={bestIndex}
                 worstIndex={worstIndex}
                 thresholds={scoreThresholds?.criteria?.[slug] ?? null}
@@ -1254,7 +1374,7 @@ function CompareGrid({
         {tagsGenresVisible && !isCollapsed("tags-generos") && (
           <>
             <SectionLabel label="" />
-            {works.map((w) => (
+            {displayed.map((w) => (
               <CompareCell key={w.id} verticalAlign="top">
                 <GenresTagsCell genres={w.genres} tags={w.tags} />
               </CompareCell>
@@ -1665,11 +1785,62 @@ function GenresTagsCell({
   )
 }
 
-function SectionLabel({ label }: { label: string }) {
+/** Controle de ordenação anexado ao rótulo de uma linha. `dir` = direção ativa
+ *  desta linha (null quando a ordenação é de outra linha ou está manual). */
+interface RowSortControl {
+  dir: "asc" | "desc" | null
+  onToggle: () => void
+}
+
+function SectionLabel({
+  label,
+  emoji,
+  sort,
+  textClassName = "font-medium",
+}: {
+  label: string
+  emoji?: string
+  sort?: RowSortControl
+  textClassName?: string
+}) {
+  const content = (
+    <>
+      {emoji && (
+        <span aria-hidden className="text-base">
+          {emoji}
+        </span>
+      )}
+      <span className={textClassName}>{label}</span>
+    </>
+  )
+  const base = "sticky left-0 z-10 flex items-center gap-1.5 bg-background text-xs text-muted-foreground"
+
+  if (!sort) return <div className={base}>{content}</div>
+
+  // Seta só aparece no hover enquanto a linha não é a ordenada — a affordance
+  // existe sem poluir 20 rótulos com ícone permanente.
+  const Icon = sort.dir === "desc" ? ArrowDown : sort.dir === "asc" ? ArrowUp : ChevronsUpDown
   return (
-    <div className="sticky left-0 z-10 flex items-center bg-background text-xs font-medium text-muted-foreground">
-      {label}
-    </div>
+    <button
+      type="button"
+      onClick={sort.onToggle}
+      title={
+        sort.dir === "desc"
+          ? `Ordenado por ${label}, maior primeiro — clique para inverter`
+          : sort.dir === "asc"
+            ? `Ordenado por ${label}, menor primeiro — clique para voltar à ordem manual`
+            : `Ordenar as obras por ${label}`
+      }
+      className={cn(base, "group text-left transition-colors hover:text-foreground", sort.dir && "text-foreground")}
+    >
+      {content}
+      <Icon
+        className={cn(
+          "h-3 w-3 shrink-0 transition-opacity",
+          sort.dir ? "text-primary opacity-100" : "opacity-0 group-hover:opacity-60",
+        )}
+      />
+    </button>
   )
 }
 
@@ -1747,6 +1918,8 @@ interface ScoreRowProps {
   /** Renderiza o número no mesmo box dos atributos (CriterionRow) em vez do
    *  ScoreBadge pequeno — usado por Prioridade / Nota Prevista. */
   asAttributeBox?: boolean
+  /** Ordenação das colunas por esta linha (clique no rótulo). */
+  sort?: RowSortControl
 }
 
 function ScoreRow({
@@ -1761,10 +1934,11 @@ function ScoreRow({
   renderExtra,
   wrapScore,
   asAttributeBox,
+  sort,
 }: ScoreRowProps) {
   return (
     <>
-      <SectionLabel label={label} />
+      <SectionLabel label={label} sort={sort} />
       {works.map((w, index) => {
         const score = getScore(w)
         const variant =
@@ -1820,17 +1994,14 @@ interface CriterionRowProps {
   thresholds: ScoreColorThresholds | null
   colorMode: AttrColorMode
   range: CriterionRange | null
+  /** Ordenação das colunas por este critério (clique no rótulo). */
+  sort?: RowSortControl
 }
 
-function CriterionRow({ slug, label, emoji, works, bestIndex, worstIndex, thresholds, colorMode, range }: CriterionRowProps) {
+function CriterionRow({ slug, label, emoji, works, bestIndex, worstIndex, thresholds, colorMode, range, sort }: CriterionRowProps) {
   return (
     <>
-      <div className="sticky left-0 z-10 flex items-center gap-1.5 bg-background text-xs text-muted-foreground">
-        <span aria-hidden className="text-base">
-          {emoji}
-        </span>
-        <span className="truncate">{label}</span>
-      </div>
+      <SectionLabel label={label} emoji={emoji} sort={sort} textClassName="truncate" />
       {works.map((w, index) => {
         const entry = w.criteria.find((c) => c.slug === slug)
         const score = entry?.score ?? null

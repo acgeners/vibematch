@@ -48,10 +48,13 @@ export function parseStatusList(
 export function parseSynopsisQualities(raw: string | string[] | undefined): string[] {
   const value = Array.isArray(raw) ? raw.join(",") : raw
   if (!value) return []
-  // Sentinelas do filtro de Interesse (tratados só na fila tab=sinopse; inofensivos
-  // nas outras queries): "none" = "Não avaliada" (synopsis_quality IS NULL);
-  // "unknown" = "Desconhecido" (synopsis_quality_source = 'legacy_unknown').
-  const valid = new Set<string>([...SYNOPSIS_QUALITIES, "none", "unknown"])
+  // Sentinela do filtro de Interesse (tratada só na fila tab=sinopse; inofensiva nas
+  // outras queries): "none" = "Não avaliada" (synopsis_quality IS NULL).
+  //
+  // "unknown" ("Desconhecido") NÃO está aqui de propósito: a proveniência legada acabou
+  // na migration 179. O token cai fora na filtragem abaixo, então um link ou filtro
+  // salvo antigo abre sem ele — e não como um filtro que não casa nada.
+  const valid = new Set<string>([...SYNOPSIS_QUALITIES, "none"])
   return value
     .split(",")
     .map((p) => p.trim())

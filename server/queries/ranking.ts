@@ -14,6 +14,9 @@ import { getScoresReader } from "@/server/queries/user-scores"
 import { getHideAdultContent } from "@/server/queries/current-user"
 import { selectByIdsInChunks, fetchAllRows } from "@/lib/supabase/paginate"
 import { titleTokens, workMatchesQuery } from "@/lib/title-match"
+import { roundToDisplayScore } from "@/lib/score-rounding"
+import { compareWithinTierTieBreak } from "@/lib/ranking/build-tiers"
+import { INTEREST_NONE, matchesManualInterest, matchesPredictedInterest } from "@/lib/interest-sentinels"
 import { isTerminalPersonalStatus } from "@/lib/constants/status-lookups"
 import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 
@@ -344,8 +347,14 @@ export async function getRanking(
   // fetch as obras que casam só pela previsão. A condição é a mesma que já existia.
   const orWithPredActive =
     (filters.interestMode ?? "or") === "or" && !!filters.predictedSynopsisQualities?.length
+  // 🔴 As sentinelas do chip "Outros" (none/unknown) NÃO podem passar por aqui. A
+  // pré-resolução vira `.in("synopsis_quality", [...])` sobre `user_work_state`: uma
+  // obra "não avaliada" ou nem tem linha, ou tem `synopsis_quality` NULL — em ambos os
+  // casos ela ficaria de fora do fetch, e o filtro devolveria vazio justamente para o
+  // valor pedido. Com sentinela, quem recorta é o filtro em memória (mais abaixo).
+  const interestHasSentinel = !!filters.synopsisQualities?.includes(INTEREST_NONE)
   const interestFilterIds =
-    filters.synopsisQualities?.length && !orWithPredActive
+    filters.synopsisQualities?.length && !orWithPredActive && !interestHasSentinel
       ? await resolvePersonalFilterIds({ synopsisQualities: filters.synopsisQualities })
       : null
 
@@ -723,12 +732,11 @@ export async function getRanking(
   if (wantedSynopsis || wantedSynopsisPred) {
     const andMode = (filters.interestMode ?? "or") === "and" && wantedSynopsis != null && wantedSynopsisPred != null
     entries = entries.filter((e) => {
-      const manualMatch =
-        wantedSynopsis != null && e.synopsisQuality != null && wantedSynopsis.has(e.synopsisQuality)
-      const predMatch =
-        wantedSynopsisPred != null &&
-        e.predictedSynopsisQuality != null &&
-        wantedSynopsisPred.has(e.predictedSynopsisQuality)
+      // Inclui a sentinela do chip "Outros" ("none") — ver matchesManualInterest.
+      const manualMatch = wantedSynopsis != null && matchesManualInterest(e, wantedSynopsis)
+      // Idem do lado da previsão, onde a sentinela "none" ("sem previsão") é o caso
+      // COMUM em multi-user: quem ainda não tem taste_profile não tem previsão nenhuma.
+      const predMatch = wantedSynopsisPred != null && matchesPredictedInterest(e, wantedSynopsisPred)
       return andMode ? manualMatch && predMatch : manualMatch || predMatch
     })
   }
@@ -861,8 +869,12 @@ export async function getRanking(
     // Comparar o cru fazia o 8,44 vir na frente sem empatar — e o critério de
     // desempate seguinte (ex.: Veredito) nunca entrava. Arredondar aqui faz notas
     // que APARECEM iguais empatarem e caírem pro próximo nível de ordenação.
+    //
+    // 🔴 O arredondamento vem de `roundToDisplayScore` justamente porque o atalho
+    // (`Math.round(v * 10) / 10`) NÃO bate com o `toFixed(1)` da tela — ver o
+    // porquê e o bug medido em lib/score-rounding.ts.
     const displayScore = (value: number | null | undefined) =>
-      value == null ? -Infinity : Math.round(value * 10) / 10
+      value == null ? -Infinity : roundToDisplayScore(value)
     if (field === "title") return m * a.title.localeCompare(b.title)
     if (field === "expected_score")
       return m * (displayScore(a.expectedScore) - displayScore(b.expectedScore))
@@ -914,11 +926,26 @@ export async function getRanking(
     return 0
   }
 
+  // Desempate FINAL, depois de TODOS os níveis escolhidos: overlap de tags do
+  // perfil efetivo (`compareWithinTierTieBreak`), e só então o título.
+  //
+  // Este desempate morava no CLIENTE (`reorderTiersByFit`, view Lista), aplicado
+  // por tier — e ali ele reordenava obras que a pessoa tinha mandado ordenar por
+  // outra coisa. Com banda 0,5 um tier cobre 8,5 → 8,0, então "dentro do tier tudo
+  // empata" era falso: ele descartava tanto o nível 2 escolhido (ex.: Veredito)
+  // quanto a própria Nota Prevista. A lista saía numa ordem que nenhum controle
+  // da tela explicava.
+  //
+  // Aqui ele só entra quando NADA mais decidiu — mantém o sinal (tag overlap
+  // ordena melhor que ordem alfabética entre empatadas) sem sobrepor escolha
+  // nenhuma, e vale igual para Lista, Cards, Faixas e Bússola.
   entries.sort((a, b) => {
     for (const level of effectiveLevels) {
       const cmp = compareByField(a, b, level.field, level.dir)
       if (cmp !== 0) return cmp
     }
+    const fit = compareWithinTierTieBreak(a, b)
+    if (fit !== 0) return fit
     return a.title.localeCompare(b.title)
   })
 

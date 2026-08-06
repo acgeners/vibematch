@@ -124,3 +124,46 @@ describe("compareWithinTierTieBreak", () => {
     ])).toEqual(["ok", "nan"])
   })
 })
+
+/**
+ * A chave da banda tem que ser a MESMA da ordenação.
+ *
+ * O /ranking ordena pela nota EXIBIDA (`roundToDisplayScore`, pra que notas que
+ * aparecem iguais empatem e caiam pro próximo nível), mas bandava pela nota CRUA.
+ * Como o consumidor agrupa RUNS CONSECUTIVOS de tier igual, o mesmo tier reaparecia
+ * ao longo da lista e virava vários blocos "Tier N" — sem erro, só com a tela
+ * mentindo sobre quantas faixas existem (medido: 2 tiers → 8 blocos em 40 obras).
+ */
+describe("banda × chave de ordenação", () => {
+  const round = (v: number) => Number(v.toFixed(1))
+
+  /** Em quantos blocos consecutivos a lista se parte, dado o score da banda. */
+  const blocos = (lista: { raw: number }[], score: (x: { raw: number }) => number, bw: number) => {
+    const tiers = buildRankingTiers(lista, score, bw).map((t) => t.tier)
+    let runs = 0
+    for (let i = 0; i < tiers.length; i++) if (i === 0 || tiers[i] !== tiers[i - 1]) runs++
+    return { runs, distintos: new Set(tiers).size }
+  }
+
+  // O caso que fragmenta: a fronteira do tier cai DENTRO de um grupo de obras que
+  // exibem a mesma nota. Âncora 8,49 e banda 0,5 → a fronteira fica em 7,99; as
+  // obras de 8,04 e 7,96 exibem "8,0" as DUAS, mas caem em tiers diferentes. Como
+  // a ordem dentro do grupo é pelo Veredito (sem correlação com a nota crua), a de
+  // 7,96 vem primeiro — e a lista sai tier1 … tier2, tier1 … tier2.
+  const lista = [
+    { raw: 8.49, veredito: 27 }, { raw: 8.43, veredito: 74 }, { raw: 8.39, veredito: 62 },
+    { raw: 8.24, veredito: 10 }, { raw: 8.16, veredito: 91 },
+    { raw: 7.96, veredito: 90 }, { raw: 8.04, veredito: 10 },
+    { raw: 7.91, veredito: 12 }, { raw: 7.85, veredito: 84 },
+  ].sort((a, b) => round(b.raw) - round(a.raw) || b.veredito - a.veredito)
+
+  it("bandar pela nota CRUA fragmenta o mesmo tier em vários blocos", () => {
+    const { runs, distintos } = blocos(lista, (x) => x.raw, 0.5)
+    expect(runs).toBeGreaterThan(distintos)
+  })
+
+  it("bandar pela nota EXIBIDA mantém cada tier num bloco só", () => {
+    const { runs, distintos } = blocos(lista, (x) => round(x.raw), 0.5)
+    expect(runs).toBe(distintos)
+  })
+})

@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils"
+import { roundToDisplayScore } from "@/lib/score-rounding"
 
 export interface ScoreColorThresholds {
   p_top: number
@@ -55,7 +56,9 @@ function pickTier(
     : FIXED_CUTOFFS
   // Arredonda pra 1 casa decimal antes de comparar — mesma granularidade do
   // display (`score.toFixed(1)`), evita "flips invisíveis" perto da fronteira.
-  const s = Math.round(score * 10) / 10
+  // ⚠️ Via `roundToDisplayScore`: `Math.round(score * 10) / 10` daria 8,5 pra um
+  // 8,45 que a badge EXIBE como "8,4" — o flip que este arredondamento evita.
+  const s = roundToDisplayScore(score)
   if (s >= cuts.top) return "top"
   if (s >= cuts.high) return "high"
   if (s >= cuts.mid) return "mid"
@@ -209,7 +212,7 @@ const NEUTRAL_CRITERION_CLASS = "bg-muted/60 text-muted-foreground border border
  */
 export function pickCriterionTierByRange(score: number, range: CriterionRange): CriterionTier {
   if (range.weight < RANGE_NEUTRAL_WEIGHT) return "neutral"
-  const s = Math.round(score * 10) / 10
+  const s = roundToDisplayScore(score)
   if (s >= range.ideal_min && s <= range.ideal_max) {
     const center = (range.ideal_min + range.ideal_max) / 2
     const halfWidth = (range.ideal_max - range.ideal_min) / 2

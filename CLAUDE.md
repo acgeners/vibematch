@@ -277,6 +277,61 @@ de slider FIXO em vez de derivado dos momentos — este apagava o filtro do usu�
 Radix clampava o valor fora do domínio e o `commit` gravava `null`. Ver
 `lib/ranking/criterion-unit.ts`, onde cada um está documentado com o número medido.
 
+## Quem ordena, colore ou agrupa por nota tem que ver o MESMO número da tela
+
+Três invariantes do `/ranking`, todas descobertas pelo mesmo sintoma — resultado plausível na
+posição errada, sem erro nem log (2026-08-06):
+
+**1. Arredondamento.** A tela usa `value.toFixed(1)`; o atalho `Math.round(value * 10) / 10`
+**não é equivalente** e diverge em **40 dos 1.001 valores de 2 casas** entre 0 e 10 — `value * 10`
+é uma multiplicação em ponto flutuante que arredonda ANTES do `Math.round`. Medido: a obra de
+`expected_score` 8,35 ordenava como 8,4 e **exibia 8,3**, aparecendo à frente de dois 8,4
+legítimos. Use `roundToDisplayScore` (`lib/score-rounding.ts`) em ordenação, faixa de cor,
+empate e limiar. Ingestão de dado externo pode seguir com `Math.round` — lá não há número na
+tela pra concordar.
+
+**2. A chave da BANDA é a da ORDENAÇÃO.** `buildRankingTiers` devolve alinhado à entrada e quem
+consome agrupa RUNS CONSECUTIVOS: bandar pela nota crua uma lista ordenada pela nota exibida faz
+o mesmo tier reaparecer várias vezes. Medido: **2 tiers reais viravam 8 blocos "Tier N"** nas 40
+primeiras obras (3 → 27 em 200), e na view Faixas ainda duplicava a React key `band-${tier}`.
+
+**3. O tier AGRUPA, não reordena.** Havia um `reorderTiersByFit` no cliente que reordenava cada
+tier por `tagOverlapNet` por cima da ordem do servidor, com a premissa falsa de que "dentro do
+tier tudo empata" (banda 0,5 cobre 8,5 → 8,0). Ele descartava o 2º nível de ordenação escolhido
+**e** a Nota Prevista — a lista saía `8,7 → 8,8 → 8,9 → 9,1 → 8,8 …`. O sinal virou o desempate
+FINAL do `getRanking` (depois de todos os níveis, antes do título), então decide só o que
+ninguém mais decidiu e vale igual em Lista, Cards, Faixas e Bússola.
+
+Guardadas por `tests/unit/ranking/score-rounding.test.ts` e `build-tiers.test.ts`.
+
+## O painel de filtros é RASCUNHO — navegar por fora dele apaga o filtro
+
+`RankingFilters` (usado por `/ranking` **e** `/favorites`) escreve tudo em `draftSearch` e só o
+"Aplicar filtros" navega. 🔴 **Qualquer coisa que mude a URL sem passar pelo rascunho é apagada
+no Aplicar seguinte**, porque ele reescreve a query string inteira a partir de uma foto que não
+conhece aquela mudança — sem erro, com cara de "não aplicou".
+
+Foi assim com o segmentado "Esconder tags evitadas", o único controle feito de `<Link href>`.
+Hoje ele é rascunho como os demais, e o rascunho **adota a URL** quando ela muda por fora
+(ajuste durante o render, com `lastApplied` em STATE — ler `ref.current` no render é proibido
+pelo lint do React). Isso cobre o resto da classe: `updateSort` do cabeçalho da tabela, chips da
+view Faixas e o voltar/avançar do browser. Ao adicionar controle no painel, use `updateParams`;
+se precisar navegar na hora, navegue **a partir do rascunho** (como `applyPreset`/`clearAll`).
+
+## Em σ, use LIMIAR — nunca argmax
+
+Os chips de "atributos em destaque" do card mostram o que passa de **|z| ≥ 1σ** (até 3), com o σ
+**impresso**. Não é estilo: o `work-signature.ts` rotulava a obra pelo ARGMAX do z-score e foi
+removido em 2026-08-05 porque o campeão vencia por margem < 0,25σ em **47%** do catálogo —
+remedido em 06-08 e deu **46,9%**. Com limiar, 93,5% das obras têm ≥1 destaque (mediana 3), e o
+σ impresso deixa a margem visível em vez de afirmar um "dominante" que o dado não sustenta.
+
+A cor diz **direção** (acima/abaixo do catálogo), nunca valor — Tragédia +1,3σ não é boa nem
+ruim. Quem opina é o ▲/▼, que cruza com `score_weights`; para peso NEGATIVO, "contra" só quando
+`score > threshold`, porque abaixo dele o `calculateGPT` não penaliza nada.
+⚠️ `score_weights` é tabela COMPARTILHADA — o ▲/▼ herda a Fase 3, igual à Nota.IA, que já lê
+essa mesma tabela global no recalc per-usuário.
+
 ## Inline type imports and Turbopack
 
 Turbopack (Next.js 16) fails to parse `import { type Foo }` inline syntax when a client component is traversed from a server context. Always use separate `import type` statements:

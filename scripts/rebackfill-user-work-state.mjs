@@ -133,7 +133,7 @@ async function main() {
     observation_adjustment: w.observation_adjustment ?? 0,
     observations: w.observations ?? null,
     synopsis_quality: w.synopsis_quality ?? null,
-    synopsis_quality_source: w.synopsis_quality_source ?? "legacy_unknown",
+    synopsis_quality_source: w.synopsis_quality_source ?? null,
     synopsis_quality_prediction_id: w.synopsis_quality_prediction_id ?? null,
     synopsis_interest_skipped: w.synopsis_interest_skipped ?? false,
     post_story_score: w.post_story_score ?? null,

@@ -805,7 +805,7 @@ export interface SynopsisQueueWork {
   personalStatusId: number | null
   /** Valor MANUAL (works.synopsis_quality). */
   manualSynopsisQuality: string | null
-  /** Proveniência do valor: human_manual | prediction_applied | legacy_unknown | null. */
+  /** Proveniência do ♥: human_manual | prediction_applied | null (não há ♥). */
   synopsisQualitySource: string | null
   expectedScore: number | null
   /** Data da última leitura de QUEM OLHA (user_work_state, via getPersonalStateReader) — pra ordenação. */
@@ -890,8 +890,8 @@ export async function getSynopsisQueueWorks(opts: {
   predictionVersions?: string[]
   /** Filtra pelo VALOR previsto pela IA (♥–♥♥♥♥). Pós-filtro. */
   predictionQualities?: string[]
-  /** Filtra pelo DELTA previsto − atual (valores exatos "-3".."3"). Só compara com
-   *  valor existente human_manual OU legacy_unknown (não prediction_applied). Pós-filtro. */
+  /** Filtra pelo DELTA previsto − atual (valores exatos "-3".."3"). Só compara com ♥ que
+   *  não veio da própria previsão (exclui prediction_applied). Pós-filtro. */
   predictionDeltas?: string[]
   /**
    * Triagem manual: ignora o estado de previsão e lista só obras SEM Interesse
@@ -980,14 +980,12 @@ export async function getSynopsisQueueWorks(opts: {
     const id = personalReader.get(workId).personalStatusId
     return id != null && personalIds.includes(id)
   }
-  // "none"/"unknown" são sentinelas de UI — nunca casam num valor real, então são
-  // removidos antes de qualquer `.in("synopsis_quality", …)`.
-  //  - "none"    = "Não avaliada" (synopsis_quality IS NULL) → via missingManual.
-  //  - "unknown" = "Desconhecido": filtra por PROVENIÊNCIA
-  //    (synopsis_quality_source = 'legacy_unknown') em vez de valor — separa os
-  //    valores legados/não-confirmados dos human_manual.
+  // "none" é sentinela de UI — nunca casa num valor real, então sai antes de qualquer
+  // `.in("synopsis_quality", …)`: "Não avaliada" (synopsis_quality IS NULL) resolve via
+  // missingManual. "unknown" (proveniência legada) acabou na migration 179; continua
+  // sendo filtrado fora aqui para que um filtro salvo antigo não vire um `.in()` com
+  // um valor que não existe.
   const synQ = (opts.synopsisQualities ?? []).filter((q) => q !== "none" && q !== "unknown")
-  const unknownSource = (opts.synopsisQualities ?? []).includes("unknown")
 
   const mapWork = (w: Record<string, unknown>): SynopsisQueueWork => {
     const calc = (w.calculated_scores as { expected_score?: number | null } | null) ?? null
@@ -1040,9 +1038,11 @@ export async function getSynopsisQueueWorks(opts: {
     if (predDeltas.length > 0) {
       const wantedDeltas = new Set(predDeltas.map((s) => Number(s)))
       result = result.filter((w) => {
-        // Delta só faz sentido com previsão + valor existente human_manual/legacy_unknown.
+        // Delta só faz sentido comparando a previsão com um ♥ que NÃO veio dela — senão
+        // o delta é zero por construção. (Antes da migration 179 esta condição também
+        // listava 'legacy_unknown', que era o mesmo caso: ♥ de origem não-IA.)
         if (w.predictedQuality == null || w.manualSynopsisQuality == null) return false
-        if (w.synopsisQualitySource !== "human_manual" && w.synopsisQualitySource !== "legacy_unknown") return false
+        if (w.synopsisQualitySource === "prediction_applied") return false
         return wantedDeltas.has(levelOf(w.predictedQuality) - levelOf(w.manualSynopsisQuality))
       })
     }
@@ -1150,7 +1150,6 @@ export async function getSynopsisQueueWorks(opts: {
       .order("updated_at", { ascending: false })
     if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
     if (synQ.length > 0) q = q.in("synopsis_quality", synQ)
-    if (unknownSource) q = q.eq("synopsis_quality_source", "legacy_unknown")
     if (excludeSkipped) q = q.eq("synopsis_interest_skipped", false)
     return q
   }

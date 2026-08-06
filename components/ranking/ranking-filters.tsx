@@ -1,9 +1,9 @@
 "use client"
 
 import { useRouter, useSearchParams } from "next/navigation"
-import Link from "next/link"
 import { useCallback, useMemo, useState, useTransition } from "react"
 import type { CSSProperties, ReactNode } from "react"
+import { INTEREST_NONE } from "@/lib/interest-sentinels"
 import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, ChevronUp, Filter, Info, Loader2, Minus, Pencil, Plus, Save, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -219,14 +219,15 @@ interface RankingFiltersProps {
    *  presente, a aba Gêneros separa Demografia (topo) de Gêneros. /ranking passa;
    *  outras páginas omitem → grid único (comportamento antigo). */
   genreCatTypes?: Record<string, string>
-  /** Filtro "esconder evitadas" (3 estados) — URLs por estado + estado atual. Só
-   *  /ranking passa; ausente = o controle não aparece (favorites etc.). */
-  hideAvoided?: {
-    current: "off" | "strong" | "all"
-    offUrl: string
-    strongUrl: string
-    allUrl: string
-  }
+  /** Mostra o segmentado "Esconder tags evitadas" (?hide_avoided=strong|all).
+   *  Ausente/false = o controle não aparece (páginas que não parseiam o param).
+   *
+   *  ⚠️ Era um objeto com 3 URLs prontas, e o controle navegava por `<Link>` — o
+   *  ÚNICO do painel fora do rascunho. Como `draftSearch` só é semeado no 1º
+   *  render, a navegação por fora deixava o rascunho sem `hide_avoided`, e o
+   *  "Aplicar filtros" seguinte reescrevia a URL SEM ele: o filtro que a pessoa
+   *  acabara de marcar sumia sem erro, com cara de "não aplicou". */
+  showHideAvoided?: boolean
   availableTags: Array<{ slug: string; name: string; tag_group_id?: string | null; groupName?: string; subGroupName?: string; subGroupSlug?: string }>
   publicationStatuses?: StatusOption[]
   personalStatuses?: StatusOption[]
@@ -270,8 +271,12 @@ interface RankingFiltersProps {
    *  obras do recorte e não forma tiers), então só confundiriam. Default = exibe. */
   showTopN?: boolean
   showTierBand?: boolean
-  /** Mostra o segmentado "Conteúdo 18+" (?adult=). Só /ranking passa true — as
-   *  outras páginas não parseiam ?adult, então o controle não deve aparecer lá. */
+  /** Mostra o segmentado "Conteúdo 18+" (?adult=). Passe true SÓ onde a página
+   *  realmente parseia `?adult` — hoje /ranking e /favorites (as duas leem
+   *  `adultFilter` e repassam ao getRanking). Ligar numa página que não parseia dá
+   *  um controle que marca e não filtra, sem erro nenhum.
+   *  (Esta linha já disse "só /ranking"; o /favorites passou a parsear e ela ficou
+   *  para trás — confira na página antes de confiar.) */
   showAdultFilter?: boolean
 }
 
@@ -340,11 +345,14 @@ function QualityToggles({
   selected,
   onToggle,
   tone,
+  extra,
 }: {
   values: readonly string[]
   selected: Set<string>
   onToggle: (v: string) => void
   tone: "rose" | "salmon"
+  /** Chip que não é um ♥ (o travessão "sem avaliação"), no mesmo container para quebrar junto. */
+  extra?: ReactNode
 }) {
   const base = tone === "rose" ? "text-red-500" : "text-orange-500"
   const onCls =
@@ -369,7 +377,54 @@ function QualityToggles({
           </button>
         )
       })}
+      {extra}
     </div>
+  )
+}
+
+/**
+ * Chip da ausência de nota, ao lado dos ♥.
+ *
+ * É um **Ø**, não a palavra: escrito por extenso ele empurrava os ♥ para uma segunda linha.
+ * Dois símbolos foram descartados, e por motivos diferentes:
+ * - **traço/`Minus`**: neste MESMO painel ele já é a ação "excluir (NOT)" das abas Gêneros
+ *   e Tags (ver FacetLegend). O mesmo desenho significaria "inclua as sem nota" aqui e
+ *   "tire estas" ali.
+ * - **♡**: no QualityHearts o coração vazio é "posição não preenchida DENTRO da nota"
+ *   (a escala mostra sempre 4). Leria como nota zero, não como "não avaliada".
+ *
+ * O que ele quer dizer vai no aria-label e no tooltip, e por extenso na barra de filtros
+ * ativos — o símbolo sozinho nunca é a única pista.
+ */
+function InterestOtherToggle({
+  active,
+  onToggle,
+  label,
+  tone,
+}: {
+  active: boolean
+  onToggle: () => void
+  /** Texto por extenso: vira aria-label e tooltip (ex.: "Sem avaliação"). */
+  label: string
+  tone: "rose" | "salmon"
+}) {
+  const onCls =
+    tone === "rose"
+      ? "border-red-500/60 bg-red-500/15 text-red-500"
+      : "border-orange-500/60 bg-orange-500/15 text-orange-500"
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={active}
+      aria-label={label}
+      title={label}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-sm font-semibold leading-none transition-colors ${
+        active ? onCls : "border-border/70 bg-background/45 text-muted-foreground hover:border-border"
+      }`}
+    >
+      <span aria-hidden>Ø</span>
+    </button>
   )
 }
 
@@ -433,43 +488,66 @@ function TierBandSection({
   contentClassName?: string
 }) {
   const active = searchParams.get("band")
+  /**
+   * Até 2 casas, sem zero à toa: 0,3 · 0,5 · 0,55.
+   * ⚠️ Arredondar para 1 casa fixa mentiria: `defaultBand` vem do banco
+   * (formula_config.tier_band_width) e pode ser 0,55 — que viraria "0,6", o rótulo de
+   * OUTRO chip da mesma linha.
+   */
+  const fmt = (n: number) => n.toFixed(2).replace(/\.?0+$/, "").replace(".", ",")
+  // Altura única: o chip do padrão tem duas linhas, e sem isto os numéricos ficariam
+  // mais baixos que ele na mesma fileira.
   const chip = (on: boolean) =>
-    `inline-flex h-8 items-center whitespace-nowrap rounded-full border px-2.5 text-xs font-semibold tabular-nums transition-colors ${
+    `inline-flex h-11 items-center justify-center whitespace-nowrap rounded-full border px-3 text-xs font-semibold tabular-nums transition-colors ${
       on
         ? "border-primary/45 bg-primary/10 text-primary"
         : "border-border/70 bg-background/45 text-muted-foreground hover:border-border hover:text-foreground"
     }`
   return (
     <FilterSection title="Largura dos tiers" className={className} contentClassName={contentClassName}>
-      {/* Ordem crescente por valor. O "Padrão (X)" ocupa a posição do seu próprio
-          valor (defaultBand) em vez de vir sempre primeiro — e substitui o chip numérico
-          equivalente, que seria redundante. */}
-      <div className="flex flex-wrap gap-1.5">
-        {[...new Set([0.3, 0.4, 0.5, 0.6, 0.8, defaultBand])]
-          .sort((a, b) => a - b)
-          .map((b) =>
-            b === defaultBand ? (
-              <button
-                key="padrao"
-                type="button"
-                onClick={() => updateParams({ band: null })}
-                className={chip(active == null)}
-                title={`Usa o valor salvo no banco (${defaultBand.toFixed(2).replace(".", ",")})`}
-              >
-                Padrão ({defaultBand.toFixed(2).replace(".", ",")})
-              </button>
-            ) : (
-              <button
-                key={b}
-                type="button"
-                onClick={() => updateParams({ band: String(b) })}
-                className={chip(active === String(b))}
-                title={`Agrupa no mesmo tier obras a até ${b} de distância na nota`}
-              >
-                {b.toFixed(1).replace(".", ",")}
-              </button>
-            ),
-          )}
+      {/* Duas colunas separadas por divisória — mesmo idioma de "Combinar" (Interesse) e
+          "Obras exibidas" (Critérios gerais): à esquerda as opções, à direita o padrão.
+          Ele saiu da fileira porque NÃO é mais um valor entre os outros: é "deixa como
+          está no banco", e antes ocupava a posição numérica do próprio valor, o que o
+          fazia parecer só mais um degrau da escala. */}
+      {/* `1fr auto 1fr` põe a divisória no centro geométrico do card e dá a mesma metade
+          para cada lado — com flex + justify-between ela encostava no bloco mais largo. */}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2">
+        <div className="flex items-center justify-center">
+          <button
+            type="button"
+            onClick={() => updateParams({ band: null })}
+            className={chip(active == null)}
+            title={`Usa o valor salvo no banco (${fmt(defaultBand)})`}
+          >
+            {/* Valor em cima, "(Padrão)" embaixo e menor: numa linha só ("Padrão (0,50)")
+                o rótulo era 2× mais largo que os outros chips. */}
+            <span className="flex flex-col items-center gap-0.5 leading-none">
+              <span>{fmt(defaultBand)}</span>
+              <span className="text-[10px] font-medium opacity-75">(Padrão)</span>
+            </span>
+          </button>
+        </div>
+        <div className="w-px bg-border/60" />
+        <div className="flex items-center justify-center">
+          <div className="grid grid-cols-2 gap-1.5">
+            {[0.3, 0.4, 0.6, 0.8]
+              // Sem repetir o chip do próprio padrão: com defaultBand = 0,3 haveria "0,3"
+              // dos dois lados da divisória, um deles gravando ?band= e o outro limpando.
+              .filter((b) => b !== defaultBand)
+              .map((b) => (
+                <button
+                  key={b}
+                  type="button"
+                  onClick={() => updateParams({ band: String(b) })}
+                  className={chip(active === String(b))}
+                  title={`Agrupa no mesmo tier obras a até ${fmt(b)} de distância na nota`}
+                >
+                  {fmt(b)}
+                </button>
+              ))}
+          </div>
+        </div>
       </div>
     </FilterSection>
   )
@@ -1104,14 +1182,14 @@ interface GenreRuleGridProps {
   showLegend?: boolean
 }
 
-/** Um segmento do controle "Esconder evitadas" (navega ao clicar; estado ativo em rosa). */
+/** Um segmento do controle "Esconder evitadas" (rascunho; estado ativo em rosa). */
 function HideAvoidedSegment({
-  href,
+  onSelect,
   active,
   label,
   tooltip,
 }: {
-  href: string
+  onSelect: () => void
   active: boolean
   label: string
   tooltip: string
@@ -1119,17 +1197,18 @@ function HideAvoidedSegment({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Link
-          href={href}
-          scroll={false}
-          className={`inline-flex h-7 items-center rounded px-2.5 text-xs font-medium transition-colors ${
+        <button
+          type="button"
+          onClick={onSelect}
+          aria-pressed={active}
+          className={`inline-flex h-7 items-center whitespace-nowrap rounded px-2.5 text-xs font-medium transition-colors ${
             active
               ? "bg-rose-500/15 text-rose-600 dark:text-rose-300"
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
           {label}
-        </Link>
+        </button>
       </TooltipTrigger>
       <TooltipContent side="bottom" sideOffset={6} className="w-[220px] text-pretty">{tooltip}</TooltipContent>
     </Tooltip>
@@ -1985,7 +2064,7 @@ function SavedFiltersControl({
 export function RankingFilters({
   availableGenres,
   genreCatTypes,
-  hideAvoided,
+  showHideAvoided,
   availableTags,
   publicationStatuses = [],
   personalStatuses = [],
@@ -2003,10 +2082,46 @@ export function RankingFilters({
   showTierBand = true,
   showAdultFilter = false,
 }: RankingFiltersProps) {
+  /**
+   * As trilhas do grid da aba Geral foram calibradas para o /ranking, que traz
+   * DOIS controles a mais: "Obras exibidas" (showTopN) e "Largura dos tiers"
+   * (showTierBand). Onde eles não existem (favoritos) sobra largura, e as
+   * mesmas trilhas deixavam ~470px de buraco medido: 45% do card de Critérios
+   * gerais e ~1/3 dos de Interesse e Conteúdo exibido. `roomy` = a página não
+   * tem os controles de tuning → trilhas mais estreitas onde o conteúdo é
+   * pequeno, e mais respiro dentro dos cards que ficam largos.
+   */
+  const roomy = !showTopN && !showTierBand
   const router = useRouter()
   const appliedSearchParams = useSearchParams()
   const appliedSearchString = appliedSearchParams.toString()
   const [draftSearch, setDraftSearch] = useState(appliedSearchString)
+
+  // 🔴 O rascunho ADOTA a URL sempre que ela muda por fora do painel.
+  //
+  // Sem isto o rascunho só era semeado no 1º render, e todo navegador de URL que
+  // NÃO passa por "Aplicar filtros" — clique no cabeçalho da tabela (`updateSort`),
+  // chip de filtro ativo da view Faixas, voltar/avançar do browser — deixava o
+  // rascunho preso numa foto velha. O próximo "Aplicar filtros" reescrevia a URL a
+  // partir dessa foto e APAGAVA o que tinha sido feito por fora, sem erro nenhum:
+  // o filtro (ou a ordenação) simplesmente voltava ao estado anterior, com cara de
+  // "não aplicou".
+  //
+  // Ajuste DURANTE o render (não `useEffect`): o painel já re-renderiza com o valor
+  // certo, sem um frame mostrando o rascunho velho. O "último aplicado" é ESTADO,
+  // não ref — ler/escrever `ref.current` no render é proibido pelo lint do React
+  // (e não agenda re-render). E ele é semeado com o valor INICIAL: começar em
+  // `null` faria isto disparar na própria renderização de hidratação (ver
+  // CLAUDE.md, "adjust-during-render").
+  //
+  // Preço aceito: edição pendente não aplicada é descartada quando a pessoa navega
+  // por fora. A URL é a verdade do que está na tela; o rascunho é que é a cópia.
+  const [lastApplied, setLastApplied] = useState(appliedSearchString)
+  if (lastApplied !== appliedSearchString) {
+    setLastApplied(appliedSearchString)
+    setDraftSearch(appliedSearchString)
+  }
+
   const searchParams = useMemo(() => new URLSearchParams(draftSearch), [draftSearch])
   // Sem momentos a lente não funciona: força Pontos em vez de deixar o seletor
   // dizer σ enquanto os pills mostram pontos.
@@ -2056,6 +2171,11 @@ export function RankingFilters({
 
   const filtersDirty = draftSearch !== appliedSearchString
   const hasFilters = draftSearch !== "" || appliedSearchString !== ""
+
+  // Esconder tags evitadas: lê do RASCUNHO como todo o resto do painel.
+  const hideAvoidedRaw = searchParams.get("hide_avoided")
+  const hideAvoidedMode: "off" | "strong" | "all" =
+    hideAvoidedRaw === "strong" || hideAvoidedRaw === "all" ? hideAvoidedRaw : "off"
 
   // Top N (URL pode sobrescrever a preferência do DB). Alimenta o campo "Obras exibidas".
   const urlTopN = num(searchParams.get("top_n"))
@@ -2135,6 +2255,13 @@ export function RankingFilters({
 
   const selectedSynopsisQ = csvSet("synopsis_q")
   const selectedSynopsisPred = csvSet("synopsis_pred")
+  // MANUAL: o chip do travessão = obras sem ♥. Um token só desde a migration 179, que aposentou a
+  // proveniência "Desconhecido" (o chip chegou a ligar dois tokens juntos).
+  const manualOtherActive = selectedSynopsisQ.has(INTEREST_NONE)
+  const toggleManualOther = () => toggleCsv("synopsis_q", INTEREST_NONE)
+  // PREVISÃO: mesmo token, do outro lado — "sem previsão para o meu perfil".
+  const predOtherActive = selectedSynopsisPred.has(INTEREST_NONE)
+  const togglePredOther = () => toggleCsv("synopsis_pred", INTEREST_NONE)
   const interestMode: "and" | "or" = searchParams.get("synopsis_mode") === "and" ? "and" : "or"
 
   // Opções de status em duas listas: a COMPLETA (materializa o "todos") e a VISÍVEL
@@ -2386,19 +2513,38 @@ export function RankingFilters({
     togglePersonalStatus
   )
   selectedSynopsisQ.forEach((quality) => {
+    // A sentinela vira o chip do travessão, logo abaixo — senão a barra de filtros ativos
+    // mostraria "Sinopse: none", que não é nome de nada na UI. Um "unknown" sobrando de
+    // filtro salvo antigo cai aqui também e some da barra, como já some do resultado.
+    if (quality === INTEREST_NONE || quality === "unknown") return
     activeFilterChips.push({
       key: `synopsis-${quality}`,
       label: `Sinopse: ${quality}`,
       onRemove: () => toggleCsv("synopsis_q", quality),
     })
   })
+  if (manualOtherActive) {
+    activeFilterChips.push({
+      key: "synopsis-outros",
+      label: "Interesse: sem avaliação",
+      onRemove: toggleManualOther,
+    })
+  }
   selectedSynopsisPred.forEach((quality) => {
+    if (quality === INTEREST_NONE) return
     activeFilterChips.push({
       key: `synopsis-pred-${quality}`,
       label: `Prev. sinopse: ${quality}`,
       onRemove: () => toggleCsv("synopsis_pred", quality),
     })
   })
+  if (predOtherActive) {
+    activeFilterChips.push({
+      key: "synopsis-pred-outros",
+      label: "Prev. IA: sem previsão",
+      onRemove: togglePredOther,
+    })
+  }
   selectedGenreAll.forEach((genre) => {
     activeFilterChips.push({
       key: `genre-all-${genre}`,
@@ -2530,8 +2676,22 @@ export function RankingFilters({
           <div className="grid gap-3">
             {/* LINHA 1: Publicação · Status pessoal · Critérios gerais (numéricos).
                 Larguras calibradas p/ cada container caber em 2 linhas: Publicação
-                (5 pills → 3/linha), Status pessoal (10 pills → 5/linha), Critérios enxuto. */}
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,2.25fr)_minmax(0,1.3fr)]">
+                (5 pills → 3/linha), Status pessoal (10 pills → 5/linha), Critérios enxuto.
+                Sem "Obras exibidas" (roomy) o 3º card carrega só Caps+Ano (194px de
+                conteúdo medido) — a trilha encolhe e a largura vai pros pills. */}
+            <div
+              className="grid gap-3 lg:[grid-template-columns:var(--l1cols)]"
+              style={
+                {
+                  // O mínimo em px é o que impede a trilha enxuta de esmagar
+                  // Caps/Ano (194px de conteúdo + 40 de padding) em telas médias:
+                  // com minmax(0,…) o card estourava 11px em 1280.
+                  ["--l1cols"]: roomy
+                    ? "minmax(0,1.2fr) minmax(0,2.15fr) minmax(240px,0.75fr)"
+                    : "minmax(0,1.25fr) minmax(0,2.25fr) minmax(0,1.3fr)",
+                } as CSSProperties
+              }
+            >
             <FilterSection
               title={`Publicação${isAllPublication ? " (todos)" : selectedPublicationStatuses.size ? ` (${selectedPublicationStatuses.size})` : ""}`}
               headerAction={
@@ -2678,14 +2838,29 @@ export function RankingFilters({
 
             {/* LINHA 2: Interesse na obra · Conteúdo exibido · Largura dos tiers · Ordenação */}
             <div
-              className="grid gap-3 lg:[grid-template-columns:var(--l2cols)]"
+              className={`grid gap-3 ${
+                roomy
+                  ? // Os três cards só cabem lado a lado a partir de xl. Em lg eles
+                    // ficavam abaixo do próprio conteúdo (Conteúdo exibido estourava
+                    // 26px em 1100), então ali a linha vira 2 colunas.
+                    "lg:grid-cols-2 xl:[grid-template-columns:var(--l2cols)]"
+                  : "lg:[grid-template-columns:var(--l2cols)]"
+              }`}
               style={
                 {
+                  // Sem "Largura dos tiers" a linha perde um card: as trilhas do
+                  // /ranking deixariam Interesse e Conteúdo exibido com ~1/3 vazio.
+                  // Os mínimos em px são o conteúdo medido + padding — sem eles o fr
+                  // encolhe abaixo do que os controles ocupam, e o card estoura.
                   ["--l2cols"]: [
-                    "minmax(0,1.6fr)",
-                    hideAvoided || showAdultFilter ? "minmax(0,1.35fr)" : null,
+                    roomy ? "minmax(410px,1.15fr)" : "minmax(0,1.6fr)",
+                    showHideAvoided || showAdultFilter
+                      ? roomy
+                        ? "minmax(350px,1fr)"
+                        : "minmax(0,1.35fr)"
+                      : null,
                     showTierBand ? "minmax(0,0.95fr)" : null,
-                    "minmax(0,1.05fr)",
+                    roomy ? "minmax(260px,1fr)" : "minmax(0,1.05fr)",
                   ]
                     .filter(Boolean)
                     .join(" "),
@@ -2695,9 +2870,19 @@ export function RankingFilters({
               <FilterSection
                 title="Interesse na obra"
                 className="flex flex-col"
-                contentClassName="flex-1 flex flex-col justify-center"
+                contentClassName={`flex-1 flex flex-col justify-center ${roomy ? "2xl:px-7" : ""}`}
               >
-                <div className="flex items-stretch justify-start gap-6">
+                {/* Sobrando largura (roomy), a folga vai PARA ENTRE os dois grupos —
+                    a divisória encosta no bloco "Combinar", à direita, em vez de
+                    deixar um buraco no fim do card. O teto de largura é o que impede
+                    o efeito colateral quando o card fica MUITO largo (a linha de 2
+                    colunas em `lg`): ali o bloco centraliza em vez de esticar, senão
+                    o "Combinar" ia parar a 400px dos ♥. */}
+                <div
+                  className={`flex items-stretch gap-6 ${
+                    roomy ? "mx-auto w-full max-w-[480px] justify-between" : "justify-start"
+                  }`}
+                >
                   <div className="flex flex-col justify-center gap-3">
                     <div className="flex items-center gap-2">
                       <Label className="w-16 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -2708,6 +2893,14 @@ export function RankingFilters({
                         selected={selectedSynopsisQ}
                         onToggle={(q) => toggleCsv("synopsis_q", q)}
                         tone="rose"
+                        extra={
+                          <InterestOtherToggle
+                            active={manualOtherActive}
+                            onToggle={toggleManualOther}
+                            tone="rose"
+                            label="Sem avaliação — obras que você ainda não pontuou"
+                          />
+                        }
                       />
                     </div>
                     <div className="flex items-center gap-2">
@@ -2728,6 +2921,14 @@ export function RankingFilters({
                         selected={selectedSynopsisPred}
                         onToggle={(q) => toggleCsv("synopsis_pred", q)}
                         tone="salmon"
+                        extra={
+                          <InterestOtherToggle
+                            active={predOtherActive}
+                            onToggle={togglePredOther}
+                            tone="salmon"
+                            label="Sem previsão — obras sem previsão de interesse para o seu perfil"
+                          />
+                        }
                       />
                     </div>
                   </div>
@@ -2749,16 +2950,16 @@ export function RankingFilters({
               </FilterSection>
 
               {/* Conteúdo exibido — filtros que escondem/mostram obras (tags evitadas + 18+) */}
-              {(hideAvoided || showAdultFilter) && (
+              {(showHideAvoided || showAdultFilter) && (
                 <FilterSection
                   title="Conteúdo exibido"
                   className="flex flex-col"
-                  contentClassName="flex-1 flex flex-col justify-center"
+                  contentClassName={`flex-1 flex flex-col justify-center ${roomy ? "2xl:px-7" : ""}`}
                 >
-                  <div className="flex flex-col gap-3.5">
-                    {hideAvoided && (
+                  <div className={`flex flex-col gap-3.5 ${roomy ? "mx-auto w-full max-w-[380px]" : ""}`}>
+                    {showHideAvoided && (
                       /* Esconder tags evitadas — esconde obras com tags declaradas como evitadas */
-                      <div className="flex items-center gap-3">
+                      <div className={`flex items-center gap-3 ${roomy ? "justify-between" : ""}`}>
                         <Label
                           className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground leading-tight"
                           title="Esconde obras com tags que você declarou evitar (em /preferencias). Fortes = só as marcadas 2×."
@@ -2768,20 +2969,20 @@ export function RankingFilters({
                         <TooltipProvider delayDuration={150} disableHoverableContent>
                           <div className="inline-flex rounded-md border border-border/70 bg-background/60 p-0.5">
                             <HideAvoidedSegment
-                              href={hideAvoided.offUrl}
-                              active={hideAvoided.current === "off"}
+                              onSelect={() => updateParams({ hide_avoided: null })}
+                              active={hideAvoidedMode === "off"}
                               label="Não"
                               tooltip="Não esconde nada; mostra todas as obras."
                             />
                             <HideAvoidedSegment
-                              href={hideAvoided.strongUrl}
-                              active={hideAvoided.current === "strong"}
+                              onSelect={() => updateParams({ hide_avoided: "strong" })}
+                              active={hideAvoidedMode === "strong"}
                               label="Fortes"
                               tooltip="Esconde obras com tags evitadas marcadas como fortes (2×)."
                             />
                             <HideAvoidedSegment
-                              href={hideAvoided.allUrl}
-                              active={hideAvoided.current === "all"}
+                              onSelect={() => updateParams({ hide_avoided: "all" })}
+                              active={hideAvoidedMode === "all"}
                               label="Todas"
                               tooltip="Esconde obras com qualquer tag evitada."
                             />
@@ -2792,7 +2993,7 @@ export function RankingFilters({
 
                     {showAdultFilter && (
                       /* Conteúdo 18+ — filtra pela classificação da obra (is_adult), não por tags */
-                      <div className="flex items-center gap-3">
+                      <div className={`flex items-center gap-3 ${roomy ? "justify-between" : ""}`}>
                         <Label
                           className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground leading-tight"
                           title="Filtra obras 18+ pela classificação da obra (o mesmo selo 🔞 da página da obra), não pelas tags. 'Tudo' respeita sua preferência global."

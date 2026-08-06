@@ -1066,7 +1066,7 @@ function personalPatchFromForm(data: WorkFormValues): PersonalStatePatch {
       data.personal_status_id ?? getPersonalStatusIdByName(data.personal_status) ?? null,
     chapters_read: data.chapters_read ?? null,
     synopsis_quality: data.synopsis_quality ?? null,
-    synopsis_quality_source: data.synopsis_quality != null ? "human_manual" : "legacy_unknown",
+    synopsis_quality_source: data.synopsis_quality != null ? "human_manual" : null,
     observation_adjustment: data.observation_adjustment,
     observations: data.observations ?? null,
     user_score: data.user_score ?? null,
@@ -2313,7 +2313,7 @@ function notesPatchFrom(data: WorkStatusValues): TasteStatePatch {
     observation_adjustment: data.observation_adjustment,
     synopsis_quality: data.synopsis_quality ?? null,
     // Proveniência (Plano 3): valor vindo do form = informado/aceito pelo usuário.
-    synopsis_quality_source: data.synopsis_quality != null ? "human_manual" : "legacy_unknown",
+    synopsis_quality_source: data.synopsis_quality != null ? "human_manual" : null,
   }
 }
 
