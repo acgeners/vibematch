@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import type { ReactNode } from "react"
 import { AlertTriangle, BookOpen, ChevronDown, ChevronUp, Compass, ImageOff, Layers, LayoutGrid, List, Sparkles, Star, X } from "lucide-react"
 import type { RankingEntry } from "@/server/queries/ranking"
@@ -38,6 +38,8 @@ import type { ActiveFilterChip } from "@/components/ranking/active-filters-bar"
 import { computeWorkForces } from "@/lib/calculations/forces"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { TierDividerRow } from "@/components/ranking/tie-break-band"
+import { archetypesOf, compositionOf } from "@/lib/ranking/tier-composition"
+import type { ForceArchetype } from "@/lib/ranking/tier-composition"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
 import type { WorkPreview } from "@/server/actions/works"
@@ -667,6 +669,19 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   // de cada tier (o tier só agrupa). O mood reordena depois, no drawer.
   const displayEntries = entries
 
+  // Arquétipo (tipo de aposta) de cada obra, por percentil sobre o CONJUNTO
+  // EXIBIDO — assim "aposta segura" quer dizer a mesma coisa em todos os tiers da
+  // tela. Alimenta os chips de composição do divisor.
+  const archetypes = useMemo(() => archetypesOf(displayEntries), [displayEntries])
+
+  // Foco por tipo de aposta: clicar no chip do divisor apaga as demais. Local e
+  // efêmero de propósito — é leitura, não filtro; não vai pra URL nem pro preset.
+  const [focusedArchetype, setFocusedArchetype] = useState<ForceArchetype | null>(null)
+  const toggleArchetype = useCallback(
+    (a: ForceArchetype) => setFocusedArchetype((cur) => (cur === a ? null : a)),
+    [],
+  )
+
   // Divisor de tier indexado pelo índice de início. Rotula TODOS os tiers
   // (inclusive o 1º) — leitura section-like, cada faixa de prioridade nomeada.
   const tierByStart = useMemo(() => {
@@ -674,6 +689,17 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
     if (tiers) for (const t of tiers) map.set(t.startIndex, t)
     return map
   }, [tiers])
+
+  /** Composição por arquétipo de cada tier, indexada pelo índice de início. */
+  const compositionByStart = useMemo(() => {
+    const map = new Map<number, ReturnType<typeof compositionOf>>()
+    if (tiers) {
+      for (const t of tiers) {
+        map.set(t.startIndex, compositionOf(archetypes.slice(t.startIndex, t.startIndex + t.count)))
+      }
+    }
+    return map
+  }, [tiers, archetypes])
 
   // IDs passados ao drawer: na ordem visível, mas reordenados pela Prioridade
   // ajustada ao mood quando há refino ativo (o drawer mostra a linha ajustada).
@@ -913,9 +939,19 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                     count={tierDivider.count}
                     colSpan={columns.length}
                     onCompare={tierDivider.count >= 2 ? compareCluster : undefined}
+                    composition={compositionByStart.get(index)}
+                    focusedArchetype={focusedArchetype}
+                    onFocusArchetype={toggleArchetype}
                   />
                 )}
-                <tr className="transition-colors hover:bg-primary/5 [&>td]:border-b [&>td]:border-border/55 last:[&>td]:border-0">
+                <tr
+                  className={cn(
+                    "transition-[background-color,opacity] hover:bg-primary/5 [&>td]:border-b [&>td]:border-border/55 last:[&>td]:border-0",
+                    // Apaga em vez de esconder: some a linha e a numeração "#"
+                    // passaria a mentir sobre a posição no ranking.
+                    focusedArchetype != null && archetypes[index] !== focusedArchetype && "opacity-25",
+                  )}
+                >
                   {columns.map((col) => (
                     <td
                       key={col.key}
