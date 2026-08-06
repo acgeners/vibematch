@@ -18,7 +18,6 @@ import { getRecalcPendingState } from "@/server/recalc/queue"
 import { Header } from "@/components/layout/header"
 import { RecalcPendingControl } from "@/components/recalc/recalc-pending-control"
 import { RankingTable } from "@/components/ranking/ranking-table"
-import type { ActiveFilterChip } from "@/components/ranking/active-filters-bar"
 import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/ranking-filters"
 import { tierBandWidthSchema } from "@/lib/ranking/tier-config"
 import { SurpriseMeButton } from "@/components/ranking/surprise-me-button"
@@ -31,8 +30,7 @@ import type { FormulaConfig, CriterionScorePresets } from "@/types/domain"
 import { unstable_cache } from "next/cache"
 import { after } from "next/server"
 import { recordRankingSnapshots } from "@/lib/server/predictions/record-prediction"
-import { UNREAD_PERSONAL_STATUSES, DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
-import { UNTRACKED_PERSONAL_STATUS } from "@/lib/constants/status-lookups"
+import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 
 interface RankingPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -343,82 +341,6 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   const queryString = queryParams.toString()
   const favoritesUrl = `/favorites${queryString ? `?${queryString}` : ""}`
 
-  // ── Chips de filtros ativos (só a view "Faixas" consome) ──
-  // Puramente descritivo + navegação por URL usando os parâmetros JÁ suportados
-  // (pub_status/per_status/min_expected/top_n). NÃO altera getRanking, ordenação,
-  // score ou dados — apenas torna visíveis os filtros aplicados por padrão.
-  const baseFilterParams = new URLSearchParams()
-  for (const [key, value] of Object.entries(params)) {
-    const v = Array.isArray(value) ? value[0] : value
-    if (v != null) baseFilterParams.set(key, v)
-  }
-  const filterHref = (mutate: (p: URLSearchParams) => void): string => {
-    const p = new URLSearchParams(baseFilterParams.toString())
-    mutate(p)
-    const s = p.toString()
-    return `/ranking${s ? `?${s}` : ""}`
-  }
-  // Rótulos dos chips do filtro padrão. As CHAVES são computadas do banco — escrevê-las à mão
-  // faria o chip sumir em silêncio no dia em que o status fosse renomeado (o filtro continuaria
-  // ativo, mas sem rótulo pra removê-lo).
-  const PERSONAL_STATUS_LABELS: Record<string, string> = {
-    [DEFAULT_PERSONAL_STATUS]: "Lista: Quero ler",
-    [UNTRACKED_PERSONAL_STATUS]: "Inclui: Sem status",
-  }
-  const activeFilterChips: ActiveFilterChip[] = []
-  if (publicationStatus?.length) {
-    activeFilterChips.push({
-      key: "pub",
-      label: `Publicação: ${publicationStatus.join(", ")}`,
-      isDefault: pubStatusParam == null,
-      removeHref: filterHref((p) => p.set("pub_status", "all")),
-    })
-  }
-  if (personalStatus?.length) {
-    for (const st of personalStatus) {
-      const others = personalStatus.filter((s) => s !== st)
-      activeFilterChips.push({
-        key: `per-${st}`,
-        label: PERSONAL_STATUS_LABELS[st] ?? `Lista: ${st}`,
-        isDefault: perStatusParam == null,
-        removeHref: filterHref((p) =>
-          others.length ? p.set("per_status", others.join(",")) : p.set("per_status", "all"),
-        ),
-      })
-    }
-  }
-  if (filters.minExpectedScore != null && filters.minExpectedScore > 0) {
-    activeFilterChips.push({
-      key: "min-expected",
-      label: `Nota estimada ≥ ${String(filters.minExpectedScore).replace(".", ",")}`,
-      isDefault: overrideMinExpected == null,
-      removeHref: filterHref((p) => p.set("min_expected", "0")),
-    })
-  }
-  if (filters.topN != null) {
-    activeFilterChips.push({
-      key: "top-n",
-      label: `Top ${filters.topN} resultados`,
-      isDefault: overrideTopN == null,
-      removeHref: filterHref((p) => p.set("top_n", "9999")),
-    })
-  }
-  if (filters.onlyRated) {
-    activeFilterChips.push({
-      key: "rated",
-      label: "Só avaliadas",
-      isDefault: false,
-      removeHref: filterHref((p) => p.delete("rated")),
-    })
-  }
-  const clearFiltersHref = filterHref((p) => {
-    p.set("pub_status", "all")
-    p.set("per_status", "all")
-    p.set("min_expected", "0")
-    p.set("top_n", "9999")
-    p.delete("rated")
-  })
-
   return (
     <div className="space-y-4">
       <Header
@@ -456,7 +378,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         showAdultFilter
       />
 
-      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} criterionPrefs={criterionPrefs} activeFilters={activeFilterChips} clearFiltersHref={clearFiltersHref} criterionMoments={criterionMoments} highlightWeights={highlightWeights} />
+      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} criterionPrefs={criterionPrefs} criterionMoments={criterionMoments} highlightWeights={highlightWeights} />
     </div>
   )
 }

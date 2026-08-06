@@ -2,27 +2,34 @@
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { Compass } from "lucide-react"
+import { ChevronDown, HelpCircle } from "lucide-react"
 import { cn, titleToSlug } from "@/lib/utils"
 import { CoverImage } from "@/components/ui/cover-image"
 import { ForceMeters } from "@/components/ranking/force-meters"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Button } from "@/components/ui/button"
 import { computeWorkForces, classifyArchetype, classifyArchetypeByPercentile, type ForceArchetype } from "@/lib/calculations/forces"
+import { ARCHETYPE_LABEL, ARCHETYPE_MEANING, ARCHETYPE_ORDER } from "@/lib/ranking/tier-composition"
+import { ARCHETYPE_STYLE, CORNER_ARCHETYPE } from "@/lib/ranking/archetype-style"
 
 /**
  * Bússola 2D — o plano de decisão da feature (ver PLANO-BUSSOLA-3-FORCAS.md).
- * Cada obra é um ponto: posição = 2 das 3 forças (face escolhida), tamanho = a
- * 3ª, cor = arquétipo (Chance × Avaliação, estável entre as faces).
+ * Cada obra é um ponto: posição = Chance × Avaliação, tamanho = Alcance.
  *
  * Serve dois contextos, controlados por `mode`:
- *   - "percentile" (/ranking): posição = percentil no acervo exibido (centenas
- *     de obras) — espalha o catálogo comprimido; mediana no centro.
+ *   - "percentile" (/ranking): posição = percentil no acervo exibido — espalha o
+ *     catálogo comprimido; mediana no centro. UMA face só, e os quatro cantos são
+ *     FILTROS clicáveis.
  *   - "absolute" (comparação de 2–10 obras): posição = magnitude real, com o
- *     limiar de cada eixo ancorado no centro — fiel, sem exagerar diferenças
- *     mínimas num punhado de obras.
+ *     limiar de cada eixo ancorado no centro. Mantém as TRÊS faces — com poucas
+ *     obras, cruzar Alcance é leitura de verdade, não curiosidade.
  *
- * Redesign 2026-07-08: legendas de canto FORA do plano (nunca cobrem/são
- * cobertas por um ponto), card explicativo ao lado dos seletores e tooltip
- * rico com capa (CoverImage) + as 3 forças (ForceMeters).
+ * Redesenho 2026-08-06 (só o ramo percentile):
+ *   - as abas de face somem; sobra Chance × Avaliação
+ *   - os 4 cantos viram filtro e matam a coluna "Foco"
+ *   - lista pareada ao lado: hover no ponto acende a linha e vice-versa
+ *   - toda a instrução colapsa no "?"
+ *   - teto de exibição (ver MAX_PLOT)
  */
 
 type ForceKey = "chance" | "avaliacao" | "alcance"
@@ -45,6 +52,22 @@ export interface BussolaDatum {
   totalVotes: number
   expectedScore: number | null
 }
+
+/**
+ * 🔴 **Teto de pontos no plano — medido, não escolhido.** O plano fica legível
+ * enquanto os pontos não se empilham, e a degradação NÃO é gradual (medido em
+ * 2026-08-06 sobre o catálogo real, plano de 820×615):
+ *
+ *   40 obras (o `top_n` padrão) →  13 alturas distintas ·  10,0% dos pontos colidindo
+ *   100 obras                   →  15 alturas          ·  12,0%
+ *   965 obras (catálogo todo)   →  23 alturas          ·  52,6%  ← mancha listrada
+ *
+ * O eixo Y é `platform_avg × 10` arredondado num acervo curado: são só ~23 valores
+ * distintos em todo o catálogo. Sem teto, afrouxar o filtro transforma a view numa
+ * mancha SEM AVISO — e o sintoma (listras) não se parece com a causa (filtro largo).
+ * Com teto, a barra diz quantas estão sendo desenhadas.
+ */
+const MAX_PLOT = 100
 
 const AXIS_LABEL: Record<ForceKey, string> = {
   chance: "Chance de você gostar",
@@ -79,13 +102,18 @@ interface Preset {
   x: ForceKey
   y: ForceKey
   size: ForceKey
-  /** Rótulo de propósito + explicação (card ao lado dos seletores). */
   tag: string
   lede: string
   note: string
   quad: { tr: string; br: string; tl: string; bl: string }
 }
 
+/**
+ * ⚠️ Usado SÓ no modo "absolute" (WorkCompareDrawer). O /ranking desenha uma face
+ * só — a primeira — e não mostra seletor. Os nomes de canto das faces 2 e 3
+ * ("Joia escondida", "Consagrada"…) são vocabulário exclusivo da comparação; o
+ * vocabulário do arquétipo vem de `tier-composition.ts`.
+ */
 const PRESETS: Preset[] = [
   {
     key: "ca", label: "Chance × Avaliação", x: "chance", y: "avaliacao", size: "alcance",
@@ -109,30 +137,6 @@ const PRESETS: Preset[] = [
     quad: { tr: "Consagrada", br: "Cult / subvalorizada", tl: "Popular e divisiva", bl: "Fundo de catálogo" },
   },
 ]
-
-const ARCH: Record<ForceArchetype, { dot: string; glow: string; text: string; label: string; desc: string }> = {
-  safe: { dot: "bg-emerald-500", glow: "rgba(16,185,129,0.5)", text: "text-emerald-600 dark:text-emerald-400", label: "Aposta segura", desc: "gosta + crítica confirma" },
-  niche: { dot: "bg-violet-500", glow: "rgba(139,92,246,0.5)", text: "text-violet-600 dark:text-violet-400", label: "Teu nicho", desc: "você curte, crítica não" },
-  upside: { dot: "bg-rose-500", glow: "rgba(244,63,94,0.5)", text: "text-rose-600 dark:text-rose-400", label: "Alto potencial", desc: "aclamada, mas arriscada" },
-  skip: { dot: "bg-slate-400 dark:bg-slate-500", glow: "rgba(100,116,139,0.4)", text: "text-slate-500", label: "Provável pular", desc: "pouca chance e aclamação" },
-}
-
-/** Canto → arquétipo (posição no plano). Estável entre as faces; casa com os tints. */
-const CORNER_ARCH: Record<"tr" | "tl" | "br" | "bl", ForceArchetype> = { tr: "safe", tl: "upside", br: "niche", bl: "skip" }
-
-type RiskMode = "all" | "segura" | "potencial"
-
-/** Opções do filtro "Foco" (por arquétipo de risco) + explicação do selecionado. */
-const RISK_OPTIONS: { v: RiskMode; label: string; swatch?: string }[] = [
-  { v: "all", label: "Tudo" },
-  { v: "segura", label: "Aposta segura", swatch: "bg-emerald-500" },
-  { v: "potencial", label: "Alto potencial", swatch: "bg-rose-500" },
-]
-const RISK_DESC: Record<RiskMode, string> = {
-  all: "Mostra todas as obras do ranking, sem filtrar por tipo de aposta.",
-  segura: "Só o que você tende a gostar e a crítica confirma.",
-  potencial: "Só apostas arriscadas: aclamadas, mas incertas pro teu perfil.",
-}
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
@@ -158,9 +162,7 @@ const FORCE_THRESHOLD: Record<ForceKey, number> = { chance: 50, avaliacao: 65, a
 
 /**
  * Mapeia a magnitude crua (0–100) pra posição no plano ancorando o limiar da
- * força em 50% (piecewise). Mantém a cruz/tints/cantos idênticos ao modo
- * percentil, mudando só onde os pontos caem — e preservando a fidelidade
- * (diferença mínima entre obras → distância mínima).
+ * força em 50% (piecewise).
  */
 const absPos = (v: number | null, thr: number) => {
   if (v == null) return 50
@@ -168,13 +170,14 @@ const absPos = (v: number | null, thr: number) => {
   return c <= thr ? (c / thr) * 50 : 50 + ((c - thr) / (100 - thr)) * 50
 }
 
-/** Legenda de canto — fora do plano, pra nunca cobrir (nem ser coberta por) um ponto. */
+/** Legenda de canto do modo absoluto — fora do plano, pra nunca cobrir um ponto. */
 function QuadCap({ arch, name, hint, align }: { arch: ForceArchetype; name: string; hint: string; align: "left" | "right" }) {
+  const style = ARCHETYPE_STYLE[arch]
   return (
     <div className={cn("inline-flex items-start gap-2", align === "right" && "flex-row-reverse text-right")}>
       <span
-        className={cn("mt-0.5 size-2.5 flex-none rounded-full", ARCH[arch].dot)}
-        style={{ boxShadow: `0 0 0 3px ${ARCH[arch].glow.replace(/0\.\d+\)/, "0.16)")}` }}
+        className={cn("mt-0.5 size-2.5 flex-none rounded-full", style.dot)}
+        style={{ boxShadow: `0 0 0 3px ${style.glow.replace(/0\.\d+\)/, "0.16)")}` }}
       />
       <div className={cn("flex flex-col leading-tight", align === "right" && "items-end")}>
         <span className="text-[13px] font-bold tracking-tight text-foreground">{name}</span>
@@ -184,38 +187,45 @@ function QuadCap({ arch, name, hint, align }: { arch: ForceArchetype; name: stri
   )
 }
 
-export function BussolaPlane({ entries, mode = "percentile" }: { entries: BussolaDatum[]; mode?: PositionMode }) {
+export function BussolaPlane({
+  entries,
+  mode = "percentile",
+  grouped = false,
+}: {
+  entries: BussolaDatum[]
+  mode?: PositionMode
+  /** "Agrupar" da barra: divide a LISTA LATERAL em prateleiras. O plano não muda. */
+  grouped?: boolean
+}) {
   const [presetKey, setPresetKey] = useState("ca")
-  const [risk, setRisk] = useState<RiskMode>("all")
   const [hovered, setHovered] = useState<string | null>(null)
-  const preset = PRESETS.find((p) => p.key === presetKey)!
+  const [focusArch, setFocusArch] = useState<ForceArchetype | null>(null)
+  const preset = mode === "absolute" ? PRESETS.find((p) => p.key === presetKey)! : PRESETS[0]
 
   const planeRef = useRef<HTMLDivElement>(null)
+  const plotRef = useRef<HTMLDivElement>(null)
   const tipRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
   const [tipPos, setTipPos] = useState<{ left: number; top: number } | null>(null)
 
+  // Teto: no /ranking o plano desenha no máximo MAX_PLOT obras, na ordem que já
+  // veio. Na comparação (2–10 obras) ele nunca é atingido.
+  const capped = mode === "percentile" && entries.length > MAX_PLOT
+  const plotted = capped ? entries.slice(0, MAX_PLOT) : entries
+
   const dots = useMemo(() => {
-    const base = entries
+    const base = plotted
       .map((e) => ({
         e,
         forces: computeWorkForces({ chanceScore: e.chanceScore, platformAvg: e.platformAvg, totalVotes: e.totalVotes }),
       }))
       .filter((d) => d.forces[preset.x] != null && d.forces[preset.y] != null)
 
-    // Modo absoluto (comparação de poucas obras): posição = magnitude real, com
-    // o limiar de cada eixo ancorado no centro. Fiel — diferença mínima entre
-    // obras vira distância mínima; percentil (relativo a 2–3 obras) exageraria
-    // os cantos. Arquétipo por limiar FIXO (chance≥50, crítica≥6,5) — a cruz
-    // vira o mesmo limiar em qualquer conjunto comparado.
     if (mode === "absolute") {
       return base.map((d) => ({
         ...d,
         xPct: absPos(d.forces[preset.x], FORCE_THRESHOLD[preset.x]),
         yPct: absPos(d.forces[preset.y], FORCE_THRESHOLD[preset.y]),
-        // Tamanho ABSOLUTO aqui, pela mesma razão da posição: com 2–3 obras o
-        // percentil vira "uma é grande, a outra é pequena" mesmo quando elas têm
-        // quase os mesmos votos. Neste modo os dois eixos e o tamanho falam
-        // magnitude real.
         size: dotSizePx((d.forces[preset.size] ?? 0) / 100),
         arch: classifyArchetype(d.forces.chance, d.forces.avaliacao),
       }))
@@ -243,44 +253,42 @@ export function BussolaPlane({ entries, mode = "percentile" }: { entries: Bussol
     const pctX = percentileFn(preset.x)
     const pctY = percentileFn(preset.y)
     const pctSize = percentileFn(preset.size)
-    const pctChance = percentileFn("chance")
-    const pctAval = percentileFn("avaliacao")
 
     return base.map((d) => ({
       ...d,
       xPct: pctX(d.forces[preset.x]),
       yPct: pctY(d.forces[preset.y]),
-      // TAMANHO = percentil também, pelo mesmo motivo da posição: a 3ª força é
-      // tão comprimida quanto os eixos, e num acervo homogêneo a escala absoluta
-      // colapsa a diferença a ~2 px. Assim a obra mais popular DO QUE ESTÁ NA
-      // TELA é sempre a maior, em qualquer filtro. O número cru continua no
-      // tooltip e no aria-label — o tamanho ordena, não mede.
+      // TAMANHO = percentil também: a 3ª força é tão comprimida quanto os eixos.
+      // O número cru continua no tooltip e no aria-label — o tamanho ordena, não mede.
       size: dotSizePx(pctSize(d.forces[preset.size]) / 100),
-      // Arquétipo por percentil de Chance × Avaliação (median-split) — alinha os
-      // quadrantes visuais (linha do meio = mediana) com a cor.
-      arch: classifyArchetypeByPercentile(pctChance(d.forces.chance), pctAval(d.forces.avaliacao)),
+      // Face principal: x = Chance e y = Avaliação, então o percentil do eixo JÁ É
+      // o percentil da força. Reusar pctX/pctY evita recalcular a mesma coisa e
+      // garante que a cor não possa divergir do quadrante.
+      arch: classifyArchetypeByPercentile(pctX(d.forces.chance), pctY(d.forces.avaliacao)),
     }))
-  }, [entries, preset.x, preset.y, preset.size, mode])
-
-  const isActive = (arch: ForceArchetype) =>
-    risk === "all" || (risk === "segura" && arch === "safe") || (risk === "potencial" && arch === "upside")
+  }, [plotted, preset.x, preset.y, preset.size, mode])
 
   const hoveredDot = hovered ? dots.find((d) => d.e.workId === hovered) : null
 
-  // Posiciona o card acima do ponto, com flip/clamp nas bordas — medido no
-  // client (o card é largo demais pra centralizar só com CSS). useLayoutEffect
-  // roda antes do paint, então não há flash de posição.
+  /**
+   * Posiciona o card acima do ponto, com flip/clamp nas bordas.
+   *
+   * ⚠️ Mede a ÁREA DE PLOTAGEM, não o plano: elas têm alturas diferentes (a
+   * plotagem é menor, ver `PLOT_INSET`). Usar o retângulo do plano deslocaria o
+   * tooltip verticalmente em ~64px, e o erro cresceria com o zoom.
+   */
   useLayoutEffect(() => {
-    if (!hoveredDot || !planeRef.current || !tipRef.current) {
+    if (!hoveredDot || !planeRef.current || !plotRef.current || !tipRef.current) {
       setTipPos(null)
       return
     }
     const pr = planeRef.current.getBoundingClientRect()
+    const ar = plotRef.current.getBoundingClientRect()
     const tw = tipRef.current.offsetWidth
     const th = tipRef.current.offsetHeight
     const dotSize = hoveredDot.size
-    const cx = (pr.width * hoveredDot.xPct) / 100
-    const cyTop = pr.height * (1 - hoveredDot.yPct / 100)
+    const cx = (ar.width * hoveredDot.xPct) / 100
+    const cyTop = ar.top - pr.top + ar.height * (1 - hoveredDot.yPct / 100)
     const left = clamp(cx - tw / 2, 8, Math.max(8, pr.width - tw - 8))
     let top = cyTop - th - dotSize / 2 - 10
     if (top < 8) top = cyTop + dotSize / 2 + 10 // flip pra baixo perto do topo
@@ -307,168 +315,107 @@ export function BussolaPlane({ entries, mode = "percentile" }: { entries: Bussol
     return top ? (right ? "↗" : "↖") : right ? "↘" : "↙"
   }
 
+  /** Rola só o container da lista até a linha — nunca a página. */
+  const revealRow = (workId: string) => {
+    const body = listRef.current
+    if (!body) return
+    const row = body.querySelector<HTMLElement>(`[data-work="${CSS.escape(workId)}"]`)
+    if (!row) return
+    const rb = row.getBoundingClientRect()
+    const bb = body.getBoundingClientRect()
+    const stickyPad = 28 // cabeçalho de prateleira
+    if (rb.top < bb.top + stickyPad) body.scrollTop += rb.top - bb.top - stickyPad
+    else if (rb.bottom > bb.bottom) body.scrollTop += rb.bottom - bb.bottom
+  }
+
+  const visible = focusArch ? dots.filter((d) => d.arch === focusArch) : dots
+
+  if (mode === "percentile") {
+    return (
+      <PercentilePlane
+        dots={dots}
+        visible={visible}
+        counts={counts}
+        focusArch={focusArch}
+        setFocusArch={setFocusArch}
+        grouped={grouped}
+        hovered={hovered}
+        setHovered={setHovered}
+        hoveredDot={hoveredDot}
+        tipPos={tipPos}
+        planeRef={planeRef}
+        plotRef={plotRef}
+        tipRef={tipRef}
+        listRef={listRef}
+        revealRow={revealRow}
+        capped={capped}
+        total={entries.length}
+      />
+    )
+  }
+
+  // ---------------------------------------------------------------- modo absoluto
+  // (WorkCompareDrawer) — as três faces, legendas fora do plano, sem lista lateral.
   return (
     <div className="flex flex-col gap-3">
-      {/* painel — como ler, controles e plano num card só */}
       <div className="overflow-hidden rounded-2xl border border-border bg-card/60 shadow-sm">
-        {/* como ler + chave de codificação */}
-        <div className="flex flex-wrap items-stretch gap-4 border-b border-border bg-muted/30 p-4">
-          <div className="flex max-w-[460px] flex-none gap-3">
-            <span className="flex size-[30px] flex-none items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <Compass className="size-[17px]" />
-            </span>
-            <div>
-              <p className="mb-1 font-mono text-[9.5px] font-bold uppercase tracking-[0.12em] text-muted-foreground">Como ler o mapa</p>
-              <p className="max-w-[44ch] text-[13px] leading-normal text-muted-foreground">
-                Cada obra é um ponto. A <b className="font-semibold text-foreground">posição</b> cruza duas das três forças,
-                o <b className="font-semibold text-foreground">tamanho</b> mostra a terceira e a{" "}
-                <b className="font-semibold text-foreground">cor</b> diz o tipo de aposta pra você. Passe o mouse num ponto pra ver a capa.
-              </p>
-            </div>
-          </div>
-          <div className="grid flex-1 grid-cols-3 items-center border-l border-border pl-4 font-mono">
-            <div className="flex flex-col gap-1 px-4">
-              <div className="flex items-center gap-2">
-                <span className="grid w-6 place-items-center">
-                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                    <path d="M9 1.5v15M1.5 9h15" className="stroke-muted-foreground" strokeWidth="1.3" />
-                    <circle cx="9" cy="9" r="2.4" className="fill-foreground" />
-                  </svg>
-                </span>
-                <span className="text-[12px] font-bold uppercase tracking-wide text-foreground">Posição</span>
-              </div>
-              <span className="text-[11px] text-muted-foreground">Cruza <b className="font-bold">2 forças</b></span>
-            </div>
-            <div className="flex flex-col gap-1 border-l border-border px-4">
-              <div className="flex items-center gap-2">
-                <span className="grid w-6 place-items-center">
-                  {/* Os raios espelham a razão REAL da escala (⌀ 9 → 34 px): uma
-                      legenda 2× ao lado de pontos 3,8× ensina a ler errado. */}
-                  <svg width="24" height="14" viewBox="0 0 24 14" className={cn("fill-current", FORCE_TEXT[preset.size])}>
-                    <circle cx="4" cy="7" r="1.6" />
-                    <circle cx="16" cy="7" r="6" />
-                  </svg>
-                </span>
-                <span className="text-[12px] font-bold uppercase tracking-wide text-foreground">Tamanho</span>
-              </div>
-              <span className="text-[11px] text-muted-foreground">A 3ª força · <b className={cn("font-bold", FORCE_TEXT[preset.size])}>{FORCE_SHORT[preset.size]}</b></span>
-            </div>
-            <div className="flex flex-col gap-1 border-l border-border px-4">
-              <div className="flex items-center gap-2">
-                <span className="grid w-6 place-items-center">
-                  <svg width="22" height="14" viewBox="0 0 22 14">
-                    <circle cx="4" cy="7" r="3" className="fill-emerald-500" />
-                    <circle cx="12" cy="7" r="3" className="fill-violet-500" />
-                    <circle cx="20" cy="7" r="3" className="fill-rose-500" />
-                  </svg>
-                </span>
-                <span className="text-[12px] font-bold uppercase tracking-wide text-foreground">Cor</span>
-              </div>
-              <span className="text-[11px] text-muted-foreground">O <b className="font-bold">tipo de aposta</b></span>
-            </div>
-          </div>
-        </div>
-
-        {/* eixos (abas) + mapa + foco */}
         <div className="border-b border-border bg-muted/30 p-4">
-          <div className="flex flex-wrap gap-[18px]">
-            <div className="flex min-w-[300px] flex-1 flex-col gap-3">
-              {/* Eixos → abas */}
-              <div className="flex flex-col gap-2">
-                <span className="font-mono text-[10.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground">Eixos</span>
-                <div className="flex flex-wrap gap-1 border-b border-border">
-                  {PRESETS.map((p) => {
-                    const on = presetKey === p.key
-                    return (
-                      <button
-                        key={p.key}
-                        type="button"
-                        onClick={() => setPresetKey(p.key)}
-                        aria-pressed={on}
-                        className={cn(
-                          "-mb-px cursor-pointer rounded-t-lg px-3 py-2 text-sm font-semibold transition-colors",
-                          on
-                            ? "bg-card text-foreground shadow-[inset_0_-2px_0_hsl(var(--primary))]"
-                            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-                        )}
-                      >
-                        {p.label}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {/* Mapa: propósito + subtítulo, forças em linhas, nota */}
-              <div className="flex flex-col gap-2.5">
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <span className="rounded-md bg-violet-500/10 px-1.5 py-1 font-mono text-[9px] font-bold uppercase tracking-[0.08em] text-violet-600 dark:text-violet-400">
-                    {preset.tag}
-                  </span>
-                  <p className="text-[13px] text-muted-foreground">{preset.lede}</p>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  {([["→ horizontal", preset.x], ["↑ vertical", preset.y], ["● tamanho", preset.size]] as const).map(
-                    ([role, key]) => (
-                      <div
-                        key={role}
-                        className={cn(
-                          "grid grid-cols-[96px_88px_minmax(0,1fr)] items-center gap-3 rounded-r-lg border-l-[2.5px] bg-muted/40 py-2 pl-3 pr-2",
-                          FORCE_BORDER[key],
-                        )}
-                      >
-                        <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">{role}</span>
-                        <span className={cn("text-[13px] font-bold", FORCE_TEXT[key])}>{FORCE_SHORT[key]}</span>
-                        <span className="text-[11px] leading-tight text-muted-foreground">{FORCE_DESC[key]}</span>
-                      </div>
-                    ),
-                  )}
-                </div>
-                <p className="text-[11px] leading-relaxed text-muted-foreground">{preset.note}</p>
-              </div>
-            </div>
-
-            {/* Foco: coluna à direita do conteúdo dos eixos */}
-            <div className="flex w-[172px] flex-none flex-col gap-2 border-l border-border pl-[18px]">
-              <span className="font-mono text-[10.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground">Foco</span>
-              <div className="flex flex-col gap-0.5">
-                {RISK_OPTIONS.map((o) => {
-                  const on = risk === o.v
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2">
+              <span className="font-mono text-[10.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground">Eixos</span>
+              <div className="flex flex-wrap gap-1 border-b border-border">
+                {PRESETS.map((p) => {
+                  const on = presetKey === p.key
                   return (
                     <button
-                      key={o.v}
+                      key={p.key}
                       type="button"
-                      onClick={() => setRisk(o.v)}
+                      onClick={() => setPresetKey(p.key)}
                       aria-pressed={on}
                       className={cn(
-                        "flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[12.5px] transition-colors",
-                        on ? "font-semibold text-foreground" : "font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                        "-mb-px cursor-pointer rounded-t-lg px-3 py-2 text-sm font-semibold transition-colors",
+                        on
+                          ? "bg-card text-foreground shadow-[inset_0_-2px_0_hsl(var(--primary))]"
+                          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                       )}
                     >
-                      <span
-                        className={cn(
-                          "grid size-[15px] flex-none place-items-center rounded-full ring-[1.5px] ring-inset",
-                          on ? "ring-primary" : "ring-muted-foreground/50",
-                        )}
-                      >
-                        {on && <span className="size-[7px] rounded-full bg-primary" />}
-                      </span>
-                      {o.label}
-                      {o.swatch && <span className={cn("ml-auto size-2 flex-none rounded-full", o.swatch)} />}
+                      {p.label}
                     </button>
                   )
                 })}
               </div>
-              <p className="mt-1 border-t border-border pt-2 text-[11px] leading-relaxed text-muted-foreground">
-                {RISK_DESC[risk]}
-              </p>
+            </div>
+
+            <div className="flex flex-col gap-2.5">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <span className="rounded-md bg-violet-500/10 px-1.5 py-1 font-mono text-[9px] font-bold uppercase tracking-[0.08em] text-violet-600 dark:text-violet-400">
+                  {preset.tag}
+                </span>
+                <p className="text-[13px] text-muted-foreground">{preset.lede}</p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {([["→ horizontal", preset.x], ["↑ vertical", preset.y], ["● tamanho", preset.size]] as const).map(
+                  ([role, key]) => (
+                    <div
+                      key={role}
+                      className={cn(
+                        "grid grid-cols-[96px_88px_minmax(0,1fr)] items-center gap-3 rounded-r-lg border-l-[2.5px] bg-muted/40 py-2 pl-3 pr-2",
+                        FORCE_BORDER[key],
+                      )}
+                    >
+                      <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">{role}</span>
+                      <span className={cn("text-[13px] font-bold", FORCE_TEXT[key])}>{FORCE_SHORT[key]}</span>
+                      <span className="text-[11px] leading-tight text-muted-foreground">{FORCE_DESC[key]}</span>
+                    </div>
+                  ),
+                )}
+              </div>
+              <p className="text-[11px] leading-relaxed text-muted-foreground">{preset.note}</p>
             </div>
           </div>
         </div>
 
-        {/* região do plot */}
         <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-1 px-5 pb-4 pt-4">
-          {/* eixo Y */}
           <div className="flex items-center justify-center">
             <span
               className={cn(
@@ -482,16 +429,14 @@ export function BussolaPlane({ entries, mode = "percentile" }: { entries: Bussol
           </div>
 
           <div className="min-w-0">
-            {/* legendas de topo (fora do plano) */}
             <div className="mb-2.5 flex items-start justify-between gap-3">
-              <QuadCap arch={CORNER_ARCH.tl} name={preset.quad.tl} hint={`↖ ${cornerHint(false, true)}`} align="left" />
+              <QuadCap arch={CORNER_ARCHETYPE.tl} name={preset.quad.tl} hint={`↖ ${cornerHint(false, true)}`} align="left" />
               <span className="self-center whitespace-nowrap font-mono text-[9px] uppercase tracking-wider text-muted-foreground/70">
-                {mode === "absolute" ? "↓ limiar" : "↓ mediana do acervo"}
+                ↓ limiar
               </span>
-              <QuadCap arch={CORNER_ARCH.tr} name={preset.quad.tr} hint={`↗ ${cornerHint(true, true)}`} align="right" />
+              <QuadCap arch={CORNER_ARCHETYPE.tr} name={preset.quad.tr} hint={`↗ ${cornerHint(true, true)}`} align="right" />
             </div>
 
-            {/* plano */}
             <div
               ref={planeRef}
               className="relative aspect-[4/3] w-full overflow-hidden rounded-xl border border-border bg-muted/30"
@@ -501,100 +446,27 @@ export function BussolaPlane({ entries, mode = "percentile" }: { entries: Bussol
                 backgroundSize: "12.5% 12.5%",
               }}
             >
-              {/* tints dos cantos (arquétipo) */}
-              <div className="pointer-events-none absolute right-0 top-0 h-1/2 w-1/2 bg-gradient-to-bl from-emerald-500/10 to-transparent" />
-              <div className="pointer-events-none absolute bottom-0 right-0 h-1/2 w-1/2 bg-gradient-to-tl from-violet-500/10 to-transparent" />
-              <div className="pointer-events-none absolute left-0 top-0 h-1/2 w-1/2 bg-gradient-to-br from-rose-500/10 to-transparent" />
-              <div className="pointer-events-none absolute bottom-0 left-0 h-1/2 w-1/2 bg-gradient-to-tr from-slate-500/10 to-transparent" />
-              {/* linhas da mediana */}
+              <QuadrantTints />
               <div className="absolute left-1/2 top-0 h-full w-px bg-border" />
               <div className="absolute left-0 top-1/2 h-px w-full bg-border" />
+              {/* Sem inset aqui: as legendas deste modo já vivem fora do plano. */}
+              <div ref={plotRef} className="absolute inset-0">
+                {dots.map((d) => (
+                  <Dot key={d.e.workId} d={d} onHover={setHovered} />
+                ))}
+              </div>
 
-              {/* pontos */}
-              {dots.map((d) => {
-                const s = d.size
-                const active = isActive(d.arch)
-                return (
-                  <Link
-                    key={d.e.workId}
-                    href={`/titles/${titleToSlug(d.e.title)}`}
-                    aria-label={`${d.e.title}: chance ${d.forces.chance ?? "—"}, avaliação ${d.forces.avaliacao ?? "—"}, alcance ${d.forces.alcance ?? "—"}`}
-                    onMouseEnter={() => setHovered(d.e.workId)}
-                    onMouseLeave={() => setHovered((h) => (h === d.e.workId ? null : h))}
-                    onFocus={() => setHovered(d.e.workId)}
-                    onBlur={() => setHovered((h) => (h === d.e.workId ? null : h))}
-                    className={cn(
-                      "absolute -translate-x-1/2 translate-y-1/2 rounded-full border-[1.5px] border-background transition-opacity hover:z-20 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      ARCH[d.arch].dot,
-                      active ? "opacity-100" : "opacity-[0.13]",
-                    )}
-                    style={{
-                      left: `${d.xPct}%`,
-                      bottom: `${d.yPct}%`,
-                      width: s,
-                      height: s,
-                      boxShadow: active ? `0 0 14px ${ARCH[d.arch].glow}` : undefined,
-                    }}
-                  />
-                )
-              })}
-
-              {/* tooltip rico */}
               {hoveredDot && (
-                <div
+                <DotTooltip
                   ref={tipRef}
-                  className="pointer-events-none absolute z-30 w-[268px] overflow-hidden rounded-xl border border-border bg-card shadow-xl transition-opacity"
-                  style={{ left: tipPos?.left ?? 0, top: tipPos?.top ?? 0, opacity: tipPos ? 1 : 0 }}
-                >
-                  <div className="flex gap-3 p-3">
-                    <CoverImage
-                      url={hoveredDot.e.coverUrl}
-                      alt=""
-                      className="h-[74px] w-[52px] flex-none rounded-md object-cover shadow"
-                    />
-                    <div className="flex min-w-0 flex-col gap-1">
-                      <div className="text-[13.5px] font-semibold leading-tight">{hoveredDot.e.title}</div>
-                      <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10.5px] text-muted-foreground">
-                        {hoveredDot.e.year != null && <span>{hoveredDot.e.year}</span>}
-                        {hoveredDot.e.year != null &&
-                          (hoveredDot.e.publicationStatusShort ?? hoveredDot.e.publicationStatus) && <span>·</span>}
-                        {(hoveredDot.e.publicationStatusShort ?? hoveredDot.e.publicationStatus) && (
-                          <span className="inline-flex items-center gap-1">
-                            <span
-                              className="size-1.5 rounded-full"
-                              style={{ background: hoveredDot.e.publicationStatusColor ?? "currentColor" }}
-                            />
-                            {hoveredDot.e.publicationStatusShort ?? hoveredDot.e.publicationStatus}
-                          </span>
-                        )}
-                      </div>
-                      <span
-                        className={cn(
-                          "mt-0.5 inline-flex items-center gap-1.5 self-start rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                          ARCH[hoveredDot.arch].text,
-                        )}
-                        style={{ backgroundColor: ARCH[hoveredDot.arch].glow.replace(/0\.\d+\)/, "0.14)") }}
-                      >
-                        <span className={cn("size-1.5 rounded-full", ARCH[hoveredDot.arch].dot)} />
-                        {ARCH[hoveredDot.arch].label}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="px-3 pb-3">
-                    <ForceMeters forces={hoveredDot.forces} size="sm" />
-                  </div>
-                  <div className="flex items-center justify-between border-t border-border bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
-                    <span>
-                      Nota Prevista{" "}
-                      <b className="font-mono text-[13px] font-bold text-foreground">
-                        {hoveredDot.e.expectedScore != null ? hoveredDot.e.expectedScore.toFixed(1) : "—"}
-                      </b>
-                    </span>
-                    <span className={cn("inline-flex items-center gap-1 font-medium", ARCH[hoveredDot.arch].text)}>
+                  d={hoveredDot}
+                  pos={tipPos}
+                  footerRight={
+                    <span className={cn("inline-flex items-center gap-1 font-medium", ARCHETYPE_STYLE[hoveredDot.arch].text)}>
                       {quadArrow(hoveredDot)} {quadName(hoveredDot)}
                     </span>
-                  </div>
-                </div>
+                  }
+                />
               )}
 
               {dots.length === 0 && (
@@ -604,82 +476,515 @@ export function BussolaPlane({ entries, mode = "percentile" }: { entries: Bussol
               )}
             </div>
 
-            {/* legendas de baixo (fora do plano) */}
             <div className="mt-2.5 flex items-start justify-between gap-3">
-              <QuadCap arch={CORNER_ARCH.bl} name={preset.quad.bl} hint={`↙ ${cornerHint(false, false)}`} align="left" />
-              <QuadCap arch={CORNER_ARCH.br} name={preset.quad.br} hint={`↘ ${cornerHint(true, false)}`} align="right" />
+              <QuadCap arch={CORNER_ARCHETYPE.bl} name={preset.quad.bl} hint={`↙ ${cornerHint(false, false)}`} align="left" />
+              <QuadCap arch={CORNER_ARCHETYPE.br} name={preset.quad.br} hint={`↘ ${cornerHint(true, false)}`} align="right" />
             </div>
 
-            {/* eixo X */}
             <div className={cn("mt-2.5 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-wider", FORCE_TEXT[preset.x])}>
               <span className="text-muted-foreground/70">baixo</span> {AXIS_LABEL[preset.x]} →
             </div>
           </div>
         </div>
 
-        {/* rodapé: legenda + como ler */}
-        <div className="flex flex-col gap-3.5 border-t border-border p-4">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
-            {(Object.keys(ARCH) as ForceArchetype[]).map((a) => (
-              <span key={a} className={cn("inline-flex items-center gap-1.5", ARCH[a].text)}>
-                <span className={cn("size-2.5 rounded-full", ARCH[a].dot)} />
-                <b className="font-semibold text-foreground">{ARCH[a].label}</b>
-                <span className="text-muted-foreground">· {ARCH[a].desc} · {counts[a]}</span>
-              </span>
-            ))}
-            <span className="ml-auto font-mono text-[11px] text-muted-foreground">
-              posição = {mode === "absolute" ? "magnitude (limiar no centro)" : "percentil no acervo"} · tamanho = {FORCE_SHORT[preset.size]} ({mode === "absolute" ? "magnitude" : "percentil"}) · {dots.length} obras
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-border p-4 text-xs">
+          {ARCHETYPE_ORDER.map((a) => (
+            <span key={a} className={cn("inline-flex items-center gap-1.5", ARCHETYPE_STYLE[a].text)}>
+              <span className={cn("size-2.5 rounded-full", ARCHETYPE_STYLE[a].dot)} />
+              <b className="font-semibold capitalize text-foreground">{ARCHETYPE_LABEL[a]}</b>
+              <span className="text-muted-foreground">· {ARCHETYPE_MEANING[a]} · {counts[a]}</span>
             </span>
-          </div>
-
-          <details className="rounded-xl border border-border bg-muted/30">
-            <summary className="flex cursor-pointer list-none items-center gap-2 p-3 text-[13px] font-semibold [&::-webkit-details-marker]:hidden">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-muted-foreground">
-                <circle cx="12" cy="12" r="9" />
-                <path d="M12 16v-4M12 8h.01" />
-              </svg>
-              Como ler a Bússola
-            </summary>
-            <div className="grid grid-cols-1 gap-4 px-3.5 pb-4 sm:grid-cols-3">
-              <div>
-                <h4 className="mb-1.5 mt-2 text-xs font-semibold">As 3 forças</h4>
-                {(["chance", "avaliacao", "alcance"] as ForceKey[]).map((k) => (
-                  <div key={k} className="mb-2 flex items-start gap-2">
-                    <span className={cn("mt-1 size-2.5 flex-none rounded-full", k === "chance" ? "bg-violet-500" : k === "avaliacao" ? "bg-amber-500" : "bg-slate-400")} />
-                    <span className="text-xs">
-                      <strong className="font-semibold">{FORCE_SHORT[k]}</strong>
-                      <span className="block text-muted-foreground">{FORCE_DESC[k]}</span>
-                    </span>
-                  </div>
-                ))}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                <h4 className="mb-1.5 mt-2 text-xs font-semibold text-foreground">Como posicionamos</h4>
-                {mode === "absolute" ? (
-                  <p>
-                    A posição usa a <span className="font-medium text-foreground">magnitude real de cada força</span> (0–100), com o limiar de cada eixo ancorado no centro. Diferenças pequenas entre as obras aparecem pequenas — ideal pra comparar poucas obras. A cruz central marca os <span className="font-medium text-foreground">limiares</span> (chance 50%, crítica boa).
-                  </p>
-                ) : (
-                  <p>
-                    A posição usa o <span className="font-medium text-foreground">percentil dentro do acervo exibido</span>, não a nota crua — assim as obras se espalham em vez de empilhar numa faixa. A cruz central é a <span className="font-medium text-foreground">mediana</span>: metade das obras de cada lado.
-                  </p>
-                )}
-                <h4 className="mb-1.5 mt-3 text-xs font-semibold text-foreground">Por que a cor é fixa</h4>
-                <p>
-                  A cor é sempre o arquétipo <span className="font-medium text-foreground">Chance × Avaliação</span> — ela viaja com a obra mesmo quando você troca os eixos, pra reconhecer a mesma aposta em qualquer face.
-                </p>
-              </div>
-              <div className="text-xs text-muted-foreground">
-                <h4 className="mb-1.5 mt-2 text-xs font-semibold text-foreground">Os 4 cantos</h4>
-                <p><span className="font-medium text-emerald-600 dark:text-emerald-400">Aposta segura</span> — você provavelmente gosta e a crítica confirma.</p>
-                <p className="mt-1.5"><span className="font-medium text-rose-600 dark:text-rose-400">Alto potencial</span> — aclamada, mas fora do teu padrão: risco que pode valer.</p>
-                <p className="mt-1.5"><span className="font-medium text-violet-600 dark:text-violet-400">Teu nicho</span> — você curte, a crítica nem tanto.</p>
-                <p className="mt-1.5"><span className="font-medium text-slate-500">Provável pular</span> — pouca chance e pouca aclamação.</p>
-              </div>
-            </div>
-          </details>
+          ))}
+          <span className="ml-auto font-mono text-[11px] text-muted-foreground">
+            posição = magnitude (limiar no centro) · tamanho = {FORCE_SHORT[preset.size]} · {dots.length} obras
+          </span>
         </div>
       </div>
     </div>
+  )
+}
+
+type PlottedDot = {
+  e: BussolaDatum
+  forces: ReturnType<typeof computeWorkForces>
+  xPct: number
+  yPct: number
+  size: number
+  arch: ForceArchetype
+}
+
+/**
+ * 🔴 **A faixa reservada existe para nenhum ponto ficar ATRÁS de um rótulo.**
+ *
+ * As legendas de canto viviam FORA do plano justamente por isso (redesenho de
+ * 2026-07-08). Ao virarem filtro, elas voltaram para dentro — e a sobreposição
+ * voltou junto. A saída é a área de plotagem ser menor que o plano:
+ *
+ *   76px = 9 (offset da borda) + 46 (rótulo de ATÉ 2 linhas) + 17 (raio do maior
+ *          ponto, o ⌀ 34 do #322) + 4 de folga
+ *
+ * ⚠️ O `line-clamp-2` da frase do rótulo é o que sustenta essa conta: com três
+ * linhas o rótulo cresce ~12px e volta a cobrir ponto. Verificado varrendo toda a
+ * borda com o ponto de diâmetro máximo em três larguras: zero sobreposições.
+ *
+ * Comprimir o eixo não distorce nada — a posição é PERCENTIL, ou seja ordinal.
+ */
+const PLOT_INSET = 76
+
+function PercentilePlane({
+  dots, visible, counts, focusArch, setFocusArch, grouped,
+  hovered, setHovered, hoveredDot, tipPos,
+  planeRef, plotRef, tipRef, listRef, revealRow, capped, total,
+}: {
+  dots: PlottedDot[]
+  visible: PlottedDot[]
+  counts: Record<ForceArchetype, number>
+  focusArch: ForceArchetype | null
+  setFocusArch: (a: ForceArchetype | null) => void
+  grouped: boolean
+  hovered: string | null
+  setHovered: (id: string | null) => void
+  hoveredDot: PlottedDot | null | undefined
+  tipPos: { left: number; top: number } | null
+  planeRef: React.RefObject<HTMLDivElement | null>
+  plotRef: React.RefObject<HTMLDivElement | null>
+  tipRef: React.RefObject<HTMLDivElement | null>
+  listRef: React.RefObject<HTMLDivElement | null>
+  revealRow: (workId: string) => void
+  capped: boolean
+  total: number
+}) {
+  const corners = [
+    { pos: "tl" as const, arch: CORNER_ARCHETYPE.tl, place: "left-2 top-2" },
+    { pos: "tr" as const, arch: CORNER_ARCHETYPE.tr, place: "right-2 top-2" },
+    { pos: "bl" as const, arch: CORNER_ARCHETYPE.bl, place: "bottom-2 left-2" },
+    { pos: "br" as const, arch: CORNER_ARCHETYPE.br, place: "bottom-2 right-2" },
+  ]
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="overflow-hidden rounded-2xl border border-border bg-card/60 shadow-sm">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-4 py-2">
+          <span className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+            Chance × Avaliação
+          </span>
+          <span className="text-[11.5px] text-muted-foreground">
+            {capped ? (
+              <>
+                mostrando as <b className="font-semibold text-foreground">{dots.length}</b> primeiras de {total} —
+                acima disso os pontos se empilham
+              </>
+            ) : (
+              "clique num canto pra focar · passe o mouse pra ligar ponto e linha"
+            )}
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            {focusArch && (
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setFocusArch(null)}>
+                Ver tudo
+              </Button>
+            )}
+            <HowToRead />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="min-w-0">
+            <div
+              ref={planeRef}
+              className="relative aspect-[4/3] w-full overflow-hidden rounded-xl border border-border bg-muted/30"
+              style={{
+                backgroundImage:
+                  "linear-gradient(rgba(128,128,150,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(128,128,150,0.06) 1px, transparent 1px)",
+                backgroundSize: "12.5% 12.5%",
+              }}
+            >
+              {/* Tints e cruz no PLANO INTEIRO: o degradê tem que chegar à borda,
+                  senão a faixa reservada fica lisa e a emenda vira uma linha
+                  horizontal visível. Como a área de plotagem é centrada (mesmo
+                  inset em cima e embaixo), o meio dela coincide com o meio do
+                  plano — a cruz da mediana segue alinhada com os pontos. */}
+              <QuadrantTints focusArch={focusArch} />
+              <div className="absolute left-1/2 top-0 h-full w-px bg-border" />
+              <div className="absolute left-0 top-1/2 h-px w-full bg-border" />
+
+              {corners.map(({ pos, arch, place }) => {
+                const style = ARCHETYPE_STYLE[arch]
+                const on = focusArch === arch
+                return (
+                  <button
+                    key={pos}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => setFocusArch(on ? null : arch)}
+                    className={cn(
+                      "absolute z-20 max-w-[46%] cursor-pointer rounded-lg border bg-card/85 px-2 py-1 text-left backdrop-blur transition-colors",
+                      place,
+                      on ? style.border : "border-border hover:border-muted-foreground",
+                    )}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span className={cn("size-[7px] flex-none rounded-full", style.dot)} />
+                      <span className={cn("text-[11.5px] font-bold leading-tight first-letter:uppercase", style.text)}>
+                        {ARCHETYPE_LABEL[arch]}
+                      </span>
+                      <span className={cn("rounded px-1 py-px text-[9.5px] font-bold tabular-nums", style.chipBg)}>
+                        {counts[arch]}
+                      </span>
+                    </span>
+                    {/* line-clamp-2 NÃO é estética: PLOT_INSET foi dimensionado
+                        para um rótulo de no máximo duas linhas. */}
+                    <span className="mt-0.5 line-clamp-2 max-w-[186px] text-[9.5px] font-medium leading-tight text-muted-foreground">
+                      {ARCHETYPE_MEANING[arch]}
+                    </span>
+                  </button>
+                )
+              })}
+
+              <div
+                ref={plotRef}
+                className="absolute inset-x-0"
+                style={{ top: PLOT_INSET, bottom: PLOT_INSET }}
+              >
+                {dots.map((d) => (
+                  <Dot
+                    key={d.e.workId}
+                    d={d}
+                    onHover={setHovered}
+                    onHoverExtra={revealRow}
+                    dimmed={focusArch != null && d.arch !== focusArch}
+                    lit={hovered === d.e.workId}
+                  />
+                ))}
+              </div>
+
+              {hoveredDot && (
+                <DotTooltip
+                  ref={tipRef}
+                  d={hoveredDot}
+                  pos={tipPos}
+                  footerRight={
+                    <span className={cn("font-semibold capitalize", ARCHETYPE_STYLE[hoveredDot.arch].text)}>
+                      {ARCHETYPE_LABEL[hoveredDot.arch]}
+                    </span>
+                  }
+                />
+              )}
+
+              {dots.length === 0 && (
+                <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+                  Nenhuma obra com dados suficientes pra posicionar.
+                </div>
+              )}
+            </div>
+
+            <div className="mt-2 flex items-center justify-between gap-2 font-mono text-[9px] font-bold uppercase tracking-wider text-muted-foreground/70">
+              <span>← menos chance de você gostar</span>
+              <span className="text-muted-foreground/60">mediana das {dots.length} na tela</span>
+              <span>mais chance →</span>
+            </div>
+          </div>
+
+          <PairedList
+            ref={listRef}
+            dots={visible}
+            grouped={grouped}
+            focusArch={focusArch}
+            hovered={hovered}
+            setHovered={setHovered}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Degradê dos 4 quadrantes. Ocupa o plano inteiro — ver o comentário em PercentilePlane. */
+function QuadrantTints({ focusArch }: { focusArch?: ForceArchetype | null }) {
+  const quads = [
+    { arch: CORNER_ARCHETYPE.tr, place: "right-0 top-0 bg-gradient-to-bl" },
+    { arch: CORNER_ARCHETYPE.br, place: "bottom-0 right-0 bg-gradient-to-tl" },
+    { arch: CORNER_ARCHETYPE.tl, place: "left-0 top-0 bg-gradient-to-br" },
+    { arch: CORNER_ARCHETYPE.bl, place: "bottom-0 left-0 bg-gradient-to-tr" },
+  ]
+  return (
+    <>
+      {quads.map(({ arch, place }) => (
+        <div
+          key={arch}
+          className={cn(
+            "pointer-events-none absolute h-1/2 w-1/2 to-transparent transition-opacity",
+            place,
+            ARCHETYPE_STYLE[arch].tint,
+            focusArch != null && focusArch !== arch && "opacity-25",
+          )}
+        />
+      ))}
+    </>
+  )
+}
+
+function Dot({
+  d, onHover, onHoverExtra, dimmed, lit,
+}: {
+  d: PlottedDot
+  onHover: (id: string | null) => void
+  onHoverExtra?: (id: string) => void
+  dimmed?: boolean
+  lit?: boolean
+}) {
+  const style = ARCHETYPE_STYLE[d.arch]
+  const enter = () => {
+    onHover(d.e.workId)
+    onHoverExtra?.(d.e.workId)
+  }
+  return (
+    <Link
+      href={`/titles/${titleToSlug(d.e.title)}`}
+      aria-label={`${d.e.title}: chance ${d.forces.chance ?? "—"}, avaliação ${d.forces.avaliacao ?? "—"}, alcance ${d.forces.alcance ?? "—"}`}
+      onMouseEnter={enter}
+      onMouseLeave={() => onHover(null)}
+      onFocus={enter}
+      onBlur={() => onHover(null)}
+      className={cn(
+        "absolute -translate-x-1/2 translate-y-1/2 rounded-full border-[1.5px] border-background transition-opacity hover:z-20 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        style.dot,
+        dimmed ? "pointer-events-none opacity-[0.12]" : "opacity-100",
+        lit && "z-30",
+      )}
+      style={{
+        left: `${d.xPct}%`,
+        bottom: `${d.yPct}%`,
+        width: d.size,
+        height: d.size,
+        boxShadow: dimmed ? undefined : lit ? `0 0 0 3px ${style.glow}, 0 0 18px ${style.glow}` : `0 0 14px ${style.glow}`,
+      }}
+    />
+  )
+}
+
+function DotTooltip({
+  ref, d, pos, footerRight,
+}: {
+  ref: React.Ref<HTMLDivElement>
+  d: PlottedDot
+  pos: { left: number; top: number } | null
+  footerRight: React.ReactNode
+}) {
+  const style = ARCHETYPE_STYLE[d.arch]
+  return (
+    <div
+      ref={ref}
+      className="pointer-events-none absolute z-40 w-[268px] overflow-hidden rounded-xl border border-border bg-card shadow-xl transition-opacity"
+      style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, opacity: pos ? 1 : 0 }}
+    >
+      <div className="flex gap-3 p-3">
+        <CoverImage url={d.e.coverUrl} alt="" className="h-[74px] w-[52px] flex-none rounded-md object-cover shadow" />
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className="text-[13.5px] font-semibold leading-tight">{d.e.title}</div>
+          <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10.5px] text-muted-foreground">
+            {d.e.year != null && <span>{d.e.year}</span>}
+            {d.e.year != null && (d.e.publicationStatusShort ?? d.e.publicationStatus) && <span>·</span>}
+            {(d.e.publicationStatusShort ?? d.e.publicationStatus) && (
+              <span className="inline-flex items-center gap-1">
+                <span
+                  className="size-1.5 rounded-full"
+                  style={{ background: d.e.publicationStatusColor ?? "currentColor" }}
+                />
+                {d.e.publicationStatusShort ?? d.e.publicationStatus}
+              </span>
+            )}
+          </div>
+          <span
+            className={cn(
+              "mt-0.5 inline-flex items-center gap-1.5 self-start rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize",
+              style.text,
+            )}
+            style={{ backgroundColor: style.glow.replace(/0\.\d+\)/, "0.14)") }}
+          >
+            <span className={cn("size-1.5 rounded-full", style.dot)} />
+            {ARCHETYPE_LABEL[d.arch]}
+          </span>
+        </div>
+      </div>
+      <div className="px-3 pb-3">
+        <ForceMeters forces={d.forces} size="sm" />
+      </div>
+      <div className="flex items-center justify-between border-t border-border bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
+        <span>
+          Nota Prevista{" "}
+          <b className="font-mono text-[13px] font-bold text-foreground">
+            {d.e.expectedScore != null ? d.e.expectedScore.toFixed(1) : "—"}
+          </b>
+        </span>
+        {footerRight}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Lista pareada com o plano: hover no ponto acende a linha (e rola até ela);
+ * hover na linha acende o ponto. É o que resolve o "ponto anônimo" sem encher o
+ * plano de rótulo — medido: 53% dos pontos ficam a menos de 9px de outro quando
+ * o acervo inteiro entra, e mesmo em 40 obras o hover sozinho não identifica.
+ */
+function PairedList({
+  ref, dots, grouped, focusArch, hovered, setHovered,
+}: {
+  ref: React.Ref<HTMLDivElement>
+  dots: PlottedDot[]
+  grouped: boolean
+  focusArch: ForceArchetype | null
+  hovered: string | null
+  setHovered: (id: string | null) => void
+}) {
+  const groups = useMemo(() => {
+    if (!grouped) return null
+    const by = new Map<ForceArchetype, PlottedDot[]>()
+    for (const d of dots) {
+      const list = by.get(d.arch) ?? []
+      list.push(d)
+      by.set(d.arch, list)
+    }
+    return ARCHETYPE_ORDER.filter((a) => by.has(a)).map((a) => ({ arch: a, items: by.get(a)! }))
+  }, [dots, grouped])
+
+  return (
+    <div className="flex max-h-[520px] min-h-[280px] flex-col overflow-hidden rounded-xl border border-border bg-card lg:max-h-none">
+      <div className="border-b border-border bg-muted/40 px-3 py-2">
+        <div className="text-[12.5px] font-semibold capitalize">
+          {focusArch ? ARCHETYPE_LABEL[focusArch] : "Todas as obras"}
+        </div>
+        <div className="text-[10.5px] text-muted-foreground">
+          {dots.length} obra{dots.length !== 1 ? "s" : ""} ·{" "}
+          {focusArch ? ARCHETYPE_MEANING[focusArch] : grouped ? "em prateleiras" : "na ordem do ranking"}
+        </div>
+      </div>
+      <div ref={ref} className="min-h-0 flex-1 overflow-y-auto">
+        {groups
+          ? groups.map(({ arch, items }) => (
+              <ShelfGroup key={arch} arch={arch} items={items} hovered={hovered} setHovered={setHovered} />
+            ))
+          : dots.map((d) => <PairedRow key={d.e.workId} d={d} hovered={hovered} setHovered={setHovered} />)}
+        {dots.length === 0 && (
+          <p className="px-3 py-6 text-center text-[12px] text-muted-foreground">Nenhuma obra neste canto.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Prateleira colapsável da lista pareada. */
+function ShelfGroup({
+  arch, items, hovered, setHovered,
+}: {
+  arch: ForceArchetype
+  items: PlottedDot[]
+  hovered: string | null
+  setHovered: (id: string | null) => void
+}) {
+  const [open, setOpen] = useState(true)
+  const style = ARCHETYPE_STYLE[arch]
+  // Fechada, a prateleira esconderia a linha que o hover no ponto quer acender —
+  // então o próprio hover reabre.
+  const hoveredHere = hovered != null && items.some((d) => d.e.workId === hovered)
+  const expanded = open || hoveredHere
+
+  return (
+    <div className="border-b border-border last:border-b-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={expanded}
+        className="sticky top-0 z-10 flex w-full cursor-pointer items-center gap-2 bg-muted/60 px-3 py-1.5 text-left backdrop-blur transition-colors hover:bg-muted"
+      >
+        <ChevronDown className={cn("size-3 flex-none transition-transform", style.text, !expanded && "-rotate-90")} />
+        <span className={cn("text-[11.5px] font-bold capitalize", style.text)}>{ARCHETYPE_LABEL[arch]}</span>
+        <span className={cn("rounded px-1 py-px text-[9.5px] font-bold tabular-nums", style.chipBg)}>{items.length}</span>
+      </button>
+      {expanded && items.map((d) => <PairedRow key={d.e.workId} d={d} hovered={hovered} setHovered={setHovered} indent />)}
+    </div>
+  )
+}
+
+function PairedRow({
+  d, hovered, setHovered, indent,
+}: {
+  d: PlottedDot
+  hovered: string | null
+  setHovered: (id: string | null) => void
+  indent?: boolean
+}) {
+  const lit = hovered === d.e.workId
+  return (
+    <Link
+      href={`/titles/${titleToSlug(d.e.title)}`}
+      data-work={d.e.workId}
+      onMouseEnter={() => setHovered(d.e.workId)}
+      onMouseLeave={() => setHovered(null)}
+      onFocus={() => setHovered(d.e.workId)}
+      onBlur={() => setHovered(null)}
+      className={cn(
+        "flex items-center gap-2 border-b border-border/50 px-3 py-1.5 transition-colors last:border-b-0 hover:bg-muted/60",
+        indent && "pl-5",
+        lit && "bg-primary/10 shadow-[inset_2px_0_0_hsl(var(--primary))]",
+      )}
+    >
+      <span className={cn("size-[7px] flex-none rounded-full", ARCHETYPE_STYLE[d.arch].dot)} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[11.5px] font-medium leading-tight">{d.e.title}</span>
+        <span className="block truncate text-[9.5px] text-muted-foreground">
+          {d.e.year ?? "—"}
+          {d.forces.alcance != null && ` · alcance ${d.forces.alcance}`}
+        </span>
+      </span>
+      <span className="flex-none font-mono text-[11px] font-bold tabular-nums text-violet-600 dark:text-violet-400">
+        {d.forces.chance != null ? `${d.forces.chance}%` : "—"}
+      </span>
+    </Link>
+  )
+}
+
+/** Toda a instrução da view mora aqui — era ~600px de tela antes do primeiro dado. */
+function HowToRead() {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="icon" className="size-7" aria-label="Como ler o mapa">
+          <HelpCircle className="size-4" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[420px] text-[12.5px] leading-relaxed">
+        <p className="mb-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+          Como ler o mapa
+        </p>
+        <p className="mb-2 text-muted-foreground">
+          Cada obra é um ponto. A <b className="text-foreground">posição horizontal</b> é a chance de você
+          gostar, a <b className="text-foreground">vertical</b> é a nota da crítica, e o{" "}
+          <b className="text-foreground">tamanho</b> é quanta gente votou.
+        </p>
+        <p className="mb-2 text-muted-foreground">
+          A cruz do meio é a <b className="text-foreground">mediana das obras que estão na tela</b> — metade
+          de cada lado. Por isso os cantos falam em um sinal <em>contra o outro</em>, e nunca em &ldquo;boa&rdquo;
+          ou &ldquo;ruim&rdquo;: um ponto à direita é o topo <em>do que você está vendo</em>.
+        </p>
+        <div className="flex flex-col gap-1">
+          {ARCHETYPE_ORDER.map((a) => (
+            <span key={a} className="flex items-start gap-2">
+              <span className={cn("mt-1 size-2 flex-none rounded-full", ARCHETYPE_STYLE[a].dot)} />
+              <span>
+                <b className={cn("font-semibold capitalize", ARCHETYPE_STYLE[a].text)}>{ARCHETYPE_LABEL[a]}</b>
+                <span className="text-muted-foreground"> — {ARCHETYPE_MEANING[a]}</span>
+              </span>
+            </span>
+          ))}
+        </div>
+        <p className="mt-2 text-[11.5px] text-muted-foreground">
+          Clique num canto para focar só naquele grupo. Passar o mouse num ponto acende a linha na lista ao
+          lado, e vice-versa.
+        </p>
+      </PopoverContent>
+    </Popover>
   )
 }

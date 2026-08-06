@@ -27,19 +27,43 @@ export interface CompositionInput {
 }
 
 /**
- * Rótulo de cada arquétipo no divisor de tier.
+ * Rótulo de cada arquétipo. **Fonte única** — divisor de tier da Lista,
+ * prateleiras dos Cards e cantos da Bússola leem daqui.
  *
- * 🔴 **Divergência conhecida, de propósito.** A Bússola (`bussola-plane.tsx`) tem
- * a própria cópia com outra redação — "Aposta segura", "Alto potencial", "Teu
- * nicho", "Provável pular" — e ela também nomeia os cantos de cada face. Não
- * unifiquei aqui para não reescrever, de carona, a copy de uma view que este
- * trabalho não toca. Ao mexer na Bússola, apagar o mapa de lá e importar este.
+ * ⚠️ Em MINÚSCULA de propósito: o rótulo também aparece dentro de frase, no
+ * divisor de tier ("5 vale o risco · 3 só teu gosto"). Onde ele é título
+ * (prateleira, canto do plano), a maiúscula é de EXIBIÇÃO — `::first-letter` no
+ * CSS, nunca uma segunda cópia da string aqui.
  */
 export const ARCHETYPE_LABEL: Record<ForceArchetype, string> = {
   safe: "pode ir sem medo",
   upside: "vale o risco",
   niche: "só teu gosto",
   skip: "fica pra depois",
+}
+
+/**
+ * O que o arquétipo quer dizer, em uma linha.
+ *
+ * 🔴 **Nenhuma destas frases afirma que a crítica gostou ou não gostou** — elas
+ * comparam os dois sinais ENTRE SI. Não é preciosismo: o corte é a MEDIANA do
+ * conjunto exibido, e o acervo é curado. Medido em 2026-08-06 sobre as 965 obras
+ * com as duas forças:
+ *
+ *   - mediana da Avaliação = 7,9/10, e **99,9%** passam de `AVALIACAO_RATED_THRESHOLD`
+ *   - a redação anterior da Bússola dizia, em `niche`, "você curte, crítica não" —
+ *     valia para 223 obras, das quais **ZERO** são mal avaliadas pelo limiar absoluto
+ *   - em `skip`, "pouca chance e aclamação" — 211 obras, das quais **1**
+ *
+ * Ou seja: o corte relativo é necessário para separar (com limiar absoluto, 69%
+ * do acervo cai num canto só e dois cantos ficam vazios), mas descrevê-lo como
+ * julgamento da crítica é dizer o que o dado nega. Ver [[project_bussola_3forcas]].
+ */
+export const ARCHETYPE_MEANING: Record<ForceArchetype, string> = {
+  safe: "teu perfil e a crítica concordam",
+  upside: "a crítica aprova mais do que o teu perfil",
+  niche: "teu perfil aprova mais do que a crítica",
+  skip: "nem um nem outro se destaca",
 }
 
 /** Ordem de exibição: da aposta mais acionável para a menos. */

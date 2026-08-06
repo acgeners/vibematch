@@ -46,11 +46,16 @@ export const DEFAULT_WORK_COLUMN_NAMESPACE: WorkColumnNamespace = "titles"
 // ranking v7 → v9: /ranking migrou do sistema próprio (ranking-table-config.ts,
 // já removido) para este. Pulamos v8 de propósito: a chave gerada seria
 // `ranking_col_config_v8`, IDÊNTICA à do sistema antigo — v9 garante clean slate.
+// Bump em TODOS ao adicionar a coluna "O que a separa" (separator), visível por
+// padrão só em /ranking. Sem o bump ela sairia VISÍVEL para quem já tem config
+// salvo em qualquer namespace: `normalizeWorkColumnConfig` acrescenta coluna nova
+// ao fim do `order`, e o `hidden` gravado obviamente não a menciona — mesmo modo
+// de falha que a `synopsis_pred` teve, e nas outras telas ela ficaria só vazia.
 const NAMESPACE_STORAGE_VERSION: Record<WorkColumnNamespace, string> = {
-  titles: "v8",
-  favorites: "v10",
-  ranking: "v9",
-  recommendations: "v6",
+  titles: "v9",
+  favorites: "v11",
+  ranking: "v10",
+  recommendations: "v7",
 }
 
 function storageKeyFor(namespace: WorkColumnNamespace): string {
@@ -88,6 +93,19 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
   // Previsão de interesse na sinopse (Interesse IA). Dado só é mesclado em
   // /favorites (vem do getRanking); nas demais telas fica vazio ("—").
   { key: "synopsis_pred", label: LABELS.synopsis_pred.abbrev, configLabel: LABELS.synopsis_pred.full, description: LABELS.synopsis_pred.tooltip_full, align: "center", group: "notas" },
+  // Herdada da view Faixas, que foi absorvida pela Lista agrupada. Mede o desvio
+  // da obra contra as empatadas DO PRÓPRIO TIER, então só é renderizada com o
+  // "Agrupar" ligado — sem tier não há grupo a que se referir. Ver `whyThisWork`.
+  // Rótulo literal (como `RANK_COL`): não tem linha em `ui_labels`; se um dia
+  // tiver, migra pra LABELS como as demais.
+  {
+    key: "separator",
+    label: "O que a separa",
+    configLabel: "O que a separa das outras",
+    description:
+      "A força que mais distancia esta obra das outras do mesmo tier, em desvios-padrão. Fica em branco quando nada passa de 1σ. Só aparece com o Agrupar ligado.",
+    group: "notas",
+  },
   { key: "ai_status", label: LABELS.ai_status.abbrev, configLabel: LABELS.ai_status.full, description: LABELS.ai_status.tooltip_full, align: "center", group: "basico" },
   { key: "updated_at", label: LABELS.updated_at.abbrev, configLabel: LABELS.updated_at.full, description: LABELS.updated_at.tooltip_full, align: "center", group: "basico" },
   { key: "last_read_at", label: LABELS.last_read_at.abbrev, configLabel: LABELS.last_read_at.full, description: LABELS.last_read_at.tooltip_full, align: "center", group: "basico" },
@@ -121,6 +139,7 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
   // dedicado por ai_eval_status); chapters_progress sai por redundância com
   // chapters_read+total.
   titles: [
+    "separator",
     "fav",
     "decision",
     "chapters_read",
@@ -136,6 +155,7 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
   // como publication_status, ai_status e updated_at saem do default por serem
   // pouco relevantes em obras já favoritadas.
   favorites: [
+    "separator",
     "fav",
     "personal_status",
     "chapters_read",
@@ -163,6 +183,7 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
   // Recomendações: 9 critérios em destaque; resto enxuto.
   // Veredito IA. visível — É a nota que ORDENA o próprio resultado da run.
   recommendations: [
+    "separator",
     "decision",
     "synopsis_q",
     "synopsis_pred",
