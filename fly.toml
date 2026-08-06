@@ -10,6 +10,9 @@ primary_region = "gru"
 [env]
   NODE_ENV = "production"
   TZ = "America/Sao_Paulo"
+  # Host público, para os links que o Supabase monta e envia por email (reset de senha).
+  # Não pode sair dos headers: atrás do proxy o servidor enxerga 0.0.0.0:3000 (ver lib/site-url.ts).
+  SITE_URL = "https://satoria.fly.dev"
   FLARESOLVERR_URL = "http://vibematch-flaresolverr.flycast:8191/v1"
   COMIX_FS_SESSION = "comix"
   COMIX_CF_ABORT_MS = "25000"

@@ -1,5 +1,10 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse } from "next/server"
+import {
+  SESSION_PERSIST_COOKIE,
+  applySessionPersistence,
+  persistFromCookieValue,
+} from "@/lib/auth-preference"
 import type { NextRequest } from "next/server"
 import type { User } from "@supabase/supabase-js"
 
@@ -30,10 +35,14 @@ export async function updateSession(request: NextRequest): Promise<SessionRefres
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
+          // "Manter-me conectado" desmarcado ⇒ cookie de sessão. Sem esta linha o refresh
+          // devolveria o `maxAge` na primeira navegação e a escolha do usuário evaporaria
+          // sem erro nenhum — ver o comentário em `applySessionPersistence`.
+          const persist = persistFromCookieValue(request.cookies.get(SESSION_PERSIST_COOKIE)?.value)
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           supabaseResponse = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options),
+            supabaseResponse.cookies.set(name, value, applySessionPersistence(options, persist)),
           )
         },
       },

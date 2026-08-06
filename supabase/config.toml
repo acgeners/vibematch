@@ -154,9 +154,20 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "http://127.0.0.1:3000"
+# 3001, não 3000: é a porta do `npm run dev` deste projeto (ver CLAUDE.md). Com o default da CLI
+# o link do email de redefinição de senha sai apontando pra uma porta onde não há app.
+site_url = "http://127.0.0.1:3001"
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+# `localhost` e `127.0.0.1` são hosts DIFERENTES para o allow-list — quem abre o app por um e tem
+# a lista só com o outro leva "redirect_to is not allowed".
+# Wildcard, não URL exata: o callback do reset de senha carrega `?next=/nova-senha`, e a
+# allow-list compara a URL INTEIRA — com query string junto. Sem o `/**` o GoTrue descarta o
+# destino em SILÊNCIO e usa o `site_url`, então o link do email chega numa home com `?code=`
+# pendurado, sem nada explicando por que a troca de senha não abriu (medido).
+additional_redirect_urls = [
+  "http://localhost:3001/**",
+  "http://127.0.0.1:3001/**",
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to the local API URL (http://127.0.0.1:<port>/auth/v1).
@@ -192,7 +203,9 @@ password_requirements = ""
 
 [auth.rate_limit]
 # Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
-email_sent = 2
+# Subido do default (2) porque testar o fluxo de "esqueci minha senha" estoura 2/hora em dois
+# cliques — e no local os emails só vão pro Mailpit (:54324), não saem da máquina.
+email_sent = 30
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30
 # Number of anonymous sign-ins that can be made per hour per IP address. Requires enable_anonymous_sign_ins = true.
@@ -243,6 +256,16 @@ otp_expiry = 3600
 # [auth.email.template.invite]
 # subject = "You have been invited"
 # content_path = "./supabase/templates/invite.html"
+
+# Templates em português — os mesmos aplicados na NUVEM (via Management API, 2026-08-06). Ficam
+# versionados aqui pra que local e produção não divirjam; o padrão do GoTrue é em inglês.
+[auth.email.template.recovery]
+subject = "Redefinir sua senha — SatorIA"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.template.confirmation]
+subject = "Confirme seu email — SatorIA"
+content_path = "./supabase/templates/confirmation.html"
 
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]
