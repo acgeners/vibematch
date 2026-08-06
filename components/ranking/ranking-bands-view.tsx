@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import Link from "next/link"
 
 import { cn, titleToSlug } from "@/lib/utils"
@@ -7,6 +8,9 @@ import { CoverImage } from "@/components/ui/cover-image"
 import { getScoreTextColor } from "@/components/ui/score-badge"
 import type { ColumnThresholds } from "@/components/ui/score-badge"
 import { buildRankingTiers } from "@/lib/ranking/build-tiers"
+import { whyThisWork, forceMomentsOf } from "@/lib/ranking/why-this-work"
+import type { WorkSeparator } from "@/lib/ranking/why-this-work"
+import { SeparatorCell, SeparatorLegend } from "@/components/ranking/separator-cell"
 import { roundToDisplayScore } from "@/lib/score-rounding"
 import type { RankingEntry } from "@/server/queries/ranking"
 import { ActiveFiltersBar } from "@/components/ranking/active-filters-bar"
@@ -35,26 +39,27 @@ function priorityLabel(tier: number): string {
   return PRIORITY_LABELS[Math.min(Math.max(tier - 1, 0), PRIORITY_LABELS.length - 1)]
 }
 
-/** personal_fit_percentile (0–100, maior = mais afinidade) → "Top X%" (menor = elite).
- *  Usado só no tooltip; o rótulo visível é a faixa qualitativa (não inverte a leitura). */
-function topPct(percentile: number | null): number | null {
-  if (percentile == null) return null
-  return Math.min(100, Math.max(1, Math.round(100 - percentile)))
+/**
+ * Valor da força na unidade em que ela é lida: Chance em %, Avaliação na escala
+ * 0–10 da nota externa, Alcance em votos abreviados (28.442 → 28,4K).
+ *
+ * ⚠️ O separador guarda a força NORMALIZADA (0–100). Mostrar "95" para 28 mil
+ * votos não diria nada a ninguém — por isso o valor exibido volta do `entry`.
+ */
+function separatorValue(entry: RankingEntry, sep: WorkSeparator | null): string | null {
+  if (!sep) return null
+  if (sep.force === "chance") return `${sep.value}%`
+  if (sep.force === "avaliacao")
+    return entry.platformAvg == null ? null : entry.platformAvg.toFixed(1).replace(".", ",")
+  return formatVotes(entry.totalVotes)
 }
 
-/** personal_fit_percentile (0–100) → faixa qualitativa. Cresce no MESMO sentido da
- *  barra (maior percentil = mais afinidade = faixa mais alta), evitando o conflito
- *  do "Top X%" (onde menor = melhor) com a barra (onde maior = mais cheia). */
-const AFFINITY_TIERS = [
-  { min: 80, label: "Muito alta" },
-  { min: 60, label: "Alta" },
-  { min: 40, label: "Média" },
-  { min: 20, label: "Baixa" },
-  { min: 0, label: "Muito baixa" },
-] as const
-function affinityTier(percentile: number | null): string | null {
-  if (percentile == null) return null
-  return (AFFINITY_TIERS.find((t) => percentile >= t.min) ?? AFFINITY_TIERS[AFFINITY_TIERS.length - 1]).label
+/** Mesma regra do `formatVotes` da view Cards — um só jeito de escrever votos. */
+function formatVotes(votes: number): string {
+  if (votes === 0) return "—"
+  if (votes < 1000) return String(votes)
+  const k = Math.floor(votes / 100) / 10
+  return `${k % 1 === 0 ? String(k) : k.toFixed(1).replace(".", ",")}K`
 }
 
 interface BandGroup {
@@ -88,6 +93,10 @@ export function RankingBandsView({
     (e) => (e.expectedScore == null ? null : roundToDisplayScore(e.expectedScore)),
     tierBandWidth,
   )
+
+  // σ de referência do CONJUNTO EXIBIDO (não da faixa): "1σ" precisa querer dizer a
+  // mesma coisa em todas as faixas da mesma tela. Ver why-this-work.ts.
+  const moments = useMemo(() => forceMomentsOf(entries), [entries])
   const groups: BandGroup[] = []
   for (let i = 0; i < entries.length; i++) {
     const t = tiered[i].tier
@@ -109,13 +118,25 @@ export function RankingBandsView({
         {/* cabeçalho de colunas */}
         <div className="flex items-center gap-3 border-b border-border/60 bg-muted/30 px-4 py-2 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
           <span className="min-w-0 flex-1">Obra</span>
-          <span className="w-36 shrink-0 sm:w-44">Afinidade por tags</span>
-          <span className="w-24 shrink-0 text-right">Prioridade</span>
+          <span className="w-[300px] shrink-0">
+            O que a separa das outras
+            <SeparatorLegend />
+          </span>
+          {/* "~" e "estim." saíam repetidos em TODA linha (45×). O aviso é da
+              coluna inteira, então mora no cabeçalho e some das células. */}
+          <span className="w-24 shrink-0 text-right">
+            Prioridade
+            <span className="mt-1 block text-[8.5px] font-semibold normal-case tracking-normal text-muted-foreground/70">
+              todas aproximadas (±0,7)
+            </span>
+          </span>
         </div>
 
         {groups.map((g) => {
           const first = g.items[0].position
           const last = g.items[g.items.length - 1].position
+          // O grupo de comparação do separador é a PRÓPRIA faixa.
+          const groupEntries = g.items.map((i) => i.entry)
           return (
             <div key={`band-${g.tier}`}>
               {/* divisor de faixa */}
@@ -143,12 +164,7 @@ export function RankingBandsView({
 
               {/* linhas da faixa */}
               {g.items.map(({ entry }) => {
-                const tx = topPct(entry.personalFitPercentile)
-                const tierLabel = affinityTier(entry.personalFitPercentile)
-                const barWidth =
-                  entry.personalFitPercentile != null
-                    ? Math.max(3, Math.min(100, Math.round(entry.personalFitPercentile)))
-                    : 0
+                const sep = whyThisWork(entry, groupEntries, moments)
                 return (
                   <div
                     key={entry.workId}
@@ -182,26 +198,12 @@ export function RankingBandsView({
                       </span>
                     </Link>
 
-                    {/* afinidade por tags (faixa qualitativa; percentil no tooltip) */}
-                    <span className="w-36 shrink-0 sm:w-44">
-                      {tierLabel != null ? (
-                        <span
-                          className="inline-flex items-center gap-2"
-                          title={`Afinidade por tags: ${tierLabel} — percentil ${Math.round(
-                            entry.personalFitPercentile ?? 0,
-                          )} no acervo exibido (top ${tx}%). Relativo ao seu perfil de gosto, não é qualidade da obra.`}
-                        >
-                          <span className="w-20 shrink-0 text-xs font-semibold text-foreground">{tierLabel}</span>
-                          <span className="h-1.5 w-12 overflow-hidden rounded-full bg-foreground/10">
-                            <span
-                              className="block h-full rounded-full bg-primary"
-                              style={{ width: `${barWidth}%` }}
-                            />
-                          </span>
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">sem perfil</span>
-                      )}
+                    {/* O QUE A SEPARA das empatadas — substitui "Afinidade por tags",
+                        que era mais um percentil sem leitura na coluna mais larga da
+                        tela. O grupo de comparação é a PRÓPRIA faixa: é o conjunto que
+                        a Nota Prevista não conseguiu ordenar. */}
+                    <span className="w-[300px] shrink-0">
+                      <SeparatorCell separator={sep} value={separatorValue(entry, sep)} />
                     </span>
 
                     {/* Nota Prevista — SECUNDÁRIA (dot de cor + ~x,x estim.) */}
@@ -218,8 +220,7 @@ export function RankingBandsView({
                           aria-hidden
                         />
                         <span className="font-mono text-xs tabular-nums text-muted-foreground">
-                          {entry.expectedScore != null ? `~${entry.expectedScore.toFixed(1)}` : "—"}
-                          <span className="ml-0.5 text-[10px] opacity-70">estim.</span>
+                          {entry.expectedScore != null ? entry.expectedScore.toFixed(1) : "—"}
                         </span>
                       </span>
                     </span>

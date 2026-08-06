@@ -3,6 +3,19 @@
 import { Scale } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { ARCHETYPE_LABEL } from "@/lib/ranking/tier-composition"
+import type { ArchetypeComposition, ForceArchetype } from "@/lib/ranking/tier-composition"
+
+/**
+ * Cor de cada tipo de aposta. Mesma família da Bússola (emerald/rose/violet/slate)
+ * — é o mesmo arquétipo, e duas paletas para o mesmo conceito ensinariam errado.
+ */
+const ARCHETYPE_CHIP: Record<ForceArchetype, string> = {
+  safe: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 ring-emerald-500 dark:text-emerald-300",
+  upside: "border-rose-500/40 bg-rose-500/10 text-rose-700 ring-rose-500 dark:text-rose-300",
+  niche: "border-violet-500/40 bg-violet-500/10 text-violet-700 ring-violet-500 dark:text-violet-300",
+  skip: "border-slate-500/40 bg-slate-500/10 text-slate-600 ring-slate-500 dark:text-slate-300",
+}
 
 /**
  * Divisor de TIER inserido entre faixas de Prioridade no ranking. A tabela não
@@ -19,6 +32,9 @@ export function TierDividerRow({
   count,
   colSpan,
   onCompare,
+  composition,
+  focusedArchetype,
+  onFocusArchetype,
 }: {
   tierNumber: number
   workIds: string[]
@@ -26,11 +42,20 @@ export function TierDividerRow({
   colSpan: number
   /** Quando ausente (tier de 1 obra), o divisor é só separador. */
   onCompare?: (workIds: string[]) => void
+  /**
+   * DE QUE o tier é feito, por tipo de aposta. O divisor dizia só "N obras de
+   * prioridade equivalente" — e "equivalente" vale só na Nota Prevista: dentro do
+   * mesmo tier convivem apostas seguras, arriscadas e de nicho. Vazio/ausente =
+   * nada a mostrar (sem modelo), e o divisor volta a ser o de antes.
+   */
+  composition?: ArchetypeComposition
+  focusedArchetype?: ForceArchetype | null
+  onFocusArchetype?: (a: ForceArchetype) => void
 }) {
   return (
     <tr className="bg-gradient-to-r from-primary/10 via-muted/40 to-transparent">
       <td colSpan={colSpan} className="border-y border-primary/25 px-3 py-1.5">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
           <span className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-primary">
               <span className="font-mono">≈</span>
@@ -39,6 +64,29 @@ export function TierDividerRow({
             <span className="font-normal normal-case tracking-normal">
               {count} {count === 1 ? "obra" : "obras"} de prioridade equivalente
             </span>
+          </span>
+
+          <span className="ml-auto flex items-center gap-1.5">
+            {composition?.map(({ archetype, count: n }) => {
+              const on = focusedArchetype === archetype
+              return (
+                <button
+                  key={archetype}
+                  type="button"
+                  onClick={() => onFocusArchetype?.(archetype)}
+                  aria-pressed={on}
+                  title={`${n} ${n === 1 ? "obra" : "obras"} deste tipo neste tier. Clique para destacar só elas.`}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10.5px] font-semibold normal-case tracking-normal transition-colors",
+                    ARCHETYPE_CHIP[archetype],
+                    on && "ring-2 ring-offset-1 ring-offset-background",
+                  )}
+                >
+                  <span className="tabular-nums">{n}</span>
+                  {ARCHETYPE_LABEL[archetype]}
+                </button>
+              )
+            })}
           </span>
 
           {onCompare && (
