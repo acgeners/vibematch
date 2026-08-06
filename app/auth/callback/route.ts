@@ -46,5 +46,9 @@ export async function GET(request: Request) {
     if (!error) return redirectTo(next)
   }
 
+  // Este callback atende dois fluxos, e mandar os dois pro mesmo lugar mente pra um deles:
+  // quem clicou num link de redefinição expirado cairia no /login lendo "oauth", palavra que
+  // não tem nada a ver com o que a pessoa estava fazendo.
+  if (next === "/nova-senha") return redirectTo("/recuperar-senha?error=link")
   return redirectTo("/login?error=oauth")
 }

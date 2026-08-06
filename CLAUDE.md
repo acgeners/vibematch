@@ -120,7 +120,40 @@ o destino reescreve a coluna, então ela **nunca** bate e não serve de invarian
 NULL) e o `config.toml` vem com todo provider externo `enabled = false` — dá
 `Unsupported provider`. O `/login` tem formulário de e-mail+senha, então crie uma senha só no
 local (`update auth.users set encrypted_password = extensions.crypt('…', extensions.gen_salt('bf'))`).
-Refazer depois de cada `db:pull`.
+Refazer depois de cada `db:pull`. Desde 2026-08-06 há também **"Esqueci minha senha"**
+(`/recuperar-senha` → e-mail → `/nova-senha`), e no local o e-mail cai no **Mailpit** (`:54324`).
+
+🔴 **PENDENTE: a recuperação de senha NÃO funciona em produção — falta SMTP.** Medido na
+Management API (2026-08-06): `smtp_host`, `smtp_user`, `smtp_pass` e `smtp_admin_email` são
+**todos `None`**, `hook_send_email_enabled = false`, e `rate_limit_email_sent = 2` **por hora, no
+projeto inteiro**. Com o provedor embutido do Supabase — que é declaradamente de desenvolvimento —
+o e-mail não chega de forma confiável a usuário real. **O código está pronto e testado ponta a
+ponta; o que falta é só configuração.** Três consequências que se explicam mal quando se esquece
+disto:
+
+1. **Traduzir os e-mails é o MESMO item.** `PATCH /v1/projects/{ref}/config/auth` devolve **400**:
+   *"Email template modification is not available for free tier projects using the default email
+   provider."* Os templates em português já existem em `supabase/templates/*.html` e valem **só no
+   local** (via `[auth.email.template.*]`); sobem pra nuvem no dia em que houver SMTP.
+2. **Sem domínio próprio, Resend/SendGrid/Mailgun não servem** — exigem domínio verificado
+   (SPF/DKIM) pra enviar a terceiros; sem isso só deixam mandar pra você mesmo. O app é
+   `satoria.fly.dev`, sem domínio. Então a escolha real é **"Gmail com App Password agora"** ou
+   **"domínio próprio primeiro"**, não "Gmail vs. provedor de verdade".
+3. **Gmail resolve, com dois preços.** `smtp.gmail.com:587` + App Password (exige 2FA na conta).
+   Mas o Gmail **reescreve o `From`** pro endereço autenticado — um e-mail de redefinição de senha
+   sai de um Gmail pessoal, que é o formato que as pessoas aprenderam a tratar como phishing. E é
+   uso fora do previsto pra conta pessoal. Pro volume atual (3 contas) o teto de envio não pesa.
+
+✅ O que **já** está certo na nuvem, não mexer achando que é pendência: `site_url` =
+`https://satoria.fly.dev` e a allow-list já cobre `satoria.fly.dev/**`, `localhost:3001/**` e
+`127.0.0.1:3001/**`.
+
+⚠️ **`supabase start` decide o projeto pelo DIRETÓRIO ATUAL.** Rodado de outra pasta, ele sobe um
+stack PARALELO com config default nas MESMAS portas — e aí `psql :54322` responde
+`relation "public.works" does not exist`, como se o banco tivesse sido apagado. Não foi: o do
+projeto está parado no volume dele. Quem denuncia é o nome do container
+(`docker ps | grep supabase_auth` → `supabase_auth_animedb-pag_obra` é o certo). Sempre `cd` no
+projeto antes, ou passe `--project-id` — inclusive no `stop`, que erra o alvo do mesmo jeito.
 
 🔴 **Signup no local não provisiona `user_settings`:** o `db:pull` dumpa só o schema `public`, e o
 trigger `on_auth_user_created` (mig 137) mora em **`auth.users`** — a FUNÇÃO `handle_new_user` vem
