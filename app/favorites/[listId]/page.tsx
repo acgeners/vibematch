@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation"
+import { sanitizeInterestSelection } from "@/lib/interest-sentinels"
 import Link from "next/link"
 import { ChevronLeft, FolderOpen, Heart, Sparkles } from "lucide-react"
 import { Header } from "@/components/layout/header"
@@ -151,7 +152,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
       const merged = [...new Set([...fromUrl, ...avoidedSlugs])]
       return merged.length ? merged : undefined
     })(),
-    synopsisQualities: multi("synopsis_q"),
+    synopsisQualities: sanitizeInterestSelection(multi("synopsis_q")),
     predictedSynopsisQualities: multi("synopsis_pred"),
     interestMode: str("synopsis_mode") === "and" ? "and" : "or",
     minTotalChapters: num("min_chapters"),
@@ -177,27 +178,6 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     includeFinishedDropped: true,
     adultFilter,
     sortLevels,
-  }
-
-  // URLs do segmentado "Esconder tags evitadas" (3 estados), preservando os demais
-  // params — mesmo padrão de app/ranking/page.tsx, mas contra este basePath (que
-  // varia por grupo: /favorites/all, /favorites/ungrouped, /favorites/<id>).
-  const buildHideUrl = (mode: "strong" | "all" | null) => {
-    const p = new URLSearchParams()
-    for (const [key, value] of Object.entries(params_)) {
-      if (value == null) continue
-      if (Array.isArray(value)) value.forEach((v) => p.append(key, v))
-      else p.set(key, value)
-    }
-    if (mode) p.set("hide_avoided", mode)
-    else p.delete("hide_avoided")
-    return `${basePath}${p.toString() ? `?${p}` : ""}`
-  }
-  const hideAvoided = {
-    current: (hideMode === "strong" || hideMode === "all" ? hideMode : "off") as "off" | "strong" | "all",
-    offUrl: buildHideUrl(null),
-    strongUrl: buildHideUrl("strong"),
-    allUrl: buildHideUrl("all"),
   }
 
   const [entries, allGenres, allTags, statusOptions, favSummary, scoreThresholds, savedPresets, criterionPrefs, canAi, catalog, recentRecs, allGroups, criterionMoments] =
@@ -332,7 +312,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         savedPresets={savedPresets}
         showTopN={false}
         showTierBand={false}
-        hideAvoided={hideAvoided}
+        showHideAvoided
         showAdultFilter
       />
 

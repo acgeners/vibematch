@@ -425,8 +425,8 @@ export function AiEvaluationFilters({
     draft.predQ.length > 0 ||
     advancedActiveCount > 0
 
-  // "Não avaliada" e "Desconhecido" agora aparecem em TODAS as abas (o filtro de
-  // Interesse é o mesmo em toda a página).
+  // "Não avaliada" aparece em TODAS as abas (o filtro de Interesse é o mesmo em toda a
+  // página).
 
   // Dados (nº) = 2 campos (Tags / Reviews úteis). Renderizados no topo
   // (dataFiltersPrimary, aba Tags & Reviews) ou dentro do "Mais filtros" (Interesse).
@@ -641,20 +641,9 @@ export function AiEvaluationFilters({
                   Não avaliada
                 </Badge>
               </button>
-              {/* Proveniência legada: tem um valor de Interesse não-confirmado
-                  (source=legacy_unknown) — separa dos human_manual. */}
-              <button
-                type="button"
-                onClick={() => toggleSynopsisQuality("unknown")}
-                title="Tem um valor de Interesse de proveniência legada/não-confirmada (não definido por você)"
-              >
-                <Badge
-                  variant={draft.synQ.includes("unknown") ? "default" : "outline"}
-                  className="cursor-pointer px-3.5 py-1 text-sm"
-                >
-                  Desconhecido
-                </Badge>
-              </button>
+              {/* Havia aqui um chip "Desconhecido" (proveniência legada). Saiu com a
+                  migration 179: ou a obra tem ♥ ou não tem, e tendo, a origem só importa
+                  quando veio da previsão da IA. */}
             </div>
           </FilterField>
 

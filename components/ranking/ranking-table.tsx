@@ -11,7 +11,11 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
 import { MoodRefineDialog } from "@/components/ranking/mood-refine-dialog"
 import { isMoodActive, sortByMoodAdjusted, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
-import { buildRankingTiers, compareWithinTierTieBreak } from "@/lib/ranking/build-tiers"
+import { buildRankingTiers } from "@/lib/ranking/build-tiers"
+import { roundToDisplayScore } from "@/lib/score-rounding"
+import { criterionHighlights } from "@/lib/ranking/criterion-highlights"
+import type { CriterionHighlight, HighlightWeight } from "@/lib/ranking/criterion-highlights"
+import type { CriterionMoments } from "@/lib/ranking/criterion-unit"
 import { DEFAULT_TIER_BAND_WIDTH } from "@/lib/ranking/tier-config"
 import type { CriterionSlug } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
@@ -132,28 +136,22 @@ function computeTiers(
 }
 
 /**
- * Desempate dentro de cada tier: reordena por overlap de tags do perfil efetivo
- * (`tagOverlapNet` desc — LLM + tags declaradas), com `expectedScore` como
- * desempate secundário (ver `compareWithinTierTieBreak`). Substitui o antigo
- * desempate por `personalFit` (auditoria 2026-06: ~constante e pior que o acaso
- * dentro do tier). O sinal NÃO vira número exibido — só ordena a ordem default
- * das linhas (o mood reordena depois no drawer). Reatribui os `rank` do tier na
- * ordem exibida pra coluna "#" continuar monotônica. Sort estável.
+ * ⚠️ Não existe mais reordenação dentro do tier no cliente.
+ *
+ * Havia um `reorderTiersByFit` aqui: ele reordenava cada tier por `tagOverlapNet`
+ * desc, por cima da ordem que o servidor já tinha produzido. A premissa era "dentro
+ * do tier tudo empata" — e ela é FALSA: com banda 0,5 um tier cobre 8,5 → 8,0, então
+ * o reorder descartava tanto o 2º nível de ordenação escolhido (ex.: Veredito) quanto
+ * a própria Nota Prevista. A lista saía numa ordem que nenhum controle da tela
+ * explicava, e a coluna "#" era reescrita pra parecer monotônica por cima disso.
+ *
+ * O sinal não foi perdido: `compareWithinTierTieBreak` virou o desempate FINAL do
+ * `getRanking` (depois de todos os níveis escolhidos, antes do título). Assim ele
+ * decide só o que ninguém mais decidiu, e vale igual nas quatro views.
+ *
+ * O tier segue existindo — como AGRUPAMENTO VISUAL (divisor + "Comparar / Refinar"),
+ * que é o papel dele.
  */
-function reorderTiersByFit(entries: RankingEntry[], tiers: Tier[]): RankingEntry[] {
-  const out = [...entries]
-  for (const tier of tiers) {
-    if (tier.count < 2) continue
-    const { startIndex, count } = tier
-    const slice = out.slice(startIndex, startIndex + count)
-    const ranks = slice.map((e) => e.rank) // ranks do tier, em ordem ascendente
-    slice.sort(compareWithinTierTieBreak)
-    for (let k = 0; k < slice.length; k++) {
-      out[startIndex + k] = { ...slice[k], rank: ranks[k] }
-    }
-  }
-  return out
-}
 
 type ViewMode = "list" | "cards" | "bussola" | "faixas"
 const VIEW_STORAGE_KEY = "ranking_view_mode_v1"
@@ -224,6 +222,11 @@ interface RankingTableProps {
   activeFilters?: ActiveFilterChip[]
   /** URL "ver tudo / limpar padrões" (só usada pela view "Faixas"). */
   clearFiltersHref?: string
+  /** Média/σ de cada atributo no catálogo — alimenta os chips de destaque do card.
+   *  Null (leitor falhou) = o card simplesmente não mostra chip. */
+  criterionMoments?: CriterionMoments | null
+  /** Pesos ativos dos atributos — dão o ▲/▼ dos chips. Null = chip sem marcador. */
+  highlightWeights?: HighlightWeight[] | null
 }
 
 const KEY_CRITERIA = ["romance", "fantasy_nobility", "protagonist", "drama", "tragedy"]
@@ -522,7 +525,7 @@ function renderCell(
   return null
 }
 
-export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true, tierBandWidth = DEFAULT_TIER_BAND_WIDTH, criterionPrefs, activeFilters, clearFiltersHref }: RankingTableProps) {
+export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true, tierBandWidth = DEFAULT_TIER_BAND_WIDTH, criterionPrefs, activeFilters, clearFiltersHref, criterionMoments, highlightWeights }: RankingTableProps) {
   const { widths, setWidth } = useColumnWidths()
   // Colunas do /ranking vêm do vocabulário COMPARTILHADO (work-table-config,
   // namespace "ranking"). Prependa a coluna "#" estrutural e descarta as colunas
@@ -648,18 +651,21 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
       tierField
         ? computeTiers(
             entries,
-            tierField === "expected_score" ? (e) => e.expectedScore : (e) => e.decisionScore,
+            // A banda usa a MESMA chave da ordenação, senão o tier intercala e vira
+            // vários blocos "Tier N" (ver build-tiers). Nota Prevista ordena pela
+            // nota EXIBIDA; Prioridade ordena pelo valor cru.
+            tierField === "expected_score"
+              ? (e) => (e.expectedScore == null ? null : roundToDisplayScore(e.expectedScore))
+              : (e) => e.decisionScore,
             tierBandWidth,
           )
         : null,
     [entries, tierField, tierBandWidth],
   )
 
-  // Dentro de cada tier, ordem default por fit. O mood reordena depois no drawer.
-  const displayEntries = useMemo(
-    () => (tiers ? reorderTiersByFit(entries, tiers) : entries),
-    [entries, tiers],
-  )
+  // A ordem exibida É a do servidor — a ordenação escolhida vale inclusive DENTRO
+  // de cada tier (o tier só agrupa). O mood reordena depois, no drawer.
+  const displayEntries = entries
 
   // Divisor de tier indexado pelo índice de início. Rotula TODOS os tiers
   // (inclusive o 1º) — leitura section-like, cada faixa de prioridade nomeada.
@@ -736,7 +742,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
           tiersAvailable={tierSortEligible}
           onTiersChange={writeTiersEnabled}
         />
-        <RankingCardsView entries={entries} scoreThresholds={scoreThresholds} />
+        <RankingCardsView entries={entries} scoreThresholds={scoreThresholds} criterionMoments={criterionMoments} highlightWeights={highlightWeights} />
       </div>
     )
   }
@@ -1226,16 +1232,26 @@ function rankCardStyles(rank: number): string {
 function RankingCardsView({
   entries,
   scoreThresholds,
+  criterionMoments,
+  highlightWeights,
 }: {
   entries: RankingEntry[]
   scoreThresholds: ColumnThresholds | null
+  criterionMoments?: CriterionMoments | null
+  highlightWeights?: HighlightWeight[] | null
 }) {
   // 3 colunas no máximo (era 4): com o AdultBadge + as stats, 4/linha ficava espremido
   // e a linha de metadados quebrava. Mais largura → tudo respira e o 18+ não empurra linha.
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {entries.map((entry) => (
-        <RankingCard key={entry.workId} entry={entry} scoreThresholds={scoreThresholds} />
+        <RankingCard
+          key={entry.workId}
+          entry={entry}
+          scoreThresholds={scoreThresholds}
+          criterionMoments={criterionMoments}
+          highlightWeights={highlightWeights}
+        />
       ))}
     </div>
   )
@@ -1297,12 +1313,20 @@ function InterestHearts({
 function RankingCard({
   entry,
   scoreThresholds,
+  criterionMoments,
+  highlightWeights,
 }: {
   entry: RankingEntry
   scoreThresholds: ColumnThresholds | null
+  criterionMoments?: CriterionMoments | null
+  highlightWeights?: HighlightWeight[] | null
 }) {
   const slug = titleToSlug(entry.title)
   const isTop3 = entry.rank <= 3
+  const highlights = useMemo(
+    () => criterionHighlights(entry.scores, criterionMoments, highlightWeights),
+    [entry.scores, criterionMoments, highlightWeights],
+  )
 
   return (
     <div
@@ -1382,11 +1406,105 @@ function RankingCard({
           </div>
         </div>
 
+        {/* Atributos em destaque — ocupam a folga da capa (78 px, medidos) que ficava
+            vazia entre o cabeçalho e as notas. Some sozinho quando a obra não tem nada
+            acima de 1σ (6,5% do acervo), e aí o card volta ao que era.
+
+            `flex-1 items-center` em vez de deixar os chips colados no cabeçalho: o
+            sobrante da capa varia por obra (1, 2 ou 3 chips = 1 ou 2 linhas), e
+            ancorar no topo só empurrava o mesmo buraco pra baixo dos chips. Centrado,
+            a folga se divide e vira respiro em vez de vazio. */}
+        <div className="flex min-h-0 flex-1 items-center">
+          <CriterionHighlightChips highlights={highlights} />
+        </div>
+
         {/* Notas de decisão (Prevista + Chance) + stats externos — fixados na base.
             Substituem as barras da Bússola: Avaliação/Alcance eram só reescala de
             Externa (nota×10) e Votos (log), então voltam como números crus. */}
         <CardScores entry={entry} scoreThresholds={scoreThresholds} />
       </div>
+    </div>
+  )
+}
+
+/**
+ * Nome CURTO do atributo, só para o chip de destaque do card — os nomes canônicos
+ * (`CRITERIA_INFO[slug].name`) vão até "Dinâmica entre Protagonistas" e não cabem em
+ * três chips numa linha de ~300 px.
+ *
+ * ⚠️ É mapa de EXIBIÇÃO, não fonte de verdade: um slug que não esteja aqui cai no
+ * nome canônico (truncado pelo CSS) em vez de sumir. Critério novo entra pela DB +
+ * `sync-constants` como sempre; isto só encurta o rótulo depois.
+ */
+const HIGHLIGHT_SHORT_NAME: Record<string, string> = {
+  romance: "Romance",
+  couple_dynamics: "Casal",
+  protagonist: "Protagonista",
+  fantasy_nobility: "Fantasia",
+  action_adventure: "Ação",
+  humor: "Humor",
+  drama: "Drama",
+  tragedy: "Tragédia",
+  adult_content: "18+",
+}
+
+/**
+ * Chips "atributos em destaque": em que a obra foge do normal do catálogo, em σ.
+ *
+ * 🔴 A cor diz DIREÇÃO (acima/abaixo do catálogo), nunca valor. Tragédia +1,3σ não é
+ * boa nem ruim — é uma característica; pintar de verde/vermelho transformaria "mais
+ * trágica que a média" em elogio, que para quem penaliza clima pesado é o oposto da
+ * verdade. Quem opina é o ▲/▼, que vem dos PESOS (ver criterion-highlights).
+ *
+ * O σ vai impresso de propósito: os destaques são escolhidos por LIMIAR e o corte em
+ * 3 é de exibição, então o número deixa a margem visível em vez de sugerir que o
+ * primeiro chip é "o atributo dominante" — afirmação que o dado não sustenta (a
+ * margem entre 1º e 2º é menor que 0,25σ em 46,9% do catálogo).
+ */
+function CriterionHighlightChips({ highlights }: { highlights: CriterionHighlight[] }) {
+  if (highlights.length === 0) return null
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {highlights.map((h) => {
+        const info = CRITERIA_INFO[h.slug]
+        const nome = HIGHLIGHT_SHORT_NAME[h.slug] ?? info?.name ?? h.slug
+        const acima = h.z > 0
+        const sigma = `${acima ? "+" : "−"}${Math.abs(h.z).toFixed(1)}σ`
+        const direcao = acima ? "acima" : "abaixo"
+        const opiniao =
+          h.favor === "favor"
+            ? " — joga a favor do seu gosto"
+            : h.favor === "contra"
+              ? " — joga contra o seu gosto"
+              : ""
+        return (
+          <span
+            key={h.slug}
+            title={`${info?.name ?? nome}: nota ${h.score.toFixed(1)}, ${sigma} (${direcao} da média do catálogo)${opiniao}`}
+            className={cn(
+              "inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-[1px] text-[10.5px] font-medium",
+              acima
+                ? "border-fuchsia-500/35 bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300"
+                : "border-cyan-500/35 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300",
+            )}
+          >
+            {info?.emoji && <span aria-hidden>{info.emoji}</span>}
+            <span className="truncate">{nome}</span>
+            <span className="font-mono text-[9.5px] font-bold tabular-nums opacity-85">{sigma}</span>
+            {h.favor !== "neutro" && (
+              <span
+                aria-hidden
+                className={cn(
+                  "text-[9px] leading-none",
+                  h.favor === "favor" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400",
+                )}
+              >
+                {h.favor === "favor" ? "▲" : "▼"}
+              </span>
+            )}
+          </span>
+        )
+      })}
     </div>
   )
 }

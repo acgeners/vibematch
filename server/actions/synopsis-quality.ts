@@ -312,10 +312,10 @@ export async function setSynopsisQualityAction(
     }
     const triaged = {
       synopsis_quality: quality,
-      // Proveniência (Plano 3): triagem manual direta. Limpar (null) zera a origem.
-      synopsis_quality_source: (quality === null ? "legacy_unknown" : "human_manual") as
-        | "legacy_unknown"
-        | "human_manual",
+      // Proveniência (Plano 3): triagem manual direta. Limpar o ♥ zera a origem junto —
+      // sem valor não há de onde ter vindo, e um CHECK no banco (migration 179) recusa
+      // a linha se os dois não andarem juntos.
+      synopsis_quality_source: (quality === null ? null : "human_manual") as "human_manual" | null,
       synopsis_quality_prediction_id: null,
     }
     // Cliente de SESSÃO: a RLS da mig 142 barra escrever na linha de outra pessoa. Vale pro

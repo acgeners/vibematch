@@ -26,6 +26,7 @@
     "db:fingerprint": "node scripts/db-table-fingerprint.mjs",
     "synopsis:lab": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/synopsis-prompt-lab.ts",
     "baselines:ranking": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/ranking-baselines.ts",
+    "baselines:rec-hit": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/recommendation-hit-baseline.ts",
     "prospective:ranking": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/ranking-prospective.ts",
     "resolve-comix-hids": "node scripts/resolve-comix-hids.mjs",
     "comick:canary": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/resolve-comick-canary.ts",

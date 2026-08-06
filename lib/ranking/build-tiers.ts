@@ -13,6 +13,15 @@ import { tierBandWidthSchema } from "./tier-config"
  *  - Não depende da ordem acidental da entrada: ordena internamente por score
  *    desc (estável por índice) para COMPUTAR os tiers, mas devolve o resultado
  *    ALINHADO à ordem de entrada.
+ *
+ * 🔴 **`getScore` TEM que ser a MESMA chave pela qual a lista está ordenada.**
+ * Quem consome agrupa RUNS CONSECUTIVOS de tier igual; se o score do tier não for
+ * o da ordenação, um mesmo tier reaparece várias vezes ao longo da lista e vira
+ * vários blocos "Tier N" — sem erro, só com a tela mentindo sobre quantas faixas
+ * existem. Medido (2026-08-06): o /ranking ordena pela nota EXIBIDA
+ * (`roundToDisplayScore`) e bandava pela CRUA → **2 tiers reais viravam 8 blocos**
+ * nas 40 primeiras obras, e 3 viravam 27 em 200. Na view Faixas isso ainda
+ * duplicava a React key (`band-${tier}`).
  */
 export interface TieredItem<T> {
   item: T

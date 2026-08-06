@@ -85,12 +85,12 @@ const EMPTY_POST_SCORES = Object.fromEntries(
 /**
  * O estado de uma obra que a pessoa nunca tocou (sem linha no espelho).
  *
- * ⚠️ `synopsisQualitySource` é `"legacy_unknown"`, não `null` — e a diferença NÃO é cosmética.
- * A coluna é `NOT NULL DEFAULT 'legacy_unknown'` nos DOIS lados (`works` e o espelho), ou seja,
- * `null` nunca foi um valor que o banco pudesse devolver: "nunca triado" sempre se escreveu
- * `legacy_unknown`. Com `null` aqui, o filtro de Interesse "não avaliado" (que casa exatamente
- * por essa string) pararia de encontrar as obras sem linha — devolvendo menos obras, sem erro.
- * A view `works_owner` faz o mesmo `coalesce`, pelo mesmo motivo.
+ * `synopsisQualitySource` é `null` porque não há ♥: sem valor não existe origem. Isto
+ * mudou na **migration 179** — antes a coluna era `NOT NULL DEFAULT 'legacy_unknown'` e
+ * este default era a mesma string, o que fazia toda obra nunca tocada aparecer carimbada
+ * como "Desconhecido" e entrar no filtro de proveniência. Hoje a view `works_owner`
+ * também devolve `null` (o `coalesce` saiu junto) e um CHECK garante o par
+ * `(synopsis_quality IS NULL) = (synopsis_quality_source IS NULL)`.
  */
 export const EMPTY_PERSONAL_STATE: PersonalWorkState = {
   isFavorite: false,
@@ -101,7 +101,7 @@ export const EMPTY_PERSONAL_STATE: PersonalWorkState = {
   observations: null,
   observationAdjustment: 0,
   synopsisQuality: null,
-  synopsisQualitySource: "legacy_unknown",
+  synopsisQualitySource: null,
   synopsisQualityPredictionId: null,
   synopsisInterestSkipped: false,
   postScores: EMPTY_POST_SCORES,

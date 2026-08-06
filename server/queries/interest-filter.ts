@@ -10,9 +10,9 @@ import { getInterestReader } from "@/server/queries/user-interest"
  * forma consistente (atributos, Veredito IA, Untracked, Tags & Reviews). A aba
  * "Interesse" já filtra internamente (`getSynopsisQueueWorks`) e não usa isto.
  *
- * - Manual: casa por VALOR de `synopsis_quality` (♥…♥♥♥♥) + sentinelas de UI
- *   "none" (Não avaliada = NULL) e "unknown" (Desconhecido =
- *   synopsis_quality_source 'legacy_unknown').
+ * - Manual: casa por VALOR de `synopsis_quality` (♥…♥♥♥♥) + a sentinela de UI
+ *   "none" (Não avaliada = NULL). O antigo "unknown" (proveniência legada) morreu
+ *   com a migration 179 e hoje é ignorado se aparecer.
  * - Previsão: casa pelo `predicted_quality` da previsão ATIVA (versão de prompt
  *   atual, senão a de maior versão) em `synopsis_quality_predictions`.
  *
@@ -32,9 +32,11 @@ export async function filterWorkIdsByInterest(
   let keep = new Set(ids)
 
   if (manualActive) {
+    // "unknown" é tolerado e IGNORADO: o conceito acabou na migration 179, mas o token
+    // pode ter sobrado em filtro salvo. Ignorar devolve o resultado sem ele, em vez de
+    // um filtro que não casa nada.
     const realHearts = new Set(manualQualities.filter((q) => q !== "none" && q !== "unknown"))
     const wantNone = manualQualities.includes("none")
-    const wantUnknown = manualQualities.includes("unknown")
 
     // O ♥ é PESSOAL (Fatia 2a) e vem do espelho de QUEM OLHA — antes havia um `select` em
     // `works` aqui, e ele só existia pra servir de fallback ao dono. Com o dono lendo o espelho
@@ -47,7 +49,6 @@ export async function filterWorkIdsByInterest(
       const q = state.synopsisQuality
       if (q != null && realHearts.has(q)) passing.add(id)
       else if (wantNone && q == null) passing.add(id)
-      else if (wantUnknown && state.synopsisQualitySource === "legacy_unknown") passing.add(id)
     }
     keep = new Set([...keep].filter((id) => passing.has(id)))
   }

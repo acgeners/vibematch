@@ -135,7 +135,23 @@ const RISK_DESC: Record<RiskMode, string> = {
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
-const sizePx = (v: number | null) => 10 + ((v ?? 0) / 100) * 18
+
+/**
+ * Diâmetro do ponto, a partir de um valor JÁ normalizado em [0,1].
+ *
+ * Interpola a ÁREA, não o diâmetro: "maior" é lido pela área do disco, e
+ * interpolar diâmetro linearmente comprime justamente o meio da escala.
+ *
+ * ⚠️ Quem normaliza é o chamador, e essa é a parte que importa — ver `dots`. A
+ * escala anterior era `10 + (v/100) * 18` com `v` ABSOLUTO, e o tamanho ficava
+ * praticamente constante: Alcance é log de votos, então metade do acervo cabe
+ * entre 74 e 87 pontos, o que dava 2,4 px de diferença de diâmetro (medido nas
+ * 42 obras do topo do ranking, 2026-08-06). A 3ª força existia sem informar nada.
+ */
+const DOT_MIN_PX = 9
+const DOT_MAX_PX = 34
+const dotSizePx = (unit: number) =>
+  Math.sqrt(DOT_MIN_PX ** 2 + clamp(unit, 0, 1) * (DOT_MAX_PX ** 2 - DOT_MIN_PX ** 2))
 
 /** Limiar absoluto (0–100) de cada força — a linha do meio no modo "absolute". */
 const FORCE_THRESHOLD: Record<ForceKey, number> = { chance: 50, avaliacao: 65, alcance: 50 }
@@ -196,6 +212,11 @@ export function BussolaPlane({ entries, mode = "percentile" }: { entries: Bussol
         ...d,
         xPct: absPos(d.forces[preset.x], FORCE_THRESHOLD[preset.x]),
         yPct: absPos(d.forces[preset.y], FORCE_THRESHOLD[preset.y]),
+        // Tamanho ABSOLUTO aqui, pela mesma razão da posição: com 2–3 obras o
+        // percentil vira "uma é grande, a outra é pequena" mesmo quando elas têm
+        // quase os mesmos votos. Neste modo os dois eixos e o tamanho falam
+        // magnitude real.
+        size: dotSizePx((d.forces[preset.size] ?? 0) / 100),
         arch: classifyArchetype(d.forces.chance, d.forces.avaliacao),
       }))
     }
@@ -221,6 +242,7 @@ export function BussolaPlane({ entries, mode = "percentile" }: { entries: Bussol
     }
     const pctX = percentileFn(preset.x)
     const pctY = percentileFn(preset.y)
+    const pctSize = percentileFn(preset.size)
     const pctChance = percentileFn("chance")
     const pctAval = percentileFn("avaliacao")
 
@@ -228,11 +250,17 @@ export function BussolaPlane({ entries, mode = "percentile" }: { entries: Bussol
       ...d,
       xPct: pctX(d.forces[preset.x]),
       yPct: pctY(d.forces[preset.y]),
+      // TAMANHO = percentil também, pelo mesmo motivo da posição: a 3ª força é
+      // tão comprimida quanto os eixos, e num acervo homogêneo a escala absoluta
+      // colapsa a diferença a ~2 px. Assim a obra mais popular DO QUE ESTÁ NA
+      // TELA é sempre a maior, em qualquer filtro. O número cru continua no
+      // tooltip e no aria-label — o tamanho ordena, não mede.
+      size: dotSizePx(pctSize(d.forces[preset.size]) / 100),
       // Arquétipo por percentil de Chance × Avaliação (median-split) — alinha os
       // quadrantes visuais (linha do meio = mediana) com a cor.
       arch: classifyArchetypeByPercentile(pctChance(d.forces.chance), pctAval(d.forces.avaliacao)),
     }))
-  }, [entries, preset.x, preset.y, mode])
+  }, [entries, preset.x, preset.y, preset.size, mode])
 
   const isActive = (arch: ForceArchetype) =>
     risk === "all" || (risk === "segura" && arch === "safe") || (risk === "potencial" && arch === "upside")
@@ -250,7 +278,7 @@ export function BussolaPlane({ entries, mode = "percentile" }: { entries: Bussol
     const pr = planeRef.current.getBoundingClientRect()
     const tw = tipRef.current.offsetWidth
     const th = tipRef.current.offsetHeight
-    const dotSize = sizePx(hoveredDot.forces[preset.size])
+    const dotSize = hoveredDot.size
     const cx = (pr.width * hoveredDot.xPct) / 100
     const cyTop = pr.height * (1 - hoveredDot.yPct / 100)
     const left = clamp(cx - tw / 2, 8, Math.max(8, pr.width - tw - 8))
@@ -314,9 +342,11 @@ export function BussolaPlane({ entries, mode = "percentile" }: { entries: Bussol
             <div className="flex flex-col gap-1 border-l border-border px-4">
               <div className="flex items-center gap-2">
                 <span className="grid w-6 place-items-center">
+                  {/* Os raios espelham a razão REAL da escala (⌀ 9 → 34 px): uma
+                      legenda 2× ao lado de pontos 3,8× ensina a ler errado. */}
                   <svg width="24" height="14" viewBox="0 0 24 14" className={cn("fill-current", FORCE_TEXT[preset.size])}>
-                    <circle cx="5" cy="7" r="2.4" />
-                    <circle cx="16" cy="7" r="5" />
+                    <circle cx="4" cy="7" r="1.6" />
+                    <circle cx="16" cy="7" r="6" />
                   </svg>
                 </span>
                 <span className="text-[12px] font-bold uppercase tracking-wide text-foreground">Tamanho</span>
@@ -482,7 +512,7 @@ export function BussolaPlane({ entries, mode = "percentile" }: { entries: Bussol
 
               {/* pontos */}
               {dots.map((d) => {
-                const s = sizePx(d.forces[preset.size])
+                const s = d.size
                 const active = isActive(d.arch)
                 return (
                   <Link
@@ -598,7 +628,7 @@ export function BussolaPlane({ entries, mode = "percentile" }: { entries: Bussol
               </span>
             ))}
             <span className="ml-auto font-mono text-[11px] text-muted-foreground">
-              posição = {mode === "absolute" ? "magnitude (limiar no centro)" : "percentil no acervo"} · tamanho = {FORCE_SHORT[preset.size]} · {dots.length} obras
+              posição = {mode === "absolute" ? "magnitude (limiar no centro)" : "percentil no acervo"} · tamanho = {FORCE_SHORT[preset.size]} ({mode === "absolute" ? "magnitude" : "percentil"}) · {dots.length} obras
             </span>
           </div>
 

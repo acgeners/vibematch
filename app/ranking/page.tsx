@@ -1,8 +1,10 @@
 import { getRanking, type RankingFilters, type RankingSortBy, type SortLevel } from "@/server/queries/ranking"
+import { sanitizeInterestSelection } from "@/lib/interest-sentinels"
 import { canConsumeAi } from "@/server/queries/current-user"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
 import { getCriterionMomentsSafe } from "@/server/queries/criterion-moments"
+import { getHighlightWeightsSafe } from "@/server/queries/score-weights"
 import { resolveMoodThresholds } from "@/lib/ranking/criterion-unit"
 import { getTierBandWidth } from "@/server/queries/tier-band-width"
 import { getLowCoverageWorkIds } from "@/server/queries/calibration-guards"
@@ -253,7 +255,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
       const merged = [...new Set([...fromUrl, ...avoidedSlugs])]
       return merged.length ? merged : undefined
     })(),
-    synopsisQualities: multi("synopsis_q"),
+    synopsisQualities: sanitizeInterestSelection(multi("synopsis_q")),
     predictedSynopsisQualities: multi("synopsis_pred"),
     interestMode: str("synopsis_mode") === "and" ? "and" : "or",
     minTotalChapters: num("min_chapters"),
@@ -287,7 +289,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     rawEntries,
     allGenres, genreCatTypes, allTags, statusOptions, savedPresets,
     scoreThresholds, tierBandWidth, lowCoverageIds, staleAlignmentCount, recalcState, criterionPrefs,
-    criterionMoments,
+    criterionMoments, highlightWeights,
   ] = await Promise.all([
     getRanking(filters),
     getAllGenres(),
@@ -302,6 +304,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     getRecalcPendingState(),
     getCriterionColorRanges(),
     momentsPromise,
+    getHighlightWeightsSafe(),
   ])
   // Marca obras não-lidas com baixa cobertura de gênero (badge ⚠ na Nota esperada).
   const entries = rawEntries.map((e) => ({ ...e, lowCoverage: lowCoverageIds.has(e.workId) }))
@@ -339,21 +342,6 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   }
   const queryString = queryParams.toString()
   const favoritesUrl = `/favorites${queryString ? `?${queryString}` : ""}`
-
-  // Filtro "esconder evitadas" (3 estados) — URLs por estado pro segmented control
-  // no painel (Critérios Gerais). Preserva os demais params.
-  const buildHideUrl = (mode: "strong" | "all" | null) => {
-    const p = new URLSearchParams(queryString)
-    if (mode) p.set("hide_avoided", mode)
-    else p.delete("hide_avoided")
-    return `/ranking${p.toString() ? `?${p}` : ""}`
-  }
-  const hideAvoided = {
-    current: (hideMode ?? "off") as "off" | "strong" | "all",
-    offUrl: buildHideUrl(null),
-    strongUrl: buildHideUrl("strong"),
-    allUrl: buildHideUrl("all"),
-  }
 
   // ── Chips de filtros ativos (só a view "Faixas" consome) ──
   // Puramente descritivo + navegação por URL usando os parâmetros JÁ suportados
@@ -454,7 +442,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
       <RankingFiltersComponent
         availableGenres={allGenres}
         genreCatTypes={genreCatTypes}
-        hideAvoided={hideAvoided}
+        showHideAvoided
         availableTags={allTags}
         publicationStatuses={statusOptions.publicationStatuses}
         personalStatuses={statusOptions.personalStatuses}
@@ -468,7 +456,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         showAdultFilter
       />
 
-      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} criterionPrefs={criterionPrefs} activeFilters={activeFilterChips} clearFiltersHref={clearFiltersHref} />
+      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} criterionPrefs={criterionPrefs} activeFilters={activeFilterChips} clearFiltersHref={clearFiltersHref} criterionMoments={criterionMoments} highlightWeights={highlightWeights} />
     </div>
   )
 }

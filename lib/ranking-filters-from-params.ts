@@ -1,4 +1,5 @@
 import { CRITERION_SLUGS } from "@/types/domain"
+import { sanitizeInterestSelection } from "@/lib/interest-sentinels"
 import type { RankingFilters } from "@/server/queries/ranking"
 import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 
@@ -56,7 +57,7 @@ export function parseFiltersFromSearchParams(sp: URLSearchParams): RankingFilter
     tagSlugsAll: multi("tags_all"),
     tagSlugsAny: multi("tags_any") ?? multi("tags"),
     tagSlugsExclude: multi("tags_exclude"),
-    synopsisQualities: multi("synopsis_q"),
+    synopsisQualities: sanitizeInterestSelection(multi("synopsis_q")),
     minTotalChapters: num("min_chapters"),
     maxTotalChapters: num("max_chapters"),
     minYear: num("min_year"),

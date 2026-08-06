@@ -7,6 +7,7 @@ import { CoverImage } from "@/components/ui/cover-image"
 import { getScoreTextColor } from "@/components/ui/score-badge"
 import type { ColumnThresholds } from "@/components/ui/score-badge"
 import { buildRankingTiers } from "@/lib/ranking/build-tiers"
+import { roundToDisplayScore } from "@/lib/score-rounding"
 import type { RankingEntry } from "@/server/queries/ranking"
 import { ActiveFiltersBar } from "@/components/ranking/active-filters-bar"
 import type { ActiveFilterChip } from "@/components/ranking/active-filters-bar"
@@ -76,9 +77,17 @@ export function RankingBandsView({
   clearFiltersHref?: string
 }) {
   // Mesma banda + mesma Nota Prevista da view Lista. buildRankingTiers ordena
-  // internamente por score desc e devolve alinhado à entrada — como as entries
-  // já vêm ordenadas do getRanking, os tiers ficam contíguos. NÃO reordena.
-  const tiered = buildRankingTiers(entries, (e) => e.expectedScore, tierBandWidth)
+  // internamente por score desc e devolve alinhado à entrada. NÃO reordena.
+  //
+  // ⚠️ A banda vai sobre a nota EXIBIDA porque é por ela que o getRanking ordena.
+  // Com a nota crua os tiers intercalavam e o agrupamento por run consecutivo
+  // abaixo quebrava: um mesmo tier virava vários blocos — e como a key é
+  // `band-${g.tier}`, virava também React key DUPLICADA.
+  const tiered = buildRankingTiers(
+    entries,
+    (e) => (e.expectedScore == null ? null : roundToDisplayScore(e.expectedScore)),
+    tierBandWidth,
+  )
   const groups: BandGroup[] = []
   for (let i = 0; i < entries.length; i++) {
     const t = tiered[i].tier
