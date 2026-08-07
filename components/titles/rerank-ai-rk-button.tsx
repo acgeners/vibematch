@@ -1,14 +1,10 @@
 "use client"
 
-import { useTransition } from "react"
-import { useRefresh } from "@/lib/use-refresh"
-import { toast } from "sonner"
 import { Loader2, RotateCw, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { rerankSingleWorkAction } from "@/server/actions/recommendations"
+import { useRerankSingleWork } from "@/components/ranking/use-rerank-single-work"
 import { GenerationGate } from "@/components/generation/generation-gate"
-import { useCostConfirm } from "@/components/cost/cost-confirm"
 import type { UiReadiness } from "@/lib/orchestration/ui-readiness"
 
 interface RerankAiRkButtonProps {
@@ -25,6 +21,8 @@ interface RerankAiRkButtonProps {
   icon?: "sparkles" | "rotate"
   /** Prontidão do Veredito (motor → UI). Quando presente, gate/selo no botão. */
   readiness?: UiReadiness | null
+  /** Título da obra, só pra nomear a tarefa no indicador global ("Veredito IA: X"). */
+  workTitle?: string
 }
 
 /**
@@ -34,10 +32,8 @@ interface RerankAiRkButtonProps {
  * `calculated_scores`. O servidor é a fonte da verdade do gate — este `isPaid` só
  * controla a aparência do botão.
  */
-export function RerankAiRkButton({ workId, hasScore, isPaid = true, icon = "sparkles", readiness }: RerankAiRkButtonProps) {
-  const refresh = useRefresh()
-  const [isPending, startTransition] = useTransition()
-  const confirmCost = useCostConfirm()
+export function RerankAiRkButton({ workId, hasScore, isPaid = true, icon = "sparkles", readiness, workTitle }: RerankAiRkButtonProps) {
+  const { isPending, run } = useRerankSingleWork(workId, workTitle)
   const Icon = icon === "rotate" ? RotateCw : Sparkles
   const gate = readiness ?? null
   const blocked = gate ? !gate.ready : false
@@ -63,22 +59,6 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true, icon = "spar
         </span>
       </Button>
     )
-  }
-
-  const run = async () => {
-    if (!(await confirmCost({ action: "rerank_single" }))) return
-    startTransition(async () => {
-      const result = await rerankSingleWorkAction(workId)
-      if (result.error) {
-        toast.error(result.error)
-        return
-      }
-      const score = result.data?.alignmentScore
-      toast.success(
-        score != null ? `Veredito IA calculado: ${Math.round(score)}` : "Veredito IA calculated.",
-      )
-      refresh()
-    })
   }
 
   const button = (

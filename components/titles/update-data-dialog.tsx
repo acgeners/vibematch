@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { useRefresh } from "@/lib/use-refresh"
-import { Archive, Check, ChevronRight, Loader2, Plus, RefreshCw, RotateCcw, SkipForward, Trash2 } from "lucide-react"
+import { Archive, Check, ChevronRight, Plus, RefreshCw, RotateCcw, SkipForward, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -29,6 +29,7 @@ import { getCoverImageSrc } from "@/lib/image-proxy"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
 import { cleanSynopsisText, dedupeByMeaning } from "@/lib/synopsis-text"
 import { cn, titleToSlug } from "@/lib/utils"
+import { ScopedTaskStrip, useScopedGuard } from "@/components/tasks/scoped-task"
 import { sourceLabel } from "@/lib/external/source-labels"
 import type { ExternalSourceId, ExternalWorkData, FieldValueProvenance } from "@/lib/external/types"
 
@@ -889,6 +890,17 @@ export function UpdateDataDialog({
     applyUpdate(patched, resolutions)
   }
 
+  // Request-scoped: a busca em 8 fontes devolve o diff PRA TELA — nada é gravado
+  // até você escolher e salvar. Modal, então a porta de saída é fechar (Cancelar
+  // · Esc · clicar fora); o scrim do Radix já impede o clique no link da barra,
+  // por isso sem `guardNavigation`. Ver components/tasks/scoped-task.tsx.
+  const { guard, guardDialog, elapsed } = useScopedGuard({
+    running: phase === "refreshing",
+    title: "Fechar agora perde a busca",
+    what: "Atualizar dados",
+    confirmLabel: "Fechar mesmo assim",
+  })
+
   const handleClose = () => {
     setOpen(false)
     setPhase(withSourceStep ? "sources" : "refreshing")
@@ -912,7 +924,8 @@ export function UpdateDataDialog({
         </Button>
       )}
 
-      <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose() }}>
+      <Dialog open={open} onOpenChange={(v) => { if (!v) guard(handleClose) }}>
+        {guardDialog}
         {/* `sm:max-w-2xl` e não `max-w-2xl`: o DialogContent já traz `sm:max-w-lg`, e
             no CSS gerado as utilidades com variante `sm:` saem DEPOIS das puras —
             um `max-w-2xl` sem variante perdia em silêncio e o diálogo ficava 512px.
@@ -1027,9 +1040,13 @@ export function UpdateDataDialog({
           )}
 
           {phase === "refreshing" && (
-            <div className="flex flex-col items-center justify-center py-10 gap-3 text-sm text-muted-foreground">
-              <Loader2 className="h-6 w-6 animate-spin" />
-              <p>Comparando dados externos...</p>
+            <div className="py-4">
+              <ScopedTaskStrip
+                running
+                elapsed={elapsed}
+                label="Comparando dados de 8 fontes externas…"
+                note="Fique nesta tela. O resultado aparece aqui e não fica salvo — fechando, você precisa rodar de novo."
+              />
             </div>
           )}
 

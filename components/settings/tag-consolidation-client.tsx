@@ -1,6 +1,11 @@
 "use client"
 
 import { useEffect, useState, useTransition } from "react"
+import { runTask } from "@/lib/tasks-store"
+import { useAppTasks } from "@/components/tasks/use-app-tasks"
+
+const APPLY_CLUSTERS_TASK_ID = "apply-tag-clusters"
+const APPLY_MOVES_TASK_ID = "apply-tag-moves"
 import { useRouter } from "next/navigation"
 import { useRefresh } from "@/lib/use-refresh"
 import { ArrowRightLeft, Check, ChevronDown, ChevronUp, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react"
@@ -118,7 +123,13 @@ export function TagConsolidationClient({
   const router = useRouter() // mantido pro router.replace em updateQuery
   const doRefresh = useRefresh()
   const [isPending, startTransition] = useTransition()
-  const [isApplying, setIsApplying] = useState(false)
+  // Pendência das duas aplicações vem do STORE: são escritas destrutivas e
+  // longas, e o botão precisa continuar "ocupado" pra quem volta pra console no
+  // meio delas.
+  const tasks = useAppTasks()
+  const isApplying = tasks.some(
+    (t) => (t.id === APPLY_CLUSTERS_TASK_ID || t.id === APPLY_MOVES_TASK_ID) && t.status === "running",
+  )
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [isBulkRunning, setIsBulkRunning] = useState(false)
@@ -260,25 +271,34 @@ export function TagConsolidationClient({
 
   const handleApply = async () => {
     if (!confirm("Aplicar todos os clusters aprovados? Esta operação é destrutiva (mescla tags e atualiza work_tags).")) return
-    setIsApplying(true)
-    try {
-      const result = await applyApprovedProposals(initialGroup ?? undefined)
-      const autoNote =
-        result.autoRejected > 0
-          ? ` ${result.autoRejected} auto-rejeitada(s) (membros já não existiam).`
-          : ""
-      if (result.errors.length > 0) {
-        toast.error(`Aplicados ${result.applied}, falharam ${result.failed}.${autoNote} Veja console.`)
-        console.error(result.errors)
-      } else {
-        toast.success(
-          `${result.applied} clusters aplicados. ${result.tagsRemoved} tags removidas, ${result.workTagsRedirected} work_tags redirecionadas.${autoNote}`,
-        )
-      }
-      refresh()
-    } finally {
-      setIsApplying(false)
-    }
+    // Durável e destrutiva: mescla tags e reescreve `work_tags` obra a obra. Vai
+    // pro indicador global porque um lote grande passa de minutos, e sair da
+    // console no meio não deveria apagar o sinal de que ainda está rodando.
+    runTask({
+      id: APPLY_CLUSTERS_TASK_ID,
+      kind: "apply-tag-clusters",
+      label: "Aplicando clusters de tags aprovados",
+      run: () => applyApprovedProposals(initialGroup ?? undefined),
+      // Suprime o toast padrão: sucesso parcial (`errors`) não é sucesso, e o
+      // toast único achataria os dois casos num só.
+      successToast: () => null,
+      onDone: (result) => {
+        const autoNote =
+          result.autoRejected > 0
+            ? ` ${result.autoRejected} auto-rejeitada(s) (membros já não existiam).`
+            : ""
+        if (result.errors.length > 0) {
+          toast.error(`Aplicados ${result.applied}, falharam ${result.failed}.${autoNote} Veja console.`)
+          console.error(result.errors)
+        } else {
+          toast.success(
+            `${result.applied} clusters aplicados. ${result.tagsRemoved} tags removidas, ${result.workTagsRedirected} work_tags redirecionadas.${autoNote}`,
+          )
+        }
+        refresh()
+      },
+      onError: () => refresh(),
+    })
   }
 
   const approvedCount = initialStatus === "approved" ? proposals.length : null
@@ -296,19 +316,23 @@ export function TagConsolidationClient({
 
   const handleApplyGroupMoves = async () => {
     if (!confirm("Aplicar todas as mudanças de grupo aprovadas?")) return
-    setIsApplying(true)
-    try {
-      const result = await applyApprovedGroupMoves()
-      if (result.errors.length > 0) {
-        toast.error(`Aplicadas ${result.applied}, falharam ${result.failed}. Veja console.`)
-        console.error(result.errors)
-      } else {
-        toast.success(`${result.applied} mudanças aplicadas.`)
-      }
-      refresh()
-    } finally {
-      setIsApplying(false)
-    }
+    runTask({
+      id: APPLY_MOVES_TASK_ID,
+      kind: "apply-tag-moves",
+      label: "Aplicando mudanças de grupo de tags",
+      run: () => applyApprovedGroupMoves(),
+      successToast: () => null,
+      onDone: (result) => {
+        if (result.errors.length > 0) {
+          toast.error(`Aplicadas ${result.applied}, falharam ${result.failed}. Veja console.`)
+          console.error(result.errors)
+        } else {
+          toast.success(`${result.applied} mudanças aplicadas.`)
+        }
+        refresh()
+      },
+      onError: () => refresh(),
+    })
   }
 
   const handleApproveGroupMove = (id: string) => async () => {

@@ -8,6 +8,7 @@ import { LastRunHint } from "@/components/settings/last-run-hint"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
+import { ScopedTaskStrip, useScopedGuard } from "@/components/tasks/scoped-task"
 import {
   suggestScoreWeights,
   applyWeightSuggestions,
@@ -69,6 +70,18 @@ export function WeightSuggestionsPanel({ initialLastApplied }: WeightSuggestions
   const [isLoading, startLoading] = useTransition()
   const [isApplying, startApplying] = useTransition()
   const [lastApplied, setLastApplied] = useState<string | null>(initialLastApplied)
+
+  // Request-scoped: `suggestScoreWeights` só LÊ e devolve — nada é gravado até
+  // você marcar e aplicar. Por isso âmbar e não o indicador azul, e por isso
+  // `guardNavigation`: este painel vive solto numa página, sem modal, então a
+  // porta de saída É o link da barra. Ver components/tasks/scoped-task.tsx.
+  const { guardDialog, elapsed } = useScopedGuard({
+    running: isLoading,
+    title: "Sair agora perde a sugestão",
+    what: "Gerar sugestões",
+    confirmLabel: "Sair mesmo assim",
+    guardNavigation: true,
+  })
 
   const handleSuggest = () => {
     startLoading(async () => {
@@ -147,6 +160,13 @@ export function WeightSuggestionsPanel({ initialLastApplied }: WeightSuggestions
 
   return (
     <div className="space-y-4">
+      {guardDialog}
+      <ScopedTaskStrip
+        running={isLoading}
+        elapsed={elapsed}
+        label="Analisando suas notas e os 9 critérios…"
+        note="Fique nesta página. A sugestão aparece aqui e não fica salva — só ao aplicar ela vira dado."
+      />
       <div className="flex items-start justify-between gap-4">
         <p className="text-xs text-muted-foreground max-w-2xl">
           Treina uma regressão Ridge nos 9 critérios IA contra suas notas reais (user_score) e

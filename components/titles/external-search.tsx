@@ -29,6 +29,7 @@ import { sourceLabel } from "@/lib/external/source-labels"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { SMALL_COVER_WIDTH } from "@/lib/cover-quality"
 import { cn, titleToSlug } from "@/lib/utils"
+import { ScopedTaskStrip, useScopedGuard } from "@/components/tasks/scoped-task"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
 import { SynopsisPicker } from "@/components/titles/synopsis-picker"
 import type { SynopsisChoice } from "@/components/titles/synopsis-picker"
@@ -1109,6 +1110,16 @@ export function ExternalSearch({
     await finalizeSelection(finalData)
   }
 
+  // Request-scoped: "Buscar dados" devolve candidatos/dados PRA TELA — nada é
+  // gravado até você escolher e salvar. Sheet MODAL, então a porta de saída é
+  // fechar; sem `guardNavigation`. Ver components/tasks/scoped-task.tsx.
+  const { guard, guardDialog, elapsed } = useScopedGuard({
+    running: phase === "searching" || phase === "loading" || phase === "evaluating",
+    title: "Fechar agora perde a busca",
+    what: "Buscar dados",
+    confirmLabel: "Fechar mesmo assim",
+  })
+
   const handleClose = () => {
     // #4: ao fechar a janela, guarda o que já foi buscado/selecionado pra
     // restaurar numa reabertura rápida (mesmo título, dentro do TTL). Só guarda
@@ -1233,7 +1244,8 @@ export function ExternalSearch({
         Buscar dados
       </Button>
 
-      <Sheet open={isOpen} onOpenChange={(open) => { if (!open) handleClose() }}>
+      <Sheet open={isOpen} onOpenChange={(open) => { if (!open) guard(handleClose) }}>
+        {guardDialog}
         {/* Largura 2xl (era xl): a galeria de capas do passo "multipick-covers" fica
             apertada em 576px. O Sheet já é full-height (side=right), então só a largura
             precisa crescer — mantém par com o UpdateDataDialog. */}
@@ -1576,16 +1588,21 @@ export function ExternalSearch({
           )}
 
           {(phase === "loading" || phase === "evaluating") && (
-            <div className="flex flex-col items-center justify-center py-16 gap-4 text-muted-foreground">
-              <Loader2 className="h-8 w-8 animate-spin" />
-              <div className="text-center">
-                <p className="font-medium text-sm">
-                  {phase === "evaluating"
-                    ? "Avaliando critérios com IA..."
+            <div className="flex flex-col items-center justify-center gap-4 py-10 text-muted-foreground">
+              <ScopedTaskStrip
+                running
+                elapsed={elapsed}
+                className="w-full"
+                label={
+                  phase === "evaluating"
+                    ? "Avaliando critérios com IA…"
                     : duplicateUpdateTarget
-                      ? "Buscando dados para atualizar..."
-                      : "Buscando dados externos..."}
-                </p>
+                      ? "Buscando dados para atualizar…"
+                      : "Buscando dados externos…"
+                }
+                note="Fique nesta tela. O que voltar aparece aqui e não fica salvo — fechando, você precisa rodar de novo."
+              />
+              <div className="text-center">
                 {phase === "loading" ? (
                   <p className="text-xs mt-1">
                     {pendingCandidate?.sources.length

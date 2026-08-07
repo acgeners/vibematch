@@ -62,6 +62,7 @@ import type { CriterionSlug } from "@/types/domain"
 import { computeMoodAdjusted, isMoodActive, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
 import { segmentTags, lowercasedNameSet, type TagStance } from "@/lib/tags/segment"
 import { cn } from "@/lib/utils"
+import { ScopedTaskStrip, useScopedGuard } from "@/components/tasks/scoped-task"
 import { CoverImage } from "@/components/ui/cover-image"
 import { fetchCompareWorks, type CompareWork } from "@/server/actions/compare"
 import { rerankClusterAction } from "@/server/actions/recommendations"
@@ -410,6 +411,17 @@ export function WorkCompareDrawer({
 
   const resetRows = () => updateRowsConfig(DEFAULT_ROWS_CONFIG)
 
+  // Request-scoped, e essa é a parte que engana: o desempate GRAVA um run quando
+  // "Salvar" está ligado, mas o entregável é o popup de veredito 1º/2º/3º — que
+  // não sobrevive a fechar o drawer. Por isso âmbar, não o indicador azul: dizer
+  // "pode navegar" aqui perderia o que a pessoa foi buscar.
+  const { guard, guardDialog, elapsed } = useScopedGuard({
+    running: reranking,
+    title: "Fechar agora perde o desempate",
+    what: "Desempatar com IA",
+    confirmLabel: "Fechar mesmo assim",
+  })
+
   // Desempate por IA: roda o re-ranker comparando só as obras do drawer
   // cabeça-a-cabeça (rerankClusterAction), depois re-fetcha pra repovoar a linha
   // "Veredito IA." com os scores/justificativas frescos. O destaque "Melhor/pior"
@@ -459,7 +471,11 @@ export function WorkCompareDrawer({
 
   return (
     <>
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet
+      open={open}
+      onOpenChange={(o) => (o ? onOpenChange(true) : guard(() => onOpenChange(false)))}
+    >
+      {guardDialog}
       <SheetContent
         side="bottom"
         className="h-screen max-h-screen gap-0 overflow-hidden p-0"
@@ -587,7 +603,7 @@ export function WorkCompareDrawer({
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => onOpenChange(false)}
+              onClick={() => guard(() => onOpenChange(false))}
               className="h-7 w-7"
               aria-label="Fechar"
             >
@@ -595,6 +611,14 @@ export function WorkCompareDrawer({
             </Button>
           </div>
         </SheetHeader>
+
+        <ScopedTaskStrip
+          running={reranking}
+          elapsed={elapsed}
+          label="Desempatando estas obras com IA…"
+          note="Fique neste painel. O veredito 1º/2º/3º aparece aqui — fechando agora, você precisa rodar de novo."
+          className="mx-4 mt-2"
+        />
 
         {moodRefine && isMoodActive(moodRefine) && <MoodSummaryBanner mood={moodRefine} />}
 

@@ -74,7 +74,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { archiveWork, setFavoriteMany, toggleFavorite, unarchiveWork } from "@/server/actions/works"
-import { rerankSingleWorkAction } from "@/server/actions/recommendations"
+import { useRerankSingleWork } from "@/components/ranking/use-rerank-single-work"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
 import { useIsAdmin, useCanWriteOwnState } from "@/components/layout/admin-context"
@@ -178,6 +178,31 @@ function scoreFor(work: WorkWithRelations, slug: string): number | null {
   const cs = (work.category_scores ?? []).find((c: CategoryScore) => c.criterion_slug === slug)
   return cs?.score != null ? Number(cs.score) : null
 }
+
+/**
+ * Item de menu do re-rank por IA.
+ *
+ * Precisa ser COMPONENTE, e não um `onClick` inline como era: o re-rank agora
+ * registra a tarefa no indicador global, e isso vem de um hook — que não roda
+ * dentro de um handler. O ganho não é organização: no formato antigo o menu
+ * fechava e a espera de ~14s (p90 47,9s) acontecia sem sinal nenhum na tela.
+ */
+function RerankMenuItem({ workId, workTitle }: { workId: string; workTitle: string }) {
+  const { isPending, run } = useRerankSingleWork(workId, workTitle)
+  return (
+    <DropdownMenuItem
+      disabled={isPending}
+      onClick={(e) => {
+        e.stopPropagation()
+        void run()
+      }}
+    >
+      <Sparkles className="h-4 w-4 mr-2" />
+      {isPending ? "Avaliando…" : "Avaliar Veredito IA"}
+    </DropdownMenuItem>
+  )
+}
+
 
 /** Acha o ancestral rolável (overflow-y auto/scroll). No layout do app o scroller
  *  é o <main>, NÃO o window — por isso restaurar window.scrollY não funcionava. */
@@ -1238,21 +1263,7 @@ function WorkListView({
                 <><Archive className="h-4 w-4 mr-2" />Arquivar</>
               )}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={async (e) => {
-                e.stopPropagation()
-                const result = await rerankSingleWorkAction(work.id)
-                if (result.error || !result.data) {
-                  toast.error(result.error ?? "Erro ao avaliar Veredito IA")
-                } else {
-                  toast.success(`Veredito IA: ${Math.round(result.data.alignmentScore)}`)
-                  refresh()
-                }
-              }}
-            >
-              <Sparkles className="h-4 w-4 mr-2" />
-              Avaliar Veredito IA
-            </DropdownMenuItem>
+            <RerankMenuItem workId={work.id} workTitle={work.title} />
               </>
             )}
             {/* Nomeia o grupo: numa obra que está em várias pastas, "Remover do grupo" sozinho

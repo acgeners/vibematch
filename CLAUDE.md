@@ -230,6 +230,11 @@ sidebar de 13 itens foi removida. A régua: **o topo é sobre obras, o avatar é
 Ranking · Recomendações); Preferências/Importar/Painel no menu do avatar; fila e curadoria como
 ÍCONE com contador (dentro de dropdown o número não é visto).
 
+⚠️ **Ação lenta na barra tem dono:** o chip e a faixa de tarefas em segundo plano vivem no
+`top-nav.tsx` e são desenhados por `components/tasks/top-nav-tasks.tsx`. Ver a seção
+**"Ação lenta tem DUAS cores"** — inclusive por que `components/tasks/sidebar-tasks.tsx` foi
+apagado (ficou órfão quando a sidebar saiu, e o feedback sumiu sem nada acusar).
+
 **A console `/curadoria`** (`components/curadoria/console-shell.tsx`) é o terceiro braço dessa régua,
 desde 2026-08-03 — o 🛠 da barra aponta pra ela. Sidebar PRÓPRIA de dois níveis com Visão geral ·
 Curadoria da Obra · Configurações (+ os 4 tópicos) · Uso da API IA · Métricas do modelo. Cada rota
@@ -286,6 +291,94 @@ types/domain.ts   – canonical domain types (partly GENERATED)
 scripts/sync-constants.js – DB → TypeScript code generator
 supabase/migrations/ – SQL migration history
 ```
+
+## Ação lenta tem DUAS cores, e elas dizem coisas opostas
+
+Toda ação que demora precisa dizer que está viva. Qual indicador usar depende de **uma
+pergunta só: o resultado sobrevive se a pessoa sair da tela?**
+
+| | **Azul — durável** | **Âmbar — request-scoped** |
+|---|---|---|
+| Critério | grava no banco enquanto roda | o resultado só existe na tela |
+| Onde mora | barra superior (segue a navegação) | dentro do diálogo/painel que disparou |
+| Promessa | "pode navegar, te aviso ao terminar" | "fique aqui, senão perde" |
+| Código | `lib/tasks-store.ts` + `components/tasks/top-nav-tasks.tsx` | `components/tasks/scoped-task.tsx` |
+
+Trocar as duas é um erro **silencioso e caro**: pôr uma ação scoped no azul é convidar a
+pessoa a navegar e jogar fora o trabalho dela; pôr uma durável no âmbar prende alguém numa
+tela por 33s à toa. **Não deduza pelo nome da action** — confira se ela escreve:
+`grep -E 'insert|upsert|update\(' ` no corpo dela. Foi assim que `proposeFavoriteGroups`,
+`suggestScoreWeights` e `suggestPostReadingWeights` mudaram de lado: parecem duráveis, só leem.
+
+### Azul: `runTask` (`lib/tasks-store.ts`)
+
+Store de MÓDULO (não estado de componente), então sobrevive à navegação client-side: o store
+DONA a promise, e o toast de conclusão + `refreshChrome()` rodam mesmo com a página que
+disparou já desmontada. Desenho no chrome: faixa indeterminada na borda de baixo do
+`<header sticky>` (periférica, segue o scroll) + chip com contador que abre o `TaskCard`
+sozinho por ~4,5s ao começar — o instante em que o olho ainda está no botão clicado.
+
+🔴 **As server actions daqui devolvem `{ error }` em vez de LANÇAR**, e o `runTask` só
+distingue falha por rejeição da promise. Sem `throw new Error(res.error)` dentro do `run`, o
+indicador anuncia **"pronto" para uma falha** — plausível, errado, sem log. (`refreshEmbeddings`
+é a exceção: essa lança.) Guardado por `tests/unit/ui/rerank-task-error.test.tsx`.
+
+⚠️ **`successToast: () => null` quando o desfecho tem mais de um tom.** Embeddings (nada a
+fazer / parcial / ok) e aplicação de clusters de tags (`errors[]` = sucesso PARCIAL) seriam
+achatados em "success" pelo toast padrão, e o caso de falha sumiria.
+
+⚠️ **Lote usa `setTaskProgress(id, done, total)`** → barra determinada + "3/12" no card. O
+`runTask` não conta sozinho; quem itera avisa. A função é no-op se a tarefa não está mais
+`running`, senão o laço do caller ressuscita tarefa já dispensada.
+
+### Âmbar: `useScopedGuard` + `ScopedTaskStrip` (`components/tasks/scoped-task.tsx`)
+
+🔴 **A porta de saída depende de a ação morar num modal ou solta na página, e isso não é
+intuitivo.** `Dialog`/`Sheet` do Radix são **modais**: o scrim já bloqueia clique fora, então
+o link da barra nem é alcançável — a porta real é **fechar o diálogo**. Só ação solta numa
+página usa `guardNavigation: true` (interceptação de clique em fase de captura). Ligar
+`guardNavigation` numa modal cria um interceptador global que nunca dispara: código morto com
+cara de proteção. Guardado por `tests/unit/orchestration/scoped-guard-placement.test.ts`.
+
+⚠️ **Fechar por fora do `onOpenChange` escapa da trava.** O X do `WorkCompareDrawer` chamava
+`onOpenChange(false)` direto — todo caminho de fechamento tem que passar pelo `guard`.
+
+🔴 **Voltar/avançar do browser NÃO é coberto** — limitação aceita, não esquecimento. Cobrir
+exigiria empurrar entrada falsa no histórico e interceptar `popstate`, o que quebra o botão de
+voltar para o app inteiro. `beforeunload` cobre fechar/recarregar a aba; o botão de voltar sai
+direto e perde o resultado.
+
+⚠️ **O cronômetro conta TICKS, não `Date.now() - início`**: o lint (`react-hooks/purity`)
+barra `Date.now()` no render. O preço é subcontar com a aba em segundo plano — aceitável,
+porque a faixa âmbar existe justamente para quem está olhando a tela.
+
+⚠️ **Cronômetro e não barra determinada**: nessas ações não dá pra saber quantas fontes vão
+responder, e progresso inventado mente pior do que progresso nenhum.
+
+### Cobertura atual
+
+**Azul (durável):** avaliar IA · recomendar (e por grupo) · digest · gerar tudo · buscar
+reviews · inferir tags · regerar sinopse · perfil de gosto · re-rank (obra, lote, cluster,
+re-rodar run) · Interesse em lote · deep dive · auditoria de calibração · relatório de viés ·
+regenerar artefatos calibrados · embeddings · aplicar clusters e grupos de tags ·
+enriquecimento em lote do `/import`.
+
+**Âmbar (scoped):** "Buscar dados" · "Atualizar dados" · desempate de cluster · sugerir grupos
+de favoritos · sugerir pesos (IA e pós-leitura).
+
+**Fora dos dois, de propósito:** recalc (tem `RecalcPendingControl` próprio na barra) · chat de
+recomendação (UI própria) · resolvedor Comix (job com painel de polling).
+
+🔴 **Pendências conhecidas, não escondidas:**
+1. **Reload zera o indicador azul** (store em memória). A ação continua e persiste; só o
+   desenho some. Reconstruir pede ler `ai_evaluations.status='processing'` no load.
+2. **Previsão de Interesse POR OBRA continua sem indicador.** `predictInterestWithToast` tem
+   confirmação de custo **recursiva** (a 1ª chamada volta `blocked_cost_confirmation`, abre
+   modal e re-chama a si mesma); uma tarefa em volta disso diria "rodando" enquanto um modal
+   espera clique. Precisa do helper refatorado antes. O LOTE já está ligado.
+3. **Latências medidas** (`ai_api_calls.latency_ms`, p50): perfil de gosto **33,4s** ·
+   ranking **14,0s** (p90 47,9s) · digest 13,4s · avaliação IA 17,5s · tags 7,6s · Interesse
+   4,9s. Deep dive **sem medição** (zero linhas locais).
 
 ## A query string do /ranking é um CONTRATO — e ela fala PONTOS
 

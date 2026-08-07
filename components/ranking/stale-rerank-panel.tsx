@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { rerankWorksBatchAction } from "@/server/actions/recommendations"
+import { runTask, setTaskProgress } from "@/lib/tasks-store"
+import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import { skipAiEvaluation } from "@/server/actions/ai"
 import type { AlignmentQueueWork } from "@/server/queries/recommendations"
 import { WorkQueueCard, type WorkQueueState } from "@/components/ai-evaluation/queue/work-queue-card"
@@ -21,6 +23,8 @@ import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
 type SortField = "default" | "expected" | "alignment"
 
 const PER_CALL_CHUNK = 10
+/** Um id só pros dois botões: "em lote" e "selecionadas" nunca rodam juntos. */
+const BATCH_TASK_ID = "rerank-batch"
 
 function fmtAlignmentAt(iso: string | null | undefined): string | null {
   if (!iso) return null
@@ -41,10 +45,57 @@ export function StaleRerankPanel({
   const { isRead, unmark } = useToggleRead("veredito", readIds)
   const [sortField, setSortField] = useState<SortField>("default")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
-  const [batchRunning, setBatchRunning] = useState(false)
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [queueSize, setQueueSize] = useState(10)
   const [skippingId, setSkippingId] = useState<string | null>(null)
+
+  // O lote é a ação mais longa do app: 14,0s de mediana por chamada de ranking
+  // (p90 47,9s), vezes N obras. O andamento saiu do estado LOCAL e foi pro store
+  // global justamente por isso — antes, sair da página levava junto o "3/12", que
+  // é a única informação que importa numa espera de minutos.
+  const tasks = useAppTasks()
+  const batchTask = tasks.find((t) => t.id === BATCH_TASK_ID)
+  const batchRunning = batchTask?.status === "running"
+  const progress = batchTask?.progress ?? null
+
+  const runBatch = (targetIds: string[], onSettled?: () => void) => {
+    if (targetIds.length === 0 || batchRunning) return
+    const total = targetIds.length
+    runTask({
+      id: BATCH_TASK_ID,
+      kind: "rerank-batch",
+      label: `Veredito IA: ${total} obra${total !== 1 ? "s" : ""}`,
+      run: async () => {
+        let ranked = 0
+        let failed = 0
+        setTaskProgress(BATCH_TASK_ID, 0, total)
+        for (let i = 0; i < targetIds.length; i += PER_CALL_CHUNK) {
+          const chunk = targetIds.slice(i, i + PER_CALL_CHUNK)
+          const result = await rerankWorksBatchAction(chunk)
+          // A action devolve `{ error }` em vez de lançar; sem converter, o store
+          // marcaria a falha como sucesso.
+          if (result.error || !result.data) throw new Error(result.error ?? "Erro ao re-rankear.")
+          ranked += result.data.ranked
+          failed += result.data.failed
+          setTaskProgress(BATCH_TASK_ID, Math.min(i + PER_CALL_CHUNK, total), total)
+        }
+        return { ranked, failed }
+      },
+      // Refresh nos DOIS caminhos: um lote que abortou no meio já persistiu as
+      // obras dos chunks anteriores, e a tela precisa mostrá-las.
+      onDone: () => {
+        refresh()
+        onSettled?.()
+      },
+      onError: () => {
+        refresh()
+        onSettled?.()
+      },
+      successToast: ({ ranked, failed }) => ({
+        message:
+          `${ranked} re-rankeada${ranked !== 1 ? "s" : ""}` + (failed > 0 ? ` · ${failed} falhou` : "."),
+      }),
+    })
+  }
 
   const handleSkip = async (workId: string) => {
     setSkippingId(workId)
@@ -88,79 +139,11 @@ export function StaleRerankPanel({
   const ids = useMemo(() => sortedWorks.map((w) => w.id), [sortedWorks])
   const selection = useWorkSelection(ids)
 
-  const handleRerankQueue = async () => {
-    // Fatia a lista VISÍVEL (sortedWorks), não a ordem crua do servidor — senão
-    // o lote processa N obras fora da tela e o topo que o usuário está olhando
-    // continua "Não avaliado" (a query da fila nem tem ORDER BY).
-    const targetIds = sortedWorks.slice(0, queueSize).map((w) => w.id)
-    if (targetIds.length === 0 || batchRunning) return
-    const total = targetIds.length
-    setBatchRunning(true)
-    setProgress({ done: 0, total })
-    let ranked = 0
-    let failed = 0
-    let aborted = false
-    try {
-      for (let i = 0; i < targetIds.length; i += PER_CALL_CHUNK) {
-        const chunk = targetIds.slice(i, i + PER_CALL_CHUNK)
-        const result = await rerankWorksBatchAction(chunk)
-        if (result.error || !result.data) {
-          toast.error(result.error ?? "Erro ao re-rankear.")
-          aborted = true
-          break
-        }
-        ranked += result.data.ranked
-        failed += result.data.failed
-        setProgress({ done: Math.min(i + PER_CALL_CHUNK, total), total })
-      }
-    } finally {
-      setBatchRunning(false)
-      setProgress(null)
-    }
-    if (!aborted) {
-      toast.success(
-        `${ranked} re-rankeada${ranked !== 1 ? "s" : ""} com sucesso` +
-          (failed > 0 ? ` · ${failed} falhou` : "."),
-      )
-    }
-    refresh()
-  }
-
-  const handleRerankSelected = async () => {
-    const selectedIds = selection.selectedIds
-    if (selectedIds.length === 0 || batchRunning) return
-    const total = selectedIds.length
-    setBatchRunning(true)
-    setProgress({ done: 0, total })
-    let ranked = 0
-    let failed = 0
-    let aborted = false
-    try {
-      for (let i = 0; i < selectedIds.length; i += PER_CALL_CHUNK) {
-        const chunk = selectedIds.slice(i, i + PER_CALL_CHUNK)
-        const result = await rerankWorksBatchAction(chunk)
-        if (result.error || !result.data) {
-          toast.error(result.error ?? "Erro ao re-rankear.")
-          aborted = true
-          break
-        }
-        ranked += result.data.ranked
-        failed += result.data.failed
-        setProgress({ done: Math.min(i + PER_CALL_CHUNK, total), total })
-      }
-    } finally {
-      setBatchRunning(false)
-      setProgress(null)
-      selection.clear()
-    }
-    if (!aborted) {
-      toast.success(
-        `${ranked} re-rankeada${ranked !== 1 ? "s" : ""}` +
-          (failed > 0 ? ` · ${failed} falhou` : "."),
-      )
-    }
-    refresh()
-  }
+  // Fatia a lista VISÍVEL (sortedWorks), não a ordem crua do servidor — senão o
+  // lote processa N obras fora da tela e o topo que o usuário está olhando
+  // continua "Não avaliado" (a query da fila nem tem ORDER BY).
+  const handleRerankQueue = () => runBatch(sortedWorks.slice(0, queueSize).map((w) => w.id))
+  const handleRerankSelected = () => runBatch(selection.selectedIds, () => selection.clear())
 
   if (works.length === 0) {
     return (
@@ -248,7 +231,7 @@ export function StaleRerankPanel({
 
           const actions = (
             <>
-              <RerankAiRkButton workId={w.id} hasScore={w.alignmentScore != null} />
+              <RerankAiRkButton workId={w.id} hasScore={w.alignmentScore != null} workTitle={w.title} />
               <Button
                 size="sm"
                 variant="outline"
