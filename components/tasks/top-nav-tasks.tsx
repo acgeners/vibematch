@@ -145,6 +145,15 @@ export function TasksChip() {
         // indicador não pode tomar o teclado de ninguém.
         onOpenAutoFocus={(e) => e.preventDefault()}
         onCloseAutoFocus={(e) => e.preventDefault()}
+        // 🔴 Sem isto a prévia NÃO APARECE nas ações que passam por um modal de
+        // custo, que são quase todas. `PopoverContentNonModal` do Radix fecha em
+        // `focusOutside` (o `preventDefault` que existe na fonte é da variante
+        // MODAL), e a sequência real é: modal de custo fecha → o Radix devolve o
+        // foco ao botão que o abriu → esse `focusin` cai fora da prévia recém-
+        // aberta → ela fecha em milissegundos. O chip continua lá, então o
+        // sintoma é "o popup não apareceu" — sem erro, sem log.
+        // Clique fora e Esc continuam fechando; só o foco deixa de fechar.
+        onFocusOutside={(e) => e.preventDefault()}
       >
         <TaskCard />
       </PopoverContent>
