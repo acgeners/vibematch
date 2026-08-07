@@ -245,14 +245,21 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
 
   return (
     <>
+      {/* Elástica: cresce até 460px e é a PRIMEIRA a ceder quando a barra aperta — os
+          destinos e os contadores não cedem nunca (ver a régua em top-nav.tsx). O
+          placeholder longo só entra quando cabe inteiro; truncá-lo diria menos que o
+          texto curto. Era `md:min-w-[168px]` fixo, o menor elemento da barra. */}
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="hidden items-center gap-2 rounded-lg border border-border/70 bg-card/50 px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:border-primary/45 hover:text-foreground md:flex md:min-w-[168px]"
+        className="hidden h-9 w-full min-w-[190px] max-w-[460px] items-center gap-2 rounded-lg border border-border/70 bg-card/50 px-3 text-sm text-muted-foreground transition-colors hover:border-primary/45 hover:text-foreground md:flex"
       >
         <Search className="size-4 shrink-0" />
-        <span>Buscar…</span>
-        <kbd className="ml-auto rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] font-semibold">
+        <span className="truncate">
+          <span className="hidden lg:inline">Buscar obras, ajustes e páginas</span>
+          <span className="lg:hidden">Buscar…</span>
+        </span>
+        <kbd className="ml-auto hidden shrink-0 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] font-semibold lg:inline">
           ⌘K
         </kbd>
       </button>

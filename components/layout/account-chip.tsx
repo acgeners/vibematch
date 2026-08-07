@@ -5,11 +5,13 @@
 import { useState, useTransition } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { BookOpenText, ChevronUp, Gauge, Info, Loader2, LogIn, LogOut, SlidersHorizontal, Sparkles, Upload, UserCircle, UserPlus } from "lucide-react"
+import { BookOpenText, ChevronUp, Clock, Gauge, Info, Loader2, LogIn, LogOut, SlidersHorizontal, Sparkles, Upload, UserCircle, UserPlus } from "lucide-react"
 import { getAccountSummary } from "@/server/actions/account"
 import type { AccountSummary } from "@/server/actions/account"
 import { signOutAction } from "@/server/actions/auth"
 import { useChromeData } from "@/lib/use-refresh"
+import { useChromeBadges } from "@/components/layout/chrome-badges"
+import { useIsSignedIn } from "@/components/layout/admin-context"
 import { RoleBadge } from "@/components/conta/role-badge"
 import {
   DropdownMenu,
@@ -44,6 +46,17 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
   const [summary, setSummary] = useState<AccountSummary | null>(null)
   const [imgError, setImgError] = useState(false)
   const [signingOut, startSignOut] = useTransition()
+  // A fila de recomendação mora AQUI e só aqui (antes: também como relógio na barra).
+  // O contador tem que aparecer no gatilho — dentro do menu ele só existe pra quem já
+  // abriu, e aí o item não convoca ninguém.
+  const { recQueue } = useChromeBadges()
+  // Sessão pelo CONTEXTO, não pelo `summary` abaixo: os dois fetches são independentes e
+  // o resumo da conta costuma chegar depois dos contadores — condicionar o badge a ele
+  // deixava a fila invisível numa janela real (pego por teste de render). O contexto é a
+  // mesma fonte que decide os destinos da barra, e é fail-closed: `recQueue` NÃO implica
+  // sessão sozinho (`getAlignmentQueueWorks` conta obras do catálogo), então sem este
+  // gate um visitante veria o número do dono.
+  const sessionKnown = useIsSignedIn()
 
   // Re-busca o resumo da conta a cada navegação e quando uma mutação atualiza o
   // chrome (ex.: editar perfil/plano em /conta). Coalescing/lifecycle no hook.
@@ -87,16 +100,27 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          title={compact ? name : undefined}
-          aria-label={compact ? name : undefined}
+          title={compact ? (recQueue > 0 ? `${name} — ${recQueue} na fila de recomendação` : name) : undefined}
+          aria-label={compact ? (recQueue > 0 ? `${name}, ${recQueue} na fila de recomendação` : name) : undefined}
           className={cn(
-            "group flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors",
+            "group relative flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors",
             compact && "justify-center gap-0 px-0",
             active || "data-[state=open]:bg-sidebar-accent/70",
             active ? "bg-sidebar-accent/70" : "hover:bg-sidebar-accent/80",
           )}
         >
           {avatar()}
+          {sessionKnown && recQueue > 0 && (
+            <span
+              aria-hidden
+              className={cn(
+                "inline-flex min-w-[17px] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-[17px] text-primary-foreground shadow-sm",
+                compact ? "absolute -right-0.5 -top-0.5" : "order-last",
+              )}
+            >
+              {recQueue > 99 ? "99+" : recQueue}
+            </span>
+          )}
           {!compact && (
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-semibold text-sidebar-foreground">
@@ -151,6 +175,26 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
             <Loader2 className="animate-spin" />
             Carregando…
           </DropdownMenuItem>
+        )}
+
+        {/* Primeiro item, e separado do resto: é o único aqui que pede AÇÃO, e é ele que
+            explica o número no gatilho. Continua sendo pendência, não rotina — se virar
+            visita frequente, o lugar dela passa a ser um chip próprio na barra. */}
+        {sessionKnown && (
+          <>
+            <DropdownMenuItem asChild>
+              <Link href="/fila-recomendacao">
+                <Clock />
+                <span className="flex-1">Fila de recomendação</span>
+                {recQueue > 0 && (
+                  <span className="rounded-full bg-primary px-1.5 font-mono text-[11px] font-bold leading-5 text-primary-foreground tabular-nums">
+                    {recQueue > 99 ? "99+" : recQueue}
+                  </span>
+                )}
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
         )}
 
         {signedIn &&
