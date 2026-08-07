@@ -96,7 +96,11 @@ export function CurationMenu() {
   return (
     <Link
       href="/curadoria"
-      aria-current={active ? "page" : undefined}
+      // `aria-current="page"` só na PRÓPRIA `/curadoria`. O destaque visual é largo de
+      // propósito (o botão é a porta do modo, fica aceso lá dentro), mas anunciar
+      // "página atual" em `/settings` num link que leva pra outro lugar é mentira pra
+      // quem navega por leitor de tela.
+      aria-current={pathname === "/curadoria" ? "page" : undefined}
       title={label(pending, alerting)}
       aria-label={label(pending, alerting)}
       className={cn(

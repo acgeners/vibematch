@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync } from "node:fs"
 
 /**
  * Invariante arquitetural: TODA rota que aparece na sidebar da console `/curadoria`
@@ -26,6 +26,22 @@ function consoleHrefs(): string[] {
   const src = readFileSync(NAV, "utf8")
   const block = src.slice(src.indexOf("const ENTRIES"), src.indexOf("\n]", src.indexOf("const ENTRIES")))
   return [...block.matchAll(/href:\s*"([^"]+)"/g)].map((m) => m[1]!)
+}
+
+/** Todo `app/**‍/layout.tsx` que monta a shell da console, em caminho relativo à raiz. */
+function shellLayouts(): string[] {
+  const found: string[] = []
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = `${dir}/${entry.name}`
+      if (entry.isDirectory()) walk(path)
+      else if (entry.name === "layout.tsx" && /CuradoriaConsole/.test(readFileSync(path, "utf8"))) {
+        found.push(path)
+      }
+    }
+  }
+  walk("app")
+  return found
 }
 
 /** Os prefixos que o proxy protege. */
@@ -65,6 +81,32 @@ describe("arquitetura: a console /curadoria é gateada no proxy", () => {
       }
     }
     expect(missing, `prefixos gateados sem a shell: ${missing.join(", ")}`).toEqual([])
+  })
+
+  /**
+   * Layout no App Router ANINHA. Um `layout.tsx` que monta a shell dentro de uma rota
+   * cujo pai já a monta desenha a console DUAS VEZES — duas sidebars lado a lado.
+   *
+   * Aconteceu com `/curadoria/pedidos`: o layout próprio parecia necessário ("entra na
+   * console"), mas `app/curadoria/layout.tsx` já cobre todo `/curadoria/*`. Nada falha
+   * — nem build, nem gate, nem teste de rota; só a página fica errada, e só pra quem
+   * abre aquela rota específica. Foi um humano olhando a tela que pegou.
+   *
+   * Varredura de arquivo é o método CERTO aqui (ao contrário do contador no gatilho,
+   * que precisou de render): a pergunta é sobre a árvore de arquivos, e é exatamente
+   * isso que o Next usa pra decidir o aninhamento.
+   */
+  it("a shell não é montada duas vezes na mesma rota", () => {
+    const layouts = shellLayouts()
+    expect(layouts.length, "nenhum layout monta a shell — o walk quebrou?").toBeGreaterThan(0)
+
+    const nested = layouts.filter((l) =>
+      layouts.some((parent) => parent !== l && l.startsWith(parent.replace(/layout\.tsx$/, ""))),
+    )
+    expect(
+      nested,
+      `layout aninhado sob outro que já monta a console (sidebar duplicada): ${nested.join(", ")}`,
+    ).toEqual([])
   })
 
   it("a shell continua checando o papel — o proxy é fail-open no caso ambíguo", () => {
