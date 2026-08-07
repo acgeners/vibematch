@@ -434,12 +434,7 @@ const BALANCE_COLS = "id, anthropic_balance_usd, anthropic_balance_set_at"
 
 /**
  * A linha de `user_settings` que guarda o saldo do OPERADOR — a marcada com
- * `is_operator`, quando essa coluna existir.
- *
- * ⚠️ **A coluna ainda NÃO está no repositório** (2026-08-07): a migration que a cria foi
- * escrita e conferida no local, mas fica para o PR seguinte. Até lá, TODO ambiente cai no
- * fallback abaixo — que é o comportamento atual, idêntico ao de antes. Este código entra
- * no ar sem depender dela de propósito.
+ * `is_operator` (migration 180).
  *
  * 🔴 **Leitura e escrita TÊM que resolver a MESMA linha, e por muito tempo não
  * resolviam.** A leitura pegava a linha mais antiga; a escrita (`setAnthropicBalance`)
@@ -453,43 +448,44 @@ const BALANCE_COLS = "id, anthropic_balance_usd, anthropic_balance_set_at"
  * `lib/plans/roles.ts`), não um dado pessoal; quando existir carteira POR USUÁRIO ela
  * será outra coluna, com outro dono, e não passa por aqui.
  *
- * ## Por que ainda há fallback pra "linha mais antiga"
+ * ## Por que não há mais fallback pra "linha mais antiga"
  *
- * As migrations são aplicadas À MÃO neste projeto, então existe uma janela em que o
- * código está no ar e a coluna não. Sem tolerância, o saldo apareceria como "nunca
- * informado" e o ponto de alerta da barra apontaria pro nada — parecendo bug de dado.
- * Mesma estratégia da migration 140 em `getCurrentRole`.
+ * Havia um, enquanto a migration 180 não estava aplicada — as migrations aqui sobem à
+ * mão, então existe sempre uma janela em que o código está no ar e a coluna não.
+ * Confirmado na nuvem em 2026-08-07 (`is_operator` existe, 1 linha marcada, índice único
+ * presente), ele saiu — e sair é o ponto, não a limpeza: enquanto existia, perder a marca
+ * (restauração malfeita, `update` manual) fazia o app **voltar em silêncio** à convenção
+ * que a migration veio justamente aposentar. O problema seguiria invisível, servindo o
+ * valor certo pelo motivo errado, até o dia em que a linha mais antiga não fosse mais a do
+ * operador.
  *
- * O fallback dispara em DOIS casos, e os dois têm a mesma resposta: coluna inexistente ou
- * coluna existente sem ninguém marcado (backfill não rodou). Um erro transitório também
- * cai aqui — e aí a consulta legada falha junto, então o problema continua aparecendo em
- * vez de virar silêncio. ⚠️ **Remover este fallback exige antes confirmar `is_operator` na
- * NUVEM**, não só no local ([[project-conferir-migration-na-nuvem]]).
+ * Agora "ninguém marcado" é estado ANÔMALO e **avisa**: o `console.warn` abaixo distingue
+ * "não achei a linha" de "erro na consulta", que é a diferença entre configuração e
+ * infraestrutura na hora de diagnosticar. Quem chama cai pro estado "saldo nunca
+ * informado", que é o mesmo desfecho de sempre — só que agora com rastro.
  */
 async function fetchOperatorSettingsRow(): Promise<OperatorSettingsRow | null> {
   const supabase = createAdminClient()
 
-  const flagged = await supabase
+  const { data, error } = await supabase
     .from("user_settings")
     .select(BALANCE_COLS)
     .eq("is_operator", true)
     .limit(1)
     .maybeSingle()
 
-  if (!flagged.error && flagged.data) return flagged.data as OperatorSettingsRow
-
-  const { data, error } = await supabase
-    .from("user_settings")
-    .select(BALANCE_COLS)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
   if (error) {
-    console.warn(`[ai-usage] saldo indisponível (colunas ausentes?): ${error.message}`)
+    console.warn(`[ai-usage] saldo indisponível: ${error.message}`)
     return null
   }
-  return (data as OperatorSettingsRow | null) ?? null
+  if (!data) {
+    console.warn(
+      "[ai-usage] nenhuma linha de user_settings com is_operator = true — o saldo do " +
+        "operador não tem onde morar. Ver migration 180.",
+    )
+    return null
+  }
+  return data as OperatorSettingsRow
 }
 
 /**
