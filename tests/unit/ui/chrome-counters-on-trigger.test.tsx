@@ -42,6 +42,11 @@ import { CurationMenu } from "@/components/layout/curation-menu"
  * dentro de um dropdown o número não é visto") continua verdadeira, e o que a resolve
  * é o badge subir pro gatilho. Se o badge sumir, os ícones soltos têm que voltar.
  *
+ * ⚠️ O dropdown de Curadoria já nem existe mais — virou botão-link pra `/curadoria`,
+ * porque curadoria é MODO e não ação pontual. Isso não afrouxa a invariante, aperta:
+ * sem menu pra abrir, o badge é o único aviso de que há trabalho lá dentro. (O avatar
+ * segue sendo dropdown, e para ele a regra vale na forma original.)
+ *
  * 🔴 **Isto é teste de RENDER de propósito.** A primeira versão era varredura de
  * source procurando `recQueue > 0` no trecho do gatilho — e passava com o badge
  * desligado (`signedIn && false &&`), porque o mesmo `recQueue > 0` aparecia no
@@ -75,9 +80,13 @@ describe("contador do chrome aparece sem abrir o menu", () => {
     expect(screen.queryByText("3")).toBeNull()
   })
 
-  it("Curadoria soma no gatilho o que o menu detalha", () => {
-    // 2 na fila de atributos + 1 pedido do leitor = 3 esperando decisão. Somar é o que
-    // impede que um Pedido pendente fique invisível pra quem não abre o menu.
+  it("Curadoria soma no gatilho o que a Visão geral detalha", () => {
+    // 2 na fila de atributos + 1 pedido do leitor = 3 esperando decisão.
+    //
+    // Desde que o dropdown virou botão-link (2026-08-07), este número é o ÚNICO sinal
+    // de que há trabalho na console pra quem está fora dela — não há mais menu pra abrir
+    // e conferir. As duas parcelas saem de `DECISION_QUEUES`, a mesma lista que a Visão
+    // geral itera, então o badge nunca aponta pra uma página que não o explica.
     Object.assign(badges, { curadoria: 2, requests: 1 })
     render(<CurationMenu />)
     expect(screen.getByText("3")).toBeDefined()
