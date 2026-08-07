@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { DECISION_QUEUES } from "@/lib/curadoria/decision-queues"
 
 /**
  * Invariante arquitetural: TODA rota que aparece na sidebar da console `/curadoria`
@@ -81,6 +82,24 @@ describe("arquitetura: a console /curadoria é gateada no proxy", () => {
       }
     }
     expect(missing, `prefixos gateados sem a shell: ${missing.join(", ")}`).toEqual([])
+  })
+
+  /**
+   * A sidebar mostra o badge de cada fila indexando por `href`. Se a rota de uma fila
+   * mudar em `DECISION_QUEUES` e a `ENTRIES` da sidebar não acompanhar, a chave deixa
+   * de casar: `undefined` vira zero pelo `?? 0`, e zero não desenha badge nenhum. A
+   * pendência some da tela feita pra mostrá-la, sem erro e sem log.
+   *
+   * Só nesta direção: `/settings` tem badge e NÃO é fila de decisão (é pendência de
+   * configuração), então a sidebar legitimamente tem entradas fora da lista.
+   */
+  it("toda fila de decisão tem entrada correspondente na sidebar da console", () => {
+    const hrefs = consoleHrefs()
+    const missing = DECISION_QUEUES.filter((q) => !hrefs.includes(q.href)).map((q) => q.href)
+    expect(
+      missing,
+      `fila de DECISION_QUEUES sem entrada na sidebar (badge não aparece): ${missing.join(", ")}`,
+    ).toEqual([])
   })
 
   /**

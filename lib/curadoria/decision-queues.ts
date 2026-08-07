@@ -71,3 +71,17 @@ export const DECISION_QUEUES: readonly DecisionQueue[] = [
 export function totalPendingDecisions(counts: Record<DecisionQueueKey, number>): number {
   return DECISION_QUEUES.reduce((sum, q) => sum + (counts[q.key] ?? 0), 0)
 }
+
+/**
+ * As contagens indexadas por ROTA, para quem mostra badge em item de navegação.
+ *
+ * A sidebar da console montava esse mapa à mão, com os `href` redigitados. Um `href`
+ * daqui mudando (ou um typo lá) fazia o badge da sidebar simplesmente sumir: chave que
+ * não casa devolve `undefined`, `?? 0` transforma em zero, e zero não desenha nada. Sem
+ * erro, sem log — a pendência fica invisível justamente na tela feita pra mostrá-la.
+ */
+export function decisionCountsByHref(
+  counts: Record<DecisionQueueKey, number>,
+): Record<string, number> {
+  return Object.fromEntries(DECISION_QUEUES.map((q) => [q.href, counts[q.key] ?? 0]))
+}

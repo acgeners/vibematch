@@ -22,6 +22,7 @@ import {
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { ACCENT_STYLES } from "@/components/console/console-registry"
+import { decisionCountsByHref } from "@/lib/curadoria/decision-queues"
 import type { SettingsAccent } from "@/lib/settings-accent"
 import { useChromeBadges } from "@/components/layout/chrome-badges"
 import { cn } from "@/lib/utils"
@@ -147,9 +148,13 @@ export function ConsoleNav({ settingsGroups, defaultSettingsGroup }: ConsoleNavP
   const pathname = usePathname() ?? ""
   const { settings, settingsByGroup, curadoria, requests } = useChromeBadges()
 
+  // As filas saem de `DECISION_QUEUES` — a mesma lista que o badge da barra soma e que a
+  // Visão geral detalha. Redigitar os `href` aqui é como o badge da sidebar some sozinho:
+  // chave que não casa vira `undefined`, o `?? 0` vira zero, e zero não desenha nada.
+  // `/settings` fica de fora da lista de propósito: é pendência de CONFIGURAÇÃO, tem badge
+  // próprio e não é fila de decisão sobre obra.
   const counts: Record<string, number> = {
-    "/ai-evaluation": curadoria,
-    "/curadoria/pedidos": requests,
+    ...decisionCountsByHref({ curadoria, requests }),
     "/settings": settings,
   }
 
