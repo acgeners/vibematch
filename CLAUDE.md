@@ -225,10 +225,41 @@ linha em `user_settings`, caso que só `isCurrentUserAdmin()` resolve, pois prec
 mesma banda quer dizer "quase em dia" (você está alcançando os lançamentos, não terminando).
 
 **A navegação é uma BARRA SUPERIOR** (`components/layout/top-nav.tsx`), desde 2026-08-02 — a
-sidebar de 13 itens foi removida. A régua: **o topo é sobre obras, o avatar é sobre você, a console
-é sobre o catálogo dos outros.** Cinco entradas no topo (Início · Minha lista ▾ · Explorar ▾ ·
-Ranking · Recomendações); Preferências/Importar/Painel no menu do avatar; fila e curadoria como
-ÍCONE com contador (dentro de dropdown o número não é visto).
+sidebar de 13 itens foi removida. A régua original ("o topo é sobre obras, o avatar é sobre você")
+**quebrava no primeiro item** — "Minha lista" era sobre VOCÊ e morava no topo — e foi trocada em
+2026-08-07 por uma régua de **pergunta**, não de assunto:
+
+| Zona | Pergunta | O que entra |
+|---|---|---|
+| Esquerda | "pra onde eu vou?" | destinos, máx. 5, **todos planos** — sem dropdown |
+| Centro | "onde está aquilo?" | a busca (⌘K), elástica 190–460px |
+| Direita | "o que está acontecendo?" | só o que tem **número ou estado** |
+| Avatar | "coisas minhas" | conta, preferências, importar, painel, **a fila de recomendação** |
+
+Hoje: `Acompanhamento · Favoritos · Catálogo · Ranking · Recomendações`, com **o logo fazendo o
+papel de Início** (`aria-current` + estado ativo). Saíram: "Minha lista ▾" (enterrava os destinos
+nº 1 e nº 2 um clique abaixo), "Explorar ▾" (menu de UM item) e o relógio da fila (que duplicava
+um item que já estava dentro do menu).
+
+⚠️ **Destino que não funciona pra quem está vendo não ocupa vaga.** `/recommendations` é per-user
+do topo ao rodapé e `/ranking` ordena pela Nota Prevista com presets de alguém — então os dois
+exigem `requiresSignedIn`, no topo **e** na bottom-nav. Ao visitante sobra Catálogo + busca +
+"Entrar". Guardado por `tests/unit/orchestration/top-nav-regua.test.ts`.
+
+🔴 **A regra "ícone e não item de menu, porque dentro de dropdown o número não é visto" continua
+verdadeira** — o que mudou é que agora o **contador vive no gatilho**. Foi isso que permitiu
+recolher fila de curadoria + saldo + alerta de fontes no `CurationMenu` (badge = curadoria +
+pedidos, ponto âmbar para saldo/fonte) e a fila de recomendação no avatar. **Se o badge sair, os
+ícones soltos têm que voltar.** Guardado por `tests/unit/ui/chrome-counters-on-trigger.test.tsx`
+— e é teste de RENDER de propósito: a primeira versão varria o source atrás de `recQueue > 0` e
+passava com o badge desligado, satisfeita pela mesma expressão no `title` do botão.
+
+⚠️ **A ordem do sacrifício.** Quando a barra não cabe, cede nesta ordem: rótulo do "Recalcular
+notas" → nome no avatar → rótulo de "Curadoria" → a busca vira ícone. **Os destinos e os
+contadores nunca cedem** — por isso a nav é `shrink-0` e quem encolhe é a busca. Na 1ª versão era
+o contrário e o texto do link transbordava por cima do vizinho, sem nada acusar. Medido em 14
+combinações papel × largura: o pior caso (Curador em 980px com recalc + tarefa + saldo baixo +
+Comix instável) fecha em 968 de 978px.
 
 ⚠️ **Ação lenta na barra tem dono:** o chip e a faixa de tarefas em segundo plano vivem no
 `top-nav.tsx` e são desenhados por `components/tasks/top-nav-tasks.tsx`. Ver a seção
