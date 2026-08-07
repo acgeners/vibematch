@@ -688,21 +688,29 @@ Post-processing applied to every evaluation (in `service.ts`):
   **174**, 2026-08-02): antes eram três `Set`s hardcoded em `lib/ai-evaluation/adult-content-rules.ts`,
   enquanto o FLAG `works.is_adult` já lia `tags.adult_indicator[_strong]` do banco — as duas fontes
   divergiam, e tag nova classificada pelo enricher afetava o flag mas nunca o piso da nota.
-  🔴 **A 174 ainda NÃO está aplicada na nuvem** (conferido 08-02); é aditiva, então aplicar ANTES
-  do deploy do código. Ver [[project-conferir-migration-na-nuvem]].
+✅ **A 174 está aplicada na nuvem** (confirmado 2026-08-07). Esta seção afirmou o contrário
+por dias — ver o aviso logo abaixo.
 
-🔴 **As migrations 175 e 176 também estão pendentes na nuvem** (03-08), aplicadas e conferidas SÓ
-no local. Ambas dão dono a dado pessoal, e **o código depende das duas**:
+✅ **As migrations 174, 175 e 176 estão aplicadas na nuvem** (confirmado 2026-08-07). Este bloco
+dizia "pendentes" desde 08-02/03-08 e **continuou dizendo depois de aplicadas** — um 🔴 falso que
+carrega em toda sessão e induz a reaplicar migration ou a segurar deploy sem motivo. O que cada
+uma fez, que segue valendo:
 
-| # | Tabela | Sem ela | Ordem |
-|---|---|---|---|
-| 174 | `tags.adult_score_tier` | aditiva, código tolera | qualquer |
-| 175 | `recommendation_chats.user_id` | insert do chat FALHA, listagem quebra | antes do deploy |
-| 176 | `ai_eval_read_acks.user_id` | "marcar como lido" FALHA (`user_id` NOT NULL) | antes do deploy |
+| # | Tabela | O que trouxe |
+|---|---|---|
+| 174 | `tags.adult_score_tier` | tirou do código os três `Set`s de piso/teto por tag |
+| 175 | `recommendation_chats.user_id` | deu dono ao chat (sem ela o insert falhava) |
+| 176 | `ai_eval_read_acks.user_id` | deu dono ao "marcar como lido" |
 
-⚠️ A 176 **troca a PRIMARY KEY** de `(work_id, queue)` para `(user_id, work_id, queue)`, e o
-`onConflict` do upsert em `server/actions/ai-eval-read.ts` acompanha. Aplicar o código sem a
-migration (ou vice-versa) troca "ack de cada um" por "último que clicou vence", em silêncio.
+⚠️ A 176 **trocou a PRIMARY KEY** de `(work_id, queue)` para `(user_id, work_id, queue)`, e o
+`onConflict` do upsert em `server/actions/ai-eval-read.ts` acompanha. Os dois já estão no ar
+juntos; separá-los de novo (revert de um só) troca "ack de cada um" por "último que clicou
+vence", em silêncio.
+
+🔴 **Lição de manutenção, mais cara que as migrations em si:** status de migration envelhece e
+**nada avisa**. Um bloco 🔴 desatualizado é pior que ausência de bloco, porque ele é lido como
+verdade conferida. Ao anotar pendência aqui, escreva a **data** e a **forma de conferir**
+([[project-conferir-migration-na-nuvem]]) — e apague o aviso no mesmo PR que aplica.
 - `enforceR19AdultContentRule`: raises `adult_content` to ≥ 7.0 if R19 marker detected anywhere in input
 - `enforceExternalContentRatingRule`: raises `adult_content` to a floor from the accepted external sources' content rating (MangaDex `contentRating` / ComicK `content_rating`) — `suggestive`→5, `erotica`→7, `pornographic`→8. Chained with the R19 rule; both are monotonic so the effective floor is the max of whichever triggered.
 - `enforceNeutralCoupleDynamicsWhenNoRomance`: raises `couple_dynamics` to 5.0 when romance ≤ 3 and couple_dynamics < 5
