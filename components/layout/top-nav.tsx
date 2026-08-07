@@ -22,6 +22,7 @@ import { useIsAdmin, useIsSignedIn } from "@/components/layout/admin-context"
 import { RecalcPendingControl } from "@/components/recalc/recalc-pending-control"
 import { LogoMark } from "@/components/ui/logo-mark"
 import { GlobalSearch } from "@/components/search/global-search"
+import { TasksChip, TasksProgressBar } from "@/components/tasks/top-nav-tasks"
 import type { SearchEntry } from "@/server/queries/search-index"
 import {
   DropdownMenu,
@@ -136,6 +137,11 @@ export function TopNav({ searchIndex }: { searchIndex: SearchEntry[] }) {
               ícones à direita são estados que pedem atenção (fila, curadoria, saldo). */}
           <GlobalSearch index={searchIndex} />
 
+          {/* Tarefas em segundo plano. Fica ANTES das ferramentas porque não é um
+              estado do catálogo — é uma coisa que VOCÊ acabou de disparar, e o
+              olho volta pra cá logo depois do clique. Ver components/tasks/top-nav-tasks.tsx. */}
+          <TasksChip />
+
           {/* Ferramentas do dono. Ficam como ÍCONE e não como item de menu porque o que
               importa nelas é o contador — dentro de um dropdown o número não é visto. */}
           {isAdmin && recalcPending && (
@@ -199,6 +205,11 @@ export function TopNav({ searchIndex }: { searchIndex: SearchEntry[] }) {
           <AccountChip compact />
         </div>
       </div>
+
+      {/* Faixa indeterminada na borda de baixo do header. Absoluta contra o
+          <header> (que é `sticky`, logo posicionado), então acompanha o scroll e
+          a navegação sem ocupar uma linha de layout. */}
+      <TasksProgressBar />
     </header>
   )
 }
