@@ -6,9 +6,13 @@ import { formatUsd } from "@/components/settings/ai-usage/format"
 import { SETTINGS_GROUPS, findSection, groupIdOfSection } from "@/app/settings/sections"
 import { getCuradoriaBadgeUnreadCount } from "@/server/queries/ai-eval-read"
 import { getSettingsItemUnread } from "@/server/queries/settings-read"
-import { getAiUsageTotals } from "@/server/queries/ai-usage"
+import { getAiUsageTotals, getAnthropicBalanceStatus } from "@/server/queries/ai-usage"
+import { countOpenCurationRequests } from "@/server/queries/curation-requests"
 import { getRecalcPendingState } from "@/server/recalc/queue"
 import { getComixStatus } from "@/lib/external/comix-gate"
+import { balanceTone } from "@/lib/ai-usage/balance"
+import { DECISION_QUEUES } from "@/lib/curadoria/decision-queues"
+import type { DecisionQueueKey } from "@/lib/curadoria/decision-queues"
 import { cn } from "@/lib/utils"
 
 export const metadata = { title: "Curadoria do catálogo — SatorIA" }
@@ -24,18 +28,33 @@ export const metadata = { title: "Curadoria do catálogo — SatorIA" }
  * MESMA dos badges da sidebar, então o número aqui e o da esquerda nunca discordam.
  * Não inventar contagem nova aqui: `getSettingsItemPending` puxa LINHAS (não
  * `count: exact`) e é uma das leituras mais caras do app (§Egress do CLAUDE.md).
+ *
+ * 🔴 **Esta página tem que explicar o badge do gatilho de Curadoria, INTEIRO.** O
+ * badge soma `curadoria + requests` (`curation-menu.tsx`), e por um tempo os Pedidos
+ * não apareciam aqui: um "3" no botão podia ser 3 pedidos de leitor, e a página que
+ * deveria dizer o que fazer não os mencionava. Ao somar parcela nova no badge, some
+ * também em `buildDecisions` — senão o número vira um alarme sem destino.
+ *
+ * ⚠️ O saldo custa uma leitura paginada a mais de `ai_api_calls` (a janela desde o
+ * último rebaseamento), sobreposta à que `getAiUsageTotals` já faz. É redundância
+ * conhecida e limitada: a janela do saldo é subconjunto da all-time, e a página é
+ * curador-only. Se um dia pesar, o corte é `getAiUsageTotals` devolver as linhas
+ * cruas e o saldo agregar em cima — não é tirar o número daqui.
  */
 export default async function CuradoriaPage() {
-  const [curadoria, unread, usage, recalc] = await Promise.all([
+  const [curadoria, requests, unread, usage, balance, recalc] = await Promise.all([
     getCuradoriaBadgeUnreadCount().catch(() => 0),
+    countOpenCurationRequests().catch(() => 0),
     getSettingsItemUnread().catch(() => ({}) as Record<string, number>),
     getAiUsageTotals().catch(() => null),
+    getAnthropicBalanceStatus().catch(() => null),
     getRecalcPendingState().catch(() => ({ pending: false, lastEditAt: null })),
   ])
   const comix = getComixStatus().state
 
   const settingsTotal = Object.values(unread).reduce((sum, n) => sum + n, 0)
-  const decisions = buildDecisions(curadoria, unread)
+  const decisions = buildDecisions({ curadoria, requests }, unread)
+  const tone = balanceTone(balance?.remainingUsd)
 
   return (
     <div className="w-full max-w-5xl">
@@ -66,11 +85,21 @@ export default async function CuradoriaPage() {
           accent="amber"
           emphasis={settingsTotal > 0}
         />
+        {/* O VALOR é o saldo, não o gasto: este tile é onde aterrissa o ponto colorido
+            do gatilho de Curadoria, e o alerta é sobre o que RESTA. O gasto de 30 dias
+            continua aqui como nota — é o contexto que dá escala ao saldo ("US$ 4 restantes"
+            significa coisas opostas se o mês custou US$ 2 ou US$ 40). A contagem de
+            chamadas saiu; ela vive em /ai-usage, que é o destino do clique. */}
         <Tile
-          label="IA · 30 dias"
-          value={usage ? formatUsd(usage.last30d.totalCostUsd) : "—"}
-          note={usage ? `${usage.last30d.nCalls.toLocaleString("pt-BR")} chamadas` : "indisponível"}
-          accent="emerald"
+          label="Saldo Anthropic"
+          value={balance?.remainingUsd != null ? formatUsd(balance.remainingUsd) : "—"}
+          note={
+            balance?.remainingUsd == null
+              ? "nunca informado — defina em Uso da API IA"
+              : `${usage ? formatUsd(usage.last30d.totalCostUsd) : "—"} gastos em 30 dias`
+          }
+          accent={tone === "negative" ? "rose" : tone === "low" ? "amber" : "emerald"}
+          emphasis={tone === "negative" || tone === "low"}
         />
         <Tile
           label="Recálculo"
@@ -91,7 +120,8 @@ export default async function CuradoriaPage() {
         </h2>
         {decisions.length === 0 ? (
           <p className="rounded-xl border border-dashed border-border/70 bg-card/40 px-4 py-5 text-sm text-muted-foreground">
-            Nada pendente. Toda fila de curadoria está zerada ou já foi marcada como lida.
+            Nada pendente. As filas estão zeradas (ou já marcadas como lidas) e não há pedido
+            de leitor em aberto.
           </p>
         ) : (
           <ul className="space-y-2">
@@ -141,21 +171,31 @@ interface Decision {
 }
 
 /**
- * A fila de atributos + toda pendência NÃO-LIDA de /settings, cada uma linkando
- * direto pro tópico dona. Título/descrição saem do `SETTINGS_GROUPS` em vez de
- * serem redigitados aqui: repetir o texto criaria uma segunda verdade que sai de
- * sincronia com a página no primeiro ajuste de rótulo.
+ * As filas do badge (via `DECISION_QUEUES`) mais toda pendência NÃO-LIDA de
+ * /settings, cada uma linkando direto pro tópico dona.
+ *
+ * 🔴 **Nenhuma das duas metades é enumerada aqui, e é isso que as mantém honestas.**
+ * As filas saem de `DECISION_QUEUES` — a MESMA lista que o badge do gatilho soma, então
+ * uma fila nova aparece nos dois lugares ou em nenhum. Os tópicos saem do
+ * `SETTINGS_GROUPS`. Redigitar qualquer um dos dois criaria uma segunda verdade que sai
+ * de sincronia no primeiro ajuste de rótulo — foi exatamente assim que os Pedidos
+ * entraram no badge e nunca chegaram nesta página.
  */
-function buildDecisions(curadoria: number, unread: Record<string, number>): Decision[] {
+function buildDecisions(
+  counts: Record<DecisionQueueKey, number>,
+  unread: Record<string, number>,
+): Decision[] {
   const rows: Decision[] = []
 
-  if (curadoria > 0) {
+  for (const queue of DECISION_QUEUES) {
+    const count = counts[queue.key] ?? 0
+    if (count <= 0) continue
     rows.push({
-      href: "/ai-evaluation",
-      title: "Avaliar atributos",
-      description: "obras sem os 9 critérios de IA, ou com avaliação aguardando revisão",
-      count: curadoria,
-      accent: "violet",
+      href: queue.href,
+      title: queue.title,
+      description: queue.description,
+      count,
+      accent: queue.accent,
     })
   }
 

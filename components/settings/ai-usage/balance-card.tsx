@@ -5,6 +5,7 @@ import { useRefresh } from "@/lib/use-refresh"
 import { useState, useTransition } from "react"
 import { setAnthropicBalance } from "@/server/actions/account"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
+import { LOW_BALANCE_USD } from "@/lib/ai-usage/balance"
 import { cn } from "@/lib/utils"
 
 function formatUsd(value: number): string {
@@ -22,8 +23,9 @@ function formatDateTime(iso: string): string {
   })
 }
 
-// Limiar de "saldo baixo" pra colorir o restante em alerta.
-const LOW_BALANCE_USD = 5
+// Limiar compartilhado com o ponto do gatilho de Curadoria e o tile da Visão geral.
+// Este card mantém os booleanos próprios (ele é o EDITOR do saldo, com estado de
+// formulário), mas o NÚMERO tem que ser o mesmo — ver lib/ai-usage/balance.ts.
 
 export function BalanceCard({ status }: { status: BalanceStatus }) {
   const refresh = useRefresh()

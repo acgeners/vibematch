@@ -254,6 +254,39 @@ pedidos, ponto âmbar para saldo/fonte) e a fila de recomendação no avatar. **
 — e é teste de RENDER de propósito: a primeira versão varria o source atrás de `recQueue > 0` e
 passava com o badge desligado, satisfeita pela mesma expressão no `title` do botão.
 
+⚠️ **Curadoria é MODO, não ação pontual — e por isso o `CurationMenu` deixou de ser menu**
+(2026-08-07). Hoje é um **botão-link** pra `/curadoria`: badge + ponto colorido, sem dropdown.
+Três coisas convergiram:
+
+1. **A régua da própria barra o contradizia.** A zona direita responde "o que está acontecendo?"
+   — *só o que tem número ou estado*. Seis links de navegação são a pergunta da zona ESQUERDA.
+   O badge pertencia ali; os destinos, não. Eles entraram de carona quando o menu foi criado
+   pra consolidar três SINAIS (fila, saldo, saúde de fonte).
+2. **O curador também é leitor, e os dois focos não se intercalam.** Ninguém "gerencia um pouco
+   enquanto procura o que ler". Oferecer atalhos pra dentro da console a partir de qualquer tela
+   comunicava o contrário e enfraquecia a console, que já é o lugar.
+3. **A conta de cliques nunca sustentou o menu**: 2 cliques em 5 dos 6 destinos, igual ao
+   botão-link — o dropdown só ganhava na Visão geral, o destino menos visitado.
+
+🔴 **O que mudou de verdade é onde os SINAIS moram.** Saldo e saúde de fonte desceram pra
+`/curadoria`; na barra ficou só o ponto colorido dizendo "algo lá precisa de você". Isso torna a
+Visão geral **obrigada a explicar o badge inteiro** — ela é a única superfície de triagem que
+sobrou. Duas consequências que se pagam caro se forem esquecidas:
+
+- As parcelas do badge saem de **`lib/curadoria/decision-queues.ts`**, iterada pelos DOIS lados
+  (soma do gatilho e `buildDecisions` da página). Enumerar de novo é como os **Pedidos entraram
+  no badge e nunca chegaram na página** — um "3" no botão que podia ser 3 pedidos de leitor, com
+  a página que devia explicá-lo sem mencionar nenhum. O tipo `Record<DecisionQueueKey, number>`
+  faz o `tsc` reprovar os dois consumidores quando uma fila nova aparece (medido).
+- O limiar de saldo baixo é **`lib/ai-usage/balance.ts`** (`LOW_BALANCE_USD` + `balanceTone`).
+  Estava copiado em dois arquivos; uma terceira cópia é como o ponto alerta e a página pra onde
+  ele aponta mostra verde. ⚠️ Os tons são **exclusivos**: saldo negativo NÃO é `"low"` — use
+  `balanceAlerting()`, senão o ponto some no pior caso.
+
+⚠️ **Aberto, não esquecido:** abaixo de `xl` o botão é só o ícone 🔧 sem rótulo. Porta fraca pra
+um modo de primeira classe — mas dar rótulo permanente reabre a conta de largura (ver a ordem do
+sacrifício abaixo).
+
 ⚠️ **A ordem do sacrifício.** Quando a barra não cabe, cede nesta ordem: rótulo do "Recalcular
 notas" → nome no avatar → rótulo de "Curadoria" → a busca vira ícone. **Os destinos e os
 contadores nunca cedem** — por isso a nav é `shrink-0` e quem encolhe é a busca. Na 1ª versão era

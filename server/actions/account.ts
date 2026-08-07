@@ -9,13 +9,11 @@ import {
   getCurrentUserSettingsId,
   getSessionUserId,
 } from "@/server/queries/current-user"
-import { getAnthropicBalanceStatus } from "@/server/queries/ai-usage"
+import { getAnthropicBalanceStatus, getOperatorSettingsId } from "@/server/queries/ai-usage"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
 import { accountProfileSchema } from "@/lib/validations/account.schema"
 import type { AccountProfileValues } from "@/lib/validations/account.schema"
 import type { Role } from "@/lib/plans/roles"
-
-type AdminClient = ReturnType<typeof createAdminClient>
 
 const AVATAR_BUCKET = "avatars"
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024 // 2 MiB — espelha o file_size_limit do bucket (migration 090).
@@ -28,10 +26,16 @@ const AVATAR_MIME_EXT: Record<string, string> = {
 
 /**
  * id da linha de user_settings do USUÁRIO ATUAL — a MESMA que as queries leem
- * (resolver session-aware, com fallback singleton p/ anon). Todos os updates de
- * conta passam por aqui pra não atualizar a linha de outro usuário.
+ * (resolver session-aware, com fallback singleton p/ anon). Todos os updates de dado
+ * PESSOAL (nome, e-mail, avatar) passam por aqui pra não atualizar a linha de outro.
+ *
+ * 🔴 **Não serve pra dado GLOBAL que mora nesta mesma tabela.** Chamava-se
+ * `getSingletonId`, e o nome convenceu o saldo do operador a usá-lo: a escrita ia
+ * pra linha de quem estava logado enquanto a leitura pegava a do dono. Para dado do
+ * operador (hoje só o saldo) use `getOperatorSettingsId` — `user_settings` guarda as
+ * duas naturezas, e só o nome da função distingue.
  */
-async function getSingletonId(_supabase: AdminClient): Promise<string> {
+async function getCurrentUserSettingsRowId(): Promise<string> {
   const id = await getCurrentUserSettingsId()
   if (!id) throw new Error("user_settings sem linha pro usuário atual — rode a migration 074.")
   return id
@@ -51,7 +55,7 @@ export async function updateProfile(
 
   const supabase = createAdminClient()
   try {
-    const id = await getSingletonId(supabase)
+    const id = await getCurrentUserSettingsRowId()
     const { error } = await supabase
       .from("user_settings")
       .update({
@@ -108,7 +112,7 @@ export async function uploadAvatar(
     const { data: pub } = supabase.storage.from(AVATAR_BUCKET).getPublicUrl(path)
     const url = pub.publicUrl
 
-    const id = await getSingletonId(supabase)
+    const id = await getCurrentUserSettingsRowId()
     const { error: updErr } = await supabase
       .from("user_settings")
       .update({ avatar_url: url })
@@ -180,7 +184,13 @@ export async function setAnthropicBalance(amountUsd: number): Promise<{ error?: 
 
   const supabase = createAdminClient()
   try {
-    const id = await getSingletonId(supabase)
+    // 🔴 `getOperatorSettingsId`, NÃO `getCurrentUserSettingsRowId`: o saldo é do
+    // operador, e quem o LÊ (`getAnthropicBalanceStatus`) resolve a linha do mesmo
+    // jeito. Gravar na linha do curador logado fazia a UI dizer "salvo" enquanto a
+    // releitura devolvia o valor antigo — sem erro e sem log, porque para o dono as
+    // duas linhas coincidem e o bug fica invisível até existir um segundo curador.
+    const id = await getOperatorSettingsId()
+    if (!id) return { error: "Não há linha de user_settings do operador pra guardar o saldo." }
     const { error } = await supabase
       .from("user_settings")
       .update({

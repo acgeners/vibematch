@@ -424,28 +424,75 @@ const EMPTY_BALANCE: BalanceStatus = {
   callsSince: 0,
 }
 
+interface OperatorSettingsRow {
+  id: string
+  anthropic_balance_usd: number | string | null
+  anthropic_balance_set_at: string | null
+}
+
 /**
- * Saldo Anthropic informado manualmente + quanto restou. Modelo snapshot
- * (migration 092): lê valor + instante do singleton user_settings e subtrai
- * o custo das chamadas desde aquele instante. Tolerante a colunas ausentes
- * (mesma estratégia de getCurrentUserProfile) → cai pro estado "nunca informado".
+ * A linha de `user_settings` que guarda o saldo do OPERADOR — a mais ANTIGA da
+ * tabela, por convenção (a conta do dono foi a primeira criada).
+ *
+ * 🔴 **Leitura e escrita TÊM que resolver a MESMA linha, e por muito tempo não
+ * resolviam.** A leitura sempre pegou a linha mais antiga; a escrita
+ * (`setAnthropicBalance`) usava um helper chamado `getSingletonId` que, apesar do
+ * nome, devolvia a linha do usuário ATUAL. Para o dono as duas coincidem e nada
+ * aparece. Para um segundo curador, a UI diz "salvo", o valor vai pra linha dele e a
+ * releitura devolve o do dono: o número simplesmente não muda, sem erro e sem log.
+ *
+ * Por isso os dois caminhos passam por aqui — a pergunta "qual linha?" é respondida
+ * uma vez só. O saldo é da conta Anthropic ÚNICA que banca o app inteiro
+ * (`global_config` em `lib/plans/roles.ts`), não um dado pessoal; quando existir
+ * carteira POR USUÁRIO ela será outra coluna, com outro dono, e não passa por aqui.
+ *
+ * ⚠️ "Mais antiga" é convenção, não garantia: se a linha do dono for apagada e
+ * recriada, a identidade do operador migra em silêncio para a próxima. Resolver de
+ * verdade pede uma coluna explícita (`is_operator`) — migration, fora deste escopo.
+ *
+ * Tolerante a colunas ausentes (mesma estratégia de `getCurrentUserProfile`): erro no
+ * select → `null`, e quem chama cai pro estado "nunca informado".
  */
-export async function getAnthropicBalanceStatus(): Promise<BalanceStatus> {
+async function fetchOperatorSettingsRow(): Promise<OperatorSettingsRow | null> {
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("user_settings")
-    .select("anthropic_balance_usd, anthropic_balance_set_at")
+    .select("id, anthropic_balance_usd, anthropic_balance_set_at")
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle()
 
   if (error) {
     console.warn(`[ai-usage] saldo indisponível (colunas ausentes?): ${error.message}`)
-    return EMPTY_BALANCE
+    return null
   }
+  return (data as OperatorSettingsRow | null) ?? null
+}
 
-  const rawBalance = data?.anthropic_balance_usd
-  const setAt = (data?.anthropic_balance_set_at as string | null | undefined) ?? null
+/**
+ * id da linha onde o saldo do operador é GRAVADO — o par de escrita de
+ * `getAnthropicBalanceStatus`. Existe para que `setAnthropicBalance` não precise
+ * (nem possa) redescobrir por conta própria qual é a linha certa.
+ */
+export async function getOperatorSettingsId(): Promise<string | null> {
+  return (await fetchOperatorSettingsRow())?.id ?? null
+}
+
+/**
+ * Saldo Anthropic informado manualmente + quanto restou. Modelo snapshot
+ * (migration 092): lê valor + instante da linha do operador e subtrai o custo das
+ * chamadas desde aquele instante.
+ *
+ * ⚠️ O custo subtraído é GLOBAL (`fetchRows` não filtra por usuário), e está certo:
+ * todas as chamadas do app saem da mesma conta Anthropic. Se um dia houver carteira
+ * per-usuário, ela precisa do seu próprio abatimento — filtrado — e não deste.
+ */
+export async function getAnthropicBalanceStatus(): Promise<BalanceStatus> {
+  const row = await fetchOperatorSettingsRow()
+  if (!row) return EMPTY_BALANCE
+
+  const rawBalance = row.anthropic_balance_usd
+  const setAt = row.anthropic_balance_set_at ?? null
   if (rawBalance == null || setAt == null) return EMPTY_BALANCE
 
   const balanceUsd = Number(rawBalance)
