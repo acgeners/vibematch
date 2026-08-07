@@ -430,34 +430,57 @@ interface OperatorSettingsRow {
   anthropic_balance_set_at: string | null
 }
 
+const BALANCE_COLS = "id, anthropic_balance_usd, anthropic_balance_set_at"
+
 /**
- * A linha de `user_settings` que guarda o saldo do OPERADOR — a mais ANTIGA da
- * tabela, por convenção (a conta do dono foi a primeira criada).
+ * A linha de `user_settings` que guarda o saldo do OPERADOR — a marcada com
+ * `is_operator`, quando essa coluna existir.
+ *
+ * ⚠️ **A coluna ainda NÃO está no repositório** (2026-08-07): a migration que a cria foi
+ * escrita e conferida no local, mas fica para o PR seguinte. Até lá, TODO ambiente cai no
+ * fallback abaixo — que é o comportamento atual, idêntico ao de antes. Este código entra
+ * no ar sem depender dela de propósito.
  *
  * 🔴 **Leitura e escrita TÊM que resolver a MESMA linha, e por muito tempo não
- * resolviam.** A leitura sempre pegou a linha mais antiga; a escrita
- * (`setAnthropicBalance`) usava um helper chamado `getSingletonId` que, apesar do
- * nome, devolvia a linha do usuário ATUAL. Para o dono as duas coincidem e nada
- * aparece. Para um segundo curador, a UI diz "salvo", o valor vai pra linha dele e a
- * releitura devolve o do dono: o número simplesmente não muda, sem erro e sem log.
+ * resolviam.** A leitura pegava a linha mais antiga; a escrita (`setAnthropicBalance`)
+ * usava um helper chamado `getSingletonId` que, apesar do nome, devolvia a linha do
+ * usuário ATUAL. Para o dono as duas coincidem e nada aparece. Para um segundo curador,
+ * a UI diz "salvo", o valor vai pra linha dele e a releitura devolve o do dono: o número
+ * simplesmente não muda, sem erro e sem log.
  *
- * Por isso os dois caminhos passam por aqui — a pergunta "qual linha?" é respondida
- * uma vez só. O saldo é da conta Anthropic ÚNICA que banca o app inteiro
- * (`global_config` em `lib/plans/roles.ts`), não um dado pessoal; quando existir
- * carteira POR USUÁRIO ela será outra coluna, com outro dono, e não passa por aqui.
+ * Por isso os dois caminhos passam por aqui — a pergunta "qual linha?" é respondida uma
+ * vez só. O saldo é da conta Anthropic ÚNICA que banca o app inteiro (`global_config` em
+ * `lib/plans/roles.ts`), não um dado pessoal; quando existir carteira POR USUÁRIO ela
+ * será outra coluna, com outro dono, e não passa por aqui.
  *
- * ⚠️ "Mais antiga" é convenção, não garantia: se a linha do dono for apagada e
- * recriada, a identidade do operador migra em silêncio para a próxima. Resolver de
- * verdade pede uma coluna explícita (`is_operator`) — migration, fora deste escopo.
+ * ## Por que ainda há fallback pra "linha mais antiga"
  *
- * Tolerante a colunas ausentes (mesma estratégia de `getCurrentUserProfile`): erro no
- * select → `null`, e quem chama cai pro estado "nunca informado".
+ * As migrations são aplicadas À MÃO neste projeto, então existe uma janela em que o
+ * código está no ar e a coluna não. Sem tolerância, o saldo apareceria como "nunca
+ * informado" e o ponto de alerta da barra apontaria pro nada — parecendo bug de dado.
+ * Mesma estratégia da migration 140 em `getCurrentRole`.
+ *
+ * O fallback dispara em DOIS casos, e os dois têm a mesma resposta: coluna inexistente ou
+ * coluna existente sem ninguém marcado (backfill não rodou). Um erro transitório também
+ * cai aqui — e aí a consulta legada falha junto, então o problema continua aparecendo em
+ * vez de virar silêncio. ⚠️ **Remover este fallback exige antes confirmar `is_operator` na
+ * NUVEM**, não só no local ([[project-conferir-migration-na-nuvem]]).
  */
 async function fetchOperatorSettingsRow(): Promise<OperatorSettingsRow | null> {
   const supabase = createAdminClient()
+
+  const flagged = await supabase
+    .from("user_settings")
+    .select(BALANCE_COLS)
+    .eq("is_operator", true)
+    .limit(1)
+    .maybeSingle()
+
+  if (!flagged.error && flagged.data) return flagged.data as OperatorSettingsRow
+
   const { data, error } = await supabase
     .from("user_settings")
-    .select("id, anthropic_balance_usd, anthropic_balance_set_at")
+    .select(BALANCE_COLS)
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle()
