@@ -23,9 +23,16 @@ import {
 
 interface WorkColumnPickerProps {
   namespace?: WorkColumnNamespace
+  /** Mantém o botão na barra, apagado, onde as colunas não se aplicam. */
+  disabled?: boolean
+  disabledTitle?: string
 }
 
-export function WorkColumnPicker({ namespace = "titles" }: WorkColumnPickerProps = {}) {
+export function WorkColumnPicker({
+  namespace = "titles",
+  disabled,
+  disabledTitle,
+}: WorkColumnPickerProps = {}) {
   const config = useSyncExternalStore(
     (onChange) => subscribeWorkColumnConfig(onChange, namespace),
     () => readWorkColumnConfig(namespace),
@@ -67,6 +74,8 @@ export function WorkColumnPicker({ namespace = "titles" }: WorkColumnPickerProps
       activePresets={activePresets as Set<string>}
       onTogglePreset={handleTogglePreset}
       onReset={() => apply(getDefaultWorkColumnConfig(namespace))}
+      disabled={disabled}
+      disabledTitle={disabledTitle}
     />
   )
 }

@@ -12,6 +12,9 @@ import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
 import { MoodRefineDialog } from "@/components/ranking/mood-refine-dialog"
 import { isMoodActive, sortByMoodAdjusted, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
 import { buildRankingTiers } from "@/lib/ranking/build-tiers"
+import { whyThisWork, forceMomentsOf } from "@/lib/ranking/why-this-work"
+import type { WorkSeparator } from "@/lib/ranking/why-this-work"
+import { SeparatorCell, SeparatorLegend, separatorValue } from "@/components/ranking/separator-cell"
 import { roundToDisplayScore } from "@/lib/score-rounding"
 import { criterionHighlights } from "@/lib/ranking/criterion-highlights"
 import type { CriterionHighlight, HighlightWeight } from "@/lib/ranking/criterion-highlights"
@@ -33,13 +36,18 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
 import { AlignmentCell, AlignmentScoreCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { BussolaPlane } from "@/components/ranking/bussola-plane"
-import { RankingBandsView } from "@/components/ranking/ranking-bands-view"
-import type { ActiveFilterChip } from "@/components/ranking/active-filters-bar"
 import { computeWorkForces } from "@/lib/calculations/forces"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { TierDividerRow } from "@/components/ranking/tie-break-band"
-import { archetypesOf, compositionOf } from "@/lib/ranking/tier-composition"
+import {
+  archetypesOf,
+  compositionOf,
+  ARCHETYPE_LABEL,
+  ARCHETYPE_MEANING,
+  ARCHETYPE_ORDER,
+} from "@/lib/ranking/tier-composition"
 import type { ForceArchetype } from "@/lib/ranking/tier-composition"
+import { ARCHETYPE_STYLE } from "@/lib/ranking/archetype-style"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
 import type { WorkPreview } from "@/server/actions/works"
@@ -155,14 +163,25 @@ function computeTiers(
  * que é o papel dele.
  */
 
-type ViewMode = "list" | "cards" | "bussola" | "faixas"
+/**
+ * ⚠️ **"faixas" saiu.** A view Faixas chamava a MESMA `buildRankingTiers`, com a
+ * mesma `tier_band_width` e a mesma chave de arredondamento da Lista agrupada —
+ * era a Lista com um preset fixo de colunas. O que ela tinha de próprio virou
+ * parte da Lista: a coluna "O que a separa" (opção do seletor, ligada junto com
+ * o Agrupar) e o aviso de imprecisão (subiu para o divisor do tier, que é onde
+ * ele se aplica, em vez de repetido em cada linha).
+ *
+ * Quem tiver `"faixas"` salvo no localStorage cai na Lista — `readViewMode` só
+ * aceita os valores vivos, e valor desconhecido já caía no default.
+ */
+type ViewMode = "list" | "cards" | "bussola"
 const VIEW_STORAGE_KEY = "ranking_view_mode_v1"
 const VIEW_EVENT = "ranking-view-mode-change"
 
 function readViewMode(): ViewMode {
   if (typeof window === "undefined") return "list"
   const stored = window.localStorage.getItem(VIEW_STORAGE_KEY)
-  return stored === "cards" || stored === "bussola" || stored === "faixas" ? stored : "list"
+  return stored === "cards" || stored === "bussola" ? stored : "list"
 }
 
 function subscribeViewMode(onChange: () => void) {
@@ -181,9 +200,18 @@ function writeViewMode(mode: ViewMode) {
   window.dispatchEvent(new CustomEvent(VIEW_EVENT))
 }
 
-// Separação em tiers (faixas de prioridade equivalente): preferência de
-// visualização client-side, ligada por padrão. Desligada, o ranking fica
-// corrido — o toggle só afeta o agrupamento visual, nunca a ordenação.
+/**
+ * "Agrupar": preferência de visualização client-side, ligada por padrão. Nunca
+ * toca a ordenação — só o agrupamento visual.
+ *
+ * ⚠️ O CRITÉRIO depende da view, e o rótulo é genérico por isso:
+ *   - Lista   → tiers de prioridade equivalente (`buildRankingTiers`)
+ *   - Cards   → prateleiras por tipo de aposta (`archetypesOf`)
+ *   - Bússola → a LISTA LATERAL em prateleiras; o plano não muda
+ *
+ * A chave do localStorage mantém o nome antigo de propósito: renomeá-la
+ * desligaria o agrupamento de quem já tinha preferência salva, sem ganho nenhum.
+ */
 const TIERS_STORAGE_KEY = "ranking_tiers_enabled_v1"
 const TIERS_EVENT = "ranking-tiers-enabled-change"
 
@@ -220,10 +248,6 @@ interface RankingTableProps {
   tierBandWidth?: number
   /** Faixas ideais por critério (perfil) — repassadas ao drawer de comparação. */
   criterionPrefs?: Record<string, CriterionRange>
-  /** Chips de filtros ativos (só usados pela view "Faixas"). Montados no server. */
-  activeFilters?: ActiveFilterChip[]
-  /** URL "ver tudo / limpar padrões" (só usada pela view "Faixas"). */
-  clearFiltersHref?: string
   /** Média/σ de cada atributo no catálogo — alimenta os chips de destaque do card.
    *  Null (leitor falhou) = o card simplesmente não mostra chip. */
   criterionMoments?: CriterionMoments | null
@@ -527,7 +551,7 @@ function renderCell(
   return null
 }
 
-export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true, tierBandWidth = DEFAULT_TIER_BAND_WIDTH, criterionPrefs, activeFilters, clearFiltersHref, criterionMoments, highlightWeights }: RankingTableProps) {
+export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true, tierBandWidth = DEFAULT_TIER_BAND_WIDTH, criterionPrefs, criterionMoments, highlightWeights }: RankingTableProps) {
   const { widths, setWidth } = useColumnWidths()
   // Colunas do /ranking vêm do vocabulário COMPARTILHADO (work-table-config,
   // namespace "ranking"). Prependa a coluna "#" estrutural e descarta as colunas
@@ -536,15 +560,6 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
     (cb) => subscribeWorkColumnConfig(cb, "ranking"),
     () => readWorkColumnConfig("ranking"),
     () => getDefaultWorkColumnConfig("ranking")
-  )
-  const columns = useMemo(
-    () => [
-      RANK_COL,
-      ...getConfiguredWorkColumns(config).filter(
-        (c) => c.key !== "select" && c.key !== "actions"
-      ),
-    ],
-    [config]
   )
   const viewMode = useSyncExternalStore(subscribeViewMode, readViewMode, () => "list" as const)
   const tiersEnabled = useSyncExternalStore(subscribeTiersEnabled, readTiersEnabled, () => true)
@@ -616,9 +631,6 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
     if (stored != null) return stored
     return DEFAULT_COLUMN_WIDTHS[key] ?? 100
   }
-  const totalNaturalWidth = columns.reduce((sum, c) => sum + naturalWidthOf(c.key), 0)
-  const widthPercentOf = (key: string): string =>
-    `${((naturalWidthOf(key) / totalNaturalWidth) * 100).toFixed(4)}%`
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -669,6 +681,25 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   // de cada tier (o tier só agrupa). O mood reordena depois, no drawer.
   const displayEntries = entries
 
+  // "O que a separa" mede o desvio contra as empatadas DO TIER: sem tiers na tela
+  // ela não tem grupo a que se referir, e sairia medindo contra um conjunto que
+  // não está sendo exibido. Some da tabela — a escolha no seletor continua valendo
+  // (ela é a outra metade da conjunção), só não tem efeito com o Agrupar desligado.
+  const columns = useMemo(
+    () =>
+      [
+        RANK_COL,
+        ...getConfiguredWorkColumns(config).filter((c) => c.key !== "select" && c.key !== "actions"),
+      ].filter((c) => c.key !== "separator" || tiers != null),
+    [config, tiers],
+  )
+
+  // Larguras: percentagens do total das colunas EFETIVAMENTE renderizadas — por
+  // isso depois do filtro acima, senão a coluna ausente ainda reservaria espaço.
+  const totalNaturalWidth = columns.reduce((sum, c) => sum + naturalWidthOf(c.key), 0)
+  const widthPercentOf = (key: string): string =>
+    `${((naturalWidthOf(key) / totalNaturalWidth) * 100).toFixed(4)}%`
+
   // Arquétipo (tipo de aposta) de cada obra, por percentil sobre o CONJUNTO
   // EXIBIDO — assim "aposta segura" quer dizer a mesma coisa em todos os tiers da
   // tela. Alimenta os chips de composição do divisor.
@@ -689,6 +720,28 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
     if (tiers) for (const t of tiers) map.set(t.startIndex, t)
     return map
   }, [tiers])
+
+  /**
+   * "O que a separa": a força que mais distancia a obra das EMPATADAS DO PRÓPRIO
+   * TIER. Herdado da view Faixas, que foi absorvida por esta.
+   *
+   * ⚠️ Só existe com tiers na tela — sem grupo não há contra o que comparar. Os
+   * momentos (σ) vêm do CONJUNTO EXIBIDO, não do tier: dentro de um tier as obras
+   * são parecidas por construção, então o σ local é minúsculo e qualquer diferença
+   * viraria um z gigante. Ver `why-this-work.ts`.
+   */
+  const separatorByIndex = useMemo(() => {
+    const map = new Map<number, WorkSeparator | null>()
+    if (!tiers) return map
+    const moments = forceMomentsOf(displayEntries)
+    for (const t of tiers) {
+      const group = displayEntries.slice(t.startIndex, t.startIndex + t.count)
+      for (let i = t.startIndex; i < t.startIndex + t.count; i++) {
+        map.set(i, whyThisWork(displayEntries[i], group, moments))
+      }
+    }
+    return map
+  }, [tiers, displayEntries])
 
   /** Composição por arquétipo de cada tier, indexada pelo índice de início. */
   const compositionByStart = useMemo(() => {
@@ -768,7 +821,13 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
           tiersAvailable={tierSortEligible}
           onTiersChange={writeTiersEnabled}
         />
-        <RankingCardsView entries={entries} scoreThresholds={scoreThresholds} criterionMoments={criterionMoments} highlightWeights={highlightWeights} />
+        <RankingCardsView
+          entries={entries}
+          scoreThresholds={scoreThresholds}
+          criterionMoments={criterionMoments}
+          highlightWeights={highlightWeights}
+          grouped={tiersEnabled}
+        />
       </div>
     )
   }
@@ -784,29 +843,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
           tiersAvailable={tierSortEligible}
           onTiersChange={writeTiersEnabled}
         />
-        <BussolaPlane entries={entries} />
-      </div>
-    )
-  }
-
-  if (viewMode === "faixas") {
-    return (
-      <div className="space-y-3">
-        <ViewModeToolbar
-          count={entries.length}
-          viewMode={viewMode}
-          onChange={writeViewMode}
-          tiersEnabled={tiersEnabled}
-          tiersAvailable={tierSortEligible}
-          onTiersChange={writeTiersEnabled}
-        />
-        <RankingBandsView
-          entries={entries}
-          scoreThresholds={scoreThresholds}
-          tierBandWidth={tierBandWidth}
-          activeFilters={activeFilters}
-          clearFiltersHref={clearFiltersHref}
-        />
+        <BussolaPlane entries={entries} grouped={tiersEnabled} />
       </div>
     )
   }
@@ -917,6 +954,9 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                   style={{ textAlign: align }}
                 >
                   {cellContent}
+                  {/* Os 3 ícones de força só fazem sentido ao lado da coluna que
+                      os usa — ensinar uma vez, no cabeçalho, como na antiga Faixas. */}
+                  {col.key === "separator" && <SeparatorLegend />}
                   <ResizeHandle
                     columnKey={col.key}
                     onResize={setWidth}
@@ -970,6 +1010,13 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                             disabled={!selectedSet.has(entry.workId) && selectedIds.length >= MAX_COMPARE_WORKS}
                             onCheckedChange={() => toggleSelect(entry.workId)}
                             aria-label={`Selecionar ${entry.title} para comparar`}
+                          />
+                        ) : col.key === "separator" ? (
+                          // Fora de renderCell porque depende do ÍNDICE (o tier a
+                          // que a obra pertence), não só da entry.
+                          <SeparatorCell
+                            separator={separatorByIndex.get(index) ?? null}
+                            value={separatorValue(entry, separatorByIndex.get(index) ?? null)}
                           />
                         ) : (
                           renderCell(entry, col, scoreThresholds, isPaid, null, attrColorMode, criterionPrefs)
@@ -1129,37 +1176,49 @@ function ViewModeToolbar({
   tiersAvailable: boolean
   onTiersChange: (enabled: boolean) => void
 }) {
-  const tiersActive = tiersEnabled && tiersAvailable
+  // ⚠️ Só a LISTA agrupa por tier, e só ela depende de a ordenação formar tiers.
+  // Cards e Bússola agrupam por ARQUÉTIPO, que sai das forças da obra e independe
+  // da ordenação — desabilitar o controle lá porque o sort é "título" seria
+  // proibir um agrupamento que funciona perfeitamente.
+  const groupAvailable = viewMode === "list" ? tiersAvailable : true
+  const tiersActive = tiersEnabled && groupAvailable
+  const groupTitle = !groupAvailable
+    ? "Agrupar em tiers só se aplica ao ordenar por Prioridade ou Nota Prevista (decrescente)."
+    : viewMode === "list"
+      ? "Agrupar em tiers de prioridade equivalente. Traz junto a coluna “O que a separa”."
+      : viewMode === "cards"
+        ? "Agrupar os cards em prateleiras por tipo de aposta."
+        : "Agrupar a lista ao lado do mapa em prateleiras por tipo de aposta."
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="text-xs text-muted-foreground">
         {count} obra{count !== 1 ? "s" : ""} no ranking
       </p>
       <div className="flex items-center gap-2">
-        {viewMode === "list" && (
-          <>
-            <WorkColumnPicker namespace="ranking" />
-            <button
+        {/* Fica em TODA view, desabilitado fora da Lista: um controle que some e
+            volta obriga a reencontrar a barra a cada troca de view. */}
+        <WorkColumnPicker
+          namespace="ranking"
+          disabled={viewMode !== "list"}
+          disabledTitle="As colunas valem na view Lista."
+        />
+        <button
               type="button"
               onClick={() => onTiersChange(!tiersEnabled)}
               aria-pressed={tiersEnabled}
-              disabled={!tiersAvailable}
-              title={
-                tiersAvailable
-                  ? "Agrupar o ranking em tiers (faixas de prioridade equivalente). Desligue para ver o ranking corrido."
-                  : "Tiers só se aplicam ao ordenar por Prioridade ou Nota Prevista (decrescente)."
-              }
+              disabled={!groupAvailable}
+              title={groupTitle}
               className={cn(
                 "inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs font-medium transition-colors",
                 tiersActive
                   ? "border-primary/30 bg-primary/10 text-primary"
                   : "border-border/70 bg-background/60 text-muted-foreground hover:text-foreground",
-                !tiersAvailable && "cursor-not-allowed opacity-50 hover:text-muted-foreground",
+                !groupAvailable && "cursor-not-allowed opacity-50 hover:text-muted-foreground",
               )}
             >
               <span className="inline-flex items-center gap-1.5">
                 <Layers className="h-3.5 w-3.5" />
-                Tiers
+                Agrupar
               </span>
               <span
                 className={cn(
@@ -1175,8 +1234,6 @@ function ViewModeToolbar({
                 />
               </span>
             </button>
-          </>
-        )}
         <div className="inline-flex items-center rounded-md border border-border/70 bg-background/60 p-0.5">
           <button
             type="button"
@@ -1223,21 +1280,6 @@ function ViewModeToolbar({
             <Compass className="h-3.5 w-3.5" />
             Bússola
           </button>
-          <button
-            type="button"
-            onClick={() => onChange("faixas")}
-            aria-label="Visualizar em faixas de prioridade"
-            aria-pressed={viewMode === "faixas"}
-            className={cn(
-              "inline-flex h-7 items-center gap-1.5 rounded px-2 text-xs font-medium transition-colors",
-              viewMode === "faixas"
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <Layers className="h-3.5 w-3.5" />
-            Faixas
-          </button>
         </div>
       </div>
     </div>
@@ -1265,22 +1307,54 @@ function rankCardStyles(rank: number): string {
   return "border-border/65"
 }
 
+/** Quantos cards cada prateleira mostra antes do "ver todas". */
+const SHELF_PREVIEW = 6
+
 function RankingCardsView({
   entries,
   scoreThresholds,
   criterionMoments,
   highlightWeights,
+  grouped,
 }: {
   entries: RankingEntry[]
   scoreThresholds: ColumnThresholds | null
   criterionMoments?: CriterionMoments | null
   highlightWeights?: HighlightWeight[] | null
+  /** "Agrupar" ligado → prateleiras por tipo de aposta. */
+  grouped?: boolean
 }) {
+  // Arquétipo por PERCENTIL do conjunto exibido — a mesma escolha do divisor de
+  // tier e da Bússola. Calcular por prateleira faria "vale o risco" querer dizer
+  // coisas diferentes em cada uma.
+  const shelves = useMemo(() => {
+    if (!grouped) return null
+    const archetypes = archetypesOf(entries)
+    const byArchetype = new Map<ForceArchetype, RankingEntry[]>()
+    for (let i = 0; i < entries.length; i++) {
+      const a = archetypes[i]
+      if (a == null) continue
+      const list = byArchetype.get(a) ?? []
+      list.push(entries[i])
+      byArchetype.set(a, list)
+    }
+    // Obra sem NENHUMA das duas forças não tem aposta a nomear; vai para o fim,
+    // sem inventar um grupo para ela.
+    const unclassified = entries.filter((_, i) => archetypes[i] == null)
+    return {
+      groups: ARCHETYPE_ORDER.filter((a) => byArchetype.has(a)).map((a) => ({
+        archetype: a,
+        items: byArchetype.get(a)!,
+      })),
+      unclassified,
+    }
+  }, [entries, grouped])
+
   // 3 colunas no máximo (era 4): com o AdultBadge + as stats, 4/linha ficava espremido
   // e a linha de metadados quebrava. Mais largura → tudo respira e o 18+ não empurra linha.
-  return (
+  const grid = (items: RankingEntry[]) => (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {entries.map((entry) => (
+      {items.map((entry) => (
         <RankingCard
           key={entry.workId}
           entry={entry}
@@ -1290,6 +1364,99 @@ function RankingCardsView({
         />
       ))}
     </div>
+  )
+
+  if (!shelves) return grid(entries)
+
+  return (
+    <div className="flex flex-col gap-8">
+      {shelves.groups.map(({ archetype, items }) => (
+        <CardShelf
+          key={archetype}
+          archetype={archetype}
+          items={items}
+          scoreThresholds={scoreThresholds}
+          criterionMoments={criterionMoments}
+          highlightWeights={highlightWeights}
+        />
+      ))}
+      {shelves.unclassified.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-baseline gap-2 border-b-2 border-border pb-2">
+            <h3 className="text-lg font-bold leading-tight tracking-tight text-muted-foreground">
+              Sem dados para classificar
+            </h3>
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[10.5px] font-bold tabular-nums text-muted-foreground">
+              {shelves.unclassified.length}
+            </span>
+          </div>
+          {grid(shelves.unclassified)}
+        </section>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Uma prateleira dos Cards. Mostra `SHELF_PREVIEW` e expande sob demanda — o
+ * ranking pode ter centenas de obras num grupo só, e a prateleira existe para
+ * dizer QUE TIPO de aposta cada bloco é, não para ser um segundo scroll infinito.
+ */
+function CardShelf({
+  archetype,
+  items,
+  scoreThresholds,
+  criterionMoments,
+  highlightWeights,
+}: {
+  archetype: ForceArchetype
+  items: RankingEntry[]
+  scoreThresholds: ColumnThresholds | null
+  criterionMoments?: CriterionMoments | null
+  highlightWeights?: HighlightWeight[] | null
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const style = ARCHETYPE_STYLE[archetype]
+  const shown = expanded ? items : items.slice(0, SHELF_PREVIEW)
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className={cn("flex flex-wrap items-baseline gap-2 border-b-2 pb-2", style.border)}>
+        {/* first-letter, não uma segunda string: o rótulo é minúsculo na fonte
+            porque também entra em frase no divisor de tier. */}
+        <h3 className={cn("text-lg font-bold leading-tight tracking-tight first-letter:uppercase", style.text)}>
+          {ARCHETYPE_LABEL[archetype]}
+        </h3>
+        <span className={cn("rounded px-1.5 py-0.5 text-[10.5px] font-bold tabular-nums", style.chipBg)}>
+          {items.length}
+        </span>
+        <p className="text-[13px] text-muted-foreground">{ARCHETYPE_MEANING[archetype]}</p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {shown.map((entry) => (
+          <RankingCard
+            key={entry.workId}
+            entry={entry}
+            scoreThresholds={scoreThresholds}
+            criterionMoments={criterionMoments}
+            highlightWeights={highlightWeights}
+          />
+        ))}
+      </div>
+
+      {items.length > SHELF_PREVIEW && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className={cn("cursor-pointer rounded px-1 py-0.5 text-[13px] font-semibold hover:underline", style.text)}
+          >
+            {expanded ? "Ver menos" : `Ver as ${items.length} →`}
+          </button>
+        </div>
+      )}
+    </section>
   )
 }
 

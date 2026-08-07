@@ -55,6 +55,13 @@ interface ColumnPickerProps {
   triggerLabel?: string
   /** Ícone do botão que abre o popover. Default <Columns3 />. */
   triggerIcon?: React.ReactNode
+  /**
+   * Desabilita o gatilho SEM escondê-lo — para quem quer manter o controle no
+   * mesmo lugar da barra em contextos onde ele não se aplica. O `title` explica
+   * por quê; sem ele, um botão apagado é só um botão quebrado.
+   */
+  disabled?: boolean
+  disabledTitle?: string
 }
 
 export function ColumnPicker({
@@ -68,6 +75,8 @@ export function ColumnPicker({
   onReset,
   triggerLabel = "Colunas",
   triggerIcon,
+  disabled = false,
+  disabledTitle,
 }: ColumnPickerProps) {
   const columnsByKey = useMemo(
     () => new Map(columns.map((column) => [column.key, column])),
@@ -127,7 +136,13 @@ export function ColumnPicker({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1.5 text-xs"
+          disabled={disabled}
+          title={disabled ? disabledTitle : undefined}
+        >
           {triggerIcon ?? <Columns3 className="h-3.5 w-3.5" />}
           {triggerLabel}
           <span className="rounded-full bg-muted/70 px-1.5 py-0 text-[11px] font-medium tabular-nums text-muted-foreground">

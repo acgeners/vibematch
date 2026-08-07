@@ -108,6 +108,35 @@ function tail(rank: WorkSeparator["rank"]): string {
   return rank === "above" ? "acima da média" : "abaixo da média"
 }
 
+/**
+ * Valor da força na unidade em que ela é lida: Chance em %, Avaliação na escala
+ * 0–10 da nota externa, Alcance em votos abreviados (28.442 → 28,4K).
+ *
+ * ⚠️ O separador guarda a força NORMALIZADA (0–100). Mostrar "95" para 28 mil
+ * votos não diria nada a ninguém — por isso o valor exibido volta do `entry`.
+ *
+ * Mora aqui, junto do componente que o consome, desde que a view Faixas foi
+ * absorvida pela Lista (era `ranking-bands-view.tsx`).
+ */
+export function separatorValue(
+  entry: { platformAvg: number | null; totalVotes: number },
+  sep: WorkSeparator | null,
+): string | null {
+  if (!sep) return null
+  if (sep.force === "chance") return `${sep.value}%`
+  if (sep.force === "avaliacao")
+    return entry.platformAvg == null ? null : entry.platformAvg.toFixed(1).replace(".", ",")
+  return formatSeparatorVotes(entry.totalVotes)
+}
+
+/** Mesma regra do `formatVotes` da view Cards — um só jeito de escrever votos. */
+function formatSeparatorVotes(votes: number): string {
+  if (votes === 0) return "—"
+  if (votes < 1000) return String(votes)
+  const k = Math.floor(votes / 100) / 10
+  return `${k % 1 === 0 ? String(k) : k.toFixed(1).replace(".", ",")}K`
+}
+
 export function SeparatorCell({
   separator,
   value,
