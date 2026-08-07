@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState } from "react"
 import { toast } from "sonner"
 import { Brain, AlertCircle, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -14,6 +14,10 @@ import {
   refreshEmbeddings,
   type RefreshEmbeddingsResult,
 } from "@/server/actions/embeddings"
+import { runTask } from "@/lib/tasks-store"
+import { useAppTasks } from "@/components/tasks/use-app-tasks"
+
+const EMBEDDINGS_TASK_ID = "embeddings"
 
 interface EmbeddingsPanelProps {
   accent: SettingsAccent
@@ -32,16 +36,26 @@ function formatTokens(n: number): string {
 }
 
 export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCount, totalWorks, initialLastRun }: EmbeddingsPanelProps) {
-  const [isPending, startTransition] = useTransition()
+  const tasks = useAppTasks()
+  const isPending = tasks.some((t) => t.id === EMBEDDINGS_TASK_ID && t.status === "running")
   const [lastResult, setLastResult] = useState<RefreshEmbeddingsResult | null>(null)
   const [lastRun, setLastRun] = useState<string | null>(initialLastRun)
   const [pendingCount, setPendingCount] = useState<number>(initialPendingCount)
   const refresh = useRefresh()
 
   const handleRefresh = () => {
-    startTransition(async () => {
-      try {
-        const result = await refreshEmbeddings()
+    runTask({
+      id: EMBEDDINGS_TASK_ID,
+      kind: "embeddings",
+      // Diferente das outras actions do app, esta LANÇA no gate — então não
+      // precisa da conversão de `{ error }` em rejeição.
+      run: () => refreshEmbeddings(),
+      label: "Atualizando embeddings do catálogo",
+      // Suprime o toast padrão: o desfecho aqui tem TRÊS tons (nada a fazer /
+      // parcial / tudo certo), e achatar os três em "success" apagaria justamente
+      // o caso em que algo falhou.
+      successToast: () => null,
+      onDone: (result) => {
         setLastResult(result)
         setLastRun(new Date().toISOString())
         setPendingCount(result.failed)
@@ -59,9 +73,8 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
             `${result.refreshed} embeddings atualizados (${formatTokens(result.tokensUsed)} tokens, ~$${result.estimatedCostUsd.toFixed(4)}).`,
           )
         }
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao gerar embeddings")
-      }
+      },
+      // Sem `onError`: o `runTask` já emite o `toast.error` da rejeição.
     })
   }
 

@@ -100,10 +100,26 @@ function TaskRow({ task, solo = false }: { task: AppTask; solo?: boolean }) {
     </button>
   )
 
+  // Com andamento conhecido a barra vira DETERMINADA: numa tarefa de minutos
+  // ("re-rank de 12 obras"), "quanto falta" é a informação que importa, e ela
+  // vivia em estado de componente — quem navegava perdia justamente essa.
   const bar = running && (
     <div className="relative mt-1.5 h-1 overflow-hidden rounded-full bg-sky-400/15">
-      <span className="task-indeterminate-bar bg-sky-400" />
+      {task.progress ? (
+        <span
+          className="absolute inset-y-0 left-0 rounded-full bg-sky-400 transition-[width] duration-300"
+          style={{ width: `${pct(task.progress)}%` }}
+        />
+      ) : (
+        <span className="task-indeterminate-bar bg-sky-400" />
+      )}
     </div>
+  )
+
+  const counter = running && task.progress && (
+    <span className="shrink-0 tabular-nums text-[10px] font-semibold text-sky-200/80">
+      {task.progress.done}/{task.progress.total}
+    </span>
   )
 
   const error = task.status === "error" && task.error && (
@@ -123,6 +139,7 @@ function TaskRow({ task, solo = false }: { task: AppTask; solo?: boolean }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             {label}
+            {counter}
             {dismiss}
           </div>
           {running && (
@@ -141,12 +158,19 @@ function TaskRow({ task, solo = false }: { task: AppTask; solo?: boolean }) {
       <div className="flex items-center gap-2">
         <StatusDot status={task.status} />
         {label}
+        {counter}
         {dismiss}
       </div>
       {bar}
       {error}
     </li>
   )
+}
+
+/** Percentual da barra determinada, protegido contra total 0 e contra passar de 100. */
+function pct({ done, total }: { done: number; total: number }): number {
+  if (total <= 0) return 0
+  return Math.min(100, Math.round((done / total) * 100))
 }
 
 /** Ponto de status: pulsa enquanto roda (via animate-ping); estático quando termina. */

@@ -8,11 +8,14 @@ import { Button } from "@/components/ui/button"
 import { useRefresh } from "@/lib/use-refresh"
 import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { planInterestBackfillForIds, runSynopsisInterestBatchAction } from "@/server/actions/synopsis-quality"
+import { runTask, setTaskProgress } from "@/lib/tasks-store"
+import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import { buildInterestBatchCost } from "@/lib/cost-preview/interest-cost-steps"
 import type { SynopsisQueueWork } from "@/server/queries/recommendations"
 
 /** Teto por chamada = SYNOPSIS_BATCH_MAX do servidor. O loop encadeia os lotes. */
 const CHUNK = 100
+const BACKFILL_TASK_ID = "interest-backfill"
 
 /**
  * Backfill de Interesse Sinopse que RESPEITA os filtros aplicados: opera sobre as
@@ -25,57 +28,75 @@ const CHUNK = 100
 export function InterestBackfillButton({ works, isPaid = true }: { works: SynopsisQueueWork[]; isPaid?: boolean }) {
   const refresh = useRefresh()
   const confirmCost = useCostConfirm()
-  const [running, setRunning] = useState(false)
+  // `planning` (dry-run + modal de custo) fica ANCORADO na página de propósito: é
+  // uma decisão que exige a pessoa aqui. Só a execução vira tarefa global.
+  const [planning, setPlanning] = useState(false)
+  const tasks = useAppTasks()
+  const running = planning || tasks.some((t) => t.id === BACKFILL_TASK_ID && t.status === "running")
   if (!isPaid) return null
 
   // Pendentes = não previstas OU desatualizadas na versão ativa (mesma regra do lote
   // do painel). É o que o backfill vai processar; fresco é pulado. Reflete os filtros.
   const pendingCount = works.filter((w) => w.predictedQuality == null || w.predictionStale).length
 
-  const runLoop = async (targetIds: string[], capUsd: number) => {
-    setRunning(true)
-    const tid = toast.loading("Reprocessando Interesse…")
-    let spent = 0
-    let succeeded = 0
-    let fresh = 0
-    let failed = 0
-    try {
-      const chunks: string[][] = []
-      for (let i = 0; i < targetIds.length; i += CHUNK) chunks.push(targetIds.slice(i, i + CHUNK))
-      for (let i = 0; i < chunks.length; i += 1) {
-        if (spent >= capUsd) {
-          toast.warning(`Teto de custo atingido ($${capUsd.toFixed(2)}). Parando.`)
-          break
+  /**
+   * O loop de lotes é a parte DURÁVEL (cada chunk persiste antes do próximo), e
+   * por isso vai pro indicador global. O `toast.loading` encadeado que existia
+   * aqui contava "Lote 2/5" no canto — mas um toast é efêmero por convenção e
+   * some numa navegação, justamente numa tarefa de minutos. Agora o mesmo
+   * contador vira `progress` no store, e o card mostra barra determinada.
+   */
+  const runLoop = (targetIds: string[], capUsd: number) => {
+    const chunks: string[][] = []
+    for (let i = 0; i < targetIds.length; i += CHUNK) chunks.push(targetIds.slice(i, i + CHUNK))
+    const total = targetIds.length
+
+    runTask({
+      id: BACKFILL_TASK_ID,
+      kind: "interest-backfill",
+      label: `Reprocessando Interesse: ${total} obra${total !== 1 ? "s" : ""}`,
+      run: async () => {
+        let spent = 0
+        let succeeded = 0
+        let fresh = 0
+        let failed = 0
+        let stoppedByCap = false
+        setTaskProgress(BACKFILL_TASK_ID, 0, total)
+        for (let i = 0; i < chunks.length; i += 1) {
+          if (spent >= capUsd) {
+            stoppedByCap = true
+            break
+          }
+          const res = await runSynopsisInterestBatchAction(chunks[i], { maxCostUsd: capUsd - spent })
+          if (res.status !== "ok") {
+            const msg = "message" in res ? res.message : res.error
+            throw new Error(`Lote ${i + 1} falhou: ${msg}. Re-rode pra continuar de onde parou.`)
+          }
+          succeeded += res.report.succeeded
+          fresh += res.report.fresh
+          failed += res.report.failed
+          spent += res.report.costUsd
+          setTaskProgress(BACKFILL_TASK_ID, Math.min((i + 1) * CHUNK, total), total)
         }
-        toast.loading(`Lote ${i + 1}/${chunks.length} · ${succeeded} feitas · $${spent.toFixed(2)}`, { id: tid })
-        const res = await runSynopsisInterestBatchAction(chunks[i], { maxCostUsd: capUsd - spent })
-        if (res.status !== "ok") {
-          const msg = "message" in res ? res.message : res.error
-          toast.error(`Lote ${i + 1} falhou: ${msg}. Parando (re-rode pra continuar).`, { id: tid })
-          return
-        }
-        succeeded += res.report.succeeded
-        fresh += res.report.fresh
-        failed += res.report.failed
-        spent += res.report.costUsd
-      }
-      toast.success(
-        `Backfill concluído: ${succeeded} estimada(s) · ${fresh} já ok${failed ? ` · ${failed} falha(s)` : ""} · custo $${spent.toFixed(2)}`,
-        { id: tid },
-      )
-    } catch (err) {
-      toast.error(`Backfill interrompido: ${err instanceof Error ? err.message : "erro"} (re-rode pra continuar).`, { id: tid })
-    } finally {
-      setRunning(false)
-      refresh()
-    }
+        return { succeeded, fresh, failed, spent, stoppedByCap }
+      },
+      // Refresh nos dois caminhos: um lote que parou no meio já gravou os chunks
+      // anteriores, e a tela precisa mostrá-los.
+      onDone: () => refresh(),
+      onError: () => refresh(),
+      successToast: (r) => ({
+        message: r.stoppedByCap
+          ? `Parou no teto de $${capUsd.toFixed(2)} · ${r.succeeded} estimada(s) · gasto $${r.spent.toFixed(2)}`
+          : `Backfill concluído: ${r.succeeded} estimada(s) · ${r.fresh} já ok${r.failed ? ` · ${r.failed} falha(s)` : ""} · custo $${r.spent.toFixed(2)}`,
+      }),
+    })
   }
 
   const onClick = async () => {
     if (running) return
-    setRunning(true)
+    setPlanning(true)
     const plan = await planInterestBackfillForIds(works.map((w) => w.id)).finally(() =>
-      setRunning(false),
+      setPlanning(false),
     )
     if (plan.status !== "ok") {
       toast.error("message" in plan ? plan.message : plan.error)
@@ -111,7 +132,7 @@ export function InterestBackfillButton({ works, isPaid = true }: { works: Synops
       description: `${cost.profileSentence}Respeita os filtros: ${plan.needCalls} a prever (de ${plan.total} exibidas). Pula as já frescas.`,
       confirmLabel: "Reprocessar",
     })
-    if (ok) void runLoop(plan.targetIds, cap)
+    if (ok) runLoop(plan.targetIds, cap)
   }
 
   return (

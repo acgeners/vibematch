@@ -27,6 +27,16 @@ export interface AppTask {
   startedAt: number
   /** Mensagem curta quando status === "error". */
   error?: string
+  /**
+   * Andamento de tarefa em LOTE (ex.: re-rank de 12 obras). Quando presente, o
+   * indicador troca a barra indeterminada por uma determinada + "3/12".
+   *
+   * Existe porque o contador dessas ações vivia em estado de componente: quem
+   * navegava perdia justamente a informação que importa numa tarefa que dura
+   * minutos — quanto falta. O `runTask` não sabe contar sozinho; quem itera
+   * chama `setTaskProgress` a cada item.
+   */
+  progress?: { done: number; total: number }
 }
 
 export interface RunTaskSpec<T> {
@@ -83,6 +93,17 @@ function setTask(next: AppTask) {
   if (i >= 0) tasks[i] = next
   else tasks.push(next)
   emit()
+}
+
+/**
+ * Atualiza o andamento de uma tarefa em lote. No-op se a tarefa já saiu do store
+ * ou não está mais rodando — o caller itera num laço que pode terminar depois de
+ * o usuário dispensar, e um `setTask` aqui a ressuscitaria.
+ */
+export function setTaskProgress(id: string, done: number, total: number) {
+  const task = tasks.find((t) => t.id === id)
+  if (!task || task.status !== "running") return
+  setTask({ ...task, progress: { done, total } })
 }
 
 export function dismissTask(id: string) {

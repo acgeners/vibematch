@@ -1,8 +1,7 @@
 "use client"
 
-import { useEffect, useRef, useState, useTransition } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Loader2, Sparkles, RefreshCw, History } from "lucide-react"
-import { toast } from "sonner"
 import {
   Dialog,
   DialogContent,
@@ -15,6 +14,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { deepDiveWorkAction } from "@/server/actions/deep-dive"
+import { runTask } from "@/lib/tasks-store"
+import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import { DeepDiveResultView } from "./deep-dive/deep-dive-result-view"
 import { CostSummary } from "@/components/cost/cost-summary"
 import { previewCost } from "@/lib/cost-preview/catalog"
@@ -67,7 +68,10 @@ export function DeepDiveDrawer({
   const [mood, setMood] = useState("")
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [loadingStepIdx, setLoadingStepIdx] = useState(0)
-  const [isPending, startTransition] = useTransition()
+  // Pendência do STORE: o drawer pode fechar no meio (o Deep Dive continua), e ao
+  // reabrir o botão precisa saber que ainda está rodando.
+  const tasks = useAppTasks()
+  const isPending = tasks.some((t) => t.id === `deep-dive:${workId}` && t.status === "running")
 
   // Ao abrir (transição fechado→aberto), escolhe a tela inicial conforme `startView`.
   // Só age na abertura — não interfere quando `current` muda durante a sessão.
@@ -90,21 +94,39 @@ export function DeepDiveDrawer({
     }
   }, [isPending])
 
+  /**
+   * O Deep Dive é DURÁVEL: grava em `deep_dive_results` e tem histórico próprio.
+   * Por isso vai pro indicador global — fechar o drawer (ou sair da página) não
+   * perde nada, e a análise continua. O drawer segue mostrando os passos e o
+   * resultado pra quem fica; quem sai é alcançado pelo toast e pelo chip.
+   */
   const handleAnalyze = () => {
     setErrorMsg(null)
     setState("loading")
-    startTransition(async () => {
-      const result = await deepDiveWorkAction(workId, mood.trim() || null)
-      if (result.error || !result.data) {
-        setErrorMsg(result.error ?? "Falha ao gerar Deep Dive.")
+    runTask({
+      id: `deep-dive:${workId}`,
+      kind: "deep-dive",
+      label: `Deep Dive: ${workTitle}`,
+      run: async () => {
+        const result = await deepDiveWorkAction(workId, mood.trim() || null)
+        // A action devolve `{ error }` em vez de lançar; sem converter, o store
+        // anunciaria "pronto" pra uma falha.
+        if (result.error || !result.data) throw new Error(result.error ?? "Falha ao gerar Deep Dive.")
+        return result.data
+      },
+      successToast: (data) => ({
+        message: `Deep Dive concluído — match ${Math.round(data.match_score ?? 0)}/100.`,
+      }),
+      onDone: (data) => {
+        setCurrent(data)
+        setState("result")
+        setMood("")
+      },
+      // Só o estado do drawer: o `runTask` já emite o `toast.error`.
+      onError: (err) => {
+        setErrorMsg(err instanceof Error ? err.message : "Falha ao gerar Deep Dive.")
         setState("error")
-        toast.error(result.error ?? "Falha ao gerar Deep Dive.")
-        return
-      }
-      setCurrent(result.data)
-      setState("result")
-      setMood("")
-      toast.success(`Deep Dive concluído — match ${Math.round(result.data.match_score ?? 0)}/100.`)
+      },
     })
   }
 

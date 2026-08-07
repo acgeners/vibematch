@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState } from "react"
 import { ChartNoAxesCombined, Info, Loader2, ScanSearch } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -11,10 +11,27 @@ import {
 } from "@/components/ui/tooltip"
 import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { runBiasReportAction, runCalibrationAuditAction } from "@/server/actions/calibration"
+import { runTask } from "@/lib/tasks-store"
+import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import { formatRelativeDateTime } from "@/lib/date-utils"
 import { cn } from "@/lib/utils"
 import type { AuditStaleness, AuditStalenessLevel, CalibrationRunRow } from "@/lib/ai-calibration/types"
 import type { ReactNode } from "react"
+
+const AUDIT_TASK_ID = "calibration-audit"
+const BIAS_TASK_ID = "bias-report"
+
+/** Resumo do run — o mesmo texto serve à linha inline e ao toast de conclusão. */
+function auditSummary(d: {
+  nWorksScanned: number
+  nAutoApplied: number
+  nSuggestions: number
+  scope: string
+}): string {
+  if (d.nWorksScanned === 0) return "Nada mudou desde a última auditoria — nenhum run criado."
+  const label = d.scope === "full" ? "Varredura completa" : "Incremental"
+  return `${label}: ${d.nWorksScanned} obras · ${d.nAutoApplied} auto-aplicadas · ${d.nSuggestions - d.nAutoApplied} pendentes.`
+}
 
 /**
  * Faixa de ação (action-zone) no topo de cada card de calibração. Diferente dos
@@ -200,7 +217,11 @@ export function AuditTriggerZone({
   ratedWorksCount: number
   staleness: AuditStaleness
 }) {
-  const [auditPending, startAudit] = useTransition()
+  // A auditoria varre TODAS as obras com nota pessoal e grava `calibration_runs` —
+  // durável e das mais longas da console. Pendência vem do store; a linha de
+  // resumo continua inline, que é onde ela é útil pra quem fica.
+  const tasks = useAppTasks()
+  const auditPending = tasks.some((t) => t.id === AUDIT_TASK_ID && t.status === "running")
   const [auditMsg, setAuditMsg] = useState<string | null>(null)
   const confirmCost = useCostConfirm()
 
@@ -228,21 +249,21 @@ export function AuditTriggerZone({
       return
     }
     setAuditMsg(null)
-    startAudit(async () => {
-      const res = await runCalibrationAuditAction(full ? { full: true } : {})
-      if (res.error) {
-        setAuditMsg(`Erro: ${res.error}`)
-      } else if (res.data) {
-        const d = res.data
-        if (d.nWorksScanned === 0) {
-          setAuditMsg("Nada mudou desde a última auditoria — nenhum run criado.")
-        } else {
-          const label = d.scope === "full" ? "Varredura completa" : "Incremental"
-          setAuditMsg(
-            `${label}: ${d.nWorksScanned} obras · ${d.nAutoApplied} auto-aplicadas · ${d.nSuggestions - d.nAutoApplied} pendentes.`,
-          )
-        }
-      }
+    runTask({
+      id: AUDIT_TASK_ID,
+      kind: "calibration-audit",
+      label: `Auditando ${scanCount} obra${scanCount !== 1 ? "s" : ""}`,
+      run: async () => {
+        const res = await runCalibrationAuditAction(full ? { full: true } : {})
+        // A action devolve `{ error }` em vez de lançar; sem converter, o store
+        // anunciaria "pronto" pra uma falha.
+        if (res.error || !res.data) throw new Error(res.error ?? "Falha na auditoria.")
+        return res.data
+      },
+      successToast: (d) => ({ message: auditSummary(d) }),
+      onDone: (d) => setAuditMsg(auditSummary(d)),
+      // Só a linha inline: o `runTask` já emite o `toast.error`.
+      onError: (err) => setAuditMsg(`Erro: ${err instanceof Error ? err.message : "falhou"}`),
     })
   }
 
@@ -305,7 +326,8 @@ export function BiasTriggerZone({
   lastBias: CalibrationRunRow | null
   ratedWorksCount: number
 }) {
-  const [biasPending, startBias] = useTransition()
+  const tasks = useAppTasks()
+  const biasPending = tasks.some((t) => t.id === BIAS_TASK_ID && t.status === "running")
   const [biasMsg, setBiasMsg] = useState<string | null>(null)
   const confirmCost = useCostConfirm()
 
@@ -321,13 +343,18 @@ export function BiasTriggerZone({
       return
     }
     setBiasMsg(null)
-    startBias(async () => {
-      const res = await runBiasReportAction()
-      if (res.error) {
-        setBiasMsg(`Erro: ${res.error}`)
-      } else {
-        setBiasMsg("Relatório de viés atualizado.")
-      }
+    runTask({
+      id: BIAS_TASK_ID,
+      kind: "bias-report",
+      label: "Gerando relatório de viés",
+      run: async () => {
+        const res = await runBiasReportAction()
+        if (res.error) throw new Error(res.error)
+        return res
+      },
+      successToast: () => ({ message: "Relatório de viés atualizado." }),
+      onDone: () => setBiasMsg("Relatório de viés atualizado."),
+      onError: (err) => setBiasMsg(`Erro: ${err instanceof Error ? err.message : "falhou"}`),
     })
   }
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, useTransition } from "react"
+import { useRef, useState } from "react"
 import {
   ArrowRight,
   BarChart3,
@@ -48,6 +48,8 @@ import type {
   ProfileStalenessLevel,
 } from "@/lib/ai-recommendation/profile-staleness"
 import { generateTasteProfileAction } from "@/server/actions/recommendations"
+import { runTask } from "@/lib/tasks-store"
+import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import type { ProfileStatus } from "@/server/actions/recommendations"
 import type {
   AlignedWork,
@@ -60,6 +62,8 @@ import type {
   TasteProfileRow,
 } from "@/lib/ai-recommendation/types"
 import { cn } from "@/lib/utils"
+
+const TASTE_PROFILE_TASK_ID = "taste-profile"
 
 const MIN_WORKS = 5
 // Prévia mostra até N tags por lado; o resto vai no "+N" → container detalhado.
@@ -128,7 +132,12 @@ export function TasteProfilePanel({
   const [profile, setProfile] = useState<TasteProfileRow | null>(status.profile)
   const [staleness, setStaleness] = useState<ProfileStaleness | null>(status.staleness)
   const [error, setError] = useState<string | null>(null)
-  const [recompute, startRecompute] = useTransition()
+  // Pendência vem do STORE, não de um `useTransition`: gerar o perfil é a ação
+  // mais lenta do app — 33,4s de mediana, máximo medido 46,8s (n=11 em
+  // `ai_api_calls`). Prender a pessoa numa tela por meio minuto pra ela ver um
+  // spinner é o oposto do que essa espera pede.
+  const tasks = useAppTasks()
+  const recompute = tasks.some((t) => t.id === TASTE_PROFILE_TASK_ID && t.status === "running")
   const [summaryOpen, setSummaryOpen] = useState(false)
   // "Ver todos" e "+N" rolam até o container detalhado (não expandem inline).
   const detailRef = useRef<HTMLElement>(null)
@@ -139,13 +148,28 @@ export function TasteProfilePanel({
 
   const handleRecompute = () => {
     setError(null)
-    startRecompute(async () => {
-      const res = await generateTasteProfileAction()
-      if (res.error) setError(res.error)
-      else if (res.data) {
-        setProfile(res.data)
+    runTask({
+      id: TASTE_PROFILE_TASK_ID,
+      kind: "taste-profile",
+      label: "Gerando seu perfil de gosto",
+      run: async () => {
+        const res = await generateTasteProfileAction()
+        // A action devolve `{ error }` em vez de lançar; sem converter, o store
+        // marcaria a falha como sucesso.
+        if (res.error || !res.data) throw new Error(res.error ?? "Erro ao gerar o perfil.")
+        return res.data
+      },
+      successToast: () => ({ message: "Perfil de gosto atualizado" }),
+      // Se o painel ainda estiver montado, pinta o resultado na hora; se a pessoa
+      // já saiu, o perfil está no banco e a próxima visita o lê do servidor.
+      onDone: (data) => {
+        setProfile(data)
         setStaleness(FRESHLY_GENERATED)
-      }
+      },
+      // A caixa vermelha inline continua, e o `runTask` também emite um toast:
+      // aqui os dois se justificam, porque o toast é o único canal que alcança
+      // quem saiu da página, e a caixa é a que fica legível ao lado do botão.
+      onError: (err) => setError(err instanceof Error ? err.message : "Erro ao gerar o perfil."),
     })
   }
   const level = staleness ? classifyProfileStalenessLevel(staleness) : null

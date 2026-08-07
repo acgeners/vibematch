@@ -20,6 +20,8 @@ import {
   planSynopsisInterestBatchAction,
   runSynopsisInterestBatchAction,
 } from "@/server/actions/synopsis-quality"
+import { runTask } from "@/lib/tasks-store"
+import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import { buildInterestBatchCost } from "@/lib/cost-preview/interest-cost-steps"
 import { cn } from "@/lib/utils"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
@@ -40,6 +42,8 @@ function fmtPredictedAt(iso: string | null): string | null {
   return y && m && d ? `${d}/${m}/${y}` : null
 }
 
+const BATCH_TASK_ID = "interest-batch"
+
 type SortField = "default" | "expected" | "lastRead" | "predicted"
 
 /** Uma obra "precisa de previsão" quando não tem previsão ou está desatualizada. */
@@ -59,7 +63,12 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
   const confirmCost = useCostConfirm()
   const [sortField, setSortField] = useState<SortField>("default")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
-  const [batchRunning, setBatchRunning] = useState(false)
+  // O dry-run + modal de custo ficam ANCORADOS (é decisão, exige a pessoa aqui);
+  // só a execução vira tarefa global. Por isso são dois estados e não um.
+  const [planning, setPlanning] = useState(false)
+  const tasks = useAppTasks()
+  const batchRunning =
+    planning || tasks.some((t) => t.id === BATCH_TASK_ID && t.status === "running")
 
   const sortedWorks = useMemo(() => {
     if (sortField === "default") {
@@ -105,29 +114,40 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
     return w != null && needsPrediction(w)
   })
 
-  // Executa o lote já confirmado. Custo total governado pelo teto (upper bound do dry-run).
-  const executeBatch = async (batchIds: string[], maxCostUsd: number) => {
-    setBatchRunning(true)
-    try {
-      const res = await runSynopsisInterestBatchAction(batchIds, { maxCostUsd })
-      if (res.status === "ok") {
-        const r = res.report
-        toast.success(
+  // Executa o lote já confirmado. Custo total governado pelo teto (upper bound do
+  // dry-run). Vai pro indicador global porque é durável — cada obra do lote
+  // persiste — e leva ~4,9s de mediana POR obra (p90 7,0s, n=234): num lote de 20
+  // já passa de um minuto, tempo de sobra pra pessoa sair da página.
+  const executeBatch = (batchIds: string[], maxCostUsd: number) => {
+    runTask({
+      id: BATCH_TASK_ID,
+      kind: "interest-batch",
+      label: `Estimando Interesse: ${batchIds.length} obra${batchIds.length !== 1 ? "s" : ""}`,
+      run: async () => {
+        const res = await runSynopsisInterestBatchAction(batchIds, { maxCostUsd })
+        // Os três status de não-sucesso viram rejeição: sem isso o store diria
+        // "pronto" pra um lote bloqueado por custo.
+        if (res.status !== "ok") {
+          throw new Error("message" in res ? res.message : res.error)
+        }
+        return res.report
+      },
+      onDone: () => {
+        selection.clear()
+        refresh()
+      },
+      onError: () => {
+        selection.clear()
+        refresh()
+      },
+      successToast: (r) => ({
+        message:
           `${r.succeeded} estimada${r.succeeded !== 1 ? "s" : ""} · ${r.fresh} já ok` +
-            (r.failed > 0 ? ` · ${r.failed} falhou` : "") +
-            (r.blocked > 0 ? ` · ${r.blocked} bloqueada(s)` : "") +
-            ` · custo $${r.costUsd.toFixed(3)}`,
-        )
-      } else if (res.status === "blocked_cost_confirmation") {
-        toast.error(res.message)
-      } else {
-        toast.error("message" in res ? res.message : res.error)
-      }
-    } finally {
-      setBatchRunning(false)
-      selection.clear()
-      refresh()
-    }
+          (r.failed > 0 ? ` · ${r.failed} falhou` : "") +
+          (r.blocked > 0 ? ` · ${r.blocked} bloqueada(s)` : "") +
+          ` · custo $${r.costUsd.toFixed(3)}`,
+      }),
+    })
   }
 
   // Fluxo: DRY-RUN obrigatório → popup de custo com os números REAIS do plano →
@@ -135,9 +155,9 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
   const predictSelected = async () => {
     const batchIds = selection.selectedIds
     if (batchIds.length === 0 || batchRunning) return
-    setBatchRunning(true)
+    setPlanning(true)
     const planned = await planSynopsisInterestBatchAction(batchIds).finally(() =>
-      setBatchRunning(false),
+      setPlanning(false),
     )
     if (planned.status !== "ok") {
       toast.error("message" in planned ? planned.message : planned.error)
@@ -173,7 +193,7 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
       description: `${cost.profileSentence}Dry-run real: ${needCalls} previsão(ões), uma chamada Sonnet por obra.`,
       confirmLabel: "Executar",
     })
-    if (ok) void executeBatch(batchIds, maxCostUsd)
+    if (ok) executeBatch(batchIds, maxCostUsd)
   }
 
   if (works.length === 0) {

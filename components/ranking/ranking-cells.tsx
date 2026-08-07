@@ -1,43 +1,14 @@
 "use client"
 
-import { useTransition } from "react"
-import { useRefresh } from "@/lib/use-refresh"
 import { Loader2, Sparkles, RotateCw } from "lucide-react"
-import { toast } from "sonner"
-
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { QualityHearts } from "@/components/ui/quality-hearts"
 import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
-import { rerankSingleWorkAction } from "@/server/actions/recommendations"
+import { useRerankSingleWork } from "@/components/ranking/use-rerank-single-work"
 import { AlignmentTooltipContent, VerdictTooltipContent } from "@/components/ranking/score-tooltip-content"
-import { useCostConfirm } from "@/components/cost/cost-confirm"
 import type { AlignmentPayload } from "@/components/ranking/score-tooltip-content"
-
-/**
- * Hook compartilhado pelo re-rank de uma obra. Dispara `rerankSingleWorkAction`
- * (1 LLM call), avisa via toast e força refresh dos server components pra a cell
- * renderizar o badge atualizado.
- */
-function useRerankSingleWork(workId: string) {
-  const [isPending, startTransition] = useTransition()
-  const refresh = useRefresh()
-  const confirmCost = useCostConfirm()
-  const run = async () => {
-    if (!(await confirmCost({ action: "rerank_single" }))) return
-    startTransition(async () => {
-      const result = await rerankSingleWorkAction(workId)
-      if (result.error || !result.data) {
-        toast.error(result.error ?? "Erro ao rankear obra.")
-        return
-      }
-      toast.success(`Veredito IA: ${Math.round(result.data.alignmentScore)}`)
-      refresh()
-    })
-  }
-  return { isPending, run }
-}
 
 /**
  * Botão pequeno que substitui o "—" da `AlignmentScoreCell` quando há um

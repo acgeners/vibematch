@@ -24,12 +24,14 @@ import { useIsAdmin } from "@/components/layout/admin-context"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
 import type { ReviewQueueMark } from "@/components/titles/update-data-dialog"
 import { enrichWorkExternal } from "@/server/actions/enrich"
+import { runTask, setTaskProgress } from "@/lib/tasks-store"
 import type { EnrichResult, ReviewWork } from "@/server/actions/enrich"
 import { deleteWork } from "@/server/actions/works"
 
 type RowState = EnrichResult | "running" | undefined
 
 const CONCURRENCY = 3
+const ENRICH_TASK_ID = "enrich-batch"
 
 /**
  * Fila de revisão em sequência. `cursor` aponta pra obra aberta agora; `marks`
@@ -154,7 +156,13 @@ export function ImportReview({
     if (succeeded.length > 0) await reload()
   }
 
-  // Só busca dados das que ainda não têm capa e não foram processadas nesta sessão.
+  /**
+   * Só busca dados das que ainda não têm capa e não foram processadas nesta
+   * sessão. O lote vai pro indicador global porque é DURÁVEL — cada obra grava
+   * assim que resolve — e são N buscas em fontes externas em fila de 3, o que
+   * passa fácil de um minuto. O status POR LINHA continua aqui na tela: é o
+   * detalhe que só faz sentido pra quem está olhando a lista.
+   */
   const runBatch = async (pool: ReviewWork[]) => {
     const targets = pool.filter((w) => {
       const s = states[w.id]
@@ -162,10 +170,41 @@ export function ImportReview({
     })
     if (targets.length === 0) return
     setRunning(true)
-    await runPool(targets, (w) => enrichOne(w.id), CONCURRENCY)
-    setRunning(false)
-    await reload()
-    onBatchComplete?.()
+    runTask({
+      id: ENRICH_TASK_ID,
+      kind: "enrich-batch",
+      label: `Buscando dados de ${targets.length} obra${targets.length !== 1 ? "s" : ""}`,
+      run: async () => {
+        let done = 0
+        setTaskProgress(ENRICH_TASK_ID, 0, targets.length)
+        await runPool(
+          targets,
+          async (w) => {
+            await enrichOne(w.id)
+            done += 1
+            setTaskProgress(ENRICH_TASK_ID, done, targets.length)
+          },
+          CONCURRENCY,
+        )
+        // `enrichOne` engole os erros por obra (viram estado da linha), então
+        // aqui só o desfecho agregado interessa.
+        return targets.length
+      },
+      successToast: (n) => ({ message: `Busca concluída em ${n} obra${n !== 1 ? "s" : ""}.` }),
+      onDone: () => {
+        setRunning(false)
+        // `reload` pode ser síncrono (`onReload` é opcional e o default é
+        // `refresh()`), então não dá pra encadear com `.then`.
+        void (async () => {
+          await reload()
+          onBatchComplete?.()
+        })()
+      },
+      onError: () => {
+        setRunning(false)
+        void reload()
+      },
+    })
   }
 
   // ── Fila ───────────────────────────────────────────────────────────────
