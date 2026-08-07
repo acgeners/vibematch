@@ -23,6 +23,7 @@ import type {
   WeightConfidence,
 } from "@/lib/ml/post-reading-weight-inference"
 import { cn } from "@/lib/utils"
+import { ScopedTaskStrip, useScopedGuard } from "@/components/tasks/scoped-task"
 
 type Suggestion = PostReadingWeightSuggestion & { selected: boolean }
 
@@ -73,6 +74,16 @@ export function PostReadingWeightSuggestionsPanel() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [isLoading, startLoading] = useTransition()
   const [isApplying, startApplying] = useTransition()
+
+  // Request-scoped: `suggestPostReadingWeights` só LÊ e devolve — nada é gravado
+  // até você marcar e aplicar. Painel solto na página ⇒ `guardNavigation`.
+  const { guardDialog, elapsed } = useScopedGuard({
+    running: isLoading,
+    title: "Sair agora perde a sugestão",
+    what: "Gerar sugestões",
+    confirmLabel: "Sair mesmo assim",
+    guardNavigation: true,
+  })
 
   const handleSuggest = () => {
     startLoading(async () => {
@@ -156,6 +167,13 @@ export function PostReadingWeightSuggestionsPanel() {
 
   return (
     <div className="space-y-4">
+      {guardDialog}
+      <ScopedTaskStrip
+        running={isLoading}
+        elapsed={elapsed}
+        label="Analisando suas notas pós-leitura…"
+        note="Fique nesta página. A sugestão aparece aqui e não fica salva — só ao aplicar ela vira dado."
+      />
       <div className="flex items-start justify-between gap-4">
         <p className="text-xs text-muted-foreground max-w-2xl">
           Treina uma regressão Ridge nos 8 critérios pós-leitura contra a Nota Prevista do sistema

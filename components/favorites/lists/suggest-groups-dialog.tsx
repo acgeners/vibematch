@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label"
 import { CoverImage } from "@/components/ui/cover-image"
 import { cn } from "@/lib/utils"
 import { createGroupFromProposal, proposeFavoriteGroups } from "@/server/actions/lists"
+import { ScopedTaskStrip, useScopedGuard } from "@/components/tasks/scoped-task"
 import type { WorkLiteForPicker } from "@/server/queries/lists"
 
 interface SuggestGroupsDialogProps {
@@ -43,6 +44,17 @@ export function SuggestGroupsDialog({ open, onOpenChange, catalog }: SuggestGrou
   const router = useRouter()
   const [n, setN] = useState(3)
   const [genPending, startGen] = useTransition()
+
+  // Request-scoped: `proposeFavoriteGroups` só LÊ e devolve as propostas — nada é
+  // gravado até você criar o grupo. Diálogo MODAL, então a porta de saída é
+  // fechar (Cancelar · Esc · clicar fora), não o link da barra: sem
+  // `guardNavigation`. Ver components/tasks/scoped-task.tsx.
+  const { guard, guardDialog, elapsed } = useScopedGuard({
+    running: genPending,
+    title: "Fechar agora perde as sugestões",
+    what: "Gerar sugestões",
+    confirmLabel: "Fechar mesmo assim",
+  })
   const [creatingIdx, setCreatingIdx] = useState<number | null>(null)
   const [, startCreate] = useTransition()
   const [proposals, setProposals] = useState<ProposalVM[] | null>(null)
@@ -130,7 +142,11 @@ export function SuggestGroupsDialog({ open, onOpenChange, catalog }: SuggestGrou
   const hasProposals = proposals != null && proposals.length > 0
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => (v ? onOpenChange(true) : guard(() => onOpenChange(false)))}
+    >
+      {guardDialog}
       <DialogContent className="flex max-h-[88vh] flex-col sm:max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -172,6 +188,14 @@ export function SuggestGroupsDialog({ open, onOpenChange, catalog }: SuggestGrou
             {genPending ? "Analisando…" : hasProposals ? "Gerar de novo" : "Gerar sugestões"}
           </Button>
         </div>
+
+        <ScopedTaskStrip
+          running={genPending}
+          elapsed={elapsed}
+          label="Analisando seus favoritos…"
+          note="Fique neste diálogo. As sugestões aparecem aqui e não ficam salvas — só ao criar o grupo elas viram dado."
+          className="mb-3"
+        />
 
         {/* Corpo */}
         <div className="-mx-1 flex-1 overflow-y-auto px-1">
