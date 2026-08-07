@@ -4,8 +4,10 @@ import Link from "next/link"
 import { AlertTriangle, CheckCircle2, Crown, ExternalLink, ImageOff, Lightbulb, Trophy } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { AdultBadge } from "@/components/ui/adult-badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { CoverImage } from "@/components/ui/cover-image"
 import { cn, titleToSlug } from "@/lib/utils"
+import { LABELS } from "@/lib/constants/ui-labels"
 import type { RankedCandidate } from "@/lib/ai-recommendation/types"
 
 interface RankedWorkWinnerCardProps {
@@ -83,35 +85,49 @@ export function RankedWorkWinnerCard({ ranked, totalCount }: RankedWorkWinnerCar
 
           {/* AI Score card containing the Laurel Wreath and details */}
           <div className="flex items-center gap-4 rounded-xl border border-border/80 bg-card/65 p-3.5 mt-4">
-            <div className="relative flex size-16 shrink-0 items-center justify-center">
-              {/* Laurel Wreath SVG */}
-              <svg
-                viewBox="0 0 24 24"
-                className={cn("absolute inset-0 size-full", q.scoreClass)}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                {/* Left branch */}
-                <path d="M6 18c-1.5-1.5-2.5-4-2.5-6.5S4.5 7 6 5.5" />
-                <path d="M3 14.5c.8-.5 1.7-.2 2 .5M2.5 11c.9-.3 1.8.2 2 1M3 7.5c.9 0 1.6.7 1.8 1.5" />
-                {/* Right branch */}
-                <path d="M18 18c1.5-1.5 2.5-4 2.5-6.5S19.5 7 18 5.5" />
-                <path d="M21 14.5c-.8-.5-1.7-.2-2 .5M21.5 11c-.9-.3-1.8.2-2 1M21 7.5c-.9 0-1.6.7-1.8 1.5" />
-              </svg>
-              <div className="flex flex-col items-center justify-center z-10 mt-[-1px]">
-                <span className={cn("text-2xl font-black leading-none tabular-nums", q.scoreClass)}>
-                  {Math.round(alignment_score)}
-                </span>
-                <span className="text-[6px] font-bold uppercase tracking-widest text-muted-foreground/80 mt-0.5 select-none">Score</span>
-              </div>
-            </div>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="relative flex size-16 shrink-0 items-center justify-center cursor-help select-none">
+                    {/* Laurel Wreath SVG */}
+                    <svg
+                      viewBox="0 0 24 24"
+                      className={cn("absolute inset-0 size-full", q.scoreClass)}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      {/* Left branch */}
+                      <path d="M6 18c-1.5-1.5-2.5-4-2.5-6.5S4.5 7 6 5.5" />
+                      <path d="M3 14.5c.8-.5 1.7-.2 2 .5M2.5 11c.9-.3 1.8.2 2 1M3 7.5c.9 0 1.6.7 1.8 1.5" />
+                      {/* Right branch */}
+                      <path d="M18 18c1.5-1.5 2.5-4 2.5-6.5S19.5 7 18 5.5" />
+                      <path d="M21 14.5c-.8-.5-1.7-.2-2 .5M21.5 11c-.9-.3-1.8.2-2 1M21 7.5c-.9 0-1.6.7-1.8 1.5" />
+                    </svg>
+                    <div className="flex flex-col items-center justify-center z-10 mt-[-1px]">
+                      <span className={cn("text-2xl font-black leading-none tabular-nums", q.scoreClass)}>
+                        {Math.round(alignment_score)}
+                      </span>
+                      <span className="text-[6px] font-bold uppercase tracking-widest text-muted-foreground/80 mt-0.5">
+                        {LABELS.alignment_score.short}
+                      </span>
+                    </div>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-[300px] space-y-1.5">
+                  <p className="text-xs font-semibold">{LABELS.alignment_score.full}: {Math.round(alignment_score)}/100</p>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    90+ excepcional · 70–89 forte · 50–69 moderado · 30–49 fraco · &lt;30 pouco alinhado
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             <div className="min-w-0">
               <p className="text-sm font-bold text-foreground">Melhor combinação para seu perfil</p>
               <p className="text-xs leading-relaxed text-muted-foreground mt-0.5">
-                Reúne os elements que mais se alinham com suas preferências e padrões narrativos.
+                Reúne os elementos que mais se alinham com suas preferências e padrões narrativos.
               </p>
             </div>
           </div>
