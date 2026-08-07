@@ -1,5 +1,5 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
-import { act, render, screen, cleanup } from "@testing-library/react"
+import { act, render, screen, cleanup, fireEvent } from "@testing-library/react"
 
 vi.mock("server-only", () => ({}))
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }))
@@ -82,6 +82,72 @@ describe("indicador de tarefas na barra superior", () => {
     const chip = screen.getByRole("button", { name: /tarefas em segundo plano/i })
     expect(chip.getAttribute("aria-label")).toContain("2 em andamento")
     expect(chip.getAttribute("aria-expanded")).toBe("true")
+  })
+
+  /**
+   * Bug real, reportado 2026-08-07: "rodei a re-avaliação e não apareceu o popup".
+   * O chip aparecia, a prévia não.
+   *
+   * Causa: quase toda ação passa por um modal de custo. Ao fechar, o Radix Dialog
+   * DEVOLVE o foco ao botão que o abriu — e `PopoverContentNonModal` fecha em
+   * `focusOutside` (o `preventDefault` que existe na fonte do Radix é da variante
+   * MODAL). A prévia abria e morria em milissegundos, sem erro e sem log.
+   *
+   * Os testes acima não pegavam porque disparavam a tarefa ANTES de montar, sem
+   * nenhum foco em jogo.
+   */
+  it("o foco voltando pro botão que disparou NÃO fecha a prévia", async () => {
+    vi.useRealTimers()
+    render(
+      <>
+        <button data-testid="avaliar">Avaliar</button>
+        <TasksChip />
+      </>,
+    )
+    startTask()
+    const chip = screen.getByRole("button", { name: /tarefas em segundo plano/i })
+    expect(chip.getAttribute("aria-expanded")).toBe("true")
+
+    const trigger = screen.getByTestId("avaliar")
+    await act(async () => {
+      trigger.focus()
+      fireEvent.focusIn(trigger)
+    })
+    expect(chip.getAttribute("aria-expanded")).toBe("true")
+  })
+
+  it("Escape continua fechando a prévia", async () => {
+    vi.useRealTimers()
+    render(<TasksChip />)
+    startTask()
+    const chip = screen.getByRole("button", { name: /tarefas em segundo plano/i })
+    expect(chip.getAttribute("aria-expanded")).toBe("true")
+
+    await act(async () => { fireEvent.keyDown(document, { key: "Escape" }) })
+    expect(chip.getAttribute("aria-expanded")).toBe("false")
+  })
+
+  it("clique fora continua fechando a prévia", async () => {
+    vi.useRealTimers()
+    render(
+      <>
+        <div data-testid="fora">fora</div>
+        <TasksChip />
+      </>,
+    )
+    startTask()
+    const chip = screen.getByRole("button", { name: /tarefas em segundo plano/i })
+    expect(chip.getAttribute("aria-expanded")).toBe("true")
+
+    // O Radix registra o listener de pointerdown num setTimeout(0); disparar
+    // antes disso testaria um listener que ainda não existe.
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    await act(async () => {
+      const el = screen.getByTestId("fora")
+      fireEvent.pointerDown(el, { button: 0 })
+      fireEvent.mouseDown(el)
+    })
+    expect(chip.getAttribute("aria-expanded")).toBe("false")
   })
 
   it("ao concluir, o chip muda de estado — e NÃO reabre a prévia (quem avisa é o toast)", async () => {
