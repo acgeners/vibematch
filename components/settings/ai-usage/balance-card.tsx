@@ -26,7 +26,12 @@ function formatDateTime(iso: string): string {
 export function BalanceCard({ status }: { status: BalanceStatus }) {
   const refresh = useRefresh()
   const [pending, startTransition] = useTransition()
-  const [value, setValue] = useState(status.balanceUsd != null ? String(status.balanceUsd) : "")
+  // Vírgula: o campo fica ao lado do saldo formatado ("$19,96") e o placeholder
+  // dele já promete "0,00". `handleSubmit` normaliza os dois separadores, então
+  // quem digitar ponto continua funcionando.
+  const [value, setValue] = useState(
+    status.balanceUsd != null ? String(status.balanceUsd).replace(".", ",") : "",
+  )
   const [error, setError] = useState<string | null>(null)
 
   const hasBalance = status.balanceUsd != null

@@ -51,9 +51,14 @@ export function CostMenu() {
 
       <div className="space-y-5 px-4 py-4 sm:px-5">
         <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-muted/30 px-3 py-1.5 text-[11.5px] text-muted-foreground">
-          <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
-          Estimativa em dólar (<strong className="font-semibold">¢</strong> = centavo de dólar) — o
-          mesmo valor que aparece antes de você confirmar uma ação.
+          <Lightbulb className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+          {/* O texto vai num <span> só: neste `inline-flex gap-2`, um <strong>
+              solto vira ITEM FLEX e ganha 8px dos dois lados — saía
+              "Estimativa em dólar ( ¢ = centavo de dólar)". */}
+          <span>
+            Estimativa em dólar (<strong className="font-semibold">¢</strong> = centavo de dólar) —
+            o mesmo valor que aparece antes de você confirmar uma ação.
+          </span>
         </div>
 
         {JOURNEY_GROUPS.map((group) => {
