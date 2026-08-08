@@ -17,7 +17,7 @@ import type { CacheEventMetrics } from "@/lib/ai-cache/cache-events"
 import { DetailGrid } from "./detail-grid"
 import type { DetailBlockData } from "./detail-grid"
 import { formatLatency, formatPct, formatTokens, topKey } from "./format"
-import { formatUsd } from "@/lib/format/money"
+import { makeUsdScale, type UsdScale } from "@/lib/format/money"
 import { WorkloadPill } from "./pills"
 
 interface Props {
@@ -106,6 +106,15 @@ export function OperationsTable({ operations, cache, active }: Props) {
     return built
   }, [operations, cacheByOp, sortKey, sortDir])
 
+  // Uma régua por COLUNA — ver o comentário nas props do `FragmentRow`. Separadas
+  // porque total do mês e custo unitário são grandezas distintas, com 2 ordens de
+  // magnitude entre elas; uma régua só achataria a menor.
+  const costScale = useMemo(() => makeUsdScale(...rows.map((r) => r.cost)), [rows])
+  const perSuccessScale = useMemo(
+    () => makeUsdScale(...rows.map((r) => r.costPerSuccess)),
+    [rows],
+  )
+
   function toggleSort(col: Column) {
     if (col.key === sortKey) setSortDir((d) => (d === "asc" ? "desc" : "asc"))
     else {
@@ -190,6 +199,8 @@ export function OperationsTable({ operations, cache, active }: Props) {
                 <FragmentRow
                   key={opKey}
                   row={row}
+                  costScale={costScale}
+                  perSuccessScale={perSuccessScale}
                   def={def}
                   opKey={opKey}
                   isActive={isActive}
@@ -216,8 +227,19 @@ function FragmentRow({
   domWorkload,
   onToggle,
   href,
+  costScale,
+  perSuccessScale,
 }: {
   row: Row
+  /**
+   * Uma régua POR COLUNA. Sem isto, `suggest_groups` (0,46¢) aparecia entre
+   * valores em dólar na coluna Custo — e "0,46" lê como MAIOR que "$0,33",
+   * sendo 70× menor. Em Custo/sucesso era pior: "$0,30" e "0,3¢" na mesma
+   * coluna, dois "0,3" que diferem 100×. As duas colunas têm réguas separadas
+   * de propósito: total do mês e custo unitário não se comparam entre si.
+   */
+  costScale: UsdScale
+  perSuccessScale: UsdScale
   def: (typeof AI_OPERATIONS)[keyof typeof AI_OPERATIONS] | undefined
   opKey: string
   isActive: boolean
@@ -271,10 +293,10 @@ function FragmentRow({
             )}
           </div>
         </td>
-        <td className="px-4 py-2 text-right font-mono tabular-nums">{formatUsd(row.cost)}</td>
+        <td className="px-4 py-2 text-right font-mono tabular-nums">{costScale.format(row.cost)}</td>
         <td className="px-4 py-2 text-right font-mono tabular-nums">{row.calls}</td>
         <td className="px-4 py-2 text-right font-mono tabular-nums">
-          {formatUsd(row.costPerSuccess)}
+          {perSuccessScale.format(row.costPerSuccess)}
         </td>
         <td className="px-4 py-2 text-right font-mono tabular-nums">{formatLatency(row.p50)}</td>
         <td className="px-4 py-2 text-right font-mono tabular-nums">{formatLatency(row.p95)}</td>

@@ -524,16 +524,25 @@ voltam a discordar sobre o mesmo número.
 comparação lado a lado é uma **régua** e precisa de uma unidade só: eixo de gráfico, par
 estimativa/teto, gasto contra cap, e a lista inteira quando ela existe pra ordenar as opções.
 
-⚠️ **"Régua" é mais largo que "eixo" — foi assim que a 1ª versão errou.** Ela só cobria eixo, e a
-lista "Quanto custa cada ação" saiu com `~8,15¢` ao lado de `até $0,12` **na mesma linha**: a
-estimativa e o teto do MESMO número em unidades diferentes, com o leitor convertendo de cabeça pra
-saber se o teto era muito acima. Hoje são **8 réguas** no app (2 gráficos, a lista do `/ai-usage`,
-o bloco de custo, os botões do confirm, o toast do backfill e 3 mensagens de bloqueio por teto).
+⚠️ **"Régua" é mais largo que "eixo", e foi assim que as duas primeiras versões erraram.** A 1ª só
+cobria eixo, e a lista "Quanto custa cada ação" saiu com `~8,15¢` ao lado de `até $0,12` **na mesma
+linha**. A 2ª esqueceu **coluna de tabela** — em "Por operação" a coluna Custo tinha `$0,33` e
+`0,46¢` (o "0,46" lê como MAIOR, sendo 70× menor), e a coluna Custo/sucesso tinha `$0,30` e `0,3¢`,
+dois "0,3" que diferem 100×. **Coluna ordenável é o pior caso**: a mistura inverte a leitura de quem
+é maior. Hoje são **12 réguas** (2 gráficos, 3 colunas de tabela, a lista do `/ai-usage`, o bloco de
+custo, os botões do confirm, o toast do backfill e 3 mensagens de bloqueio por teto).
+
+⚠️ **Régua de coluna sai das linhas VISÍVEIS**, não do conjunto todo — filtrar por modelo no log de
+chamadas muda o que está sendo comparado, e a unidade tem que acompanhar.
 
 ⚠️ **A unidade sai do MENOR valor não-nulo, não do maior** — é o menor que colapsa em `$0.00`,
 então é ele quem decide se a régua precisa de centavos. O maior só exerce **veto**: a partir de
 US$1 a régua inteira vai pra dólar, senão um eixo de US$0,001 a US$7,76 imprimiria `776¢`. Zero
 não opina (num eixo ele é sempre o 1º tick, e fixaria tudo em centavos).
+
+🔴 **Sob veto, o menor da série NÃO pode virar `$0,00`** — isso afirma que não houve custo. Medido:
+`suggest_groups` custou US$0,0046 e o veto do US$25,91 da mesma coluna puxou a régua pra dólar. Por
+isso `asDollars` tem o mesmo `<$0,01` que `asCents` já tinha; zero de verdade segue `$0,00`.
 
 ⚠️ **Quem embute o `CostSummary` numa tela que também mostra dinheiro tem que PASSAR a régua**
 (`scale`). Derivar uma de cada lado não basta: o card conhece o custo por item e os passos da

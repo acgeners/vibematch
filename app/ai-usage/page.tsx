@@ -13,7 +13,7 @@ import { OperationsTable } from "@/components/settings/ai-usage/operations-table
 import { PeriodFilter } from "@/components/settings/ai-usage/period-filter"
 import { ModelPill } from "@/components/settings/ai-usage/pills"
 import { formatPct, formatTokens } from "@/components/settings/ai-usage/format"
-import { formatUsd } from "@/lib/format/money"
+import { makeUsdScale } from "@/lib/format/money"
 import {
   AI_USAGE_RANGES,
   getAiOperationDiagnostics,
@@ -63,6 +63,11 @@ export default async function AiUsagePage({
       getCoverFixReport(),
       getCacheEventMetrics(rangeDays, op),
     ])
+
+  // Régua da coluna "Custo USD" da tabela Por modelo — os três modelos são lidos
+  // um contra o outro, e hoje ficam em dólar por sorte (o mais barato é $0,55).
+  // Um modelo pouco usado bastaria pra misturar a coluna.
+  const modelCostScale = makeUsdScale(...byModel.map((m) => m.totalCostUsd))
 
   const diagOps = op
     ? diagnostics.operations.filter((o) => o.operation === op)
@@ -191,7 +196,7 @@ export default async function AiUsagePage({
                   <td className="px-4 py-2 text-right font-mono tabular-nums">
                     {formatTokens(row.cacheReadTokens)} / {formatTokens(row.cacheCreationTokens)}
                   </td>
-                  <td className="px-4 py-2 text-right font-mono tabular-nums">{formatUsd(row.totalCostUsd)}</td>
+                  <td className="px-4 py-2 text-right font-mono tabular-nums">{modelCostScale.format(row.totalCostUsd)}</td>
                 </tr>
               ))}
             </tbody>
