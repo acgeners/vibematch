@@ -10,7 +10,7 @@ import {
   YAxis,
 } from "recharts"
 import type { DailyUsagePoint } from "@/server/queries/ai-usage"
-import { formatUsd, makeUsdAxisFormatter } from "@/lib/format/money"
+import { makeUsdScale } from "@/lib/format/money"
 
 interface Props {
   data: DailyUsagePoint[]
@@ -23,9 +23,9 @@ function formatDayShort(iso: string): string {
 
 export function DailyCostChart({ data }: Props) {
   const hasData = data.some((d) => d.cost > 0 || d.calls > 0)
-  // Unidade fixa pelo maior dia: tick a tick, um mês que cruza o corte imprimiria
-  // "0¢ · 5¢ · 50¢ · $1,20" na mesma régua.
-  const formatAxis = makeUsdAxisFormatter(Math.max(0, ...data.map((d) => d.cost)))
+  // Régua do mês inteiro — eixo E tooltip. Tick a tick, um mês que cruza o corte
+  // imprimiria "0¢ · 5¢ · 50¢ · $1,20" na mesma régua.
+  const scale = makeUsdScale(...data.map((d) => d.cost))
   if (!hasData) {
     return (
       <div className="flex h-44 items-center justify-center text-xs text-muted-foreground">
@@ -53,7 +53,7 @@ export function DailyCostChart({ data }: Props) {
           />
           <YAxis
             tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-            tickFormatter={formatAxis}
+            tickFormatter={scale.format}
             width={56}
           />
           <Tooltip
@@ -66,7 +66,7 @@ export function DailyCostChart({ data }: Props) {
             }}
             formatter={(value, name) => {
               const num = typeof value === "number" ? value : Number(value)
-              if (name === "cost") return [formatUsd(num), "Custo"]
+              if (name === "cost") return [scale.format(num), "Custo"]
               return [num, name as string]
             }}
             labelFormatter={(label) => formatDayShort(String(label))}

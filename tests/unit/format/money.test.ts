@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatUsd, formatUsdApprox, makeUsdAxisFormatter } from "@/lib/format/money"
+import { formatUsd, formatUsdApprox, makeUsdScale } from "@/lib/format/money"
 
 describe("formatUsd", () => {
   it("mostra centavos abaixo de 10¢, que é onde o dólar colapsa", () => {
@@ -63,17 +63,55 @@ describe("formatUsdApprox", () => {
   })
 })
 
-describe("makeUsdAxisFormatter", () => {
-  it("mantém a unidade fixa no eixo inteiro, escolhida pelo máximo da série", () => {
-    // Série que cruza o corte: tick a tick daria "5¢ · 50¢ · $1,20" no mesmo eixo.
-    const dollars = makeUsdAxisFormatter(1.2)
-    expect(dollars(0)).toBe("$0,00")
-    expect(dollars(0.05)).toBe("$0,05")
-    expect(dollars(1.2)).toBe("$1,20")
+describe("makeUsdScale", () => {
+  it("mantém uma unidade só na régua inteira", () => {
+    const s = makeUsdScale(0.0122, 0.03, 0.0472, 0.0815, 0.1, 0.21)
+    // A lista "Quanto custa cada ação": a coluna passa a ordenar a olho.
+    expect([0.0122, 0.03, 0.0472, 0.0815, 0.1, 0.21].map(s.format)).toEqual([
+      "1,22¢",
+      "3¢",
+      "4,72¢",
+      "8,15¢",
+      "10¢",
+      "21¢",
+    ])
+  })
 
-    const cents = makeUsdAxisFormatter(0.08)
-    expect(cents(0)).toBe("0¢")
-    expect(cents(0.02)).toBe("2¢")
-    expect(cents(0.08)).toBe("8¢")
+  it("resolve o par estimativa/teto que cruza o corte", () => {
+    // O bug do print: `formatUsd` valor a valor dava "~8,15¢" ao lado de "até $0,12".
+    expect(formatUsdApprox(0.0815)).toBe("~8,15¢")
+    expect(formatUsd(0.1223)).toBe("$0,12")
+
+    const par = makeUsdScale(0.0815, 0.1223)
+    expect(par.approx(0.0815)).toBe("~8,15¢")
+    expect(par.format(0.1223)).toBe("12,23¢")
+  })
+
+  it("a unidade sai do MENOR valor — é ele que colapsa em dólar", () => {
+    // Pelo maior, este par sairia "$0,08 / $0,12" e perderia a resolução dos dois.
+    expect(makeUsdScale(0.0815, 0.1223).format(0.0815)).toBe("8,15¢")
+  })
+
+  it("mas o maior VETA a partir de US$1, senão o eixo imprime '776¢'", () => {
+    const eixo = makeUsdScale(0.001, 0.45, 7.76)
+    expect(eixo.format(7.76)).toBe("$7,76")
+    expect(eixo.format(0.45)).toBe("$0,45")
+    // O preço do veto, aceito: o menor da série colapsa. Nenhuma unidade única
+    // serve pra três ordens de magnitude, e num eixo quem manda são os grandes.
+    expect(eixo.format(0.001)).toBe("$0,00")
+  })
+
+  it("zero não decide a unidade da régua", () => {
+    // Num eixo o zero é sempre o 1º tick; se opinasse, fixaria tudo em centavos.
+    const dollars = makeUsdScale(0, 0.05, 1.2)
+    expect(dollars.format(0)).toBe("$0,00")
+    expect(dollars.format(1.2)).toBe("$1,20")
+    // Régua só de zeros: não há o que preservar, cai no default.
+    expect(makeUsdScale(0, 0).format(0)).toBe("0¢")
+  })
+
+  it("valor solto é a régua de um elemento só — mesma regra, não uma cópia", () => {
+    expect(makeUsdScale(0.0567).format(0.0567)).toBe(formatUsd(0.0567))
+    expect(makeUsdScale(38.5).format(38.5)).toBe(formatUsd(38.5))
   })
 })

@@ -4,7 +4,7 @@ import { ChevronRight, Info, Lightbulb } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { formatEta, previewCascade, shortModelName } from "@/lib/cost-preview/catalog"
-import { formatUsd, formatUsdApprox } from "@/lib/format/money"
+import { makeUsdScale, type UsdScale } from "@/lib/format/money"
 import { COST_JOURNEYS, JOURNEY_GROUPS, type CostJourney } from "@/lib/cost-preview/journeys"
 
 /** Nº de "moedas" (1–3) que representa a faixa de custo, pra bater o olho. */
@@ -16,6 +16,19 @@ function costDots(usd: number): number {
 
 export function CostMenu() {
   const [open, setOpen] = useState<Set<string>>(() => new Set())
+
+  // Esta lista existe pra ORDENAR ações por custo, então a régua é a lista toda —
+  // não cada linha por si. Escolhendo a unidade linha a linha, a coluna saía
+  // "~$0,10 · ~4,72¢ · ~8,15¢ · ~3¢ · ~1,22¢" e comparar exigia converter de
+  // cabeça. Entram os totais, os tetos e os passos, que são as parcelas do total.
+  const previews = new Map(COST_JOURNEYS.map((j) => [j.id, previewCascade(j.parts)]))
+  const scale = makeUsdScale(
+    ...[...previews.values()].flatMap((pv) => [
+      pv.likelyUsd,
+      pv.upperBoundUsd,
+      ...pv.steps.map((s) => s.likelyUsd),
+    ]),
+  )
 
   function toggle(id: string) {
     setOpen((prev) => {
@@ -39,7 +52,8 @@ export function CostMenu() {
       <div className="space-y-5 px-4 py-4 sm:px-5">
         <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-muted/30 px-3 py-1.5 text-[11.5px] text-muted-foreground">
           <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
-          Estimativa em dólar — o mesmo valor que aparece antes de você confirmar uma ação.
+          Estimativa em dólar (<strong className="font-semibold">¢</strong> = centavo de dólar) — o
+          mesmo valor que aparece antes de você confirmar uma ação.
         </div>
 
         {JOURNEY_GROUPS.map((group) => {
@@ -59,6 +73,8 @@ export function CostMenu() {
                   <JourneyRow
                     key={journey.id}
                     journey={journey}
+                    pv={previews.get(journey.id)!}
+                    scale={scale}
                     isOpen={open.has(journey.id)}
                     onToggle={() => toggle(journey.id)}
                   />
@@ -74,14 +90,18 @@ export function CostMenu() {
 
 function JourneyRow({
   journey,
+  pv,
+  scale,
   isOpen,
   onToggle,
 }: {
   journey: CostJourney
+  pv: ReturnType<typeof previewCascade>
+  /** Régua da lista inteira — ver o comentário no `CostMenu`. */
+  scale: UsdScale
   isOpen: boolean
   onToggle: () => void
 }) {
-  const pv = previewCascade(journey.parts)
   const composed = journey.parts.length > 1
   const expandable = composed || !!journey.note
   const dots = costDots(pv.likelyUsd)
@@ -146,11 +166,11 @@ function JourneyRow({
               isCheap ? "text-emerald-600 dark:text-emerald-400" : "text-foreground",
             )}
           >
-            {formatUsdApprox(pv.likelyUsd)}
+            {scale.approx(pv.likelyUsd)}
           </p>
           {composed && (
             <p className="mt-1 text-[11px] text-muted-foreground/80">
-              até {formatUsd(pv.upperBoundUsd)}
+              até {scale.format(pv.upperBoundUsd)}
             </p>
           )}
         </div>
@@ -177,7 +197,7 @@ function JourneyRow({
                       </span>
                     </span>
                     <span className="font-mono text-[11px] text-muted-foreground">
-                      {formatUsdApprox(step.likelyUsd)}
+                      {scale.approx(step.likelyUsd)}
                     </span>
                   </div>
                 ))}

@@ -21,7 +21,7 @@ import {
   shortModelName,
   DEFAULT_SUPPRESS_THRESHOLD_USD,
 } from "@/lib/cost-preview/catalog"
-import { formatUsd, formatUsdApprox } from "@/lib/format/money"
+import { formatUsd, makeUsdScale } from "@/lib/format/money"
 import type { CostActionId, CostPreview } from "@/lib/cost-preview/catalog"
 
 /**
@@ -203,6 +203,18 @@ export function CostConfirmProvider({ children }: { children: React.ReactNode })
   const req = pending?.req ?? null
   const canSuppress =
     preview != null && preview.upperBoundUsd <= DEFAULT_SUPPRESS_THRESHOLD_USD
+  // Os botões ficam NA MESMA TELA do `CostSummary` — mesma régua, senão o número
+  // grande do card sai em ¢ e o do botão logo abaixo sai em $, para o mesmo custo.
+  // Derivar uma régua de cada lado NÃO bastaria: o card conhece o custo por item e
+  // os passos da cascata, e o rodapé conhece a ação secundária. Por isso a régua é
+  // calculada aqui, com tudo, e desce pro card por prop.
+  const usd = makeUsdScale(
+    preview?.likelyUsd,
+    preview?.upperBoundUsd,
+    preview != null && preview.scale > 1 ? preview.likelyUsd / preview.scale : null,
+    req?.secondaryAction?.likelyUsd,
+    ...(req?.steps ?? []).map((s) => s.likelyUsd),
+  )
 
   return (
     <CostConfirmContext.Provider value={confirm}>
@@ -225,7 +237,7 @@ export function CostConfirmProvider({ children }: { children: React.ReactNode })
               </AlertDialogDescription>
             </AlertDialogHeader>
 
-            <CostSummary preview={preview} steps={req.steps} />
+            <CostSummary preview={preview} steps={req.steps} scale={usd} />
 
             {canSuppress && (
               <label className="flex cursor-pointer select-none items-center gap-2 text-xs text-muted-foreground">
@@ -248,12 +260,12 @@ export function CostConfirmProvider({ children }: { children: React.ReactNode })
               // (não Radix Action/Cancel) pra controlar o fechamento via settle*.
               <div className="flex flex-col gap-2">
                 <Button onClick={() => settle(true)} className="w-full">
-                  {req.confirmLabel ?? "Confirmar"} · {formatUsdApprox(preview.likelyUsd)}
+                  {req.confirmLabel ?? "Confirmar"} · {usd.approx(preview.likelyUsd)}
                 </Button>
                 <Button variant="outline" onClick={() => settleSecondary()} className="w-full">
                   {req.secondaryAction.label}
                   {req.secondaryAction.likelyUsd != null
-                    ? ` · ${formatUsdApprox(req.secondaryAction.likelyUsd)}`
+                    ? ` · ${usd.approx(req.secondaryAction.likelyUsd)}`
                     : ""}
                 </Button>
                 <Button
@@ -270,7 +282,7 @@ export function CostConfirmProvider({ children }: { children: React.ReactNode })
                   {req.cancelLabel ?? "Cancelar"}
                 </AlertDialogCancel>
                 <AlertDialogAction onClick={() => settle(true)}>
-                  {req.confirmLabel ?? "Confirmar"} · {formatUsdApprox(preview.likelyUsd)}
+                  {req.confirmLabel ?? "Confirmar"} · {usd.approx(preview.likelyUsd)}
                 </AlertDialogAction>
               </AlertDialogFooter>
             )}

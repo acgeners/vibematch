@@ -11,7 +11,7 @@ import {
 } from "@/server/queries/user-work-state"
 import { recalculateForUser } from "@/server/recalc/user-recalc"
 import { ensureAiConsumption } from "@/server/queries/ai-quota"
-import { formatUsd } from "@/lib/format/money"
+import { makeUsdScale } from "@/lib/format/money"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getSynopsisPredictionForWork, getSynopsisPredictionsByWorkIds } from "@/server/queries/synopsis-quality"
 import { markRecalcPending } from "@/server/recalc/queue"
@@ -512,11 +512,13 @@ export async function runSynopsisInterestBatchAction(
     const planned = await planSynopsisInterestBatchAction(ids)
     if (planned.status !== "ok") return planned
     if (planned.plan.upperBoundUsd > opts.maxCostUsd) {
+      // Régua única: os dois são comparados na mesma frase.
+      const usd = makeUsdScale(planned.plan.upperBoundUsd, opts.maxCostUsd)
       return {
         status: "blocked_cost_confirmation",
         upperBoundUsd: planned.plan.upperBoundUsd,
         maxCostUsd: opts.maxCostUsd,
-        message: `Upper bound do lote (${formatUsd(planned.plan.upperBoundUsd)}) acima do teto (${formatUsd(opts.maxCostUsd)}).`,
+        message: `Upper bound do lote (${usd.format(planned.plan.upperBoundUsd)}) acima do teto (${usd.format(opts.maxCostUsd)}).`,
       }
     }
 

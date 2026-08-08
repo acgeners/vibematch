@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { formatUsd, makeUsdAxisFormatter } from "@/lib/format/money"
+import { makeUsdScale } from "@/lib/format/money"
 
 interface Props {
   data: Array<{ operation: string; label: string; totalCostUsd: number; nCalls: number }>
@@ -33,9 +33,9 @@ export function CostByOperationChart({ data, active }: Props) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const filtered = data.filter((d) => d.totalCostUsd > 0).slice(0, 8)
-  // Unidade fixa pela operação mais cara — as barras se comparam entre si, então
-  // uma régua que trocasse de unidade no meio quebraria justamente a leitura.
-  const formatAxis = makeUsdAxisFormatter(Math.max(0, ...filtered.map((d) => d.totalCostUsd)))
+  // As barras existem pra ser comparadas entre si, então a régua é a série toda —
+  // uma unidade que trocasse no meio quebraria justamente essa leitura.
+  const scale = makeUsdScale(...filtered.map((d) => d.totalCostUsd))
   if (filtered.length === 0) {
     return (
       <div className="flex h-44 items-center justify-center text-xs text-muted-foreground">
@@ -64,7 +64,7 @@ export function CostByOperationChart({ data, active }: Props) {
           <XAxis
             type="number"
             tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-            tickFormatter={formatAxis}
+            tickFormatter={scale.format}
           />
           <YAxis
             type="category"
@@ -83,7 +83,7 @@ export function CostByOperationChart({ data, active }: Props) {
             formatter={(value, _name, item) => {
               const num = typeof value === "number" ? value : Number(value)
               const calls = (item?.payload as { nCalls?: number } | undefined)?.nCalls ?? 0
-              return [`${formatUsd(num)} · ${calls} chamadas`, "Custo"]
+              return [`${scale.format(num)} · ${calls} chamadas`, "Custo"]
             }}
           />
           <Bar

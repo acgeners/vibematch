@@ -498,7 +498,7 @@ Guardadas por `tests/unit/ranking/score-rounding.test.ts` e `build-tiers.test.ts
 ## Dinheiro tem UM dono, e a unidade muda com a escala
 
 Todo valor em USD na interface passa por **`lib/format/money.ts`** — `formatUsd`,
-`formatUsdApprox` (estimativa, com "~") e `makeUsdAxisFormatter` (eixo de gráfico). A régua:
+`formatUsdApprox` (estimativa, com "~") e `makeUsdScale` (régua compartilhada). A régua:
 **abaixo de 10¢ o valor sai em centavos** (máx. 2 casas, sem zeros mudos: `5,67¢`, `0,2¢`),
 **de 10¢ pra cima em dólares** (`$0,13`, `$38,50`), sempre em **vírgula pt-BR**.
 
@@ -520,9 +520,24 @@ servidor. O sintoma era visível: o `/ai-usage` mostrava `$0.06` e o popup de cu
 `~$0,05` na mesma sessão. É a mesma armadilha do `LOW_BALANCE_USD`; uma 7ª cópia é como duas telas
 voltam a discordar sobre o mesmo número.
 
-⚠️ **Eixo de gráfico usa `makeUsdAxisFormatter`, não `formatUsd` tick a tick.** Uma série que
-cruza o corte imprimiria `0¢ · 5¢ · 50¢ · $1,00` na mesma régua, e a distância entre dois ticks
-deixaria de ser comparável a olho. O formatter fixa UMA unidade, escolhida pelo maior valor.
+🔴 **Valor que aparece ao lado de outro usa `makeUsdScale`, nunca `formatUsd` um a um.** Toda
+comparação lado a lado é uma **régua** e precisa de uma unidade só: eixo de gráfico, par
+estimativa/teto, gasto contra cap, e a lista inteira quando ela existe pra ordenar as opções.
+
+⚠️ **"Régua" é mais largo que "eixo" — foi assim que a 1ª versão errou.** Ela só cobria eixo, e a
+lista "Quanto custa cada ação" saiu com `~8,15¢` ao lado de `até $0,12` **na mesma linha**: a
+estimativa e o teto do MESMO número em unidades diferentes, com o leitor convertendo de cabeça pra
+saber se o teto era muito acima. Hoje são **8 réguas** no app (2 gráficos, a lista do `/ai-usage`,
+o bloco de custo, os botões do confirm, o toast do backfill e 3 mensagens de bloqueio por teto).
+
+⚠️ **A unidade sai do MENOR valor não-nulo, não do maior** — é o menor que colapsa em `$0.00`,
+então é ele quem decide se a régua precisa de centavos. O maior só exerce **veto**: a partir de
+US$1 a régua inteira vai pra dólar, senão um eixo de US$0,001 a US$7,76 imprimiria `776¢`. Zero
+não opina (num eixo ele é sempre o 1º tick, e fixaria tudo em centavos).
+
+⚠️ **Quem embute o `CostSummary` numa tela que também mostra dinheiro tem que PASSAR a régua**
+(`scale`). Derivar uma de cada lado não basta: o card conhece o custo por item e os passos da
+cascata, o rodapé conhece a ação secundária — mesmas entradas aparentes, réguas diferentes.
 
 **Fora daqui, de propósito:** `scripts/*.ts` — é saída de terminal pro dev, e mudar o formato
 quebraria a comparação com logs de execuções antigas.
