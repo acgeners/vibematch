@@ -495,6 +495,44 @@ ninguém mais decidiu e vale igual em Lista, Cards, Faixas e Bússola.
 
 Guardadas por `tests/unit/ranking/score-rounding.test.ts` e `build-tiers.test.ts`.
 
+## Na Bússola, EMPATE é regra — e ponto empilhado imita o estado aceso
+
+`computeWorkForces` **arredonda pra inteiro** antes de virar posição (`round(chance_score)`,
+`round(platform_avg × 10)`), e a posição é o percentil com midrank. Logo, valores diferentes
+viram a **mesma coordenada**: medido em 2026-08-08 nas 40 obras do topo, **dois pares** caem no
+mesmo pixel (ex.: chance 56,04 e 56,32 → 56, com nota 8,1061 e 8,0987 → 81).
+
+Isso produzia dois bugs de uma vez, os dois silenciosos:
+
+1. Os dois pontos desenhavam um **anel** — porque o de cima tem `border-background` — e o anel
+   era **idêntico ao estado aceso**. Foi lido como estado por quem usa e por quem mantém.
+2. Quando o MAIOR era pintado por último, ele cobria o menor inteiro: obra **invisível e sem
+   hover**, presente só na lista lateral.
+
+Três defesas, em `components/ranking/bussola-plane.tsx`:
+
+| Defesa | O que garante |
+|---|---|
+| `spreadTies` | empatados se afastam num círculo — **≤40% de um passo de percentil** e **nunca cruzam a mediana** (a cor vem do quadrante; cor e posição não podem discordar) |
+| `byDrawOrder` | pinta do maior pro menor, então ponto pequeno nunca some |
+| aceso com anel **neutro** (`--foreground`) | sobreposição de pontos não consegue imitar |
+
+🔴 **`boxShadow` inline VENCE a classe do Tailwind** — o `focus-visible:ring-2` do ponto nunca
+chegou a aparecer, era proteção de mentira. Quem marca o foco é o próprio aceso (`onFocus`
+acende o ponto), e por isso o `lit` também é passado no modo absoluto.
+
+⚠️ **O tooltip é a lupa: mostra o CRU** (nota externa 8,1 e 1.278 votos), porque "81" e "66" são
+as forças normalizadas — não são nota nem votos. A Nota Prevista abre o card com
+`getScoreTextColor` e as faixas de `/preferencias` (`scoreThresholds.expected`, passada pelos
+dois consumidores); sem elas caem os cutoffs fixos do `ScoreBadge`. **Cor própria aqui seria uma
+2ª régua pro mesmo número.** O bloco da nota é `float`, não item de flex: ao lado, ele encolhia
+TODAS as linhas do título (46 caracteres viravam 4 linhas num card de 268px; hoje 320px + float
+= 2 linhas).
+
+Guardado por `tests/unit/ranking/bussola-empilhamento.test.tsx` e `bussola-legenda-lista.test.tsx`
+— inclusive um teste que falha se a prop de faixas for ignorada, que era o jeito silencioso de a
+cor da nota regredir pro fallback.
+
 ## Dinheiro tem UM dono, e a unidade muda com a escala
 
 Todo valor em USD na interface passa por **`lib/format/money.ts`** — `formatUsd`,
