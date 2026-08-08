@@ -20,10 +20,23 @@
  *
  * pt-BR (vírgula) em todo lugar: até 2026-08-07 o `/ai-usage` mostrava `$0.06` e
  * o popup de custo mostrava `~$0,05` na mesma sessão.
+ *
+ * 🔴 **Valor que aparece ao lado de outro precisa de `makeUsdScale`, não de
+ * `formatUsd`.** Ver o docblock dele: escolher a unidade valor a valor faz a régua
+ * trocar de unidade no meio, e foi assim que `~8,15¢ … até $0,12` saiu na mesma
+ * linha.
  */
 
 /** Em centavos: abaixo disto o valor é exibido em ¢, daqui pra cima em $. */
 const CENTS_CUTOFF = 10
+
+/**
+ * Teto em centavos: mesmo que o menor valor da régua peça ¢, um vizinho a partir
+ * de US$1 força a régua inteira pra dólar. Sem isso um eixo de US$0,001 a US$7,76
+ * imprimiria "776¢" — nenhuma unidade única serve pra três ordens de magnitude, e
+ * num eixo quem manda são os valores grandes.
+ */
+const CENTS_VETO = 100
 
 /** Sinal de menos tipográfico (U+2212), o mesmo usado nos z-scores do /ranking. */
 const MINUS = "−"
@@ -54,41 +67,74 @@ function asDollars(usd: number): string {
   return `${usd < 0 ? MINUS : ""}$${Math.abs(usd).toFixed(2).replace(".", ",")}`
 }
 
-/**
- * A unidade sai do valor JÁ ARREDONDADO, não do bruto. Decidindo pelo bruto,
- * US$0,0999 imprimiria "10¢" e US$0,10 imprimiria "$0,10" — o mesmo número em
- * duas unidades, um centavo de distância.
- */
-function isCentScale(usd: number): boolean {
-  return Number((Math.abs(usd) * 100).toFixed(2)) < CENTS_CUTOFF
+/** Centavos do valor JÁ ARREDONDADO — é ele que decide a unidade (ver `makeUsdScale`). */
+function roundedCents(usd: number): number {
+  return Number((Math.abs(usd) * 100).toFixed(2))
 }
 
-/** USD legível. `null`/`NaN`/`Infinity` → "—" (não "$0", que afirmaria zero). */
+/**
+ * Uma régua de USD: **uma unidade só** para um conjunto de valores que o leitor
+ * compara entre si.
+ *
+ * 🔴 **"Régua" é mais largo do que eixo de gráfico** — e essa foi a lição de
+ * 2026-08-07. A 1ª versão só cobria eixo, e a lista "Quanto custa cada ação" saiu
+ * com `~8,15¢` ao lado de `até $0,12` **na mesma linha**: a estimativa e o teto do
+ * MESMO número, em unidades diferentes, com o leitor convertendo de cabeça pra
+ * saber se o teto era muito acima. Toda comparação lado a lado é uma régua: eixo,
+ * par estimativa/teto, gasto contra cap, e a lista inteira quando ela existe pra
+ * ordenar as opções.
+ *
+ * A unidade sai do **menor** valor não-nulo, não do maior: é o menor que colapsa
+ * em "$0.00", então é ele quem decide se a régua precisa de centavos. O maior só
+ * exerce VETO, via `CENTS_VETO`.
+ *
+ * ⚠️ A decisão usa o valor **já arredondado**. Pelo bruto, US$0,0999 imprimiria
+ * "10¢" e US$0,10 imprimiria "$0,10" — o mesmo número em duas unidades, um
+ * centavo de distância.
+ */
+export interface UsdScale {
+  /** "$0,13" · "5,67¢" · "—" para ausência de dado. */
+  format(usd: number | null | undefined): string
+  /** Idem, marcado como estimativa: "~5,67¢". */
+  approx(usd: number | null | undefined): string
+}
+
+export function makeUsdScale(...valuesUsd: Array<number | null | undefined>): UsdScale {
+  const magnitudes = valuesUsd
+    .filter((v): v is number => v != null && Number.isFinite(v))
+    .map((v) => roundedCents(v))
+    // Zero não opina: num eixo ele é sempre o 1º tick, e deixá-lo decidir fixaria
+    // toda régua em centavos.
+    .filter((c) => c > 0)
+
+  const cents =
+    magnitudes.length === 0 ||
+    (Math.min(...magnitudes) < CENTS_CUTOFF && Math.max(...magnitudes) < CENTS_VETO)
+
+  const format = (usd: number | null | undefined): string => {
+    if (usd == null || !Number.isFinite(usd)) return "—"
+    return cents ? asCents(usd) : asDollars(usd)
+  }
+  return {
+    format,
+    approx: (usd) => {
+      const s = format(usd)
+      // "~<0,01¢" empilharia dois qualificadores para dizer a mesma coisa.
+      if (s === "—" || s.startsWith("<") || s.startsWith(">")) return s
+      return `~${s}`
+    },
+  }
+}
+
+/**
+ * Valor solto, sem nada ao lado pra comparar — é a régua de um elemento só, então
+ * sai da MESMA regra em vez de uma segunda cópia dela.
+ */
 export function formatUsd(usd: number | null | undefined): string {
-  if (usd == null || !Number.isFinite(usd)) return "—"
-  return isCentScale(usd) ? asCents(usd) : asDollars(usd)
+  return makeUsdScale(usd).format(usd)
 }
 
 /** Idem, marcado como estimativa: "~5,67¢". */
 export function formatUsdApprox(usd: number | null | undefined): string {
-  const s = formatUsd(usd)
-  // "~<0,01¢" empilharia dois qualificadores para dizer a mesma coisa.
-  if (s === "—" || s.startsWith("<") || s.startsWith(">")) return s
-  return `~${s}`
-}
-
-/**
- * Formatter de eixo de gráfico: fixa UMA unidade para o eixo inteiro, escolhida
- * pelo maior valor da série.
- *
- * Aplicar `formatUsd` tick a tick produziria "0¢ · 5¢ · 50¢ · $1,00" no mesmo
- * eixo — a régua trocaria de unidade no meio, e a distância entre dois ticks
- * deixaria de ser comparável a olho.
- */
-export function makeUsdAxisFormatter(maxAbsUsd: number): (value: number) => string {
-  const cents = isCentScale(maxAbsUsd)
-  return (value: number) => {
-    if (!Number.isFinite(value)) return "—"
-    return cents ? asCents(value) : asDollars(value)
-  }
+  return makeUsdScale(usd).approx(usd)
 }

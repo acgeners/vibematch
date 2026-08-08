@@ -25,7 +25,7 @@ import type { TasteProfileRow } from "@/lib/ai-recommendation/types"
 import { MODEL as PREDICT_MODEL } from "@/lib/ai-evaluation/synopsis-quality-predictor"
 import { resolveInterestPromptVersion } from "@/lib/ai-evaluation/compiled-preferences"
 import { estimateStep } from "../cost"
-import { formatUsd } from "@/lib/format/money"
+import { makeUsdScale } from "@/lib/format/money"
 import { getJobStore, type JobStore } from "../jobs"
 import { isProductionBuildPhase } from "../integrations/build-phase"
 import {
@@ -598,11 +598,14 @@ export async function runInterestBackfill(deps: RunInterestBackfillDeps): Promis
   }
   // 2) Teto (hard cap insuficiente) — sempre sobre o UPPER BOUND.
   if (plan.estimatedUpperBoundUsd > deps.maxCostUsd) {
+    // Régua única: a frase compara os dois ("X acima do teto Y"), então formatar
+    // cada um por si sairia "12,2¢ acima do teto $0,10".
+    const usd = makeUsdScale(plan.estimatedUpperBoundUsd, deps.maxCostUsd)
     return {
       status: "blocked_cost_confirmation",
       upperBoundUsd: plan.estimatedUpperBoundUsd,
       maxCostUsd: deps.maxCostUsd,
-      message: `Upper bound da cascata (${formatUsd(plan.estimatedUpperBoundUsd)}) acima do teto (${formatUsd(deps.maxCostUsd)}). Aumente --max-cost-usd ou reduza o escopo.`,
+      message: `Upper bound da cascata (${usd.format(plan.estimatedUpperBoundUsd)}) acima do teto (${usd.format(deps.maxCostUsd)}). Aumente --max-cost-usd ou reduza o escopo.`,
     }
   }
   if (plan.profileState === "blocked_manual") {

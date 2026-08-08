@@ -12,7 +12,7 @@ import { runTask, setTaskProgress } from "@/lib/tasks-store"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import { buildInterestBatchCost } from "@/lib/cost-preview/interest-cost-steps"
 import type { SynopsisQueueWork } from "@/server/queries/recommendations"
-import { formatUsd } from "@/lib/format/money"
+import { makeUsdScale } from "@/lib/format/money"
 
 /** Teto por chamada = SYNOPSIS_BATCH_MAX do servidor. O loop encadeia os lotes. */
 const CHUNK = 100
@@ -85,11 +85,16 @@ export function InterestBackfillButton({ works, isPaid = true }: { works: Synops
       // anteriores, e a tela precisa mostrá-los.
       onDone: () => refresh(),
       onError: () => refresh(),
-      successToast: (r) => ({
+      successToast: (r) => {
+        // Gasto e teto são comparados na mesma frase — régua única, senão sai
+        // "Parou no teto de $0,10 · gasto 9,4¢".
+        const usd = makeUsdScale(capUsd, r.spent)
+        return {
         message: r.stoppedByCap
-          ? `Parou no teto de ${formatUsd(capUsd)} · ${r.succeeded} estimada(s) · gasto ${formatUsd(r.spent)}`
-          : `Backfill concluído: ${r.succeeded} estimada(s) · ${r.fresh} já ok${r.failed ? ` · ${r.failed} falha(s)` : ""} · custo ${formatUsd(r.spent)}`,
-      }),
+          ? `Parou no teto de ${usd.format(capUsd)} · ${r.succeeded} estimada(s) · gasto ${usd.format(r.spent)}`
+          : `Backfill concluído: ${r.succeeded} estimada(s) · ${r.fresh} já ok${r.failed ? ` · ${r.failed} falha(s)` : ""} · custo ${usd.format(r.spent)}`,
+        }
+      },
     })
   }
 

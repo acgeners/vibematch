@@ -3,7 +3,8 @@
 import { Coins, Clock } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatEta, shortModelName } from "@/lib/cost-preview/catalog"
-import { formatUsd, formatUsdApprox } from "@/lib/format/money"
+import { makeUsdScale } from "@/lib/format/money"
+import type { UsdScale } from "@/lib/format/money"
 import type { CostPreview } from "@/lib/cost-preview/catalog"
 
 /** Um passo de cascata itemizado (ex.: as sub-ações de "Salvar obra"). */
@@ -22,10 +23,17 @@ export interface CostStep {
 export function CostSummary({
   preview,
   steps,
+  scale,
   className,
 }: {
   preview: CostPreview
   steps?: CostStep[]
+  /**
+   * Régua de USD da tela que embute este bloco. Obrigatória quando essa tela
+   * mostra outro valor (o botão do `CostConfirmDialog`) — ver o comentário no
+   * corpo. Omitida, o bloco deriva a própria a partir do que ele mesmo exibe.
+   */
+  scale?: UsdScale
   className?: string
 }) {
   // "N × por-obra" só é honesto quando NÃO há passos itemizados. Com `steps` (ex.:
@@ -34,6 +42,18 @@ export function CostSummary({
   const hasSteps = (steps?.length ?? 0) > 0
   const isBatch = preview.scale > 1 && !hasSteps
   const perItem = isBatch ? preview.likelyUsd / preview.scale : null
+  // Régua do bloco: o número grande, o teto logo abaixo e os passos da cascata são
+  // lidos juntos. Formatados um a um, "~8,15¢" aparecia ao lado de "teto $0,12".
+  //
+  // ⚠️ Quem embute este bloco numa tela que TAMBÉM mostra dinheiro (o botão do
+  // `CostConfirmDialog`) precisa passar a régua de lá — derivar duas do mesmo
+  // `preview` não basta, porque cada lado conhece valores que o outro não vê.
+  const usd = scale ?? makeUsdScale(
+    preview.likelyUsd,
+    preview.upperBoundUsd,
+    perItem,
+    ...(steps ?? []).map((s) => s.likelyUsd),
+  )
 
   return (
     <div className={cn("space-y-3", className)}>
@@ -43,12 +63,12 @@ export function CostSummary({
             <Coins className="h-3 w-3" /> Custo estimado
           </span>
           <span className="font-mono text-xl font-semibold tabular-nums text-foreground">
-            {formatUsdApprox(preview.likelyUsd)}
+            {usd.approx(preview.likelyUsd)}
           </span>
           <span className="text-[11px] text-muted-foreground">
             {isBatch
-              ? `${preview.scale} × ${formatUsdApprox(perItem ?? 0)}`
-              : `teto ${formatUsd(preview.upperBoundUsd)}`}
+              ? `${preview.scale} × ${usd.approx(perItem ?? 0)}`
+              : `teto ${usd.format(preview.upperBoundUsd)}`}
           </span>
         </div>
 
@@ -81,7 +101,7 @@ export function CostSummary({
                   {shortModelName(s.model)}
                 </span>
                 <span className="w-14 shrink-0 text-right font-mono tabular-nums text-amber-700 dark:text-amber-300">
-                  {formatUsdApprox(s.likelyUsd)}
+                  {usd.approx(s.likelyUsd)}
                 </span>
                 <span className="w-10 shrink-0 text-right font-mono tabular-nums text-muted-foreground">
                   {formatEta(s.etaSeconds)}

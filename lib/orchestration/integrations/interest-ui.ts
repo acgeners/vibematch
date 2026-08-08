@@ -6,7 +6,7 @@
  */
 import type { PredictInterestOutcome } from "./synopsis-interest"
 import type { SynopsisQuality } from "@/types/domain"
-import { formatUsd, formatUsdApprox } from "@/lib/format/money"
+import { makeUsdScale } from "@/lib/format/money"
 
 export type WorkPredictResult =
   | { status: "fresh" | "succeeded"; predictedQuality: SynopsisQuality; partial: boolean; usedFallbacks: string[] }
@@ -25,11 +25,13 @@ export interface PredictWorkOpts {
 }
 
 export function interestCostMessage(reason: string, likely: number, upper: number): string {
+  // "provável" e "até" descrevem o MESMO custo — régua única.
+  const usd = makeUsdScale(likely, upper)
   if (reason === "profile_cascade")
-    return `Atualizar o perfil + prever: ${formatUsdApprox(likely)} (provável) / até ${formatUsd(upper)}. Dá pra prever só com o perfil atual (mais barato).`
-  if (reason === "over_cap") return `Custo (até ${formatUsd(upper)}) acima do teto configurado.`
+    return `Atualizar o perfil + prever: ${usd.approx(likely)} (provável) / até ${usd.format(upper)}. Dá pra prever só com o perfil atual (mais barato).`
+  if (reason === "over_cap") return `Custo (até ${usd.format(upper)}) acima do teto configurado.`
   if (reason === "pricing_unknown") return "Custo não estimável (preço do modelo desconhecido) — bloqueado."
-  return `Esta previsão custa ${formatUsdApprox(likely)} (provável) / até ${formatUsd(upper)}. Confirmar?`
+  return `Esta previsão custa ${usd.approx(likely)} (provável) / até ${usd.format(upper)}. Confirmar?`
 }
 
 export function mapInterestOutcome(o: PredictInterestOutcome): WorkPredictResult {
