@@ -7,7 +7,7 @@ import type { AiCallRow } from "@/server/queries/ai-usage"
 import { DetailGrid } from "./detail-grid"
 import type { DetailBlockData } from "./detail-grid"
 import { formatLatency, formatRelative, formatTokens } from "./format"
-import { formatUsd } from "@/lib/format/money"
+import { makeUsdScale, type UsdScale } from "@/lib/format/money"
 import { ModelPill, shortModel, StatusPill } from "./pills"
 
 interface Props {
@@ -62,6 +62,10 @@ export function CallLog({ calls }: Props) {
     })
     return filtered
   }, [calls, showOk, showErr, hiddenModels, query, sortKey, sortDir])
+
+  // Régua da coluna Custo, sobre as linhas VISÍVEIS: filtrar por modelo muda o
+  // conjunto que está sendo comparado, então a unidade acompanha o filtro.
+  const costScale = useMemo(() => makeUsdScale(...visible.map((c) => c.totalCostUsd)), [visible])
 
   function toggleSort(key: SortKey) {
     if (key === sortKey) setSortDir((d) => (d === "asc" ? "desc" : "asc"))
@@ -149,7 +153,13 @@ export function CallLog({ calls }: Props) {
             {visible.map((c) => {
               const isOpen = expanded.has(c.id)
               return (
-                <CallRow key={c.id} call={c} isOpen={isOpen} onToggle={() => toggleExpand(c.id)} />
+                <CallRow
+                  key={c.id}
+                  call={c}
+                  costScale={costScale}
+                  isOpen={isOpen}
+                  onToggle={() => toggleExpand(c.id)}
+                />
               )
             })}
           </tbody>
@@ -198,10 +208,14 @@ function SortTh({
 
 function CallRow({
   call: c,
+  costScale,
   isOpen,
   onToggle,
 }: {
   call: AiCallRow
+  /** Régua da coluna Custo — a coluna é ordenável, então mistura de unidade
+   *  inverte a leitura de quem é maior. Ver `operations-table`. */
+  costScale: UsdScale
   isOpen: boolean
   onToggle: () => void
 }) {
@@ -225,7 +239,7 @@ function CallRow({
           <ModelPill model={c.modelName} />
         </td>
         <td className="px-4 py-2 text-right font-mono tabular-nums">{formatTokens(c.totalTokens)}</td>
-        <td className="px-4 py-2 text-right font-mono tabular-nums">{formatUsd(c.totalCostUsd)}</td>
+        <td className="px-4 py-2 text-right font-mono tabular-nums">{costScale.format(c.totalCostUsd)}</td>
         <td className="px-4 py-2 text-right font-mono tabular-nums">{formatLatency(c.latencyMs)}</td>
         <td className="px-4 py-2">
           <StatusPill status={c.status} />

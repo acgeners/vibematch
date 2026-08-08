@@ -64,7 +64,13 @@ function asCents(usd: number): string {
 
 /** "$0,13" · "$38,50" — sempre 2 casas, que é como dólar se escreve. */
 function asDollars(usd: number): string {
-  return `${usd < 0 ? MINUS : ""}$${Math.abs(usd).toFixed(2).replace(".", ",")}`
+  const abs = Math.abs(usd)
+  // Mesmo cuidado do `asCents`, e ele importa MAIS aqui: quando o veto do
+  // `CENTS_VETO` puxa a régua pra dólar, os menores da série caem nesta faixa.
+  // Medido no /ai-usage: `suggest_groups` custou US$0,0046 e a coluna Custo
+  // imprimia "$0,00" — que AFIRMA que não houve custo.
+  if (abs > 0 && abs < 0.005) return usd < 0 ? `>${MINUS}$0,01` : "<$0,01"
+  return `${usd < 0 ? MINUS : ""}$${abs.toFixed(2).replace(".", ",")}`
 }
 
 /** Centavos do valor JÁ ARREDONDADO — é ele que decide a unidade (ver `makeUsdScale`). */

@@ -96,9 +96,16 @@ describe("makeUsdScale", () => {
     const eixo = makeUsdScale(0.001, 0.45, 7.76)
     expect(eixo.format(7.76)).toBe("$7,76")
     expect(eixo.format(0.45)).toBe("$0,45")
-    // O preço do veto, aceito: o menor da série colapsa. Nenhuma unidade única
-    // serve pra três ordens de magnitude, e num eixo quem manda são os grandes.
-    expect(eixo.format(0.001)).toBe("$0,00")
+  })
+
+  it("sob veto, o menor da série não vira '$0,00' — isso afirmaria custo zero", () => {
+    // A coluna Custo do /ai-usage: `suggest_groups` custou US$0,0046 e o veto do
+    // US$25,91 puxa a régua pra dólar. "$0,00" diria que não houve custo.
+    const coluna = makeUsdScale(0.0046, 3.28, 25.91)
+    expect(coluna.format(0.0046)).toBe("<$0,01")
+    expect(coluna.format(25.91)).toBe("$25,91")
+    // Zero de verdade continua sendo zero.
+    expect(coluna.format(0)).toBe("$0,00")
   })
 
   it("zero não decide a unidade da régua", () => {
