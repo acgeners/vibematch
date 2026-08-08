@@ -12,7 +12,8 @@ import { OperationsGlossary } from "@/components/settings/ai-usage/operations-gl
 import { OperationsTable } from "@/components/settings/ai-usage/operations-table"
 import { PeriodFilter } from "@/components/settings/ai-usage/period-filter"
 import { ModelPill } from "@/components/settings/ai-usage/pills"
-import { formatPct, formatTokens, formatUsd } from "@/components/settings/ai-usage/format"
+import { formatPct, formatTokens } from "@/components/settings/ai-usage/format"
+import { formatUsd } from "@/lib/format/money"
 import {
   AI_USAGE_RANGES,
   getAiOperationDiagnostics,

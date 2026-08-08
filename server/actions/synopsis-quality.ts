@@ -11,6 +11,7 @@ import {
 } from "@/server/queries/user-work-state"
 import { recalculateForUser } from "@/server/recalc/user-recalc"
 import { ensureAiConsumption } from "@/server/queries/ai-quota"
+import { formatUsd } from "@/lib/format/money"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getSynopsisPredictionForWork, getSynopsisPredictionsByWorkIds } from "@/server/queries/synopsis-quality"
 import { markRecalcPending } from "@/server/recalc/queue"
@@ -515,7 +516,7 @@ export async function runSynopsisInterestBatchAction(
         status: "blocked_cost_confirmation",
         upperBoundUsd: planned.plan.upperBoundUsd,
         maxCostUsd: opts.maxCostUsd,
-        message: `Upper bound do lote ($${planned.plan.upperBoundUsd.toFixed(3)}) acima do teto ($${opts.maxCostUsd.toFixed(3)}).`,
+        message: `Upper bound do lote (${formatUsd(planned.plan.upperBoundUsd)}) acima do teto (${formatUsd(opts.maxCostUsd)}).`,
       }
     }
 

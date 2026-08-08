@@ -16,6 +16,7 @@ import {
 } from "@/server/actions/embeddings"
 import { runTask } from "@/lib/tasks-store"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
+import { formatUsdApprox } from "@/lib/format/money"
 
 const EMBEDDINGS_TASK_ID = "embeddings"
 
@@ -70,7 +71,7 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
           )
         } else {
           toast.success(
-            `${result.refreshed} embeddings atualizados (${formatTokens(result.tokensUsed)} tokens, ~$${result.estimatedCostUsd.toFixed(4)}).`,
+            `${result.refreshed} embeddings atualizados (${formatTokens(result.tokensUsed)} tokens, ${formatUsdApprox(result.estimatedCostUsd)}).`,
           )
         }
       },
@@ -96,7 +97,7 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
             critérios mudam.
           </p>
           <p className="text-xs">
-            Custo ~$0.02 por milhão de tokens (~$0.10–1.00 pra base inteira).
+            Custo ~2¢ por milhão de tokens (~$0,10–1,00 pra base inteira).
           </p>
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
@@ -133,7 +134,7 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
           label="Modelo"
           value="text-embedding-3-small"
           valueClassName="text-xs"
-          hint="1536 dimensões · $0.02/M tokens"
+          hint="1536 dimensões · 2¢/M tokens"
         />
       </div>
 
@@ -160,7 +161,7 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
               <span className="font-mono text-foreground">
                 {formatTokens(lastResult.tokensUsed)}
               </span>{" "}
-              (~${lastResult.estimatedCostUsd.toFixed(4)})
+              ({formatUsdApprox(lastResult.estimatedCostUsd)})
             </li>
           </ul>
         </div>

@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils"
 import type { AiCallRow } from "@/server/queries/ai-usage"
 import { DetailGrid } from "./detail-grid"
 import type { DetailBlockData } from "./detail-grid"
-import { formatLatency, formatRelative, formatTokens, formatUsd } from "./format"
+import { formatLatency, formatRelative, formatTokens } from "./format"
+import { formatUsd } from "@/lib/format/money"
 import { ModelPill, shortModel, StatusPill } from "./pills"
 
 interface Props {

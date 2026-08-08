@@ -78,7 +78,8 @@ describe("mapInterestOutcome — estados tipados", () => {
     if (cost.status === "blocked_cost_confirmation") {
       expect(cost.upperBoundUsd).toBe(0.6)
       expect(cost.likelyUsd).toBe(0.4)
-      expect(cost.message).toContain("0.4")
+      // pt-BR: a mensagem passa por `formatUsd`, então é "$0,40" e não "0.4".
+      expect(cost.message).toContain("$0,40")
     }
     expect(mapInterestOutcome({ status: "failed", error: "boom" }).status).toBe("failed")
   })

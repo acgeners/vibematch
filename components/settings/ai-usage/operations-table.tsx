@@ -16,7 +16,8 @@ import type { OperationMetrics } from "@/lib/ai-observability"
 import type { CacheEventMetrics } from "@/lib/ai-cache/cache-events"
 import { DetailGrid } from "./detail-grid"
 import type { DetailBlockData } from "./detail-grid"
-import { formatLatency, formatPct, formatTokens, formatUsd, formatUsdPrecise, topKey } from "./format"
+import { formatLatency, formatPct, formatTokens, topKey } from "./format"
+import { formatUsd } from "@/lib/format/money"
 import { WorkloadPill } from "./pills"
 
 interface Props {
@@ -273,7 +274,7 @@ function FragmentRow({
         <td className="px-4 py-2 text-right font-mono tabular-nums">{formatUsd(row.cost)}</td>
         <td className="px-4 py-2 text-right font-mono tabular-nums">{row.calls}</td>
         <td className="px-4 py-2 text-right font-mono tabular-nums">
-          {formatUsdPrecise(row.costPerSuccess)}
+          {formatUsd(row.costPerSuccess)}
         </td>
         <td className="px-4 py-2 text-right font-mono tabular-nums">{formatLatency(row.p50)}</td>
         <td className="px-4 py-2 text-right font-mono tabular-nums">{formatLatency(row.p95)}</td>

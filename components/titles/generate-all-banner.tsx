@@ -12,6 +12,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
 import { generateAllWorkData } from "@/server/actions/generate-all"
 import type { CascadeStatus, GenerateAllResult, GenerateAllOpts } from "@/lib/generate-all/types"
+import { formatUsdApprox } from "@/lib/format/money"
 
 // Reaproveita os tipos do dialog de "Atualizar dados" (interfaces internas não
 // exportadas) — o passo de escolha de fontes+capas do "Gerar tudo" é o mesmo dialog.
@@ -138,7 +139,7 @@ export function GenerateAllBanner({
         title="Gerar todos os dados"
         description={
           dialog?.kind === "cost"
-            ? `Vai gerar tudo em ordem (~$${dialog.estimatedUsd.toFixed(2)}).` +
+            ? `Vai gerar tudo em ordem (${formatUsdApprox(dialog.estimatedUsd)}).` +
               (dialog.noReviewsReason
                 ? ` ⚠️ Sem reviews: ${NO_REVIEWS_HINT[dialog.noReviewsReason] ?? "a obra não tem reviews"}. Os atributos ficam mais fracos.`
                 : "")

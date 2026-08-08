@@ -142,7 +142,7 @@ export default async function RecommendationsPage() {
                   Escolha o escopo (não-lidos ou todos) e, opcionalmente, um mood — gera um ranking one-shot sem abrir conversa.
                 </p>
                 <div className="text-[10px] text-muted-foreground/60 font-semibold tracking-wide uppercase">
-                  Custo estimado: ~$0.05 por execução
+                  Custo estimado: ~5¢ por execução
                 </div>
               </div>
               <div className="shrink-0 w-full sm:w-auto">

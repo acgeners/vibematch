@@ -284,7 +284,7 @@ export function RecommendDialog({
               </SelectContent>
             </Select>
             <p className="text-[11px] text-muted-foreground">
-              Mais obras = mais tokens. 20 é o sweet spot (~$0.05/run).
+              Mais obras = mais tokens. 20 é o sweet spot (~5¢/run).
             </p>
           </div>
 

@@ -2,12 +2,8 @@
 
 import { Coins, Clock } from "lucide-react"
 import { cn } from "@/lib/utils"
-import {
-  formatUsd,
-  formatUsdExact,
-  formatEta,
-  shortModelName,
-} from "@/lib/cost-preview/catalog"
+import { formatEta, shortModelName } from "@/lib/cost-preview/catalog"
+import { formatUsd, formatUsdApprox } from "@/lib/format/money"
 import type { CostPreview } from "@/lib/cost-preview/catalog"
 
 /** Um passo de cascata itemizado (ex.: as sub-ações de "Salvar obra"). */
@@ -47,12 +43,12 @@ export function CostSummary({
             <Coins className="h-3 w-3" /> Custo estimado
           </span>
           <span className="font-mono text-xl font-semibold tabular-nums text-foreground">
-            {formatUsd(preview.likelyUsd)}
+            {formatUsdApprox(preview.likelyUsd)}
           </span>
           <span className="text-[11px] text-muted-foreground">
             {isBatch
-              ? `${preview.scale} × ${formatUsd(perItem ?? 0)}`
-              : `teto ${formatUsdExact(preview.upperBoundUsd)}`}
+              ? `${preview.scale} × ${formatUsdApprox(perItem ?? 0)}`
+              : `teto ${formatUsd(preview.upperBoundUsd)}`}
           </span>
         </div>
 
@@ -85,7 +81,7 @@ export function CostSummary({
                   {shortModelName(s.model)}
                 </span>
                 <span className="w-14 shrink-0 text-right font-mono tabular-nums text-amber-700 dark:text-amber-300">
-                  {formatUsd(s.likelyUsd)}
+                  {formatUsdApprox(s.likelyUsd)}
                 </span>
                 <span className="w-10 shrink-0 text-right font-mono tabular-nums text-muted-foreground">
                   {formatEta(s.etaSeconds)}

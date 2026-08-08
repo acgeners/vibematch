@@ -18,11 +18,10 @@ import { CostSummary } from "./cost-summary"
 import type { CostStep } from "./cost-summary"
 import {
   previewCost,
-  formatUsd,
-  formatUsdExact,
   shortModelName,
   DEFAULT_SUPPRESS_THRESHOLD_USD,
 } from "@/lib/cost-preview/catalog"
+import { formatUsd, formatUsdApprox } from "@/lib/format/money"
 import type { CostActionId, CostPreview } from "@/lib/cost-preview/catalog"
 
 /**
@@ -238,7 +237,7 @@ export function CostConfirmProvider({ children }: { children: React.ReactNode })
                 />
                 Não avisar de novo para ações abaixo de{" "}
                 <span className="font-medium text-foreground">
-                  {formatUsdExact(DEFAULT_SUPPRESS_THRESHOLD_USD)}
+                  {formatUsd(DEFAULT_SUPPRESS_THRESHOLD_USD)}
                 </span>
               </label>
             )}
@@ -249,12 +248,12 @@ export function CostConfirmProvider({ children }: { children: React.ReactNode })
               // (não Radix Action/Cancel) pra controlar o fechamento via settle*.
               <div className="flex flex-col gap-2">
                 <Button onClick={() => settle(true)} className="w-full">
-                  {req.confirmLabel ?? "Confirmar"} · {formatUsd(preview.likelyUsd)}
+                  {req.confirmLabel ?? "Confirmar"} · {formatUsdApprox(preview.likelyUsd)}
                 </Button>
                 <Button variant="outline" onClick={() => settleSecondary()} className="w-full">
                   {req.secondaryAction.label}
                   {req.secondaryAction.likelyUsd != null
-                    ? ` · ${formatUsd(req.secondaryAction.likelyUsd)}`
+                    ? ` · ${formatUsdApprox(req.secondaryAction.likelyUsd)}`
                     : ""}
                 </Button>
                 <Button
@@ -271,7 +270,7 @@ export function CostConfirmProvider({ children }: { children: React.ReactNode })
                   {req.cancelLabel ?? "Cancelar"}
                 </AlertDialogCancel>
                 <AlertDialogAction onClick={() => settle(true)}>
-                  {req.confirmLabel ?? "Confirmar"} · {formatUsd(preview.likelyUsd)}
+                  {req.confirmLabel ?? "Confirmar"} · {formatUsdApprox(preview.likelyUsd)}
                 </AlertDialogAction>
               </AlertDialogFooter>
             )}

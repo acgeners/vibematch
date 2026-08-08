@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { ensurePermission, getCurrentRole, getSessionUserId } from "@/server/queries/current-user"
 import { ROLE_LABELS } from "@/lib/plans/roles"
 import type { Role } from "@/lib/plans/roles"
+import { formatUsd } from "@/lib/format/money"
 
 /**
  * Cota de IA POR USUÁRIO — a trava de denial-of-wallet.
@@ -117,6 +118,6 @@ export async function ensureAiBudget(): Promise<{ ok: true } | { ok: false; erro
 
   return {
     ok: false,
-    error: `Cota diária de IA do plano ${ROLE_LABELS[status.role]} atingida (US$ ${status.limitUsd.toFixed(2)} em 24h). Ela volta conforme as chamadas antigas saem da janela.`,
+    error: `Cota diária de IA do plano ${ROLE_LABELS[status.role]} atingida (${formatUsd(status.limitUsd)} em 24h). Ela volta conforme as chamadas antigas saem da janela.`,
   }
 }

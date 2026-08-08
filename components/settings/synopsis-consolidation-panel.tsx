@@ -71,7 +71,7 @@ export function SynopsisConsolidationPanel({
         <div className="space-y-1 text-sm text-muted-foreground max-w-2xl">
           <p>
             Consolida múltiplas sinopses por obra em uma única canônica via Haiku 4.5
-            (~$0.002 por obra). Usada nos prompts de recomendação no lugar do texto
+            (~0,2¢ por obra). Usada nos prompts de recomendação no lugar do texto
             concatenado com <span className="font-mono">---</span>.
           </p>
           <p className="text-xs">
@@ -101,7 +101,7 @@ export function SynopsisConsolidationPanel({
           label="Modelo"
           value="claude-haiku-4-5"
           valueClassName="text-xs"
-          hint="~$0.002/obra"
+          hint="~0,2¢/obra"
         />
       </div>
 

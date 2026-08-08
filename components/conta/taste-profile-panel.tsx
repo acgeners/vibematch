@@ -34,7 +34,7 @@ import { TAG_GROUP_LABELS } from "@/lib/constants/tag-groups"
 import { GENRE_NAMES, TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
 import type { PredictionDriver } from "@/lib/calculations/ridge-feature-labels"
 import { CRITERION_SLUGS } from "@/types/domain"
-import { formatUsd } from "@/lib/cost-preview/catalog"
+import { formatUsdApprox } from "@/lib/format/money"
 import {
   classifyProfileStalenessLevel,
   profileStalenessTriggers,
@@ -267,7 +267,7 @@ export function TasteProfilePanel({
             <div className="flex items-center gap-2">
               {status.regenCostUsd > 0 && (
                 <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                  {formatUsd(status.regenCostUsd)}
+                  {formatUsdApprox(status.regenCostUsd)}
                 </span>
               )}
               <Button
@@ -279,7 +279,7 @@ export function TasteProfilePanel({
                 title={
                   insufficient
                     ? `Avalie pelo menos ${MIN_WORKS} obras com user_score`
-                    : `Recomputar perfil (${formatUsd(status.regenCostUsd)})`
+                    : `Recomputar perfil (${formatUsdApprox(status.regenCostUsd)})`
                 }
               >
                 {recompute ? <Loader2 className="animate-spin" /> : <RefreshCw />}
@@ -787,13 +787,13 @@ function CompactFreshness({
               </b>{" "}
               entraram ou saíram do seu gosto destilado ({pctLabel(st.driftPct)} de mudança).
               Recomputar só compensa acima de {pctLabel(PROFILE_DRIFT_THRESHOLD)} — abaixo disso o
-              perfil novo sai praticamente igual, e a geração custa {formatUsd(costUsd)}.
+              perfil novo sai praticamente igual, e a geração custa {formatUsdApprox(costUsd)}.
             </>
           ) : (
             <>
               Este perfil foi gerado antes de o app guardar a impressão digital do gosto, então não
               dá pra medir o quanto ele se moveu. Recomputar passa a permitir a medida (
-              {formatUsd(costUsd)}).
+              {formatUsdApprox(costUsd)}).
             </>
           )}
         </TooltipContent>
@@ -1413,7 +1413,7 @@ function AdvancedDetails({
         <p className="text-[11px] leading-relaxed text-muted-foreground">
           Estes sinais alimentam o <code className="font-mono">personal_fit</code> e as features de
           alinhamento no ranking IA. Recomputar custa{" "}
-          <span className="font-mono">{formatUsd(costUsd)}</span> e só compensa acima de{" "}
+          <span className="font-mono">{formatUsdApprox(costUsd)}</span> e só compensa acima de{" "}
           {pctLabel(PROFILE_DRIFT_THRESHOLD)} de drift ({criteriaWithPref} critérios com preferência
           no total).
         </p>
