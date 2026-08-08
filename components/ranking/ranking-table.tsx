@@ -843,7 +843,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
           tiersAvailable={tierSortEligible}
           onTiersChange={writeTiersEnabled}
         />
-        <BussolaPlane entries={entries} grouped={tiersEnabled} />
+        <BussolaPlane entries={entries} grouped={tiersEnabled} thresholds={scoreThresholds?.expected} />
       </div>
     )
   }

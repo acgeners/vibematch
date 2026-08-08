@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button"
 import { computeWorkForces, classifyArchetype, classifyArchetypeByPercentile, type ForceArchetype } from "@/lib/calculations/forces"
 import { ARCHETYPE_LABEL, ARCHETYPE_MEANING, ARCHETYPE_ORDER } from "@/lib/ranking/tier-composition"
 import { ARCHETYPE_STYLE, CORNER_ARCHETYPE } from "@/lib/ranking/archetype-style"
+import { getScoreTextColor } from "@/components/ui/score-badge"
+import type { ScoreColorThresholds } from "@/components/ui/score-badge"
 
 /**
  * Bússola 2D — o plano de decisão da feature (ver PLANO-BUSSOLA-3-FORCAS.md).
@@ -157,6 +159,64 @@ const DOT_MAX_PX = 34
 const dotSizePx = (unit: number) =>
   Math.sqrt(DOT_MIN_PX ** 2 + clamp(unit, 0, 1) * (DOT_MAX_PX ** 2 - DOT_MIN_PX ** 2))
 
+/**
+ * 🔴 **Empate exato = mesmo pixel, e empate exato aqui é COMUM, não raro.**
+ * `computeWorkForces` ARREDONDA as duas forças pra inteiro (chance =
+ * `round(chance_score)`, avaliação = `round(platform_avg × 10)`) antes de virar
+ * percentil — então valores diferentes viram a MESMA coordenada. Medido em
+ * 2026-08-08 sobre as 40 obras do topo: dois pares caem no mesmo ponto (ex.:
+ * chance 56,04 e 56,32 → 56, com nota 8,1061 e 8,0987 → 81).
+ *
+ * Empilhados, os dois desenham um ANEL — a mesma imagem do ponto aceso, que foi
+ * lida como estado e não como colisão — e o menor pode sumir inteiro atrás do
+ * maior, invisível e sem hover, aparecendo só na lista ao lado.
+ *
+ * Aqui os empatados se afastam num círculo em volta do ponto real. Duas amarras:
+ * o raio é no máximo 40% de UM passo de percentil (`100/n`), então o empate se
+ * resolve DENTRO da célula dele; e nunca atravessa a mediana, senão a cor (que
+ * vem do quadrante) discordaria da posição — plausível e errado, a família de
+ * bug que este arquivo inteiro tenta evitar.
+ *
+ * Quem garante que ninguém some é a ORDEM DE DESENHO (ver `byDrawOrder`); este
+ * aqui é o que faz duas obras parecerem duas.
+ */
+const TIE_SPREAD_MAX_PCT = 1.2
+
+/** Mantém o ponto do lado da mediana em que o percentil dele o colocou. */
+const keepSideOfMedian = (original: number, moved: number) =>
+  clamp(original >= 50 ? Math.max(50, moved) : Math.min(50, moved), 0, 100)
+
+function spreadTies<T extends { xPct: number; yPct: number }>(list: T[]): T[] {
+  const groups = new Map<string, T[]>()
+  for (const d of list) {
+    const key = `${d.xPct}|${d.yPct}`
+    const g = groups.get(key)
+    if (g) g.push(d)
+    else groups.set(key, [d])
+  }
+  // Sem empate nenhum, o caminho fica byte a byte o de antes.
+  if (groups.size === list.length) return list
+
+  const radius = Math.min(TIE_SPREAD_MAX_PCT, (100 / Math.max(list.length, 1)) * 0.4)
+  const moved = new Map<T, { xPct: number; yPct: number }>()
+  for (const group of groups.values()) {
+    if (group.length < 2) continue
+    group.forEach((d, i) => {
+      // Começa na diagonal: um par empatado se separa nos DOIS eixos por igual,
+      // em vez de fingir diferença só na chance (ou só na nota).
+      const angle = (2 * Math.PI * i) / group.length + Math.PI / 4
+      moved.set(d, {
+        xPct: keepSideOfMedian(d.xPct, d.xPct + radius * Math.cos(angle)),
+        yPct: keepSideOfMedian(d.yPct, d.yPct + radius * Math.sin(angle)),
+      })
+    })
+  }
+  return list.map((d) => {
+    const m = moved.get(d)
+    return m ? { ...d, ...m } : d
+  })
+}
+
 /** Limiar absoluto (0–100) de cada força — a linha do meio no modo "absolute". */
 const FORCE_THRESHOLD: Record<ForceKey, number> = { chance: 50, avaliacao: 65, alcance: 50 }
 
@@ -191,11 +251,18 @@ export function BussolaPlane({
   entries,
   mode = "percentile",
   grouped = false,
+  thresholds,
 }: {
   entries: BussolaDatum[]
   mode?: PositionMode
   /** "Agrupar" da barra: divide a LISTA LATERAL em prateleiras. O plano não muda. */
   grouped?: boolean
+  /**
+   * Faixas de cor da Nota Prevista (`scoreThresholds.expected`), pra ela sair no
+   * tooltip com a MESMA cor da badge no resto do app. Omitido → cutoffs fixos do
+   * `ScoreBadge`, que é o fallback documentado dele.
+   */
+  thresholds?: ScoreColorThresholds | null
 }) {
   const [presetKey, setPresetKey] = useState("ca")
   const [hovered, setHovered] = useState<string | null>(null)
@@ -222,13 +289,15 @@ export function BussolaPlane({
       .filter((d) => d.forces[preset.x] != null && d.forces[preset.y] != null)
 
     if (mode === "absolute") {
-      return base.map((d) => ({
-        ...d,
-        xPct: absPos(d.forces[preset.x], FORCE_THRESHOLD[preset.x]),
-        yPct: absPos(d.forces[preset.y], FORCE_THRESHOLD[preset.y]),
-        size: dotSizePx((d.forces[preset.size] ?? 0) / 100),
-        arch: classifyArchetype(d.forces.chance, d.forces.avaliacao),
-      }))
+      return spreadTies(
+        base.map((d) => ({
+          ...d,
+          xPct: absPos(d.forces[preset.x], FORCE_THRESHOLD[preset.x]),
+          yPct: absPos(d.forces[preset.y], FORCE_THRESHOLD[preset.y]),
+          size: dotSizePx((d.forces[preset.size] ?? 0) / 100),
+          arch: classifyArchetype(d.forces.chance, d.forces.avaliacao),
+        })),
+      )
     }
 
     // Posição = PERCENTIL dentro do acervo exibido. Sem isso, o catálogo
@@ -254,18 +323,22 @@ export function BussolaPlane({
     const pctY = percentileFn(preset.y)
     const pctSize = percentileFn(preset.size)
 
-    return base.map((d) => ({
-      ...d,
-      xPct: pctX(d.forces[preset.x]),
-      yPct: pctY(d.forces[preset.y]),
-      // TAMANHO = percentil também: a 3ª força é tão comprimida quanto os eixos.
-      // O número cru continua no tooltip e no aria-label — o tamanho ordena, não mede.
-      size: dotSizePx(pctSize(d.forces[preset.size]) / 100),
-      // Face principal: x = Chance e y = Avaliação, então o percentil do eixo JÁ É
-      // o percentil da força. Reusar pctX/pctY evita recalcular a mesma coisa e
-      // garante que a cor não possa divergir do quadrante.
-      arch: classifyArchetypeByPercentile(pctX(d.forces.chance), pctY(d.forces.avaliacao)),
-    }))
+    return spreadTies(
+      base.map((d) => ({
+        ...d,
+        xPct: pctX(d.forces[preset.x]),
+        yPct: pctY(d.forces[preset.y]),
+        // TAMANHO = percentil também: a 3ª força é tão comprimida quanto os eixos.
+        // O número cru continua no tooltip e no aria-label — o tamanho ordena, não mede.
+        size: dotSizePx(pctSize(d.forces[preset.size]) / 100),
+        // Face principal: x = Chance e y = Avaliação, então o percentil do eixo JÁ É
+        // o percentil da força. Reusar pctX/pctY evita recalcular a mesma coisa e
+        // garante que a cor não possa divergir do quadrante. ⚠️ Sai do percentil
+        // CRU, antes do desempate de posição — o afastamento é cosmético e não
+        // pode mudar o quadrante de ninguém.
+        arch: classifyArchetypeByPercentile(pctX(d.forces.chance), pctY(d.forces.avaliacao)),
+      })),
+    )
   }, [plotted, preset.x, preset.y, preset.size, mode])
 
   const hoveredDot = hovered ? dots.find((d) => d.e.workId === hovered) : null
@@ -350,6 +423,7 @@ export function BussolaPlane({
         revealRow={revealRow}
         capped={capped}
         total={entries.length}
+        thresholds={thresholds}
       />
     )
   }
@@ -451,8 +525,8 @@ export function BussolaPlane({
               <div className="absolute left-0 top-1/2 h-px w-full bg-border" />
               {/* Sem inset aqui: as legendas deste modo já vivem fora do plano. */}
               <div ref={plotRef} className="absolute inset-0">
-                {dots.map((d) => (
-                  <Dot key={d.e.workId} d={d} onHover={setHovered} />
+                {byDrawOrder(dots).map((d) => (
+                  <Dot key={d.e.workId} d={d} onHover={setHovered} lit={hovered === d.e.workId} />
                 ))}
               </div>
 
@@ -461,8 +535,12 @@ export function BussolaPlane({
                   ref={tipRef}
                   d={hoveredDot}
                   pos={tipPos}
-                  footerRight={
-                    <span className={cn("inline-flex items-center gap-1 font-medium", ARCHETYPE_STYLE[hoveredDot.arch].text)}>
+                  thresholds={thresholds}
+                  // O chip acima nomeia o ARQUÉTIPO (constante entre as faces);
+                  // isto aqui nomeia o canto da face que está na tela, que na 2ª
+                  // e 3ª é outra coisa ("Joia escondida", "Consagrada").
+                  note={
+                    <span className={cn("inline-flex items-center gap-1 text-[10.5px] font-medium", ARCHETYPE_STYLE[hoveredDot.arch].text)}>
                       {quadArrow(hoveredDot)} {quadName(hoveredDot)}
                     </span>
                   }
@@ -514,6 +592,17 @@ type PlottedDot = {
 }
 
 /**
+ * Ordem de PINTURA (não de leitura): do maior pro menor, porque quem chega
+ * depois fica por cima. É o que garante que um ponto pequeno nunca desapareça
+ * atrás de um grande — antes disso, um par empilhado escondia uma obra inteira,
+ * invisível e fora do alcance do mouse, e só a lista ao lado denunciava.
+ *
+ * ⚠️ Copia antes de ordenar: `dots` é consumido em outra ordem por quem conta os
+ * cantos e por quem lista.
+ */
+const byDrawOrder = (list: PlottedDot[]) => [...list].sort((a, b) => b.size - a.size)
+
+/**
  * 🔴 **A faixa reservada existe para nenhum ponto ficar ATRÁS de um rótulo.**
  *
  * As legendas de canto viviam FORA do plano justamente por isso (redesenho de
@@ -534,7 +623,7 @@ const PLOT_INSET = 76
 function PercentilePlane({
   dots, visible, counts, focusArch, setFocusArch, grouped,
   hovered, setHovered, hoveredDot, tipPos,
-  planeRef, plotRef, tipRef, listRef, revealRow, capped, total,
+  planeRef, plotRef, tipRef, listRef, revealRow, capped, total, thresholds,
 }: {
   dots: PlottedDot[]
   visible: PlottedDot[]
@@ -553,6 +642,7 @@ function PercentilePlane({
   revealRow: (workId: string) => void
   capped: boolean
   total: number
+  thresholds?: ScoreColorThresholds | null
 }) {
   const corners = [
     { pos: "tl" as const, arch: CORNER_ARCHETYPE.tl, place: "left-2 top-2" },
@@ -589,7 +679,20 @@ function PercentilePlane({
         </div>
 
         <div className="grid grid-cols-1 gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_300px]">
-          <div className="min-w-0">
+          {/* Coluna estreita à esquerda = régua do eixo Y, gêmea da do X que fica
+              embaixo. Sem ela o plano só diz o que a HORIZONTAL significa, e a
+              vertical — que é metade da decisão — vira decoração. */}
+          <div className="grid min-w-0 grid-cols-[15px_minmax(0,1fr)] gap-x-1.5">
+            <div
+              className="flex items-center justify-between py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-muted-foreground/70 [writing-mode:vertical-rl]"
+              style={{ transform: "rotate(180deg)" }}
+            >
+              {/* Comparativo, nunca absoluto: o corte é a MEDIANA do que está na
+                  tela, então "pior avaliada" quer dizer "pior que as outras 39". */}
+              <span>← pior avaliada pela crítica</span>
+              <span className="text-muted-foreground/60">mediana</span>
+              <span>melhor avaliada →</span>
+            </div>
             <div
               ref={planeRef}
               className="relative aspect-[4/3] w-full overflow-hidden rounded-xl border border-border bg-muted/30"
@@ -646,7 +749,7 @@ function PercentilePlane({
                 className="absolute inset-x-0"
                 style={{ top: PLOT_INSET, bottom: PLOT_INSET }}
               >
-                {dots.map((d) => (
+                {byDrawOrder(dots).map((d) => (
                   <Dot
                     key={d.e.workId}
                     d={d}
@@ -658,18 +761,10 @@ function PercentilePlane({
                 ))}
               </div>
 
-              {hoveredDot && (
-                <DotTooltip
-                  ref={tipRef}
-                  d={hoveredDot}
-                  pos={tipPos}
-                  footerRight={
-                    <span className={cn("font-semibold capitalize", ARCHETYPE_STYLE[hoveredDot.arch].text)}>
-                      {ARCHETYPE_LABEL[hoveredDot.arch]}
-                    </span>
-                  }
-                />
-              )}
+              {/* Sem `note`: nesta face o canto É o arquétipo, e o chip do
+                  cabeçalho já o nomeia — repetir no rodapé só ocuparia a linha
+                  que agora mostra o número cru. */}
+              {hoveredDot && <DotTooltip ref={tipRef} d={hoveredDot} pos={tipPos} thresholds={thresholds} />}
 
               {dots.length === 0 && (
                 <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
@@ -678,6 +773,9 @@ function PercentilePlane({
               )}
             </div>
 
+            {/* célula vazia sob a régua do Y — sem ela a do X escorrega pra
+                coluna 1 e sai desalinhada do plano que ela descreve */}
+            <div aria-hidden />
             <div className="mt-2 flex items-center justify-between gap-2 font-mono text-[9px] font-bold uppercase tracking-wider text-muted-foreground/70">
               <span>← menos chance de você gostar</span>
               <span className="text-muted-foreground/60">mediana das {dots.length} na tela</span>
@@ -747,7 +845,11 @@ function Dot({
       onFocus={enter}
       onBlur={() => onHover(null)}
       className={cn(
-        "absolute -translate-x-1/2 translate-y-1/2 rounded-full border-[1.5px] border-background transition-opacity hover:z-20 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        // Sem `focus-visible:ring`: o boxShadow inline abaixo VENCE a classe do
+        // Tailwind, então aquele anel nunca chegou a aparecer — era proteção de
+        // mentira. Quem marca o foco é o mesmo estado aceso, porque `onFocus`
+        // também acende o ponto.
+        "absolute -translate-x-1/2 translate-y-1/2 rounded-full border-[1.5px] border-background transition-opacity hover:z-20 focus-visible:z-20 focus-visible:outline-none",
         style.dot,
         dimmed ? "pointer-events-none opacity-[0.12]" : "opacity-100",
         lit && "z-30",
@@ -757,31 +859,76 @@ function Dot({
         bottom: `${d.yPct}%`,
         width: d.size,
         height: d.size,
-        boxShadow: dimmed ? undefined : lit ? `0 0 0 3px ${style.glow}, 0 0 18px ${style.glow}` : `0 0 14px ${style.glow}`,
+        boxShadow: dimmed
+          ? undefined
+          : lit
+            ? // 🔴 Anel NEUTRO de propósito. Na cor do arquétipo ele era idêntico
+              // ao desenho que dois pontos empilhados fazem sozinhos — aceso e
+              // empatado viravam a mesma imagem, e foi assim que uma colisão foi
+              // lida como estado. Vindo do `--foreground`, nenhuma sobreposição
+              // de pontos consegue imitar.
+              `0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--foreground)), 0 0 20px ${style.glow}`
+            : `0 0 14px ${style.glow}`,
       }}
     />
   )
 }
 
 function DotTooltip({
-  ref, d, pos, footerRight,
+  ref, d, pos, thresholds, note,
 }: {
   ref: React.Ref<HTMLDivElement>
   d: PlottedDot
   pos: { left: number; top: number } | null
-  footerRight: React.ReactNode
+  /** Faixas de cor da Nota Prevista (as de /preferencias). Ausentes → cutoffs fixos. */
+  thresholds?: ScoreColorThresholds | null
+  /** Linha extra sob o chip — o canto da FACE atual, que só existe no modo absoluto. */
+  note?: React.ReactNode
 }) {
   const style = ARCHETYPE_STYLE[d.arch]
   return (
     <div
       ref={ref}
-      className="pointer-events-none absolute z-40 w-[268px] overflow-hidden rounded-xl border border-border bg-card shadow-xl transition-opacity"
+      /**
+       * 320px, não 268: com a capa (52) + respiros, os 268 deixavam ~126px pro
+       * título, e título de obra aqui é longo — "The Acting Empress Still Spends
+       * the First Night" saía em QUATRO linhas. O card é transiente e
+       * reposicionado por medição (`offsetWidth`), então crescer não custa nada;
+       * o `max-w` cobre o plano estreito, que tem `overflow-hidden` e cortaria.
+       */
+      className="pointer-events-none absolute z-40 w-[320px] max-w-[calc(100%-16px)] overflow-hidden rounded-xl border border-border bg-card shadow-xl transition-opacity"
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, opacity: pos ? 1 : 0 }}
     >
       <div className="flex gap-3 p-3">
         <CoverImage url={d.e.coverUrl} alt="" className="h-[74px] w-[52px] flex-none rounded-md object-cover shadow" />
-        <div className="flex min-w-0 flex-col gap-1">
-          <div className="text-[13.5px] font-semibold leading-tight">{d.e.title}</div>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          {/* `overflow-hidden` = contém o float (senão ele vaza por cima da linha
+              de ano/status quando o título tem uma linha só). */}
+          <div className="overflow-hidden break-words text-pretty text-[13.5px] font-semibold leading-tight">
+            {/* A Nota Prevista é o DESFECHO da leitura do ponto (as 3 forças são o
+                caminho), então ela abre o card em vez de fechá-lo. A cor sai de
+                `getScoreTextColor` — a mesma régua da badge do /ranking e da
+                página da obra, com as faixas configuradas em /preferencias.
+                Inventar uma cor aqui seria uma 2ª régua pro mesmo número, que é
+                como duas telas passam a discordar.
+                ⚠️ FLOAT, não item de flex: ao lado, ela encolhia TODAS as linhas
+                do título; flutuando, encolhe só as duas que ficam ao lado dela e
+                o resto do título usa a largura inteira. */}
+            <span className="float-right ml-2 flex flex-col items-end leading-none">
+              <span className="font-mono text-[8.5px] uppercase tracking-wider text-muted-foreground/70">
+                prevista
+              </span>
+              <span
+                className={cn(
+                  "mt-0.5 font-mono text-[16px] font-bold tabular-nums",
+                  getScoreTextColor(d.e.expectedScore, thresholds),
+                )}
+              >
+                {d.e.expectedScore != null ? d.e.expectedScore.toFixed(1).replace(".", ",") : "—"}
+              </span>
+            </span>
+            {d.e.title}
+          </div>
           <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10.5px] text-muted-foreground">
             {d.e.year != null && <span>{d.e.year}</span>}
             {d.e.year != null && (d.e.publicationStatusShort ?? d.e.publicationStatus) && <span>·</span>}
@@ -805,19 +952,33 @@ function DotTooltip({
             <span className={cn("size-1.5 rounded-full", style.dot)} />
             {ARCHETYPE_LABEL[d.arch]}
           </span>
+          {note}
         </div>
       </div>
       <div className="px-3 pb-3">
         <ForceMeters forces={d.forces} size="sm" />
       </div>
-      <div className="flex items-center justify-between border-t border-border bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
+      {/* Rodapé = o CRU das duas forças externas. Os medidores mostram a versão
+          normalizada (0–100), que é o que posiciona o ponto — mas "86" não é uma
+          nota e "93" não é um número de votos, e é o cru que a pessoa compara
+          com a plataforma de onde o dado veio. Exato de propósito: o tooltip é a
+          lupa; a forma compacta ("23,9K") é das listas, onde falta espaço. */}
+      <div className="flex items-center justify-between gap-2 border-t border-border bg-muted/40 px-3 py-2 font-mono text-[11px] text-muted-foreground">
         <span>
-          Nota Prevista{" "}
-          <b className="font-mono text-[13px] font-bold text-foreground">
-            {d.e.expectedScore != null ? d.e.expectedScore.toFixed(1) : "—"}
+          Nota externa{" "}
+          <b className="text-[12.5px] font-bold text-foreground">
+            {d.e.platformAvg != null ? d.e.platformAvg.toFixed(1).replace(".", ",") : "—"}
           </b>
         </span>
-        {footerRight}
+        <span>
+          {d.e.totalVotes > 0 ? (
+            <>
+              <b className="text-[12.5px] font-bold text-foreground">{d.e.totalVotes.toLocaleString("pt-BR")}</b> votos
+            </>
+          ) : (
+            "sem votos"
+          )}
+        </span>
       </div>
     </div>
   )
@@ -839,16 +1000,31 @@ function PairedList({
   hovered: string | null
   setHovered: (id: string | null) => void
 }) {
+  /**
+   * A lista é a legenda do plano, e o plano se lê da direita pra esquerda —
+   * então ela ordena pela MESMA grandeza do eixo X: maior chance primeiro. Na
+   * ordem do ranking (Nota Prevista) a coluna de % descia e subia sem padrão, e
+   * a lista parecia desordenada ao lado de um eixo que estava ordenado.
+   *
+   * Empate mantém a ordem do ranking (o sort do JS é estável). O `-Infinity` é
+   * só rede: obra sem Chance nem chega aqui — ela é cortada antes, junto com
+   * quem não tem Avaliação, porque sem as duas forças não há ponto no plano.
+   */
+  const ordered = useMemo(
+    () => [...dots].sort((a, b) => (b.forces.chance ?? -Infinity) - (a.forces.chance ?? -Infinity)),
+    [dots],
+  )
+
   const groups = useMemo(() => {
     if (!grouped) return null
     const by = new Map<ForceArchetype, PlottedDot[]>()
-    for (const d of dots) {
+    for (const d of ordered) {
       const list = by.get(d.arch) ?? []
       list.push(d)
       by.set(d.arch, list)
     }
     return ARCHETYPE_ORDER.filter((a) => by.has(a)).map((a) => ({ arch: a, items: by.get(a)! }))
-  }, [dots, grouped])
+  }, [ordered, grouped])
 
   return (
     <div className="flex max-h-[520px] min-h-[280px] flex-col overflow-hidden rounded-xl border border-border bg-card lg:max-h-none">
@@ -858,7 +1034,11 @@ function PairedList({
         </div>
         <div className="text-[10.5px] text-muted-foreground">
           {dots.length} obra{dots.length !== 1 ? "s" : ""} ·{" "}
-          {focusArch ? ARCHETYPE_MEANING[focusArch] : grouped ? "em prateleiras" : "na ordem do ranking"}
+          {focusArch
+            ? ARCHETYPE_MEANING[focusArch]
+            : grouped
+              ? "em prateleiras, maior chance primeiro"
+              : "maior chance primeiro"}
         </div>
       </div>
       <div ref={ref} className="min-h-0 flex-1 overflow-y-auto">
@@ -866,7 +1046,7 @@ function PairedList({
           ? groups.map(({ arch, items }) => (
               <ShelfGroup key={arch} arch={arch} items={items} hovered={hovered} setHovered={setHovered} />
             ))
-          : dots.map((d) => <PairedRow key={d.e.workId} d={d} hovered={hovered} setHovered={setHovered} />)}
+          : ordered.map((d) => <PairedRow key={d.e.workId} d={d} hovered={hovered} setHovered={setHovered} />)}
         {dots.length === 0 && (
           <p className="px-3 py-6 text-center text-[12px] text-muted-foreground">Nenhuma obra neste canto.</p>
         )}
