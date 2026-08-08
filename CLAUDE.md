@@ -567,8 +567,20 @@ cobria eixo, e a lista "Quanto custa cada ação" saiu com `~8,15¢` ao lado de 
 linha**. A 2ª esqueceu **coluna de tabela** — em "Por operação" a coluna Custo tinha `$0,33` e
 `0,46¢` (o "0,46" lê como MAIOR, sendo 70× menor), e a coluna Custo/sucesso tinha `$0,30` e `0,3¢`,
 dois "0,3" que diferem 100×. **Coluna ordenável é o pior caso**: a mistura inverte a leitura de quem
-é maior. Hoje são **12 réguas** (2 gráficos, 3 colunas de tabela, a lista do `/ai-usage`, o bloco de
-custo, os botões do confirm, o toast do backfill e 3 mensagens de bloqueio por teto).
+é maior. A 3ª esqueceu a **quebra que SOMA um total** — o badge de custo por obra imprimia `$0,13`
+sobre `5,37¢ · 3,98¢ · 1,53¢ · 1,14¢ · 0,50¢`, e a conta parava de fechar de olho. Hoje são
+**14 réguas** (2 gráficos, 3 colunas de tabela, a lista do `/ai-usage`, o bloco de custo, os botões
+do confirm, o toast do backfill, 3 mensagens de bloqueio por teto, o badge dev de custo por obra e
+o card de saldo).
+
+⚠️ **Elemento recorrente cuja distribuição senta EM CIMA do corte precisa de régua própria** — senão
+ele troca de unidade a cada navegação e inverte a leitura sem nada acusar. Medido em 2026-08-08 no
+badge dev de custo por obra: das **520 obras** com custo atribuído a mediana é **US$0,079 (7,9¢)**,
+a dois centavos do corte de 10¢ — 338 em ¢ e 182 em $. A saída não foi fixar centavos no código:
+`components/titles/dev-work-ai-cost.tsx` monta **uma régua** com o total, todas as parcelas e o
+baseline, e o número do **gatilho** sai dela. Como toda parcela é pequena, isso dá ¢ pra qualquer
+obra de hoje (máx. 58,2¢) e volta pra $ sozinho no dia em que uma passar de US$1. Mesma correção em
+`balance-card.tsx`: informado − gasto = restante são termos de uma conta só.
 
 ⚠️ **Régua de coluna sai das linhas VISÍVEIS**, não do conjunto todo — filtrar por modelo no log de
 chamadas muda o que está sendo comparado, e a unidade tem que acompanhar.
@@ -590,7 +602,10 @@ cascata, o rodapé conhece a ação secundária — mesmas entradas aparentes, r
 quebraria a comparação com logs de execuções antigas.
 
 Guardado por `tests/unit/format/money.test.ts` (10 casos, inclusive saldo negativo — que antes
-saía `$-4.20`, com o cifrão na frente do sinal).
+saía `$-4.20`, com o cifrão na frente do sinal) e por
+`tests/unit/format/dev-work-cost-regua.test.tsx` — este último é teste de **render**, de propósito:
+o `money.test.ts` passava verde enquanto o badge chamava `formatUsd` quatro vezes em separado. O
+que regride nesta classe não é a fórmula, é o **escopo**, e escopo só aparece na árvore desenhada.
 
 ## O painel de filtros é RASCUNHO — navegar por fora dele apaga o filtro
 

@@ -2,7 +2,7 @@
 
 import { Coins } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { formatUsd, formatUsdApprox } from "@/lib/format/money"
+import { makeUsdScale } from "@/lib/format/money"
 import type { WorkAiCostSummary, FromScratchBaseline } from "@/server/queries/ai-usage"
 
 /**
@@ -13,6 +13,24 @@ import type { WorkAiCostSummary, FromScratchBaseline } from "@/server/queries/ai
  * produção). Custo = soma de `cost_total_usd` de todas as chamadas com
  * `metadata.work_id` desta obra (avaliação IA, prever interesse, digest/resumo
  * de reviews, tags…), inclusive tentativas com erro.
+ *
+ * 🔴 **Badge e popover são UMA régua** (`makeUsdScale`), não quatro `formatUsd`
+ * soltos. Duas razões, as duas medidas em 2026-08-08:
+ *
+ * 1. **As parcelas SOMAM o total** — é a comparação lado a lado mais forte que
+ *    existe. Com régua por valor o popover imprimia total `$0,13` sobre
+ *    `5,37¢ · 3,98¢ · 1,53¢ · 1,14¢ · 0,50¢`: a conta deixa de fechar de olho.
+ * 2. **O custo por obra mora EM CIMA do corte de 10¢** — nas 520 obras com custo
+ *    atribuído a mediana é US$0,079 (7,9¢), a dois centavos dele, com 338 obras
+ *    em ¢ e 182 em $. O badge existe pra comparar obra com obra ao navegar, e
+ *    alternando de unidade ele inverte a leitura ("0,13" lê como menor que
+ *    "7,77" sendo 1,6× maior). Como toda parcela é pequena, a régua do popover
+ *    cai em ¢ pra qualquer obra de hoje (máx. 58,2¢, abaixo do veto de US$1) —
+ *    e volta pra $ sozinha no dia em que uma obra passar disso.
+ *
+ * Por isso o número do GATILHO sai da mesma régua do popover, e não de um
+ * `formatUsd` próprio: são o mesmo número, e discordar da unidade entre o botão
+ * e o cabeçalho que ele abre seria pior que o estado anterior.
  */
 export function DevWorkAiCost({
   summary,
@@ -23,6 +41,15 @@ export function DevWorkAiCost({
   baseline?: FromScratchBaseline | null
 }) {
   const { totalCostUsd, nCalls, byOperation } = summary
+  // Tudo que aparece na tela entra na régua — inclusive o baseline do rodapé,
+  // que existe justamente pra ser comparado com o total ("esta obra custou X, do
+  // zero custaria ~Y"). As medianas por operação do baseline NÃO entram: só os
+  // rótulos delas são exibidos.
+  const usd = makeUsdScale(
+    totalCostUsd,
+    ...byOperation.map((op) => op.totalCostUsd),
+    baseline?.totalUsd,
+  )
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -33,7 +60,7 @@ export function DevWorkAiCost({
         >
           <Coins className="h-4 w-4 text-amber-600 dark:text-amber-400" />
           <span className="font-mono font-semibold tabular-nums text-foreground">
-            {formatUsd(totalCostUsd)}
+            {usd.format(totalCostUsd)}
           </span>
           <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">
             dev
@@ -49,7 +76,7 @@ export function DevWorkAiCost({
           </div>
           <div className="text-right">
             <div className="font-mono text-base font-bold tabular-nums text-foreground">
-              {formatUsd(totalCostUsd)}
+              {usd.format(totalCostUsd)}
             </div>
             <div className="text-[11px] text-muted-foreground">
               {nCalls} {nCalls === 1 ? "chamada" : "chamadas"}
@@ -70,7 +97,7 @@ export function DevWorkAiCost({
                   <span className="flex shrink-0 items-center gap-3 font-mono text-xs">
                     <span className="text-muted-foreground">{op.nCalls}×</span>
                     <span className="font-semibold tabular-nums text-foreground">
-                      {formatUsd(op.totalCostUsd)}
+                      {usd.format(op.totalCostUsd)}
                     </span>
                   </span>
                 </li>
@@ -90,7 +117,7 @@ export function DevWorkAiCost({
             <div className="flex items-baseline justify-between gap-4">
               <span className="text-sm font-semibold text-foreground/85">Criar do zero</span>
               <span className="font-mono text-sm font-bold tabular-nums text-foreground">
-                {formatUsdApprox(baseline.totalUsd)}
+                {usd.approx(baseline.totalUsd)}
               </span>
             </div>
             <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/80">

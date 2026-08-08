@@ -6,7 +6,7 @@ import { useState, useTransition } from "react"
 import { setAnthropicBalance } from "@/server/actions/account"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
 import { LOW_BALANCE_USD } from "@/lib/ai-usage/balance"
-import { formatUsd } from "@/lib/format/money"
+import { makeUsdScale } from "@/lib/format/money"
 import { cn } from "@/lib/utils"
 
 function formatDateTime(iso: string): string {
@@ -38,6 +38,14 @@ export function BalanceCard({ status }: { status: BalanceStatus }) {
   const remaining = status.remainingUsd
   const isLow = remaining != null && remaining <= LOW_BALANCE_USD
   const isNegative = remaining != null && remaining < 0
+
+  // Os três números são termos da MESMA conta (informado − gasto = restante) e
+  // aparecem colados, então são uma régua só. Com `formatUsd` por valor, o dia em
+  // que o saldo é informado saía "Informado $20,00 … gasto desde então 3¢" — dois
+  // dígitos "3" que diferem 100× de um lado ao outro de um sinal de menos
+  // implícito. O veto de US$1 do `makeUsdScale` mantém tudo em dólar no caso
+  // normal; ele só cai pra ¢ quando o próprio saldo é de centavos.
+  const usd = makeUsdScale(status.balanceUsd, status.spentSinceUsd, remaining)
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
@@ -80,13 +88,13 @@ export function BalanceCard({ status }: { status: BalanceStatus }) {
                       : "text-foreground",
               )}
             >
-              {hasBalance && remaining != null ? formatUsd(remaining) : "—"}
+              {hasBalance && remaining != null ? usd.format(remaining) : "—"}
             </p>
             {hasBalance && status.setAt ? (
               <p className="mt-1 text-xs text-muted-foreground">
-                Informado <span className="font-medium text-foreground">{formatUsd(status.balanceUsd!)}</span>{" "}
+                Informado <span className="font-medium text-foreground">{usd.format(status.balanceUsd!)}</span>{" "}
                 em {formatDateTime(status.setAt)} · gasto desde então{" "}
-                <span className="font-medium text-foreground">{formatUsd(status.spentSinceUsd)}</span>{" "}
+                <span className="font-medium text-foreground">{usd.format(status.spentSinceUsd)}</span>{" "}
                 ({status.callsSince} {status.callsSince === 1 ? "chamada" : "chamadas"})
               </p>
             ) : (
