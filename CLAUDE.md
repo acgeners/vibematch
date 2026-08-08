@@ -568,10 +568,31 @@ linha**. A 2ª esqueceu **coluna de tabela** — em "Por operação" a coluna Cu
 `0,46¢` (o "0,46" lê como MAIOR, sendo 70× menor), e a coluna Custo/sucesso tinha `$0,30` e `0,3¢`,
 dois "0,3" que diferem 100×. **Coluna ordenável é o pior caso**: a mistura inverte a leitura de quem
 é maior. A 3ª esqueceu a **quebra que SOMA um total** — o badge de custo por obra imprimia `$0,13`
-sobre `5,37¢ · 3,98¢ · 1,53¢ · 1,14¢ · 0,50¢`, e a conta parava de fechar de olho. Hoje são
-**14 réguas** (2 gráficos, 3 colunas de tabela, a lista do `/ai-usage`, o bloco de custo, os botões
-do confirm, o toast do backfill, 3 mensagens de bloqueio por teto, o badge dev de custo por obra e
-o card de saldo).
+sobre `5,37¢ · 3,98¢ · 1,53¢ · 1,14¢ · 0,50¢`, e a conta parava de fechar de olho.
+
+**Hoje são 15 réguas** — conferido, **não** contado de cabeça. Esta linha já dizia "12" quando eram
+13, porque a coluna "Custo USD" da tabela **Por modelo** (`app/ai-usage/page.tsx`) nunca entrou na
+conta. Antes de mexer neste número, rode:
+
+```bash
+grep -rn 'makeUsdScale(' --include='*.ts' --include='*.tsx' . \
+  --exclude-dir=node_modules --exclude-dir=.next \
+  | grep -v 'lib/format/money.ts' | grep -v '^\.\?/\?tests/'   # → 15 em 2026-08-08
+```
+
+Contagem que fecha com ele:
+
+| Quantas | Onde |
+|---|---|
+| 2 | gráficos (diário, por operação) |
+| **4** | colunas de tabela — Custo do log de chamadas, Custo e Custo/sucesso de "Por operação", **Custo USD de "Por modelo"** |
+| 1 | a lista "Quanto custa cada ação" (`cost-menu`) |
+| 1 | o bloco de custo (`cost-summary`) |
+| 1 | os botões do confirm (`cost-confirm`) |
+| 1 | o toast do backfill de Interesse |
+| 3 | mensagens de bloqueio por teto (`synopsis-quality`, `interest-ui`, `interest-backfill`) |
+| 1 | o badge dev de custo por obra |
+| 1 | o card de saldo |
 
 ⚠️ **Elemento recorrente cuja distribuição senta EM CIMA do corte precisa de régua própria** — senão
 ele troca de unidade a cada navegação e inverte a leitura sem nada acusar. Medido em 2026-08-08 no
