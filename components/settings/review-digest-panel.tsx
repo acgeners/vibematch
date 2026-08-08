@@ -91,7 +91,7 @@ export function ReviewDigestPanel({ accent, pendingCount, totalCount }: ReviewDi
           <p>
             Destila as reviews num{" "}
             <strong className="font-semibold text-foreground">digest estruturado</strong> (consenso,
-            divergências, traços, alertas) via Sonnet 4.6 (~$0.02–0.04 por obra). É o sinal
+            divergências, traços, alertas) via Sonnet 4.6 (~2–4¢ por obra). É o sinal
             qualitativo que o{" "}
             <strong className="font-semibold text-foreground">consultor IA</strong> consome (Recomendar
             / Veredito / Deep Dive / Chat).
@@ -123,7 +123,7 @@ export function ReviewDigestPanel({ accent, pendingCount, totalCount }: ReviewDi
           label="Modelo"
           value="claude-sonnet-4-6"
           valueClassName="text-xs"
-          hint="~$0.02–0.04/obra"
+          hint="~2–4¢/obra"
         />
       </div>
 

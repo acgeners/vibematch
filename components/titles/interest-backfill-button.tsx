@@ -12,6 +12,7 @@ import { runTask, setTaskProgress } from "@/lib/tasks-store"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import { buildInterestBatchCost } from "@/lib/cost-preview/interest-cost-steps"
 import type { SynopsisQueueWork } from "@/server/queries/recommendations"
+import { formatUsd } from "@/lib/format/money"
 
 /** Teto por chamada = SYNOPSIS_BATCH_MAX do servidor. O loop encadeia os lotes. */
 const CHUNK = 100
@@ -86,8 +87,8 @@ export function InterestBackfillButton({ works, isPaid = true }: { works: Synops
       onError: () => refresh(),
       successToast: (r) => ({
         message: r.stoppedByCap
-          ? `Parou no teto de $${capUsd.toFixed(2)} · ${r.succeeded} estimada(s) · gasto $${r.spent.toFixed(2)}`
-          : `Backfill concluído: ${r.succeeded} estimada(s) · ${r.fresh} já ok${r.failed ? ` · ${r.failed} falha(s)` : ""} · custo $${r.spent.toFixed(2)}`,
+          ? `Parou no teto de ${formatUsd(capUsd)} · ${r.succeeded} estimada(s) · gasto ${formatUsd(r.spent)}`
+          : `Backfill concluído: ${r.succeeded} estimada(s) · ${r.fresh} já ok${r.failed ? ` · ${r.failed} falha(s)` : ""} · custo ${formatUsd(r.spent)}`,
       }),
     })
   }

@@ -3,13 +3,8 @@
 import { ChevronRight, Info, Lightbulb } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
-import {
-  formatEta,
-  formatUsd,
-  formatUsdExact,
-  previewCascade,
-  shortModelName,
-} from "@/lib/cost-preview/catalog"
+import { formatEta, previewCascade, shortModelName } from "@/lib/cost-preview/catalog"
+import { formatUsd, formatUsdApprox } from "@/lib/format/money"
 import { COST_JOURNEYS, JOURNEY_GROUPS, type CostJourney } from "@/lib/cost-preview/journeys"
 
 /** Nº de "moedas" (1–3) que representa a faixa de custo, pra bater o olho. */
@@ -151,11 +146,11 @@ function JourneyRow({
               isCheap ? "text-emerald-600 dark:text-emerald-400" : "text-foreground",
             )}
           >
-            {formatUsd(pv.likelyUsd)}
+            {formatUsdApprox(pv.likelyUsd)}
           </p>
           {composed && (
             <p className="mt-1 text-[11px] text-muted-foreground/80">
-              até {formatUsdExact(pv.upperBoundUsd)}
+              até {formatUsd(pv.upperBoundUsd)}
             </p>
           )}
         </div>
@@ -182,7 +177,7 @@ function JourneyRow({
                       </span>
                     </span>
                     <span className="font-mono text-[11px] text-muted-foreground">
-                      {formatUsd(step.likelyUsd)}
+                      {formatUsdApprox(step.likelyUsd)}
                     </span>
                   </div>
                 ))}

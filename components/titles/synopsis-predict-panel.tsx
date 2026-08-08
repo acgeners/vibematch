@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { SynopsisQueueWork } from "@/server/queries/recommendations"
+import { formatUsd } from "@/lib/format/money"
 
 /** Nível ordinal do Interesse (♥=1 … ♥♥♥♥=4); 0 se desconhecido. */
 function synopsisLevel(q: string | null): number {
@@ -145,7 +146,7 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
           `${r.succeeded} estimada${r.succeeded !== 1 ? "s" : ""} · ${r.fresh} já ok` +
           (r.failed > 0 ? ` · ${r.failed} falhou` : "") +
           (r.blocked > 0 ? ` · ${r.blocked} bloqueada(s)` : "") +
-          ` · custo $${r.costUsd.toFixed(3)}`,
+          ` · custo ${formatUsd(r.costUsd)}`,
       }),
     })
   }

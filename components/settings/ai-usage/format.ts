@@ -1,20 +1,13 @@
 /**
  * Formatadores compartilhados do painel /ai-usage. Centralizados aqui pra não
  * duplicar entre a página (server) e os componentes interativos (client).
+ *
+ * ⚠️ **Dinheiro NÃO mora aqui** — mora em `lib/format/money.ts`, e o app inteiro
+ * (popups de custo, badge dev, toasts, mensagens de servidor) importa de lá. Este
+ * arquivo já foi o dono do `formatUsd` e virou origem de três cópias literais.
+ * `formatUsdPrecise` deixou de existir junto: a régua de casas decimais que ele
+ * resolvia agora é a escala (¢ abaixo de 10¢, $ acima).
  */
-
-export function formatUsd(value: number): string {
-  if (!Number.isFinite(value) || value === 0) return "$0.00"
-  if (value < 0.005) return `$${value.toFixed(3)}`
-  return `$${value.toFixed(2)}`
-}
-
-/** Custo com 3 casas — p/ custo-por-item pequeno (custo/sucesso, por chamada). */
-export function formatUsdPrecise(value: number | null): string {
-  if (value == null || !Number.isFinite(value)) return "—"
-  if (value === 0) return "$0.000"
-  return `$${value.toFixed(3)}`
-}
 
 export function formatTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`

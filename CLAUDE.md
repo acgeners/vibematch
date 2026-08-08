@@ -347,6 +347,7 @@ lib/
   calculations/   – deterministic scoring pipeline
   constants/      – GENERATED files (do not edit by hand)
   external/       – third-party API integrations + multi-source merge logic
+  format/         – formatação de valor pra tela (money.ts é o dono único de USD)
   import/         – GENERATED files + CSV/XLSX import pipeline
   ml/             – Ridge regression for Nota Prevista / expected_score (pure TS, no native deps)
   supabase/       – client factories
@@ -493,6 +494,41 @@ FINAL do `getRanking` (depois de todos os níveis, antes do título), então dec
 ninguém mais decidiu e vale igual em Lista, Cards, Faixas e Bússola.
 
 Guardadas por `tests/unit/ranking/score-rounding.test.ts` e `build-tiers.test.ts`.
+
+## Dinheiro tem UM dono, e a unidade muda com a escala
+
+Todo valor em USD na interface passa por **`lib/format/money.ts`** — `formatUsd`,
+`formatUsdApprox` (estimativa, com "~") e `makeUsdAxisFormatter` (eixo de gráfico). A régua:
+**abaixo de 10¢ o valor sai em centavos** (máx. 2 casas, sem zeros mudos: `5,67¢`, `0,2¢`),
+**de 10¢ pra cima em dólares** (`$0,13`, `$38,50`), sempre em **vírgula pt-BR**.
+
+O corte é 10¢ e não US$1 porque é ali que o dólar **colapsa**: a maioria das chamadas de IA custa
+entre US$0,0001 e US$0,09, e com 2 casas isso vira "$0.00". Acima de 10¢ o inverso vale — `$0,57`
+lê melhor que `57,3¢`.
+
+⚠️ **Isso não é cosmético — o formato antigo apagava diferença real.** Medido em 2026-08-07 na
+coluna "custo por chamada" do `/ai-usage`: `tag_classifier` (0,57¢), `tag_inference` (1,09¢) e
+`synopsis_quality_predict` (1,27¢) exibiam **todas o mesmo "$0.01"** — custos 2,2× distintos com
+o mesmo rótulo, sem erro e sem log.
+
+🔴 **A duplicação é o modo de falha, não a fórmula.** Até 2026-08-07, **seis arquivos** formatavam
+dinheiro por conta própria (oito funções, duas convenções incompatíveis):
+`components/settings/ai-usage/format.ts` (ponto), **três cópias literais** dela (card de saldo, os
+dois gráficos), a de 4 casas do badge dev, e a dupla `formatUsd`/`formatUsdExact` de
+`lib/cost-preview/catalog.ts` (vírgula) — além de ~12 `toFixed()` soltos em toasts e mensagens de
+servidor. O sintoma era visível: o `/ai-usage` mostrava `$0.06` e o popup de custo mostrava
+`~$0,05` na mesma sessão. É a mesma armadilha do `LOW_BALANCE_USD`; uma 7ª cópia é como duas telas
+voltam a discordar sobre o mesmo número.
+
+⚠️ **Eixo de gráfico usa `makeUsdAxisFormatter`, não `formatUsd` tick a tick.** Uma série que
+cruza o corte imprimiria `0¢ · 5¢ · 50¢ · $1,00` na mesma régua, e a distância entre dois ticks
+deixaria de ser comparável a olho. O formatter fixa UMA unidade, escolhida pelo maior valor.
+
+**Fora daqui, de propósito:** `scripts/*.ts` — é saída de terminal pro dev, e mudar o formato
+quebraria a comparação com logs de execuções antigas.
+
+Guardado por `tests/unit/format/money.test.ts` (10 casos, inclusive saldo negativo — que antes
+saía `$-4.20`, com o cifrão na frente do sinal).
 
 ## O painel de filtros é RASCUNHO — navegar por fora dele apaga o filtro
 

@@ -11,6 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
+import { formatUsd, makeUsdAxisFormatter } from "@/lib/format/money"
 
 interface Props {
   data: Array<{ operation: string; label: string; totalCostUsd: number; nCalls: number }>
@@ -27,17 +28,14 @@ const COLORS = [
   "hsl(310 76% 65%)",
 ]
 
-function formatUsd(value: number): string {
-  if (!Number.isFinite(value) || value === 0) return "$0.00"
-  if (value < 0.005) return `$${value.toFixed(3)}`
-  return `$${value.toFixed(2)}`
-}
-
 export function CostByOperationChart({ data, active }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const filtered = data.filter((d) => d.totalCostUsd > 0).slice(0, 8)
+  // Unidade fixa pela operação mais cara — as barras se comparam entre si, então
+  // uma régua que trocasse de unidade no meio quebraria justamente a leitura.
+  const formatAxis = makeUsdAxisFormatter(Math.max(0, ...filtered.map((d) => d.totalCostUsd)))
   if (filtered.length === 0) {
     return (
       <div className="flex h-44 items-center justify-center text-xs text-muted-foreground">
@@ -66,7 +64,7 @@ export function CostByOperationChart({ data, active }: Props) {
           <XAxis
             type="number"
             tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-            tickFormatter={formatUsd}
+            tickFormatter={formatAxis}
           />
           <YAxis
             type="category"

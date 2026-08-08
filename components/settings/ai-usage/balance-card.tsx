@@ -6,12 +6,8 @@ import { useState, useTransition } from "react"
 import { setAnthropicBalance } from "@/server/actions/account"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
 import { LOW_BALANCE_USD } from "@/lib/ai-usage/balance"
+import { formatUsd } from "@/lib/format/money"
 import { cn } from "@/lib/utils"
-
-function formatUsd(value: number): string {
-  const v = Math.abs(value) < 0.005 ? 0 : value
-  return `$${v.toFixed(2)}`
-}
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("pt-BR", {

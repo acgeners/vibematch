@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts"
 import type { DailyUsagePoint } from "@/server/queries/ai-usage"
+import { formatUsd, makeUsdAxisFormatter } from "@/lib/format/money"
 
 interface Props {
   data: DailyUsagePoint[]
@@ -20,14 +21,11 @@ function formatDayShort(iso: string): string {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })
 }
 
-function formatUsd(value: number): string {
-  if (!Number.isFinite(value) || value === 0) return "$0.00"
-  if (value < 0.005) return `$${value.toFixed(3)}`
-  return `$${value.toFixed(2)}`
-}
-
 export function DailyCostChart({ data }: Props) {
   const hasData = data.some((d) => d.cost > 0 || d.calls > 0)
+  // Unidade fixa pelo maior dia: tick a tick, um mês que cruza o corte imprimiria
+  // "0¢ · 5¢ · 50¢ · $1,20" na mesma régua.
+  const formatAxis = makeUsdAxisFormatter(Math.max(0, ...data.map((d) => d.cost)))
   if (!hasData) {
     return (
       <div className="flex h-44 items-center justify-center text-xs text-muted-foreground">
@@ -55,7 +53,7 @@ export function DailyCostChart({ data }: Props) {
           />
           <YAxis
             tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-            tickFormatter={formatUsd}
+            tickFormatter={formatAxis}
             width={56}
           />
           <Tooltip

@@ -82,7 +82,7 @@ export function DeepDiveButton({
               </p>
               {allowNew && (
                 <p className="text-[11px] text-muted-foreground/80">
-                  ~$0.21/análise · 25-45s · cap diário de 10
+                  ~$0,21/análise · 25-45s · cap diário de 10
                 </p>
               )}
             </div>

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { ensureReviewDigest } from "@/lib/orchestration/integrations/reviews"
 import { ensureAdmin } from "@/server/queries/current-user"
+import { formatUsdApprox } from "@/lib/format/money"
 
 export interface GenerateDigestResult {
   ok: boolean
@@ -44,7 +45,7 @@ export async function generateWorkReviewDigest(
     case "processing":
       return { ok: true, status: "processing", message: "Geração do digest em andamento." }
     case "blocked_cost_confirmation":
-      return { ok: false, status: "blocked", message: `Confirmação de custo necessária (~$${outcome.estimatedUsd.toFixed(3)}).` }
+      return { ok: false, status: "blocked", message: `Confirmação de custo necessária (${formatUsdApprox(outcome.estimatedUsd)}).` }
     case "failed":
       return { ok: false, status: "error", message: outcome.error }
     default:

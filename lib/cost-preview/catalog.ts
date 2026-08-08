@@ -281,19 +281,10 @@ export function shortModelName(model: string): string {
   return model
 }
 
-/** USD em pt-BR: "<$0,01" para tostões, "~$0,05" caso contrário. */
-export function formatUsd(usd: number): string {
-  if (!Number.isFinite(usd)) return "—"
-  if (usd < 0.01) return "<$0,01"
-  return `~$${usd.toFixed(2).replace(".", ",")}`
-}
-
-/** USD exato (sem "~"), pra somatórios/tetos: "$0,08". */
-export function formatUsdExact(usd: number): string {
-  if (!Number.isFinite(usd)) return "—"
-  const decimals = usd < 0.1 ? 3 : 2
-  return `$${usd.toFixed(decimals).replace(".", ",")}`
-}
+// Dinheiro mora em `lib/format/money.ts` — `formatUsd`/`formatUsdApprox`. O que
+// existia aqui (`formatUsd` com "~", `formatUsdExact` sem) achatava tudo abaixo
+// de um centavo em "<$0,01", então a operação mais barata do catálogo e uma
+// dez vezes menor apareciam com o mesmo rótulo.
 
 /** Tempo aproximado: "~8 s", "~2 min", "~30 min". */
 export function formatEta(seconds: number): string {

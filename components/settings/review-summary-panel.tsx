@@ -73,7 +73,7 @@ export function ReviewSummaryPanel({ accent, pendingCount, totalCount }: ReviewS
         <div className="max-w-2xl space-y-1 text-sm text-muted-foreground">
           <p>
             Resume as reviews externas de cada obra em um parágrafo de consenso via Haiku 4.5
-            (~$0.002 por obra). Mostrado na aba “Notas & Avaliações”. Obras avaliadas/atualizadas
+            (~0,2¢ por obra). Mostrado na aba “Notas & Avaliações”. Obras avaliadas/atualizadas
             de agora em diante já geram o resumo automaticamente — isto cobre as antigas.
           </p>
           <p className="text-xs">
@@ -103,7 +103,7 @@ export function ReviewSummaryPanel({ accent, pendingCount, totalCount }: ReviewS
           label="Modelo"
           value="claude-haiku-4-5"
           valueClassName="text-xs"
-          hint="~$0.002/obra"
+          hint="~0,2¢/obra"
         />
       </div>
 

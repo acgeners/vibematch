@@ -2,6 +2,7 @@
 
 import { Coins } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { formatUsd, formatUsdApprox } from "@/lib/format/money"
 import type { WorkAiCostSummary, FromScratchBaseline } from "@/server/queries/ai-usage"
 
 /**
@@ -13,11 +14,6 @@ import type { WorkAiCostSummary, FromScratchBaseline } from "@/server/queries/ai
  * `metadata.work_id` desta obra (avaliação IA, prever interesse, digest/resumo
  * de reviews, tags…), inclusive tentativas com erro.
  */
-function formatUsd(value: number): string {
-  if (value > 0 && value < 0.0001) return "<$0.0001"
-  return `$${value.toFixed(4)}`
-}
-
 export function DevWorkAiCost({
   summary,
   baseline,
@@ -94,7 +90,7 @@ export function DevWorkAiCost({
             <div className="flex items-baseline justify-between gap-4">
               <span className="text-sm font-semibold text-foreground/85">Criar do zero</span>
               <span className="font-mono text-sm font-bold tabular-nums text-foreground">
-                ~{formatUsd(baseline.totalUsd)}
+                {formatUsdApprox(baseline.totalUsd)}
               </span>
             </div>
             <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/80">

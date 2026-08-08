@@ -19,6 +19,7 @@ import { isDigestCorrupted } from "@/lib/ai-recommendation/digest-integrity"
 import { RefetchReviewsButton } from "@/components/titles/refetch-reviews-button"
 import type { ReviewDigest } from "@/lib/ai-recommendation/types"
 import type { WorkReviewsSnapshot } from "@/server/queries/work-reviews"
+import { formatUsdApprox } from "@/lib/format/money"
 
 interface WorkReviewsCardProps {
   snapshot: WorkReviewsSnapshot
@@ -160,7 +161,7 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
         return
       }
       if (res.status === "generated") {
-        toast.success(`Síntese gerada${res.costUsd ? ` (~$${res.costUsd.toFixed(3)})` : ""}.`)
+        toast.success(`Síntese gerada${res.costUsd ? ` (${formatUsdApprox(res.costUsd)})` : ""}.`)
       } else if (res.status === "fresh") {
         toast.info("Síntese já está em dia.")
       } else if (res.status === "processing") {

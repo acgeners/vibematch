@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils"
 import type { AiUsageKpis } from "@/server/queries/ai-usage"
-import { formatLatency, formatPct, formatTokens, formatUsd } from "./format"
+import { formatLatency, formatPct, formatTokens } from "./format"
+import { formatUsd } from "@/lib/format/money"
 
 /** Sparkline SSR (sem cliente): polyline normalizada + ponto final destacado. */
 function Sparkline({ values, color }: { values: number[]; color: string }) {
