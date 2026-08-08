@@ -1110,6 +1110,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   <SynopsisQualitySuggestion
                     workId={work.id as string}
                     manualValue={(work.synopsis_quality as SynopsisQuality | null) ?? null}
+                    manualFromPrediction={synopsisFromPrediction}
+                    canEditManual={canEditPersonalState}
                     hasCanonicalSynopsis={Boolean(work.canonical_synopsis)}
                     readiness={interestReadiness}
                     isPaid={isPaidPlan}
@@ -1120,6 +1122,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                             justification: synopsisPrediction.justification,
                             confidence: synopsisPrediction.confidence,
                             stale: synopsisPrediction.stale,
+                            predictedAt: synopsisPrediction.predictedAt,
+                            modelName: synopsisPrediction.modelName,
                           }
                         : null
                     }

@@ -7,6 +7,7 @@ import { Heart, Loader2, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
+import { HEART_TONE } from "@/components/ui/quality-hearts"
 import { setSynopsisQualityAction } from "@/server/actions/synopsis-quality"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
@@ -82,12 +83,13 @@ export function SynopsisQualityPicker({
               onClick={() => save(current === level ? null : q)}
               className="p-0.5 disabled:opacity-50"
             >
+              {/* Tons vêm do `HEART_TONE` (quality-hearts.tsx): o mesmo bloco mostra
+                  corações editáveis e exibidos lado a lado, e duas cópias da paleta é
+                  como eles passam a discordar de cor. */}
               <Heart
                 className={cn(
                   "h-4 w-4 transition-colors",
-                  filled
-                    ? "fill-rose-500 text-rose-500"
-                    : "fill-transparent text-rose-300 dark:text-rose-400/40",
+                  filled ? HEART_TONE.manual.filled : HEART_TONE.manual.empty,
                 )}
               />
             </button>
