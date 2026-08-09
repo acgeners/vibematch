@@ -37,6 +37,7 @@ import { getPersonalStatusDescription } from "@/lib/constants/personal-status-de
 import { LABELS } from "@/lib/constants/ui-labels"
 import { cn } from "@/lib/utils"
 import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
+import { CollapseIconTrigger, CollapseTitleTrigger } from "@/components/ui/collapse-trigger"
 import { ActiveFilterChips } from "@/components/ranking/active-filter-chips"
 
 const CRITERION_LABELS: Record<string, string> = {
@@ -815,6 +816,8 @@ export function TitleFilters({
   const [, startTransition] = useTransition()
   const [tabsExpanded, setTabsExpanded] = useState(false)
   const [collapsed, setCollapsed] = useCollapsedFilters("titles")
+  /** Um só alvo para os três gatilhos do cabeçalho: o ícone, o título e o ⌃. */
+  const toggleCollapsed = useCallback(() => setCollapsed((v) => !v), [setCollapsed])
 
   const updateParams = useCallback(
     (updates: Record<string, string | null>) => {
@@ -1061,12 +1064,19 @@ export function TitleFilters({
     <div className="rounded-xl border border-border/70 bg-card/58 p-4 shadow-sm shadow-black/5 backdrop-blur">
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+          <CollapseIconTrigger
+            onToggle={toggleCollapsed}
+            className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary hover:bg-primary/20"
+          >
             <Filter className="h-4 w-4" />
-          </div>
+          </CollapseIconTrigger>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-base font-semibold">Filtros</h2>
+              <h2 className="text-base font-semibold">
+                <CollapseTitleTrigger collapsed={collapsed} onToggle={toggleCollapsed}>
+                  Filtros
+                </CollapseTitleTrigger>
+              </h2>
               {activeChips.length > 0 && (
                 <span className="rounded-full border border-border/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                   {activeFilterLabel}
@@ -1094,7 +1104,7 @@ export function TitleFilters({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setCollapsed((v) => !v)}
+            onClick={toggleCollapsed}
             aria-expanded={!collapsed}
             aria-label={collapsed ? "Mostrar filtros" : "Ocultar filtros"}
             title={collapsed ? "Mostrar filtros" : "Ocultar filtros"}
