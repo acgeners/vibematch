@@ -224,9 +224,17 @@ export async function fetchReviewDigestsBatch(workIds: string[]): Promise<Map<st
   return out
 }
 
-export async function getRatedWorksForProfile(limit = 200): Promise<RatedWorkInput[]> {
+export async function getRatedWorksForProfile(
+  limit = 200,
+  /**
+   * DONO das notas. Explícito quando quem chama JÁ resolveu a identidade — sem ele,
+   * `getCurrentUserId()` cai no singleton sem sessão e a contagem volta a ser a do
+   * dono. Mesmo padrão do `userIdOverride` de `getTagPreferenceRows`.
+   */
+  userIdOverride?: string,
+): Promise<RatedWorkInput[]> {
   const supabase = createAdminClient()
-  const userId = await getCurrentUserId(supabase)
+  const userId = userIdOverride ?? (await getCurrentUserId(supabase))
   const { data, error } = await supabase
     .from("works")
     .select(RATED_WORK_SELECT)
