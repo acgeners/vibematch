@@ -195,11 +195,36 @@ recalcularia as notas dele **sem a calibração dele** — sem erro, sem log, s�
 `signOutAction`). Quem autoriza é o **papel** (`user_settings.role` → `lib/plans/roles.ts`,
 `ensureAdmin`/`roleAllows`), verificado dentro das actions.
 
-**O `middleware.ts` protege UMA coisa: a console de curadoria** (desde 2026-08-03). Ele refresca a
-sessão em toda rota e, só nos prefixos `/curadoria`, `/ai-evaluation`, `/settings`, `/ai-usage` e
-`/admin`, decide: sem sessão → `/login`; logado não-curador → `/`. **Todo o resto do app segue sem
-gate de rota** — visitante anônimo carrega `/titles`, `/painel`, `/leitura` e vê o catálogo (que é
-compartilhado por design).
+**O `middleware.ts` gateia DUAS famílias, com exigências diferentes.** Ele refresca a sessão em
+toda rota e, só nesses prefixos, decide:
+
+| Lista | Prefixos | Exigência |
+|---|---|---|
+| `CONSOLE_PREFIXES` | `/curadoria`, `/ai-evaluation`, `/settings`, `/ai-usage`, `/admin` | sem sessão → `/login`; logado não-curador → `/` |
+| `SIGNED_IN_PREFIXES` | `/conta`, `/painel` | sem sessão → `/login`. **Papel não importa** |
+
+**Todo o resto segue sem gate de rota** — visitante anônimo carrega `/titles`, `/leitura`,
+`/favorites`, `/ranking`, `/import` e `/recommendations`, que é o desenho: o catálogo é
+compartilhado, e os leitores per-usuário devolvem vazio sem sessão (medido rota a rota em
+2026-08-09).
+
+🔴 **As duas listas são separadas porque `/conta` e `/painel` exigem IDENTIDADE, não papel.**
+Herdar a checagem de curador jogaria todo leitor logado pra `/` — trancando fora justamente quem
+essas páginas descrevem. Daí o `if (!isConsole) return response` logo depois do `if (!user)`.
+
+🔴 **As duas entraram em 2026-08-09 por vazamento MEDIDO, não por precaução.** `/conta/perfil` e
+`/painel` anônimos devolviam **200 com o perfil de gosto do DONO** — o resumo em prosa, as tags, a
+versão, o alinhamento — com "Entrar" na barra ao lado. Sem sessão, `getCurrentUserId()` cai no
+singleton **por design** (o recalc em background precisa do bias dele), então a página tinha um
+sujeito: o errado.
+
+⚠️ **Não dá pra corrigir só trocando o leitor por `getSessionUserId()`** — sem sessão a página não
+tem sujeito nenhum. Mas gate de rota também não basta sozinho: `getTasteProfileStatusAction` é
+consumida por **três** páginas (`/painel`, `/recommendations`, `/conta/perfil`), então ela devolve
+um `ProfileStatus` vazio sem sessão e repassa o `userId` adiante. Rota + fonte, as duas.
+Guardadas por `tests/unit/orchestration/rotas-de-sessao.test.ts` (que **deriva** os diretórios de
+`SIGNED_IN_PREFIXES` — a 1ª versão tinha `app/conta` fixo, e foi assim que o `/painel` passou
+enquanto o `/conta` era corrigido) e por `leitores-por-sessao.test.ts`.
 
 🔴 **Gate de rota NÃO funciona só no layout.** A 1ª versão fazia `notFound()` no layout da console e
 o Next devolvia **200 com o HTML da página protegida no corpo**, seguido do 404: layout e página
@@ -786,6 +811,57 @@ nível é estável, mas a página da obra reordena por proveniência (externa an
 os chips do perfil em `/conta` (régua `strength`, não `weight`; mesmo desenho ali afirmaria que
 os dois números são o mesmo).
 
+## A `/conta/perfil` PROVA que entende você — e três números mentem se forem "melhorados"
+
+`components/conta/taste-profile-panel.tsx` + `lib/ai-recommendation/profile-tag-origin.ts`
+(v3, 2026-08-09). A página responde UMA pergunta — "o quanto vocês entendem meu gosto?" — e a v2
+respondia em **4.020px com a prova em 6º lugar**. Hoje é **hero + 4 abas** (A prova · Seus
+critérios · Tags e temas · O que isso muda). O estado das abas mora no componente PAI: os painéis
+desmontam, e estado dentro deles zeraria a cada ida e volta.
+
+**A manchete é concordância INDEPENDENTE, não correlação.** `getRatedWorksForProfile` manda obra
+(título, notas, sinopse, critérios, tags) e **nunca** manda `user_tag_preferences` — conferido no
+código. Então tag que aparece nos dois lados com a mesma stance é evidência, não eco. Medido no
+v23: **17 de 17 concordam · 23 a IA descobriu sozinha · 130 declaradas ficaram fora do destilado**.
+🔴 Se um dia o prompt do perfil passar a receber as preferências declaradas, isto vira **circular**
+e a seção tem que SAIR da tela — a UI não percebe sozinha.
+
+Os três números que ficam piores quando alguém tenta melhorá-los:
+
+1. 🔴 **Só declaração de nível TAG conta.** `getDeclaredTagPreferences` EXPANDE grupo/subgrupo pra
+   todas as tags membras — certo pro ranker, e aqui infla de graça: quem marca um grupo inteiro faz
+   qualquer tag dele "concordar" sem nunca ter opinado sobre ela. Medido: com expansão, **314
+   declaradas e 23 concordâncias**; só nível tag, **147 e 17**. Dono do limiar:
+   `COUNTS_AS_DECLARATION`.
+2. 🔴 **O "N de 20" fica no ALINHAMENTO, nunca na Nota Prevista.** Pela Prevista dá número melhor —
+   **18 de 20, corr. 0,851 contra 0,769** — e errado: `calculations.ts` treina o Ridge nas obras
+   COM `user_score` e prevê pra TODAS, inclusive essas, então o `expected_score` persistido delas é
+   **in-sample**. Seria o modelo confirmando o rótulo em que foi ajustado. Por isso
+   `getAlignedWorkSplit` ordena as TRILHAS por `expected_score` em **cópias** — o array original
+   segue por `personal_fit`, de que a confirmação depende.
+3. ⚠️ **Stance oposta é CONFLITO, nunca confirmação.** Somar os dois transformaria discordância em
+   prova de acerto — o único caso em que a manchete sobe enquanto o entendimento piora.
+
+🔴 **TAG ≠ TEMA, e a diferença é FUNCIONAL.** `computePersonalFit` só consome
+`loved_tags`/`avoided_tags` + critérios: um TEMA (frase livre da IA) não existe no catálogo, não
+casa com obra nenhuma e **não entra no cálculo do alinhamento** — só contextualiza prompts. Por
+isso a distinção é de **FORMA** (pílula × linha de texto), não de cor: os dois já dividem a cor de
+stance, e frase de ~60 caracteres nunca foi chip.
+⚠️ Coração de **contorno**, nunca preenchido — o preenchido é o marcador de ênfase 2×
+(`TagStanceMark`, 3 outras superfícies), e tag de perfil **nunca é forte** (escala `strength` 0–1).
+
+⚠️ **As 9 `criterion_preferences.note`** (uma frase da IA por critério) existiam no banco desde
+sempre e a v2 **não mostrava nenhuma** — era o dado mais explicativo do perfil, 100% invisível. Na
+linha do critério, **faixa** (`ideal_min`–`ideal_max`) e **peso** são campos ROTULADOS e separados:
+na v2 a barra desenhava a faixa e o "%" ao lado era o peso, sem nada dizendo que eram grandezas
+diferentes — em Humor a barra é larga (4–8,5) com peso 50% e em Romance é estreita (7–9,5) com 90%,
+então "barra maior = número maior" se invertia.
+
+A página inteira é saída de LLM: reusa `AiProvenanceSeal` (não faça outro selo). Guardada por
+`tests/unit/ui/perfil-gosto-painel.test.tsx`, que é teste de **RENDER** de propósito — a `note`
+fora da tela, o tema com forma de tag e o mesmo número impresso duas vezes passariam verdes num
+teste que lesse o objeto do perfil.
+
 ## Inline type imports and Turbopack
 
 Turbopack (Next.js 16) fails to parse `import { type Foo }` inline syntax when a client component is traversed from a server context. Always use separate `import type` statements:
@@ -1162,11 +1238,19 @@ O catálogo **não tem política**: é lido/escrito pela service role, que ignor
 
 ## Tests
 
-`npm run test` → **~2.353 testes em 218 arquivos** (medido em 2026-08-09; a linha dizia
-"~1.780 em ~157" e envelheceu sem nada acusar). Vitest, jsdom, alias `@` → raiz. A
+`npm run test` → **2.386 passando (+24 pulados) em 221 arquivos** (medido em 2026-08-09; a
+linha já dizia "~1.780 em ~157" e depois "~2.353 em 218", as duas envelhecendo sem nada
+acusar — **re-meça antes de editar este número**). Vitest, jsdom, alias `@` → raiz. A
 descrição antiga ("só `tests/unit/calculations/`, sem teste de componente") estava desatualizada
 havia muito: hoje `calculations` é a 4ª maior pasta, atrás de `synopsis-interest` (36),
 `external` (30) e `orchestration` (19), e há `.test.tsx` de componente.
+
+⚠️ **Sob carga, a suíte FALHA sem nenhum teste falhar.** Com dev server + Supabase local +
+Chromium abertos, o pool de forks estoura timeout ao subir workers
+(`[vitest-pool-runner]: Timeout waiting for worker to respond`) e alguns arquivos simplesmente
+não rodam. Medido em 2026-08-09: **9 arquivos numa execução, 7 arquivos DIFERENTES na seguinte**
+— o conjunto é aleatório, e o rodapé ainda diz "0 failed". Antes de chamar de verde, re-rode os
+acusados isolados (`npx vitest run --maxWorkers=2 <arquivos>`); se passarem, era a máquina.
 
 ⚠️ **O Vitest NÃO faz checagem completa de tipos do projeto.** Suíte verde não garante que
 compila — quem responde isso é `npm run build`. Rode-o antes de abrir PR que mexa em tipos
