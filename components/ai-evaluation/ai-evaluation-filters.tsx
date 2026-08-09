@@ -1,8 +1,8 @@
 "use client"
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
-import { useState, useTransition } from "react"
-import { ChevronRight, Filter, X } from "lucide-react"
+import { useCallback, useState, useTransition } from "react"
+import { ChevronDown, ChevronRight, ChevronUp, Filter, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { QualityHearts } from "@/components/ui/quality-hearts"
 import { Button } from "@/components/ui/button"
@@ -23,6 +23,8 @@ import {
 } from "@/lib/constants/criteria"
 import { PERSONAL_STATUSES as PERSONAL_STATUS_NAMES, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
+import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
+import { CollapseIconTrigger, CollapseTitleTrigger } from "@/components/ui/collapse-trigger"
 
 type EvaluationFilter = "pending" | "review-pending" | "low-confidence" | "outdated-model" | "outdated-reviews"
 const DEFAULT_FILTERS: EvaluationFilter[] = ["pending", "review-pending"]
@@ -161,6 +163,11 @@ export function AiEvaluationFilters({
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
+  // Colapso por PÁGINA: este painel serve /ai-evaluation e /fila-recomendacao, e
+  // recolher os filtros de uma não pode recolher os da outra.
+  const [collapsed, setCollapsed] = useCollapsedFilters(`ai-eval:${pathname}`)
+  /** Um só alvo para os três gatilhos do cabeçalho: o ícone, o título e o ⌃. */
+  const toggleCollapsed = useCallback(() => setCollapsed((v) => !v), [setCollapsed])
 
   // Filtros viram um RASCUNHO local: alternar chips só muda o estado local; nada
   // navega/bate no banco até clicar "Aplicar". Assim dá pra ajustar vários filtros
@@ -452,10 +459,17 @@ export function AiEvaluationFilters({
         {/* Compact header */}
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <div className="grid size-7 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+            <CollapseIconTrigger
+              onToggle={toggleCollapsed}
+              className="grid size-7 shrink-0 place-items-center rounded-md bg-primary/10 text-primary hover:bg-primary/20"
+            >
               <Filter className="h-3.5 w-3.5" />
-            </div>
-            <h2 className="text-sm font-semibold">Filtros</h2>
+            </CollapseIconTrigger>
+            <h2 className="text-sm font-semibold">
+              <CollapseTitleTrigger collapsed={collapsed} onToggle={toggleCollapsed}>
+                Filtros
+              </CollapseTitleTrigger>
+            </h2>
             {activeCount > 0 && (
               <span className="rounded-full border border-border/70 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
                 {activeCount}
@@ -469,18 +483,31 @@ export function AiEvaluationFilters({
                 alterações não aplicadas
               </span>
             )}
-            {hasAnyActive && (
+            {hasAnyActive && !collapsed && (
               <Button variant="ghost" size="xs" onClick={clearAll} disabled={isPending}>
                 <X className="h-3 w-3" />
                 Limpar
               </Button>
             )}
-            <Button size="xs" onClick={apply} disabled={!isDirty || isPending}>
-              {isPending ? "Aplicando…" : "Aplicar"}
+            {!collapsed && (
+              <Button size="xs" onClick={apply} disabled={!isDirty || isPending}>
+                {isPending ? "Aplicando…" : "Aplicar"}
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={toggleCollapsed}
+              aria-expanded={!collapsed}
+              aria-label={collapsed ? "Mostrar filtros" : "Ocultar filtros"}
+              title={collapsed ? "Mostrar filtros" : "Ocultar filtros"}
+            >
+              {collapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
             </Button>
           </div>
         </div>
 
+        {!collapsed && (
         <div className="space-y-2.5">
           {/* Estado da avaliação */}
           {showEvalState && (
@@ -728,6 +755,7 @@ export function AiEvaluationFilters({
             </div>
           )}
         </div>
+        )}
       </div>
     </TooltipProvider>
   )
