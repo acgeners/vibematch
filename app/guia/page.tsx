@@ -88,7 +88,6 @@ export default async function GuiaPage() {
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6">
       <Header
-        kicker="Guia"
         icon={<BookOpenText />}
         title="O guia entrega uma camada de cada vez"
         description="Cada conceito abre em três níveis — a frase que resolve, o mecanismo por trás e onde o número aparece na tela. Quem só quer usar o app para no primeiro."

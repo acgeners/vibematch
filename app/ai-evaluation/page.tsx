@@ -826,7 +826,6 @@ export default async function CuradoriaDaObraPage({
   return (
     <div className="space-y-4">
       <Header
-        kicker="Curadoria"
         title="Curadoria da Obra"
         description="Notas de IA e dados do catálogo — uma linha por obra, compartilhada por todo mundo. Editar aqui muda o que qualquer leitor vê."
         icon={<Wrench />}

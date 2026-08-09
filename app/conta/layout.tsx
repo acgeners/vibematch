@@ -11,7 +11,6 @@ export default function ContaLayout({ children }: { children: ReactNode }) {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4">
       <Header
-        kicker="Você"
         title="Minha conta"
         description="Sua identidade, seu papel e seu perfil de gosto num só lugar."
         icon={<UserCircle />}

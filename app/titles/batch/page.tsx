@@ -20,7 +20,7 @@ export default async function BatchReviewPage({ searchParams }: BatchReviewPageP
   if (ids.length === 0) {
     return (
       <div className="space-y-4">
-        <Header kicker="Lote" title="Revisão de lote" />
+        <Header title="Revisão de lote" />
         <p className="text-sm text-muted-foreground">
           Nenhuma obra no lote.{" "}
           <Link href="/titles" className="underline">
@@ -52,7 +52,6 @@ export default async function BatchReviewPage({ searchParams }: BatchReviewPageP
   return (
     <div className="space-y-4">
       <Header
-        kicker="Lote"
         title={`${works.length} obra${works.length === 1 ? "" : "s"} criada${works.length === 1 ? "" : "s"}`}
         description="Revise os dados de cada obra. A Nota Prevista é calculada depois da Avaliação IA. Clique no título pra abrir o detalhe."
         actions={

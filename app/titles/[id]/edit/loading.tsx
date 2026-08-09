@@ -5,7 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 export default function EditTitleLoading() {
   return (
     <div className="space-y-4">
-      <Header title="Editar título" description="Carregando…" />
+      <Header kicker="Catálogo" title="Editar título" description="Carregando…" />
       <Card>
         <CardHeader>
           <Skeleton className="h-5 w-40" />

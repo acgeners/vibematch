@@ -26,7 +26,6 @@ export default async function RecommendationChatPage() {
       </div>
 
       <Header
-        kicker="IA"
         title="Conversar com a IA"
         description="Bate um papo sobre o que você tá a fim de ler e receba recomendações do seu catálogo."
         icon={<MessageCircle />}

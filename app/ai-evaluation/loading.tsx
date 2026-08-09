@@ -12,7 +12,6 @@ export default function AiEvaluationLoading() {
   return (
     <div className="space-y-4">
       <Header
-        kicker="Avaliação"
         title="Avaliação IA"
         description="Fila de avaliação/revisão das notas por IA (atributos) e de re-rank (Veredito IA) desatualizado ou não avaliado."
         icon={<Sparkles />}

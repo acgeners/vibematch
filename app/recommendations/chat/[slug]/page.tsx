@@ -33,7 +33,6 @@ export default async function RecommendationChatDetailPage({ params }: PageProps
       </div>
 
       <Header
-        kicker="IA"
         title={chat?.title ?? "Conversa"}
         description="Continue a conversa pra refinar as recomendações."
         icon={<MessageCircle />}

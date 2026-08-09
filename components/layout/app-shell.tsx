@@ -37,7 +37,7 @@ export function AppShell({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto scroll-smooth">
       {topNav}
-      <main className="relative z-10 mx-auto w-full max-w-[1560px] flex-1 px-4 py-5 pb-24 md:px-7 md:py-7 md:pb-7">
+      <main className="relative z-10 mx-auto w-full max-w-[1560px] flex-1 px-4 pt-4 pb-24 md:px-7 md:pt-5 md:pb-7">
         {children}
       </main>
       {overlays}

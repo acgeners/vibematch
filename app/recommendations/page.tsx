@@ -54,7 +54,6 @@ export default async function RecommendationsPage() {
   return (
     <div className="w-full space-y-6">
       <Header
-        kicker="IA"
         title="Recomendações"
         description="Converse com a IA pra encontrar sua próxima leitura. Cada recomendação fica salva no histórico abaixo."
         icon={<Sparkles />}

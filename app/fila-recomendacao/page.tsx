@@ -631,7 +631,6 @@ export default async function FilaRecomendacaoPage({
   return (
     <div className="space-y-4">
       <Header
-        kicker="Recomendação"
         title="Fila de Recomendação"
         description="Mantém suas notas pessoais em dia: o quanto cada obra combina com seu gosto (Veredito IA) e sua previsão de Interesse antes de decidir ler."
         icon={<Clock />}

@@ -18,7 +18,6 @@ export default async function ImportPage() {
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6">
       <Header
-        kicker="Importação"
         icon={<Upload />}
         title="Importar obras"
         description="Traga sua lista do AniList, MyAnimeList, MangaUpdates ou Anime-Planet. As obras entram como pendentes; você revisa capa e sinopse, e as notas saem da Avaliação IA."

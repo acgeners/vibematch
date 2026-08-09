@@ -16,7 +16,6 @@ export default async function TagConsolidationPage({ searchParams }: PageProps) 
   return (
     <div className="w-full max-w-6xl space-y-4">
       <Header
-        kicker="Configurações"
         title="Consolidação de tags"
         description="Revise os clusters semânticos, as mudanças de grupo e os sub-grupos propostos pela IA."
       />

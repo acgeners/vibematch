@@ -28,7 +28,6 @@ export default async function ReadingPage() {
   return (
     <div className="space-y-4">
       <Header
-        kicker="Biblioteca"
         title="Acompanhamento"
         description="Obras que você acompanha. Separadas entre publicação em andamento e concluídas/outras — verifique nas fontes externas se saíram capítulos novos (ou se uma parada voltou)."
         icon={<BookMarked />}
