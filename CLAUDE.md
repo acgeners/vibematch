@@ -919,6 +919,66 @@ importa). ⚠️ **Não existe recálculo por obra** — `recalculateWork` foi c
 **não existe no código** (conferido 2026-07-29: zero referências). Toda edição de dado custa uma leitura
 do catálogo inteiro: **5,3 MB** por rodada (medido). É o maior consumidor de egress do projeto. The honest cross-validated MAE of Nota Prevista is stored in `formula_config` (`cv_mae_expected`). Since the `user_score` label switched from craft to **taste** (2026-07-16 — the average of the 7 fixed taste axes, excluding the "Final"; see `computeTasteUserScore`), the absolute cvMAE rose to **~0.73** (was ~0.58 under craft). This is a **scale artifact**, not a regression: the taste target has a wider spread (σ 0.95→1.25, baseline MAE 0.73→0.98), so normalized the model is slightly better (cvMAE/baseline 0.79→0.75). Don't read the raw ~0.73 as "the model got worse".
 
+## O badge "Recalcular notas" só acende com mudança MATERIAL
+
+`markRecalcPending` é chamado de **30 lugares** e o default é MARCAR — e isso está
+certo: não marcar deixa nota velha na tela sem nada acusar. O preço era o badge
+acender por salvar uma sinopse, por marcar "Lendo" e por ação de leitor cujo estado
+o recalc global nem lê.
+
+A régua é **`lib/calculations/recalc-inputs.ts`**, dono único da lista do que o
+`recalculateAll` de fato consome (o `select` de `calculations.ts` cruzado com as
+features de `expected.ts`), em dois grupos:
+
+| Grupo | Entradas | Vale para |
+|---|---|---|
+| **Catálogo** | `category_scores`, `platform_ratings`, `total_chapters`, `year` (+`year_end`), `publication_status`, `original_title`, `work_tags`, `catalog_membership` | qualquer um que mexa |
+| **Pessoal** | `user_score` (o RÓTULO), `observation_adjustment`, `synopsis_quality`, `attribute_bias`, `tag_preferences`, `taste_profile` | só o **DONO** — é o dele que o recalc global lê |
+
+⚠️ **Fora da régua, conferido:** `personal_status_id`, `chapters_read`,
+`last_read_at` e `is_favorite` (estão em `PERSONAL_COLUMNS`, mas em nenhuma
+feature) e as 8 `post_*_score` — `QUALITY_NUMERIC_FEATURES` é array VAZIO e
+`L0_QUALITY_ENABLED = false`. A pós-leitura entra por UM caminho só, o
+`attribute_bias`. Sinopse, capa, títulos alternativos e external ids também não
+entram — e note que `work_tags` ENTRA enquanto `work_genres` não.
+
+`markRecalcPending(context, { changed, actorId })`: `changed` omitido = "não sei"
+e marca; `[]` = não marca; só-pessoal de quem não é o dono = não marca.
+
+🔴 **O gate falha ABERTO, de propósito.** Dono indeterminado, `changed` ausente,
+dúvida de qualquer tipo ⇒ marca. Um badge a mais custa um clique; um a menos
+devolve nota errada, calada.
+
+Três armadilhas que custaram a descobrir:
+
+- 🔴 **`numeric` do PostgREST volta como STRING.** Sem `sameRecalcValue`,
+  `"8.5" !== 8.5` e todo diff diria "mudou" — o gate nasceria inútil, marcando
+  sempre, e **ninguém notaria**, porque o resultado é idêntico ao de antes.
+- ⚠️ **`platform_ratings` é delete-e-reinsere**: "houve escrita" é sempre verdade e
+  não diz nada. Compare VALOR (digest ordenado), nunca "passou pelo código".
+- ⚠️ **`createWork`/`createWorksBatch` continuam marcando de propósito** — é assim
+  que a obra nova ganha a primeira Nota Prevista. Obra sem rótulo não entra no
+  treino (imputer e scaler são fitados só nele), mas `personal_fit_percentile` é
+  percentil sobre o catálogo inteiro.
+
+Declaram materialidade hoje: `updateWork`, `updateWorkStatus`,
+`submitPostReadingAttributes`, `saveTagPreferences` e `taste_profile_new_version`.
+`setReadingStatusForWorks` **deixou de marcar** (só grava status e capítulos). Os
+demais marcam sempre.
+
+⚠️ **Ainda marcam à toa, conhecido e não escondido:** `updateWorkExternalData`
+quando "Atualizar dados" não acha nada novo; `setSynopsisQuality` e
+`calibration-revert` quando regravam o mesmo valor.
+
+O `context` — que era descartado — vai pro log com prefixo `[recalc-pending]`,
+marcou ou pulou. É a única medição que existe da frequência real por caller:
+`grep '\[recalc-pending\]'`, não estimativa.
+
+Guardado por `tests/unit/calculations/recalc-inputs.test.ts` e
+`tests/unit/orchestration/recalc-pending-inventario.test.ts` — este último enumera
+os call sites do SOURCE e falha quando um aparece, some ou muda de declaração, que
+é a defesa contra o próximo caller entrar no badge sem ninguém decidir nada.
+
 ## AI evaluation flow
 
 Two distinct paths both ultimately call `requestAiEvaluation()` in `lib/ai-evaluation/service.ts`:
@@ -1102,7 +1162,8 @@ O catálogo **não tem política**: é lido/escrito pela service role, que ignor
 
 ## Tests
 
-`npm run test` → **~1.780 testes em ~157 arquivos** (Vitest, jsdom, alias `@` → raiz). A
+`npm run test` → **~2.353 testes em 218 arquivos** (medido em 2026-08-09; a linha dizia
+"~1.780 em ~157" e envelheceu sem nada acusar). Vitest, jsdom, alias `@` → raiz. A
 descrição antiga ("só `tests/unit/calculations/`, sem teste de componente") estava desatualizada
 havia muito: hoje `calculations` é a 4ª maior pasta, atrás de `synopsis-interest` (36),
 `external` (30) e `orchestration` (19), e há `.test.tsx` de componente.
