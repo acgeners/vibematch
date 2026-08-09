@@ -8,8 +8,26 @@ import type { NextRequest } from "next/server"
  */
 const CONSOLE_PREFIXES = ["/curadoria", "/ai-evaluation", "/settings", "/ai-usage", "/admin"]
 
-function isConsoleRoute(pathname: string): boolean {
-  return CONSOLE_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+/**
+ * Rotas que exigem SESSÃO (qualquer papel serve) — não são console, mas também não
+ * são do catálogo compartilhado: só falam sobre QUEM está olhando.
+ *
+ * 🔴 `/conta` entrou aqui em 2026-08-09 depois de medido: sem sessão,
+ * `getCurrentUserId()` cai no singleton (o DONO), e `/conta/perfil` renderizava o
+ * perfil de gosto **dele** para visitante anônimo — o resumo em prosa, as 40 tags, a
+ * versão e o alinhamento — com "Entrar" na barra superior ao lado. Status 200, sem
+ * erro e sem log: a mesma classe de [[gotcha-anonimo-vira-dono]].
+ *
+ * Não dá pra resolver trocando o leitor por `getSessionUserId()`: sem sessão a página
+ * simplesmente não tem sujeito, e o fallback pro dono é DESEJADO em background (o
+ * recalc precisa do bias dele). O que não pode é uma ROTA renderizar isso. Por isso o
+ * gate é aqui — e vale para `/conta` inteira, não só `/perfil`, porque a aba Conta
+ * mostra e-mail e papel.
+ */
+const SIGNED_IN_PREFIXES = ["/conta"]
+
+function matchesPrefix(pathname: string, prefixes: string[]): boolean {
+  return prefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 }
 
 /**
@@ -40,18 +58,24 @@ function isConsoleRoute(pathname: string): boolean {
  * layout aplica a regra inteira logo em seguida. Fechar aqui, sim, trancaria o dono
  * para fora num estado que a UI não explica.
  *
- * ⚠️ Isto gateia SÓ a console. `/import`, `/painel`, `/conta` e o resto da matriz de
- * acesso continuam abertos a qualquer logado — é trabalho à parte, ainda não feito.
+ * ⚠️ Isto gateia a console (papel de curador) e `/conta` (só exige sessão).
+ * `/import`, `/painel` e o resto da matriz de acesso continuam abertos a qualquer
+ * logado — é trabalho à parte, ainda não feito.
  */
 export async function middleware(request: NextRequest) {
   const { response, user, supabase } = await updateSession(request)
 
   const { pathname } = request.nextUrl
-  if (!isConsoleRoute(pathname)) return response
+  const needsSession = matchesPrefix(pathname, SIGNED_IN_PREFIXES)
+  const isConsole = matchesPrefix(pathname, CONSOLE_PREFIXES)
+  if (!needsSession && !isConsole) return response
 
   if (!user) {
     return NextResponse.redirect(new URL("/login", request.url))
   }
+
+  // Sessão é tudo que `/conta` pede — o papel só importa na console.
+  if (!isConsole) return response
 
   // A própria linha do usuário — a política da migration 142 libera lê-la com a sessão,
   // sem service role. `role` é a fonte de verdade do acesso (migration 140).
