@@ -23,11 +23,20 @@
  * `--execute` contra a nuvem (o banco não tem backup automático).
  */
 import { createAdminClient } from "@/lib/supabase/admin"
-import { computeAdultContentBounds, clampAdultContentScore } from "@/lib/ai-evaluation/adult-content-rules"
+import {
+  computeAdultContentBounds,
+  clampAdultContentScore,
+  EXPLICIT_FLOOR,
+  ADULT_LABEL_FLOOR,
+} from "@/lib/ai-evaluation/adult-content-rules"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { markRecalcPending } from "@/server/recalc/queue"
 
 const EXECUTE = process.argv.includes("--execute")
+const HEAL = process.argv.includes("--heal")
+/** Os pisos que `computeAdultContentBounds` sabe produzir. Nota persistida que vale
+ *  exatamente um deles é candidata a ter sido ESCRITA por um clamp, não pelo modelo. */
+const FLOOR_VALUES = new Set([EXPLICIT_FLOOR, ADULT_LABEL_FLOOR, 5])
 const CHUNK = 200
 
 type Admin = ReturnType<typeof createAdminClient>
@@ -53,15 +62,38 @@ function chunk<T>(arr: T[], size: number): T[][] {
 
 async function main() {
   const supabase: Admin = createAdminClient()
-  console.log(`modo: ${EXECUTE ? "EXECUTE (grava)" : "dry-run (só reporta)"}`)
+  console.log(`modo: ${EXECUTE ? "EXECUTE (grava)" : "dry-run (só reporta)"}${HEAL ? " + --heal (desfaz piso obsoleto)" : ""}`)
   console.log(`alvo: ${process.env.NEXT_PUBLIC_SUPABASE_URL}`)
 
-  // 1) Notas adult_content persistidas.
-  const scoreRows = await fetchAllPaged<{ work_id: string; score: string; id: string }>(async (from, to) =>
+  // 1) Notas adult_content persistidas + a nota COMMITADA na avaliação de origem.
+  //
+  // 🔴 O baseline do clamp é a nota da AVALIAÇÃO, não a persistida. `clampAdultContentScore`
+  // só empurra a nota PARA DENTRO da faixa — reaplicá-lo sobre a nota já ajustada é
+  // idempotente pra piso que SOBE e inerte pra piso que DESCE. Medido em 2026-08-09: a
+  // rodada de 01/08 subiu 64 obras pra 9,0 por tags de circunstância marcadas 'explicit'
+  // (migration 182 corrigiu o tier); com baseline na nota persistida, nenhuma delas voltaria
+  // — o script diria "nada a gravar" e o erro ficaria congelado, sem nada acusar.
+  const scoreRows = await fetchAllPaged<{
+    work_id: string
+    score: string
+    id: string
+    ai_evaluation_id: string | null
+    // O client tipa embed to-one como ARRAY. Manter o tipo fiel ao que volta evita
+    // um `as` que esconderia mudança de forma na próxima alteração do select.
+    ai_evaluations: Array<{
+      ai_evaluation_scores: Array<{ criterion_slug: string; suggested_score: string | null; accepted_score: string | null }>
+    }> | null
+  }>(async (from, to) =>
     supabase
       .from("category_scores")
-      .select("id, work_id, score")
+      .select(
+        "id, work_id, score, ai_evaluation_id, ai_evaluations(ai_evaluation_scores(criterion_slug, suggested_score, accepted_score))",
+      )
       .eq("criterion_slug", "adult_content")
+      // 🔴 O embed traz os NOVE critérios da avaliação. Sem este filtro, `[0]` é um
+      // critério qualquer — na 1ª versão o baseline de adult_content saiu 8.0 numa obra
+      // cuja avaliação dizia 7.0, porque veio de outra linha. Erro que produz resultado.
+      .eq("ai_evaluations.ai_evaluation_scores.criterion_slug", "adult_content")
       .range(from, to),
   )
   console.log(`obras com adult_content persistido: ${scoreRows.length}`)
@@ -149,7 +181,38 @@ async function main() {
     })
     if (bounds.floor == null && bounds.ceiling == null) continue
     const oldScore = Number(row.score)
-    const newScore = clampAdultContentScore(oldScore, bounds)
+
+    // Caminho normal: empurra a nota persistida PRA DENTRO da faixa de hoje.
+    let newScore = clampAdultContentScore(oldScore, bounds)
+
+    // Caminho `--heal`: desfaz nota que um piso ANTIGO subiu e que o piso de hoje já não
+    // justifica. Necessário porque `clampAdultContentScore` é one-way — baixar um piso
+    // não desfaz nada, e o erro fica congelado dizendo "nada a gravar".
+    //
+    // 🔴 As quatro condições são um FINGERPRINT estreito, não um resync com a avaliação.
+    // A 1ª versão deste bloco simplesmente usava a nota da avaliação como baseline, e o
+    // dry-run devolveu 219 diffs contra as 64 obras que eu queria curar: ele reescrevia
+    // toda divergência entre `category_scores` e `ai_evaluation_scores`, inclusive ajuste
+    // manual posterior que nunca voltou pra avaliação. Ampliar isto é como apagar
+    // curadoria em silêncio.
+    if (HEAL && newScore === oldScore) {
+      const evalScore = row.ai_evaluations?.[0]?.ai_evaluation_scores?.find(
+        (x) => x.criterion_slug === "adult_content",
+      )
+      const committed = evalScore?.accepted_score ?? evalScore?.suggested_score
+      const baseline = committed != null ? Number(committed) : null
+      const healed = baseline != null ? clampAdultContentScore(baseline, bounds) : null
+      if (
+        baseline != null &&
+        healed != null &&
+        oldScore > baseline &&              // a persistida está ACIMA do que a avaliação entregou
+        FLOOR_VALUES.has(oldScore) &&       // e vale EXATAMENTE um piso — assinatura de escrita do clamp
+        healed < oldScore                   // e o piso de hoje já não a sustenta
+      ) {
+        newScore = healed
+      }
+    }
+
     if (newScore === oldScore) continue
     diffs.push({
       id: row.work_id,
@@ -163,7 +226,8 @@ async function main() {
 
   console.log(`\n${diffs.length} obra(s) fora do piso/teto atual:\n`)
   for (const d of diffs.sort((a, b) => Math.abs(b.newScore - b.oldScore) - Math.abs(a.newScore - a.oldScore))) {
-    console.log(`  ${d.oldScore.toFixed(1)} → ${d.newScore.toFixed(1)}  ${d.title}`)
+    const seta = d.newScore < d.oldScore ? "↓" : "↑"
+    console.log(`  ${seta} ${d.oldScore.toFixed(1)} → ${d.newScore.toFixed(1)}  ${d.title}`)
     console.log(`      ${d.reasons}`)
   }
 

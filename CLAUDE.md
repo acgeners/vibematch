@@ -1088,6 +1088,33 @@ Post-processing applied to every evaluation (in `service.ts`):
   **174**, 2026-08-02): antes eram três `Set`s hardcoded em `lib/ai-evaluation/adult-content-rules.ts`,
   enquanto o FLAG `works.is_adult` já lia `tags.adult_indicator[_strong]` do banco — as duas fontes
   divergiam, e tag nova classificada pelo enricher afetava o flag mas nunca o piso da nota.
+
+🔴 **`explicit` afirma que a CENA é mostrada — não que haja sexo no enredo.** A lista migrada
+na 174 misturou atos gráficos (Cunnilingus, Anal Sex) com tags de **circunstância**: que vez
+(`First-Time Intercourse`, 83 obras), em que estado (`Drunken Intercourse`), onde
+(`Outdoor/Public/School/Office/Toilet`), posição (`Doggy Style`, `Missionary Position`) e até
+`Clothed Intercourse` — sexo **vestido** valendo piso 9,0 = "há cena de sexo explícito".
+Corrigido pela **migration 182** (2026-08-09): as 18 viraram `label` (piso 7,0, a faixa "sexo
+mostrado PARCIALMENTE"), que é o que elas de fato sustentam. `explicit` foi de 46 → 28.
+
+Medido antes: **64 obras** tinham como única evidência de "explicit" uma tag de circunstância,
+**todas** em 9,0–9,5, e em **24 delas a prosa da própria avaliação argumentava faixa 0-3 ou 4-6**
+— ex.: *"Faixa 4-6 (Suggestive): … os leitores afirmam que a obra NÃO é smut/explícita"*, obra
+persistida em 9,0 por causa de `Drunken Intercourse`.
+
+🔴 **Baixar um piso NÃO desfaz o que ele subiu.** `clampAdultContentScore` é one-way — só empurra
+pra dentro da faixa. Sem `scripts/adult-content-retroactive-bounds.ts --heal`, as 64 ficariam
+congeladas em 9,0 e o script diria "nada a gravar". O `--heal` só age sob um fingerprint estreito:
+nota persistida ACIMA da que a avaliação entregou **E** valendo exatamente um piso (9/7/5) **E**
+não sustentada pelos limites de hoje. ⚠️ A 1ª versão usava a nota da avaliação como baseline
+direto e o dry-run deu **219** diffs contra as 51 reais — ela reescrevia toda divergência entre
+`category_scores` e `ai_evaluation_scores`, inclusive ajuste manual posterior. Ampliar esse
+critério é apagar curadoria em silêncio.
+
+⚠️ **O embed do PostgREST traz os NOVE critérios.** `ai_evaluations(ai_evaluation_scores(...))`
+sem `.eq("ai_evaluations.ai_evaluation_scores.criterion_slug", "adult_content")` devolve todos, e
+pegar `[0]` dá o baseline de outro critério — mediu 8,0 numa obra cuja avaliação dizia 7,0, e o
+relatório saiu inteiro plausível. Erro que produz resultado.
 ✅ **A 174 está aplicada na nuvem** (confirmado 2026-08-07). Esta seção afirmou o contrário
 por dias — ver o aviso logo abaixo.
 
@@ -1129,6 +1156,13 @@ continuou "a relação entre o **casal principal**", o guia de tags dizia "apena
 descreve o casal", e o clamp de romance seguia vivo. Como `buildCriteriaPromptSection()` cola a
 description ACIMA das faixas, o modelo lia título amplo + descrição restrita + rubrica ampla no
 mesmo bloco. Fechado pela **migration 181** + v23.
+
+✅ **A 181 está aplicada na nuvem** (2026-08-09, projeto `obwlwu…pizd`). Conferir com
+`select md5(description) from criteria where slug='couple_dynamics'` via Management API e
+comparar com o local — bateram em `f3b2adbd15b1f4e1d42f1c85373d17b6`. ⚠️ O
+`scripts/apply-migration.mjs` deriva o ref do `NEXT_PUBLIC_SUPABASE_URL` do `.env.local`: com o
+env apontando pro LOCAL ele não acha ref nenhum e sai. O ref da nuvem mora em
+`.env.supabase-cloud` ([[project-conferir-migration-na-nuvem]]).
 
 ⚠️ **O vínculo a avaliar tem ORDEM, não é uma lista solta:** casal principal → família (pais,
 irmãos, filhos) → demais recorrentes (mestre/discípulo, equipe, rivalidade, amizade). Pegue o
