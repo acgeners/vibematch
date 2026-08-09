@@ -1630,7 +1630,12 @@ function pearson(xs: number[], ys: number[]): number {
  * `user_id`, então a linha crua é a do DONO. Sem o overlay, a Leitora veria o
  * alinhamento do gosto dele apresentado como o dela.
  */
-export async function getAlignedWorkSplit(limit = 5): Promise<AlignedWorkSplit> {
+export async function getAlignedWorkSplit(
+  /** Quantas obras JÁ LIDAS a trilha de confirmação devolve. */
+  readLimit = 5,
+  /** Quantas NÃO LIDAS — separado porque a trilha de próximas leituras é paginada. */
+  unreadLimit = readLimit,
+): Promise<AlignedWorkSplit> {
   const supabase = createAdminClient()
   const [personal, scoresReader] = await Promise.all([
     getPersonalStateReader(),
@@ -1707,6 +1712,17 @@ export async function getAlignedWorkSplit(limit = 5): Promise<AlignedWorkSplit> 
   const read = works.filter(isRead)
   const unread = works.filter(isUnread)
 
+  // ⚠️ `ratedRead` (e portanto a CONFIRMAÇÃO) tem que ser lida na ordem de
+  // `personal_fit` — `works` acima já está ordenado assim, e `top` é o top-20 POR
+  // ALINHAMENTO. Não reordene aqui: as trilhas exibidas são reordenadas por
+  // `expected_score` só no return, sobre cópias.
+  //
+  // Refazer a confirmação por Nota Prevista dá número melhor e ERRADO: medido em
+  // 2026-08-09 nas 105 lidas com nota, 18 de 20 e correlação 0,851 contra 17 de 20
+  // e 0,769. O ganho é circularidade — `recalculateAll` treina o Ridge nas obras COM
+  // `user_score` e prevê para TODAS, inclusive essas, então o `expected_score`
+  // persistido delas é in-sample. Seria o modelo "confirmando" o rótulo em que foi
+  // ajustado.
   const ratedRead = read.filter((w) => w.userScore != null)
   const top = ratedRead.slice(0, CONFIRMATION_TOP_N)
   const avg = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length
@@ -1726,9 +1742,16 @@ export async function getAlignedWorkSplit(limit = 5): Promise<AlignedWorkSplit> 
         }
       : null
 
+  // As TRILHAS ordenam por Nota Prevista: no lado lido isso põe lado a lado o que o
+  // modelo previu e o que a pessoa deu (a demonstração de acerto obra a obra); no lado
+  // não-lido é a própria pergunta "o que leio agora". Cópias — o array original segue
+  // por `personal_fit`, que é do que a confirmação depende.
+  const byExpected = (a: AlignedWork, b: AlignedWork) =>
+    (b.expectedScore ?? Number.NEGATIVE_INFINITY) - (a.expectedScore ?? Number.NEGATIVE_INFINITY)
+
   return {
-    read: read.slice(0, limit),
-    unread: unread.slice(0, limit),
+    read: [...read].sort(byExpected).slice(0, readLimit),
+    unread: [...unread].sort(byExpected).slice(0, unreadLimit),
     readTotal: read.length,
     unreadTotal: unread.length,
     otherTotal: works.length - read.length - unread.length,

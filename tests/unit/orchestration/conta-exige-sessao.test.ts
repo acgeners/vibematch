@@ -75,4 +75,13 @@ describe("arquitetura: /conta exige sessão", () => {
       "faltou o early-return que libera rota de sessão antes do gate de papel",
     ).toMatch(/if\s*\(\s*!isConsole\s*\)\s*return response/)
   })
+
+  it("a página do perfil não perdeu o gate ao ganhar leitura per-usuário", () => {
+    // A /conta/perfil passou a ler `getDeclaredTagPreferences()` (as tags declaradas
+    // de quem olha). Sem sessão isso resolveria nas preferências do dono — a segunda
+    // via do mesmo vazamento, por outra função.
+    const page = readFileSync("app/conta/perfil/page.tsx", "utf8")
+    expect(page).toMatch(/getDeclaredTagPreferences/)
+    expect(signedInPrefixes()).toContain("/conta")
+  })
 })
