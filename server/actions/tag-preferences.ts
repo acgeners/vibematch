@@ -67,7 +67,13 @@ export async function saveTagPreferences(items: TagStanceItem[]): Promise<SaveTa
     if (error) return { ok: false, error: error.message }
   }
 
-  await markRecalcPending("saveTagPreferences")
+  // `user_tag_preferences` alimenta os 3 sinais de fit em TODAS as obras — mas os
+  // do DONO: `getDeclaredTagPreferences` cai em `getCurrentUserId()`, que sem
+  // sessão é o singleton. Declaração de outra pessoa não move número na tela dele.
+  await markRecalcPending("saveTagPreferences", {
+    changed: ["tag_preferences"],
+    actorId: userId,
+  })
   revalidatePath("/preferencias")
   revalidatePath("/ranking")
   return { ok: true }

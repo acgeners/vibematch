@@ -85,10 +85,18 @@ export async function submitPostReadingAttributes(
 
   // Lê user_attribute_assessment e grava attribute_bias — as duas são suas.
   await recomputeAttributeBias(userId, userDb)
-  // A pós-leitura alimenta o Ridge global → marca recálculo pendente em vez de
-  // recalcular na hora. A Nota Prevista atualiza no "Recalcular agora" ou no
-  // auto-recalc (≥1h sem novas edições). Antes era um recalc-all em background.
-  await markRecalcPending("submitPostReadingAttributes")
+  // A pós-leitura entra no recalc global por UM caminho só: o `attribute_bias`,
+  // que desloca on-read as notas de origem IA. (As 8 colunas `post_*_score` NÃO
+  // são features — `QUALITY_NUMERIC_FEATURES` é vazio.) Marca pendente em vez de
+  // recalcular na hora; a Nota Prevista atualiza no "Recalcular agora" ou no
+  // auto-recalc (≥1h sem novas edições).
+  //
+  // `actorId`: o recalc global lê o viés DO DONO. Sem isto, a calibração de um
+  // leitor acendia o badge do curador e o recálculo devolvia os mesmos números.
+  await markRecalcPending("submitPostReadingAttributes", {
+    changed: ["attribute_bias"],
+    actorId: userId,
+  })
   revalidatePath(`/titles/${workId}`)
 
   return { ok: true }
