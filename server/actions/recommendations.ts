@@ -181,10 +181,45 @@ export interface ProfileStatus {
   regenCostUsd: number
 }
 
+/**
+ * Status sem sujeito. NÃO é "erro" nem "ainda carregando": é o que existe pra quem não
+ * está logado — nenhum perfil, nenhuma obra avaliada, nada a recomputar.
+ */
+const ANONYMOUS_PROFILE_STATUS: ProfileStatus = {
+  hasProfile: false,
+  profile: null,
+  isStale: false,
+  currentHash: "",
+  ratedWorksCount: 0,
+  staleness: null,
+  regenCostUsd: 0,
+}
+
 export async function getTasteProfileStatusAction(): Promise<ProfileStatus> {
+  /**
+   * 🔴 Resolve por SESSÃO, e devolve vazio sem ela.
+   *
+   * `loadCurrentTasteProfile()` e `getRatedWorksForProfile()` resolvem por
+   * `getCurrentUserId()`, que sem sessão cai no singleton — o DONO. Isso é o
+   * comportamento certo em background (o recalc precisa do bias dele) e errado numa
+   * função que TRÊS páginas renderizam: `/painel`, `/recommendations` e
+   * `/conta/perfil`.
+   *
+   * Medido em 2026-08-09: `/painel` anônimo devolvia 200 imprimindo o
+   * `taste_profile.summary` do dono em prosa ("…o coração do gosto é o romance de
+   * fantasia/rofan…"), mais os temas e as tags amadas dele. Sem erro e sem log — a
+   * página tinha um sujeito, o errado.
+   *
+   * O gate de rota (`/painel` e `/conta` no proxy) é a 2ª camada. Esta é a 1ª, e é a
+   * que protege o próximo consumidor: um leitor novo desta action herda o vazamento
+   * sem que nada acuse.
+   */
+  const userId = await getSessionUserId()
+  if (!userId) return ANONYMOUS_PROFILE_STATUS
+
   const [profile, ratedWorks] = await Promise.all([
-    loadCurrentTasteProfile(),
-    getRatedWorksForProfile(),
+    loadCurrentTasteProfile(userId),
+    getRatedWorksForProfile(undefined, userId),
   ])
   const currentHash = computeInputHash(ratedWorks)
   const staleness =

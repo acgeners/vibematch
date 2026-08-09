@@ -66,6 +66,20 @@ const READERS = [
     // teste que acusa o inocente é um teste que alguém apaga.
     delegatesTo: "loadChatBySlug",
   },
+  {
+    file: "server/actions/recommendations.ts",
+    fn: "getTasteProfileStatusAction",
+    // O status do perfil de gosto. Medido em 2026-08-09: `/painel` ANÔNIMO imprimia o
+    // `taste_profile.summary` do dono em prosa ("…o coração do gosto é o romance de
+    // fantasia/rofan…"), mais os temas e as tags amadas dele — porque a cadeia inteira
+    // (`loadCurrentTasteProfile` → `getRatedWorksForProfile` → `getCurrentUserId`)
+    // resolvia no singleton sem sessão. TRÊS páginas renderizam esta função
+    // (`/painel`, `/recommendations`, `/conta/perfil`), então o gate de rota sozinho
+    // deixaria o próximo consumidor herdar o buraco.
+    // Não consulta direto: repassa o `userId` resolvido para os dois leitores.
+    delegatesTo: "loadCurrentTasteProfile",
+    delegateFile: "lib/ai-recommendation/taste-profile.ts",
+  },
 ]
 
 /** Comentários fora: as menções em prosa (inclusive a este próprio bug) são intencionais. */
@@ -127,10 +141,18 @@ function bodyOf(file: string, fn: string): string {
 }
 
 describe("arquitetura: histórico pessoal é escopado por SESSÃO", () => {
-  for (const { file, fn, delegatesTo } of READERS as Array<{
+  for (const { file, fn, delegatesTo, delegateFile } of READERS as Array<{
     file: string
     fn: string
     delegatesTo?: string
+    /**
+     * Onde o delegado MORA, quando não é o mesmo arquivo. Existe desde 2026-08-09:
+     * `getTasteProfileStatusAction` resolve a identidade e repassa para
+     * `loadCurrentTasteProfile`, que vive em `lib/ai-recommendation/`. Sem isto o
+     * harness procurava o delegado no arquivo do caller e reprovava código correto —
+     * o modo mais rápido de um teste de arquitetura ser apagado.
+     */
+    delegateFile?: string
   }>) {
     it(`${fn} resolve o usuário por getSessionUserId (nunca getCurrentUserId)`, () => {
       const body = bodyOf(file, fn)
@@ -150,7 +172,7 @@ describe("arquitetura: histórico pessoal é escopado por SESSÃO", () => {
           `${fn} deve repassar o userId para ${delegatesTo}`,
         ).toMatch(new RegExp(`${delegatesTo}\\([^)]*userId`))
         expect(
-          bodyOf(file, delegatesTo),
+          bodyOf(delegateFile ?? file, delegatesTo),
           `${delegatesTo} precisa de .eq("user_id", …)`,
         ).toMatch(/\.eq\(\s*["']user_id["']/)
         return

@@ -23,8 +23,14 @@ const CONSOLE_PREFIXES = ["/curadoria", "/ai-evaluation", "/settings", "/ai-usag
  * recalc precisa do bias dele). O que não pode é uma ROTA renderizar isso. Por isso o
  * gate é aqui — e vale para `/conta` inteira, não só `/perfil`, porque a aba Conta
  * mostra e-mail e papel.
+ *
+ * 🔴 `/painel` entrou no mesmo dia, pelo mesmo motivo, medido: a página imprimia o
+ * `taste_profile.summary` do dono em prosa para visitante anônimo. A causa raiz foi
+ * corrigida na fonte (`getTasteProfileStatusAction` devolve vazio sem sessão); este
+ * gate é a 2ª camada — e o CLAUDE.md já descrevia a rota como "**a SUA biblioteca** —
+ * tudo aqui é de quem olha; nada é do catálogo", o que sempre pediu sessão.
  */
-const SIGNED_IN_PREFIXES = ["/conta"]
+const SIGNED_IN_PREFIXES = ["/conta", "/painel"]
 
 function matchesPrefix(pathname: string, prefixes: string[]): boolean {
   return prefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`))
