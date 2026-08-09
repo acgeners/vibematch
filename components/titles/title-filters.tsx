@@ -37,6 +37,7 @@ import { getPersonalStatusDescription } from "@/lib/constants/personal-status-de
 import { LABELS } from "@/lib/constants/ui-labels"
 import { cn } from "@/lib/utils"
 import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
+import { ActiveFilterChips } from "@/components/ranking/active-filter-chips"
 
 const CRITERION_LABELS: Record<string, string> = {
   romance: "Romance",
@@ -1487,18 +1488,18 @@ export function TitleFilters({
             <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               Filtros ativos
             </span>
-            {activeChips.map((chip) => (
-              <button
-                key={chip.key}
-                type="button"
-                onClick={chip.onRemove}
-                className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border/80 bg-background/55 px-2.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/10"
-                title="Remover filtro"
-              >
-                {chip.label}
-                <X className="h-3 w-3 text-muted-foreground" />
-              </button>
-            ))}
+            {/* Mesmo componente do /ranking: o markup do chip estava DUPLICADO
+                literalmente entre os dois arquivos, e mudar num só era como as duas
+                páginas passavam a discordar sobre a mesma coisa. Aqui os chips ainda
+                são um-por-valor (o /titles não tem exclusão de status) — o componente
+                trata isso como chip simples. */}
+            <ActiveFilterChips
+              chips={activeChips.map((chip) => ({
+                key: chip.key,
+                label: chip.label,
+                onClear: chip.onRemove,
+              }))}
+            />
           </div>
         </div>
       )}

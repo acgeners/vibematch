@@ -5,7 +5,9 @@ import { Skeleton } from "@/components/ui/skeleton"
 export default function NewTitleLoading() {
   return (
     <div className="space-y-4">
-      <Header title="Novo título" description="Carregando…" />
+      {/* Mesmo cabeçalho da página carregada (`page.tsx`) — um esqueleto com outro
+          título troca o texto na frente do usuário quando o conteúdo chega. */}
+      <Header kicker="Catálogo" title="Adicionar nova obra" description="Carregando…" />
       <Card>
         <CardHeader>
           <Skeleton className="h-5 w-40" />

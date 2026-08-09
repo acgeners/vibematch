@@ -173,6 +173,14 @@ export interface RankingFilters {
   criterionMax?: Partial<Record<string, number>>
   publicationStatus?: string[]
   personalStatus?: string[]
+  /**
+   * Exclusão de status (`not in`), o par do positivo acima. Os dois NUNCA vêm juntos —
+   * `readStatusFilter` (lib/status-filter-toggle.ts) é o dono da regra, e num conjunto
+   * fechado eles são redundantes. A diferença que importa é o FUTURO: a lista positiva
+   * ignora um status que entre depois na tabela; a exclusão o adota.
+   */
+  publicationStatusExclude?: string[]
+  personalStatusExclude?: string[]
   aiEvalStatus?: string[]
   genreAll?: string[]
   genreAny?: string[]
@@ -299,6 +307,14 @@ export async function getRanking(
     return ids.length > 0 ? ids : []
   }
   const publicationStatusIdFilter = resolveStatusIds(filters.publicationStatus, getPublicationStatusIdByName)
+  const publicationStatusExcludeIds = resolveStatusIds(
+    filters.publicationStatusExclude,
+    getPublicationStatusIdByName
+  )
+  // "Unknown" é o nome que a entry usa para `publication_status_id` NULO (ver o
+  // `?? "Unknown"` lá embaixo) E é também um status real da tabela. Excluir "Unknown"
+  // portanto precisa alcançar os dois — e é o que decide o tratamento do NULL no SQL.
+  const excludesUnknownPublication = Boolean(filters.publicationStatusExclude?.includes("Unknown"))
 
   // Estado de leitura de QUEM está olhando (Fatia 1). Pro dono, isto é a própria linha de
   // `works` que a query já traz (custo zero). Pros demais, vem de `user_work_state` — e é o
@@ -558,6 +574,19 @@ export async function getRanking(
       // Filter pediu status que nenhum nome resolve — força match vazio.
       q = q.eq("id", "00000000-0000-0000-0000-000000000000")
     }
+    // Exclusão de status de publicação. 🔴 `not in` NÃO casa linha com a coluna NULA
+    // (NULL não é comparável), e essa obra aparece na UI como "Unknown" — deixar o
+    // `not in` sozinho a faria sumir ao excluir QUALQUER outro status, em silêncio e
+    // discordando do filtro em memória logo abaixo. Hoje são 0 obras nessa situação
+    // (medido no clone local), mas a coluna é nullable e o `?? "Unknown"` existe por
+    // isso. Quando "Unknown" É um dos excluídos, o comportamento cru do `not in` já é
+    // o desejado: a linha nula também sai.
+    if (publicationStatusExcludeIds && publicationStatusExcludeIds.length > 0) {
+      const ids = `(${publicationStatusExcludeIds.join(",")})`
+      q = excludesUnknownPublication
+        ? q.not("publication_status_id", "in", ids)
+        : q.or(`publication_status_id.is.null,publication_status_id.not.in.${ids}`)
+    }
     // O STATUS de leitura NÃO é filtrado em SQL — nem pro dono. Ele sai em memória, sobre
     // `entry.personalStatus`, porque só lá a obra sem linha de estado aparece como
     // "Want to Read" (ver o comentário no topo, em `personalFilterIds`).
@@ -709,8 +738,19 @@ export async function getRanking(
   if (filters.publicationStatus?.length) {
     entries = entries.filter((e) => filters.publicationStatus!.includes(e.publicationStatus))
   }
+  if (filters.publicationStatusExclude?.length) {
+    entries = entries.filter((e) => !filters.publicationStatusExclude!.includes(e.publicationStatus))
+  }
   if (filters.personalStatus?.length) {
     entries = entries.filter((e) => filters.personalStatus!.includes(e.personalStatus))
+  }
+  // 🔴 Exclusão de status PESSOAL só existe aqui — não há par em SQL, pelo mesmo motivo
+  // do positivo (ver o comentário em `personalFilterIds`): obra SEM linha de estado É
+  // "Want to Read", e uma lista de ids só enxerga quem TEM linha. Excluir "Want to Read"
+  // em SQL deixaria passar justamente as obras que nunca foram tocadas — o conjunto
+  // maior, e exatamente o que o usuário pediu para tirar.
+  if (filters.personalStatusExclude?.length) {
+    entries = entries.filter((e) => !filters.personalStatusExclude!.includes(e.personalStatus))
   }
   if (filters.aiEvalStatus?.length) {
     entries = entries.filter((e) => filters.aiEvalStatus!.includes(e.aiEvalStatus))

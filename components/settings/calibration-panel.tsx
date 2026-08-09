@@ -11,6 +11,7 @@ import { AiPendingGuardDialog } from "@/components/settings/ai-pending-guard-dia
 import type { AiPendingItem } from "@/components/settings/ai-pending-guard-dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
+import { refreshChrome } from "@/lib/chrome-refresh"
 import { recalculateNow } from "@/server/actions/settings"
 import type { CalibrationHistoryEntry } from "@/server/actions/settings"
 import { cn } from "@/lib/utils"
@@ -108,6 +109,13 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
     startTransition(async () => {
       try {
         const result = await recalculateNow()
+        // Este recálculo é o MESMO do botão "Recalcular notas" da barra superior
+        // (ambos passam por `recalculateScoresNow`, que zera `recalc_pending`), mas o
+        // chrome é client-side e não fica sabendo: o botão continuava lá, oferecendo
+        // repetir o trabalho recém-feito, até a próxima navegação ou o TTL de 30s.
+        // Patch direcionado em vez de re-fetch — a verdade do servidor já é conhecida
+        // aqui, e re-buscar custaria uma leitura do chrome à toa.
+        refreshChrome({ recalcPending: false })
         const cal = result.calibration
         if (cal) {
           // Reporta a MESMA métrica HONESTA da headline: MAE CV da Nota Prevista

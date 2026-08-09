@@ -35,6 +35,7 @@ import { MAX_CANDIDATES_HARD_LIMIT } from "@/lib/ai-recommendation/limits"
 import { getPreferenceRules } from "@/server/queries/preference-rules"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import type { TagStance } from "@/server/queries/tag-preferences"
+import { STRONG_TAG_WEIGHT } from "@/lib/tags/segment"
 import { getSynopsisInputsBatch } from "@/server/queries/work-card-meta"
 import type { SynopsisInputs } from "@/server/queries/work-card-meta"
 import { recordRecommendationSnapshots } from "@/lib/server/predictions/record-prediction"
@@ -222,7 +223,14 @@ export async function getTasteProfileStatusAction(): Promise<ProfileStatus> {
  * indexa também "harem" pra casar com a tag da obra. As declaradas têm nome limpo
  * (catálogo). Tudo em minúsculas.
  */
-export async function getEffectiveTagStanceAction(): Promise<{ loved: string[]; avoided: string[] }> {
+export async function getEffectiveTagStanceAction(): Promise<{
+  loved: string[]
+  avoided: string[]
+  /** Nomes com ênfase 2× DECLARADA (`STRONG_TAG_WEIGHT`) — o "muito amada/evitada". */
+  strong: string[]
+  /** Nomes que vieram de DECLARAÇÃO (o resto veio do perfil inferido) — só pro tooltip. */
+  declared: string[]
+}> {
   const [profileRow, declared] = await Promise.all([
     loadCurrentTasteProfile(),
     getDeclaredTagPreferences(),
@@ -242,14 +250,20 @@ export async function getEffectiveTagStanceAction(): Promise<{ loved: string[]; 
   for (const t of p?.avoided_tags ?? []) addProfile(t?.name, "avoid")
   for (const t of p?.loved_tags ?? []) addProfile(t?.name, "love")
   // Declaradas por último → precedem o perfil (nome limpo do catálogo).
+  // A ênfase 2× só existe aqui: o perfil traz `strength` 0–1, outra escala.
+  const strongNames = new Set<string>()
+  const declaredNames = new Set<string>()
   for (const d of declared) {
     const n = d.name.toLowerCase().trim()
-    if (n) stance.set(n, d.stance)
+    if (!n) continue
+    stance.set(n, d.stance)
+    declaredNames.add(n)
+    if (d.weight >= STRONG_TAG_WEIGHT) strongNames.add(n)
   }
   const loved: string[] = []
   const avoided: string[] = []
   for (const [name, s] of stance) (s === "love" ? loved : avoided).push(name)
-  return { loved, avoided }
+  return { loved, avoided, strong: [...strongNames], declared: [...declaredNames] }
 }
 
 /**

@@ -4,7 +4,6 @@ import { useMemo, useState } from "react"
 import { useRefresh } from "@/lib/use-refresh"
 import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
 import { Loader2, Sparkles } from "lucide-react"
-import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { PredictSynopsisRowActions } from "@/components/titles/predict-synopsis-row-actions"
@@ -15,19 +14,12 @@ import { WorkQueueGrid } from "@/components/ai-evaluation/queue/work-queue-grid"
 import { QueueToolbar, QueueSortSelect } from "@/components/ai-evaluation/queue/queue-toolbar"
 import { useWorkSelection } from "@/components/ai-evaluation/queue/use-work-selection"
 import { InterestBackfillButton } from "@/components/titles/interest-backfill-button"
-import { useCostConfirm } from "@/components/cost/cost-confirm"
-import {
-  planSynopsisInterestBatchAction,
-  runSynopsisInterestBatchAction,
-} from "@/server/actions/synopsis-quality"
-import { runTask } from "@/lib/tasks-store"
+import { useBatchAiActions, INTEREST_TASK_ID } from "@/components/titles/use-batch-ai-actions"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
-import { buildInterestBatchCost } from "@/lib/cost-preview/interest-cost-steps"
 import { cn } from "@/lib/utils"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { SynopsisQueueWork } from "@/server/queries/recommendations"
-import { formatUsd } from "@/lib/format/money"
 
 /** Nível ordinal do Interesse (♥=1 … ♥♥♥♥=4); 0 se desconhecido. */
 function synopsisLevel(q: string | null): number {
@@ -43,7 +35,7 @@ function fmtPredictedAt(iso: string | null): string | null {
   return y && m && d ? `${d}/${m}/${y}` : null
 }
 
-const BATCH_TASK_ID = "interest-batch"
+const BATCH_TASK_ID = INTEREST_TASK_ID
 
 type SortField = "default" | "expected" | "lastRead" | "predicted"
 
@@ -61,15 +53,10 @@ function needsPrediction(w: SynopsisQueueWork): boolean {
 export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { works: SynopsisQueueWork[]; readIds?: string[]; isPaid?: boolean }) {
   const refresh = useRefresh()
   const { isRead, unmark } = useToggleRead("interesse", readIds)
-  const confirmCost = useCostConfirm()
   const [sortField, setSortField] = useState<SortField>("default")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
-  // O dry-run + modal de custo ficam ANCORADOS (é decisão, exige a pessoa aqui);
-  // só a execução vira tarefa global. Por isso são dois estados e não um.
-  const [planning, setPlanning] = useState(false)
   const tasks = useAppTasks()
-  const batchRunning =
-    planning || tasks.some((t) => t.id === BATCH_TASK_ID && t.status === "running")
+  const taskRunning = tasks.some((t) => t.id === BATCH_TASK_ID && t.status === "running")
 
   const sortedWorks = useMemo(() => {
     if (sortField === "default") {
@@ -115,86 +102,25 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
     return w != null && needsPrediction(w)
   })
 
-  // Executa o lote já confirmado. Custo total governado pelo teto (upper bound do
-  // dry-run). Vai pro indicador global porque é durável — cada obra do lote
-  // persiste — e leva ~4,9s de mediana POR obra (p90 7,0s, n=234): num lote de 20
-  // já passa de um minuto, tempo de sobra pra pessoa sair da página.
-  const executeBatch = (batchIds: string[], maxCostUsd: number) => {
-    runTask({
-      id: BATCH_TASK_ID,
-      kind: "interest-batch",
-      label: `Estimando Interesse: ${batchIds.length} obra${batchIds.length !== 1 ? "s" : ""}`,
-      run: async () => {
-        const res = await runSynopsisInterestBatchAction(batchIds, { maxCostUsd })
-        // Os três status de não-sucesso viram rejeição: sem isso o store diria
-        // "pronto" pra um lote bloqueado por custo.
-        if (res.status !== "ok") {
-          throw new Error("message" in res ? res.message : res.error)
-        }
-        return res.report
-      },
-      onDone: () => {
-        selection.clear()
-        refresh()
-      },
-      onError: () => {
-        selection.clear()
-        refresh()
-      },
-      successToast: (r) => ({
-        message:
-          `${r.succeeded} estimada${r.succeeded !== 1 ? "s" : ""} · ${r.fresh} já ok` +
-          (r.failed > 0 ? ` · ${r.failed} falhou` : "") +
-          (r.blocked > 0 ? ` · ${r.blocked} bloqueada(s)` : "") +
-          ` · custo ${formatUsd(r.costUsd)}`,
-      }),
-    })
-  }
+  // O dry-run → popup de custo → execução mora em `useBatchAiActions`, o MESMO
+  // caminho que a seleção do /ranking usa. Uma 2ª cópia divergiria justo nos dois
+  // detalhes silenciosos: o `throw` que transforma `status !== "ok"` em falha (sem
+  // ele o indicador diz "pronto" pra um lote bloqueado por custo) e o teto
+  // `upperBoundUsd` que governa o gasto autorizado.
+  const batchAi = useBatchAiActions({
+    onSettled: () => {
+      selection.clear()
+      refresh()
+    },
+  })
 
-  // Fluxo: DRY-RUN obrigatório → popup de custo com os números REAIS do plano →
-  // confirmação única → execução.
-  const predictSelected = async () => {
-    const batchIds = selection.selectedIds
-    if (batchIds.length === 0 || batchRunning) return
-    setPlanning(true)
-    const planned = await planSynopsisInterestBatchAction(batchIds).finally(() =>
-      setPlanning(false),
-    )
-    if (planned.status !== "ok") {
-      toast.error("message" in planned ? planned.message : planned.error)
-      return
-    }
-    const p = planned.plan
-    const needCalls = p.stale + p.absent
-    if (needCalls === 0) {
-      toast.success("As obras selecionadas já estão atualizadas — nada a estimar.")
-      return
-    }
-    // Itemiza perfil (custo ÚNICO) × previsões quando o perfil vai ser regenerado —
-    // deixando explícito que ele está defasado — em vez de amortizar em "N × por-obra".
-    const cost = buildInterestBatchCost({
-      needCalls,
-      regenProfile: planned.regenProfile,
-      driftPct: planned.driftPct,
-      profileLikelyUsd: p.profileLikelyUsd,
-      totalLikelyUsd: p.likelyUsd,
-    })
-    const maxCostUsd = Math.max(p.upperBoundUsd, 0.01)
-    const ok = await confirmCost({
-      estimate: {
-        likelyUsd: p.likelyUsd,
-        upperBoundUsd: p.upperBoundUsd,
-        etaSeconds: cost.etaSeconds,
-        model: "claude-sonnet-4-6",
-        background: false,
-        scale: needCalls,
-      },
-      steps: cost.steps,
-      title: `Prever Interesse — ${needCalls} obra(s)?`,
-      description: `${cost.profileSentence}Dry-run real: ${needCalls} previsão(ões), uma chamada Sonnet por obra.`,
-      confirmLabel: "Executar",
-    })
-    if (ok) executeBatch(batchIds, maxCostUsd)
+  // O dry-run + modal de custo ficam ANCORADOS (é decisão, exige a pessoa aqui);
+  // só a execução vira tarefa global. Daí os dois sinais somados no `batchRunning`.
+  const batchRunning = taskRunning || batchAi.planning
+
+  const predictSelected = () => {
+    if (batchRunning) return
+    void batchAi.predictInterest(selection.selectedIds)
   }
 
   if (works.length === 0) {

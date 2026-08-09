@@ -24,9 +24,11 @@ import { getStatusOptions } from "@/server/queries/status-options"
 import { getFilterPresets } from "@/server/queries/filter-presets"
 import { getCriterionMomentsSafe } from "@/server/queries/criterion-moments"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
+import { STRONG_TAG_WEIGHT } from "@/lib/tags/segment"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
+import { readStatusFilter } from "@/lib/status-filter-toggle"
 
 interface FavoritesListPageProps {
   params: Promise<{ listId: string }>
@@ -105,17 +107,10 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
   })
 
   const aiStatuses = multi("ai_status")
-  const perStatusParam = str("per_status")
-  const personalStatus =
-    perStatusParam === "all" || !perStatusParam
-      ? undefined
-      : perStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
-
-  const pubStatusParam = str("pub_status")
-  const publicationStatus =
-    pubStatusParam === "all" || !pubStatusParam
-      ? undefined
-      : pubStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
+  // Sem defaults, ao contrário do /ranking: aqui a ausência do parâmetro já significa
+  // "sem filtro" (ver `defaultPublicationStatus="all"` passado ao painel, mais abaixo).
+  const personalFilter = readStatusFilter(str, "personal")
+  const publicationFilter = readStatusFilter(str, "publication")
 
   // Filtro opt-in "esconder minhas tags evitadas" (mesmo padrão de /ranking, ver
   // app/ranking/page.tsx) — off | "strong" (só as evitadas com ênfase 2×) | "all".
@@ -127,7 +122,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     hideMode === "all"
       ? avoided.map((p) => p.slug)
       : hideMode === "strong"
-        ? avoided.filter((p) => p.weight >= 2).map((p) => p.slug)
+        ? avoided.filter((p) => p.weight >= STRONG_TAG_WEIGHT).map((p) => p.slug)
         : []
 
   // Conteúdo 18+ por-página (?adult=hide|only), mesmo padrão de /ranking. Usa
@@ -139,8 +134,10 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     search: str("search"),
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
     criterionMax: Object.keys(criterionMax).length ? criterionMax : undefined,
-    publicationStatus,
-    personalStatus,
+    publicationStatus: publicationFilter.include,
+    publicationStatusExclude: publicationFilter.exclude,
+    personalStatus: personalFilter.include,
+    personalStatusExclude: personalFilter.exclude,
     aiEvalStatus: aiStatuses,
     genreAll: multi("genres_all"),
     genreAny: multi("genres_any") ?? multi("genres"),
@@ -309,6 +306,11 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         defaultTopN={null}
         basePath={basePath}
         criterionMoments={criterionMoments}
+        // Mesmas faixas que a WorkTable abaixo já usa no modo de cor "Minha
+        // faixa" — aqui elas também FILTRAM. Uma leitura só (`criterionPrefs`)
+        // alimenta os dois: derivar de novo é como cor e filtro passam a
+        // discordar sobre o que está "dentro".
+        criterionRanges={criterionPrefs}
         savedPresets={savedPresets}
         showTopN={false}
         showTierBand={false}

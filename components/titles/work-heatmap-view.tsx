@@ -488,10 +488,19 @@ export function WorkHeatmapView({
                   key={work.id}
                   className={cn(
                     "border-b transition-colors hover:bg-primary/5",
-                    isSelected && "bg-primary/5"
+                    isSelected && "bg-primary/12"
                   )}
                 >
-                  <td className="sticky left-0 z-10 border-r bg-background px-3 py-2">
+                  {/* A 1ª célula é sticky e OPACA: sem repetir o realce aqui, a linha selecionada
+                      ficava sem marca justamente na coluna que fica visível ao rolar. */}
+                  <td
+                    className={cn(
+                      "sticky left-0 z-10 border-r px-3 py-2",
+                      isSelected
+                        ? "bg-primary/12 shadow-[inset_3px_0_0_0_var(--color-primary)]"
+                        : "bg-background"
+                    )}
+                  >
                     <div className="flex items-center gap-2">
                       {enableCompare && (
                         <Checkbox

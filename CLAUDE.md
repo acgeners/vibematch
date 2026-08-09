@@ -533,6 +533,56 @@ Guardado por `tests/unit/ranking/bussola-empilhamento.test.tsx` e `bussola-legen
 — inclusive um teste que falha se a prop de faixas for ignorada, que era o jeito silencioso de a
 cor da nota regredir pro fallback.
 
+## Dado gerado por IA carrega um SELO — e nenhuma procedência fica solta na tela
+
+Todo bloco da página da obra cujo conteúdo saiu de um modelo leva o selo ✨
+(`components/ui/ai-provenance.tsx`), e modelo/prompt/data/confiança vivem **só** no tooltip
+dele. Régua de 2026-08-08, em 11 superfícies: Resumo da avaliação IA · Notas por critério ·
+Sinopse consolidada · Interesse previsto · Síntese das reviews (+ resumo em prosa) · Veredito
+IA · Deep Dive · Tags inferidas · Atributos da obra. O ℹ️ de "Obras parecidas" ganhou o modelo
+do embedding no tooltip que **já** explicava o método — busca vetorial não é texto de LLM, e
+dar a ela a mesma marca da sinopse afirmaria algo falso.
+
+Dois problemas que a ausência da régua produzia:
+
+1. **Duplicação.** "Resumo da avaliação IA" e "Notas por critério" imprimiam a MESMA faixa
+   (`Modelo · Confiança · Reviews · Data`) da MESMA avaliação, escrita em dois lugares. Hoje um
+   objeto só (`aiEvalProvenance`) alimenta os dois selos.
+2. **Omissão.** A sinopse canônica é ESCRITA por um modelo e a página não dizia isso em lugar
+   nenhum. Por isso o selo é a **marca**, não só o botão: ele aparece mesmo com o modelo
+   desconhecido ("sem registro"). Escondê-lo apagaria o fato de o texto ser de IA.
+
+🔴 **O que NÃO vai pro selo: ESTADO.** "Desatualizada" (Interesse) e "Desatualizado" (Veredito)
+ficam na tela. Não são procedência — são o que impede aplicar ao pipeline de notas um número
+que a IA já não sustenta. Enterrá-los num tooltip devolve o "aplicar cego".
+
+⚠️ **Fora da régua, de propósito:** Nota Prevista, Nota.Calc, Alinhamento e a Bússola são Ridge
+e aritmética em TS, sem LLM — selo "gerado por IA" ali seria mentira. A caixa lateral
+("Última avaliação em / Atualizada em") também fica: é painel de FRESCOR da ficha, e
+"Atualizada em" nem é de IA.
+
+🔴 **Modelo não existe pra todo mundo, e o número é medido.** Sinopse, síntese/resumo de reviews
+e tags não têm coluna de modelo; o que existe é o log central (`ai_api_calls`, ligado por
+`metadata->>'work_id'`), e ele **só começa em 03/07/2026**. Medido em 2026-08-08 no clone local:
+
+| Artefato | tem o artefato | modelo recuperável |
+|---|---|---|
+| sinopse consolidada | 980 obras | 327 (**33%**) |
+| síntese das reviews | 841 | 487 (58%) |
+| resumo em prosa | 885 | 498 (56%) |
+| Veredito IA (via `alignment_run_id`) | 501 | 66 (**13%**) |
+| tags inferidas | 475 | **0** — nenhuma chamada grava `work_id` |
+
+Não fixe o modelo numa constante: `synopsis_consolidator` e `review_digest` têm **2 modelos
+distintos** no histórico, então "Sonnet" mentiria em toda obra antiga, em silêncio.
+
+⚠️ **Dentro do tooltip, tom secundário é `text-background/<alfa>` — nunca token de página.**
+O `TooltipContent` é invertido (`bg-foreground` + `text-background`). `text-foreground` ali é
+invisível nos dois temas (bug de 2026-07-03); `text-muted-foreground` é pior de achar: passa no
+escuro e cai pra ~3:1 no CLARO (medido). Guardado por `tests/unit/ui/ai-provenance-selo.test.tsx`,
+que lê o ARQUIVO — a 1ª versão varria `AiProvenanceSeal.toString()` e não enxergava
+`ProvenanceRow`, que é justamente quem desenha o corpo.
+
 ## Dinheiro tem UM dono, e a unidade muda com a escala
 
 Todo valor em USD na interface passa por **`lib/format/money.ts`** — `formatUsd`,
@@ -655,6 +705,43 @@ ruim. Quem opina é o ▲/▼, que cruza com `score_weights`; para peso NEGATIVO
 `score > threshold`, porque abaixo dele o `calculateGPT` não penaliza nada.
 ⚠️ `score_weights` é tabela COMPARTILHADA — o ▲/▼ herda a Fase 3, igual à Nota.IA, que já lê
 essa mesma tabela global no recalc per-usuário.
+
+## Tag amada tem DOIS níveis, e o segundo é forma — não um verde mais escuro
+
+A ênfase **2×** (`user_tag_preferences.weight ≥ STRONG_TAG_WEIGHT`, o botão ✨ de
+`/preferencias`) aparece no chip como **♥ preenchido** (amada) ou **⊘** (evitada), e as fortes
+vêm **primeiro** dentro do bloco. Três superfícies, um componente só
+(`components/ui/tag-stance-mark.tsx`): card Tags da obra · prévia e popover do comparador ·
+"Informações sobre a obra" da `/fila-recomendacao`. Régua desde 2026-08-08.
+
+Medido no clone local (981 obras, 164 declarações): **895 obras (91,5%)** misturam os dois
+níveis no mesmo bloco "Amadas", **43%** dos chips amados são 2× (4.851 de 11.364), mediana de
+**11,6 amadas por obra** (máx. 56). Não é caso raro — é metade de um bloco inteiro pintado igual.
+Do lado vermelho é o oposto e por isso importa mais: evitada forte existe em **32 obras**, e era
+exatamente ela que sumia entre três evitadas comuns.
+
+🔴 **O sinal é FORMA porque os dois níveis dividem a mesma cor de stance.** Trocar o glifo por
+"um verde mais firme" devolve o problema pra quem enxerga cor com dificuldade — e, com 43% dos
+chips no nível forte, o gradiente vira ruído em vez de leitura.
+
+⚠️ **`STRONG_TAG_WEIGHT` (`lib/tags/segment.ts`) é o dono único do limiar.** Ele já governava o
+filtro "Esconder tags evitadas → só as fortes" (`hide_avoided=strong`), onde estava **copiado**
+como `>= 2` em `/ranking` e `/favorites`. Uma 3ª cópia é como a tela marca de forte uma tag que
+o filtro não esconde — mesma armadilha do `LOW_BALANCE_USD`.
+
+⚠️ **Tag vinda do PERFIL de gosto nunca é forte, de propósito.** A régua de lá é `strength` 0–1
+(inferida pelo modelo; medido: 0,55–0,95, média 0,78) — outra escala, cujo "alto" precisaria de
+um limiar inventado. Por isso `TagStanceInfo` carrega `source: "declared" | "profile"`: sem ele o
+tooltip diria "você marcou" sobre algo que ninguém marcou, e a pessoa iria procurar em
+`/preferencias` uma linha que não existe.
+
+⚠️ **Quem RESSORTA depois do `segmentTags` precisa de `strong` como 1ª chave.** A partição por
+nível é estável, mas a página da obra reordena por proveniência (externa antes de IA) — omitir
+`strong` ali desfaz a partição em silêncio, e os dois níveis voltam a se intercalar.
+
+**Fora da régua, de propósito:** `/preferencias` (é onde a ênfase se DECLARA — já mostra o 2×) e
+os chips do perfil em `/conta` (régua `strength`, não `weight`; mesmo desenho ali afirmaria que
+os dois números são o mesmo).
 
 ## Inline type imports and Turbopack
 
