@@ -262,8 +262,18 @@ export async function insertNewTasteProfile(
   // aqui (apenas marca; reusa o mecanismo existente). Marcado SÓ após o insert
   // bem-sucedido: geração/persistência que falham nunca chegam aqui (caem no throw
   // acima). Cobre TODOS os caminhos de persistência (este é o único sink).
+  //
+  // `actorId`: o recalc global carrega o perfil do DONO por id explícito
+  // (`getOwnerUserId`), então perfil novo de outra pessoa não muda `personal_fit`
+  // nenhum aqui. ⚠️ O gate de materialidade do bloco acima (fingerprint) NÃO
+  // serve pra este: a chave é determinística sobre as obras notadas, mas o
+  // loved/avoided que o recalc lê vem do output do LLM, que re-rola 57–73% por
+  // regeração. Mesma chave ainda é perfil diferente para o `personal_fit`.
   const { markRecalcPending } = await import("@/server/recalc/queue")
-  await markRecalcPending("taste_profile_new_version")
+  await markRecalcPending("taste_profile_new_version", {
+    changed: ["taste_profile"],
+    actorId: userId,
+  })
 
   // Grava o fingerprint na linha (best-effort; reusa o já computado). Se a coluna
   // não existir (migration pendente) ou faltar `ratedWorks`, apenas avisa e segue.

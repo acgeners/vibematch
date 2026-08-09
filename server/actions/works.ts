@@ -26,6 +26,8 @@ import {
   splitSynopsesFromText,
 } from "@/lib/work-derived"
 import { markRecalcPending, recalculateScoresNow } from "@/server/recalc/queue"
+import { changedInputs } from "@/lib/calculations/recalc-inputs"
+import type { RecalcInput } from "@/lib/calculations/recalc-inputs"
 import { recalculateForUser } from "@/server/recalc/user-recalc"
 import { capturePredictionForFirstRating } from "./prediction-ledger"
 import {
@@ -277,6 +279,35 @@ function isStrongIdentityMatch(
   return strongKeys.includes(matchKey)
 }
 
+/**
+ * Impressão digital das notas de plataforma, pro diff de materialidade do
+ * `markRecalcPending` (elas viram `Nota.M` + `LogVotos`). Aceita as duas formas
+ * — a linha do banco (`vote_count`) e a normalizada do form (`votes`) — e ordena,
+ * porque a ordem das linhas não significa nada. `rating` nulo vira string vazia
+ * e NÃO `Number(null) === 0`: "sem nota" e "nota zero" são estados diferentes.
+ */
+function platformRatingsDigest(
+  rows:
+    | ReadonlyArray<{
+        platform: string
+        rating?: number | string | null
+        vote_count?: number | string | null
+        votes?: number | string | null
+      }>
+    | null
+    | undefined
+): string {
+  return (rows ?? [])
+    .map((r) => {
+      const rating = r.rating == null ? "" : String(Number(r.rating))
+      const rawVotes = r.vote_count ?? r.votes
+      const votes = rawVotes == null ? "0" : String(Number(rawVotes))
+      return `${r.platform}:${rating}:${votes}`
+    })
+    .sort()
+    .join("|")
+}
+
 function normalizePlatformRatings(
   platforms: Array<{ platform: string; rating?: number | null; votes?: number | null }>
 ) {
@@ -339,11 +370,16 @@ async function upsertTagsBatch(
 // PostgREST (uma obra pode ter ~200 tags).
 const TAG_DELETE_CHUNK = 100
 
+/**
+ * Devolve `{ changed }` porque `work_tags` é feature do Ridge (os 3 sinais de
+ * fit) e quem chama precisa saber se marca recálculo pendente. O diff já existia
+ * aqui dentro por outro motivo (preservar a proveniência) — só não era contado.
+ */
 async function syncWorkTags(
   supabase: SupabaseAdminClient,
   workId: string,
   tags: string[]
-) {
+): Promise<{ changed: boolean }> {
   const uniqueTagIds = [...new Set(await upsertTagsBatch(supabase, tags))]
 
   // DIFF, não delete-tudo-e-reinsere. O insert cru não carrega `source` nem
@@ -385,6 +421,7 @@ async function syncWorkTags(
   }
   // Tags mudaram → recomputa a classificação 18+ (monotônico; migração 161).
   await recomputeAdultAuto(supabase, workId)
+  return { changed: toRemove.length > 0 || toAdd.length > 0 }
 }
 
 async function syncWorkGenres(
@@ -1722,9 +1759,13 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
   // previsões (`capturePredictionForFirstRating` / `resolvePredictionsForWork`). Lida de
   // `works` ela morre no `DROP`; lida da view, ela vem do espelho dele e sobrevive. O `title`
   // é catálogo e passa igual.
+  // As colunas além de `title`/`user_score` existem só pro diff de materialidade
+  // do `markRecalcPending` lá embaixo — são a MESMA linha, custo zero de query.
   const { data: existingWork } = await supabase
     .from("works_owner")
-    .select("title, user_score")
+    .select(
+      "title, user_score, original_title, year, year_end, publication_status_id, total_chapters, observation_adjustment, synopsis_quality",
+    )
     .eq("id", id)
     .maybeSingle()
   const previousSlug = existingWork?.title ? titleToSlug(existingWork.title) : null
@@ -1882,6 +1923,14 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
       .upsert(scores, { onConflict: "work_id,criterion_slug" })
   }
 
+  // Estado anterior das plataformas — só pro diff. Precisa ser lido ANTES do
+  // delete abaixo, e comparado por VALOR: o fluxo é delete-e-reinsere, então
+  // "houve escrita" é sempre verdade e não diz nada sobre ter mudado.
+  const { data: prevPlatformRows } = await supabase
+    .from("platform_ratings")
+    .select("platform, rating, vote_count")
+    .eq("work_id", id)
+
   // Upsert plataformas
   const platforms = normalizePlatformRatings([
     { platform: "mangaupdates", rating: data.mu_rating, votes: data.mu_votes },
@@ -1910,8 +1959,9 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
     if (platformError) return { error: { _root: [platformError.message] } }
   }
 
-  // Salvar tags
-  await syncWorkTags(supabase, id, data.tags ?? [])
+  // Salvar tags. `work_tags` é feature (fit); `work_genres` NÃO — o recalc lê só
+  // a primeira, por isso o resultado de `syncWorkGenres` não entra no diff.
+  const tagSync = await syncWorkTags(supabase, id, data.tags ?? [])
   await syncWorkGenres(supabase, id, knownGenres.genreIds, "replace")
   // Arquivadas ANTES das ativas: se o insert das ativas falhar, o pior caso é uma
   // capa a mais no arquivo — e não uma capa arquivada que "desarquivou" sozinha.
@@ -1960,10 +2010,56 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
     await markPredictionLabelChanged(id)
   }
 
-  // Editar a obra muda as features do Ridge global → marca a base como recálculo
-  // pendente em vez de recalcular na hora. A Nota Prevista atualiza quando o
-  // usuário clica "Recalcular agora" ou no auto-recalc (≥1h sem novas edições).
-  await markRecalcPending("updateWork")
+  // Editar a obra PODE mudar as features do Ridge global — e na maior parte das
+  // vezes não muda: título, sinopse, capa, títulos alternativos, gêneros e
+  // external ids não entram em nenhuma feature. Marca a base como pendente só
+  // quando alguma entrada de `recalc-inputs.ts` de fato mudou de valor; quando
+  // muda, a Nota Prevista atualiza no "Recalcular agora" ou no auto-recalc (≥1h).
+  const ownerId = await getOwnerUserId()
+  const editorIsOwner = (editorId ?? ownerId) === ownerId
+  const changedForRecalc = changedInputs([
+    ["original_title", existingWork?.original_title, data.original_title ?? null],
+    ["year", existingWork?.year, data.year ?? null],
+    ["year", existingWork?.year_end, data.year_end ?? null],
+    [
+      "publication_status",
+      existingWork?.publication_status_id,
+      getPublicationStatusIdByName(data.publication_status) ?? data.publication_status_id ?? null,
+    ],
+    ["total_chapters", existingWork?.total_chapters, data.total_chapters ?? null],
+    // As 9 notas: `existingByCriterion` já estava em memória (é o que preserva a
+    // proveniência AI). Conta remoção também — `slugsToDelete` some do vetor.
+    [
+      "category_scores",
+      `${existingByCriterion.size}`,
+      `${scores.length}`,
+    ],
+    ...scores.map(
+      (row) =>
+        [
+          "category_scores",
+          existingByCriterion.get(row.criterion_slug)?.score ?? null,
+          row.score,
+        ] as const,
+    ),
+    ["platform_ratings", platformRatingsDigest(prevPlatformRows), platformRatingsDigest(platforms)],
+    ["work_tags", false, tagSync.changed],
+    // Pessoais: só contam se quem editou for o dono — o `personalPatchFromForm`
+    // vai pro espelho de QUEM EDITA, e o recalc global lê o do dono. Sem esta
+    // guarda, um 2º curador salvando a ficha compararia a nota DELE com a DELE.
+    ...(editorIsOwner
+      ? ([
+          ["user_score", existingWork?.user_score, data.user_score ?? null],
+          [
+            "observation_adjustment",
+            existingWork?.observation_adjustment,
+            data.observation_adjustment,
+          ],
+          ["synopsis_quality", existingWork?.synopsis_quality, data.synopsis_quality ?? null],
+        ] as ReadonlyArray<readonly [RecalcInput, unknown, unknown]>)
+      : []),
+  ])
+  await markRecalcPending("updateWork", { changed: changedForRecalc, actorId: editorId ?? ownerId })
 
   revalidatePath(`/titles/${id}`)
   revalidatePath(`/titles/${id}/edit`)
@@ -2539,7 +2635,33 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
     }
   }
 
-  await markRecalcPending("updateWorkStatus")
+  // Diff, não "houve save". O form do Meu Status grava status, capítulos, a data,
+  // as observações e as 8 `post_*` — nenhuma delas é feature nem rótulo. Só três
+  // colunas do patch movem número, e o estado anterior das três já veio no
+  // `sharedRow` lido lá em cima: o diff aqui não custa uma query a mais.
+  //
+  // A checagem é `in personalState` porque o patch é PARCIAL: sem leitura
+  // suficiente, `ratingPatchFrom` nem entra (ver `canRate`), a nota gravada
+  // continua a de antes — e comparar contra um campo ausente diria "virou null".
+  const changedInputsFromStatus = changedInputs(
+    (
+      [
+        ["user_score", "user_score"],
+        ["observation_adjustment", "observation_adjustment"],
+        ["synopsis_quality", "synopsis_quality"],
+      ] as const
+    )
+      .filter(([column]) => column in personalState)
+      .map(
+        ([column, input]) =>
+          [
+            input,
+            sharedRow?.[column as keyof typeof sharedRow] ?? null,
+            personalState[column as keyof PersonalStatePatch] ?? null,
+          ] as const,
+      ),
+  )
+  await markRecalcPending("updateWorkStatus", { changed: changedInputsFromStatus })
 
   revalidatePath("/titles/[id]", "page")
   revalidatePath("/titles")
@@ -2607,8 +2729,11 @@ export async function setReadingStatusForWorks(ids: string[], status: string) {
     }
   }
 
-  // Recalc só faz sentido pro dono: é a linha de `works` (e o modelo dele) que mudou.
-  if (gate.isOwner) await markRecalcPending("setReadingStatusForWorks")
+  // Recalc NÃO é marcado aqui, de propósito: esta action só grava `personal_status_id`
+  // e `chapters_read` (o `chapters_read = total` do ramo "Finished" é o arredondamento
+  // do status, não o `total_chapters` do catálogo). Nenhuma das duas colunas é feature
+  // do Ridge nem rótulo — ver `lib/calculations/recalc-inputs.ts`. Marcava antes, e
+  // 100% dos disparos eram inócuos: badge aceso, recálculo devolvendo os mesmos números.
 
   revalidatePath("/leitura")
   revalidatePath("/ai-evaluation")

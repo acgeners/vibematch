@@ -9,7 +9,9 @@ import "server-only"
 
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { ensureAdmin } from "@/server/queries/current-user"
+import { ensureAdmin, getOwnerUserId } from "@/server/queries/current-user"
+import { decideMarkRecalc, needsOwnerToDecide } from "@/lib/calculations/recalc-inputs"
+import type { RecalcInput } from "@/lib/calculations/recalc-inputs"
 import { recalculateAll, type RecalculateExecutionContext } from "@/server/actions/calculations"
 import { ensureRecalculateScores } from "@/lib/orchestration/integrations/recalculate-scores"
 import {
@@ -51,6 +53,26 @@ export async function getAiPendingCounts(): Promise<AiPendingCounts> {
   return { embeddings, canonicalSynopsis, reviewSummary }
 }
 
+export interface MarkRecalcPendingOptions {
+  /**
+   * As entradas do recálculo que ESTA operação mudou (ver
+   * `lib/calculations/recalc-inputs.ts`). Omitir significa "não sei" e marca —
+   * é o default à prova de falha, e o comportamento de quem ainda não declara.
+   * Array VAZIO significa "conferi, nada material mudou" e NÃO marca.
+   */
+  changed?: readonly RecalcInput[]
+  /**
+   * Quem fez a operação. Só é lido quando `changed` tem apenas entradas
+   * PESSOAIS: o recalc global lê o viés/tags/perfil/rótulos do DONO, então a
+   * mesma mudança feita por outra pessoa não move número nenhum aqui.
+   *
+   * 🔴 Passe o id EXPLÍCITO de quem agiu. Deduzir com `getCurrentUserId()` aqui
+   * dentro seria pior que não checar: em background (sem sessão) ele cai no
+   * singleton, ou seja, TODA ação pareceria ser do dono e o gate nunca fecharia.
+   */
+  actorId?: string
+}
+
 /**
  * Marca a base como "recálculo pendente" em vez de rodar recalculateAll na hora.
  * Usado pelos saves incidentais (edição de obra/status, pós-leitura, importação,
@@ -58,12 +80,23 @@ export async function getAiPendingCounts(): Promise<AiPendingCounts> {
  * Prevista só recalcula quando o usuário clica "Recalcular agora" ou passada 1h
  * sem novas edições.
  *
+ * O `context` vai pro log (`[recalc-pending]`), que é a única medição que existe
+ * da frequência real de cada disparo: a distribuição por caller sai de
+ * `grep '\[recalc-pending\]'` nos logs, não de estimativa.
+ *
  * Fallback: se a RPC/colunas ainda não existem (migration 096 não aplicada) ou o
  * UPDATE falha, cai pro recálculo em background (comportamento antigo) pra nada
  * quebrar — o deferimento passa a valer só depois da migration.
  */
-export async function markRecalcPending(context: string): Promise<void> {
+export async function markRecalcPending(
+  context: string,
+  opts?: MarkRecalcPendingOptions,
+): Promise<void> {
+  const skip = await shouldSkipMark(context, opts)
+  if (skip) return
+
   const supabase = createAdminClient()
+  console.info(`[recalc-pending] marcou · context=${context} · changed=${opts?.changed?.join(",") ?? "?"}`)
   try {
     const { error } = await supabase.rpc("touch_recalc_pending")
     if (error) throw error
@@ -74,6 +107,37 @@ export async function markRecalcPending(context: string): Promise<void> {
     )
     recalculateScoresInBackground(context)
   }
+}
+
+/**
+ * Gate de materialidade. Duas saídas, ambas conservadoras por construção — a
+ * dúvida sempre resolve em MARCAR, porque não marcar deixa nota velha na tela
+ * sem nada acusar, enquanto marcar demais só custa um clique.
+ */
+async function shouldSkipMark(context: string, opts?: MarkRecalcPendingOptions): Promise<boolean> {
+  const changed = opts?.changed
+
+  // Só paga o `getOwnerUserId()` quando a decisão depende dele — o caminho comum
+  // (mudou entrada de catálogo) resolve sem consulta nenhuma.
+  let ownerId: string | null = null
+  if (needsOwnerToDecide(changed, opts?.actorId)) {
+    try {
+      ownerId = await getOwnerUserId()
+    } catch (err) {
+      // Não deu pra saber quem é o dono → marca. Um gate que falha ABERTO devolve
+      // um badge a mais; um que falha fechado devolve nota errada, calada.
+      console.warn(
+        `[recalc-pending] dono indeterminado em ${context}, marcando:`,
+        err instanceof Error ? err.message : err,
+      )
+      return false
+    }
+  }
+
+  const decision = decideMarkRecalc(changed, opts?.actorId, ownerId)
+  if (decision.mark) return false
+  console.info(`[recalc-pending] pulou · context=${context} · ${decision.reason}`)
+  return true
 }
 
 /**
