@@ -341,7 +341,6 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   return (
     <div className="space-y-4">
       <Header
-        kicker="Ranking"
         title={
           <span className="inline-flex items-center gap-3">
             Ranking

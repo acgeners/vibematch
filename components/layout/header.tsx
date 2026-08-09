@@ -5,43 +5,65 @@ interface HeaderProps {
   title: ReactNode
   description?: ReactNode
   actions?: ReactNode
+  /**
+   * Só nomeia o TIPO do objeto quando o título é nome próprio ("Grupo" + "Shounen pesado")
+   * ou avisa o teor da tela. Em rota fixa ele repete o item aceso da barra superior — que já
+   * responde "onde eu estou" desde que a sidebar saiu — e vira a 3ª vez que a mesma palavra
+   * aparece na dobra. Não tem default: kicker herdado é palavra que ninguém pediu.
+   */
   kicker?: string
   icon?: ReactNode
   className?: string
 }
 
-export function Header({
-  title,
-  description,
-  actions,
-  kicker = "Biblioteca",
-  icon,
-  className,
-}: HeaderProps) {
+/**
+ * Acima disto a descrição não cabe ao lado do título sem truncar nas larguras que importam,
+ * então desce pra linha de baixo. Medido nas descrições reais do app: as curtas ficam em
+ * 22–66 caracteres e as explicativas passam de 79.
+ */
+const INLINE_DESCRIPTION_MAX_CHARS = 72
+
+export function Header({ title, description, actions, kicker, icon, className }: HeaderProps) {
+  // ReactNode não tem comprimento — só string entra no ramo inline. Descrição rica
+  // (a de /recommendations/[slug] é um <span> com chips) sempre desce.
+  const inlineDescription =
+    typeof description === "string" && description.length <= INLINE_DESCRIPTION_MAX_CHARS
+
   return (
     <div
       className={cn(
-        "relative mb-6 flex flex-col gap-4 pb-5 sm:flex-row sm:items-end sm:justify-between",
+        "relative mb-4 flex flex-col gap-3 pb-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6",
         "after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-border/60 after:via-primary/40 after:to-transparent",
         className
       )}
     >
-      <div className="flex min-w-0 items-start gap-4">
+      <div className="flex min-w-0 items-start gap-3">
         {icon && (
-          <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 text-primary ring-1 ring-primary/20 shadow-sm shadow-primary/10 [&_svg]:size-5">
+          <div className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 text-primary ring-1 ring-primary/20 shadow-sm shadow-primary/10 [&_svg]:size-4">
             {icon}
           </div>
         )}
         <div className="min-w-0">
-          <p className="mb-2 inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-primary/85">
-            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-primary/80 shadow-[0_0_8px_hsl(var(--primary)/0.6)]" />
-            {kicker}
-          </p>
-          <h1 className="font-bold tracking-tight text-foreground text-3xl md:text-4xl xl:text-[2.5rem] xl:leading-[1.1]">
-            {title}
-          </h1>
-          {description && (
-            <p className="mt-2 text-sm text-muted-foreground max-w-prose">{description}</p>
+          {/* items-baseline alinha a descrição com o título; o wrap é o que faz ela cair
+              pra linha de baixo sozinha no celular, sem truncar. */}
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+            {kicker && (
+              <span className="inline-flex shrink-0 translate-y-px items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-primary/90">
+                <span aria-hidden className="h-1 w-1 rounded-full bg-primary/80" />
+                {kicker}
+              </span>
+            )}
+            <h1 className="min-w-0 text-2xl font-bold leading-tight tracking-tight text-foreground sm:text-[1.625rem]">
+              {title}
+            </h1>
+            {inlineDescription && (
+              <span className="text-[13px] leading-snug text-muted-foreground">{description}</span>
+            )}
+          </div>
+          {description && !inlineDescription && (
+            <p className="mt-1.5 max-w-prose text-[13px] leading-snug text-muted-foreground">
+              {description}
+            </p>
           )}
         </div>
       </div>

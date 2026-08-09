@@ -25,7 +25,6 @@ export default async function FavoritesPage() {
   return (
     <div className="space-y-4">
       <Header
-        kicker="Biblioteca"
         title="Favoritos"
         description="Organize suas obras em grupos pra comparar em contextos diferentes."
         icon={<Heart />}
