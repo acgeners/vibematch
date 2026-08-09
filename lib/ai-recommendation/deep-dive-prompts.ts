@@ -1,7 +1,12 @@
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { POST_READING_WEIGHT_LABELS, type PostReadingScoreField } from "@/lib/constants/post-reading-criteria"
-import { formatPreferenceRulesBlock, formatReviewDigestBlock } from "./prompts"
+import {
+  CRITERIA_COHERENCE_RULE,
+  CRITERIA_SCALE_LEGEND,
+  formatPreferenceRulesBlock,
+  formatReviewDigestBlock,
+} from "./prompts"
 import type {
   CandidateReview,
   DeepDiveAlternativeCandidate,
@@ -45,6 +50,10 @@ PRINCÍPIOS:
 
 2. **Cite evidência o tempo todo.** Reviews vêm rotuladas R1..R10. Quando uma decisão depende de review, cite o ID na justificativa (ex.: "pacing irregular [R3, R7]"). NÃO INVENTE reviews. Se a obra não tem reviews fornecidas, declare isso em \`review_synthesis.consensus\` ("Sem reviews externas") e mantenha o resto da análise via tags/scores/perfil.
    - Para obras com POUCAS tags ou \`category_scores\` escassos/rasos, apoie-se MAIS nas reviews (R1..R10) e nas PREFERÊNCIAS/REGRAS do usuário do que nos atributos finos — eles são pouco confiáveis nesses casos. Abaixe o \`confidence\` quando a evidência for magra.
+
+${CRITERIA_SCALE_LEGEND}
+
+${CRITERIA_COHERENCE_RULE}
 
 2b. **PREFERÊNCIAS E REGRAS DO USUÁRIO** (quando o bloco estiver presente): são declarações do próprio usuário, em texto livre — CONDICIONAIS ("evito X exceto se Y") e/ou GERAIS ("valorizo arte detalhada mesmo com história simples"). Aplique as condicionais como LÓGICA, não filtro absoluto: só pesam quando a condição E a exceção casarem com tags/category_scores da obra — não rebaixe a obra só porque o antecedente apareceu. As gerais entram como contexto permanente do gosto. Quando uma regra mover o \`match_score\` ou a \`read_recommendation\`, cite-a no \`reasoning\` (ou em \`flags\`).
    - **INVERSÃO DE SENTIMENTO**: uma review que CONFIRMA um traço que o usuário declarou EVITAR é evidência NEGATIVA pra ele, MESMO que o autor da review AME esse traço. Ex.: "amo que ela é uma vilã cruel" CONFIRMA a crueldade que ele evita → conta CONTRA. NÃO use o consenso positivo nem a nota alta dos reviewers pra descontar a regra — o entusiasmo deles não anula a preferência dele.

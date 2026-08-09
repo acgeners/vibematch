@@ -1143,6 +1143,53 @@ verdade conferida. Ao anotar pendência aqui, escreva a **data** e a **forma de 
 - ~~`enforceNeutralCoupleDynamicsWhenNoRomance`~~: **removido na v23** (2026-08-09). Forçava `couple_dynamics = 5.0` quando `romance ≤ 3`, partindo de "sem romance, não há dinâmica" — premissa que morreu com a ampliação do critério pra vínculos centrais. Travava **17 das 18** obras sem romance. Quem decide "não aplicável" agora é o prompt, por ausência de VÍNCULO — não de romance. ⚠️ As ~31 justificativas que ele reescreveu seguem no banco (ver `lib/criteria/justification.ts`)
 - `enforceAuditableReviewUsage`: **non-fatal since v20 (2026-06-27)** — generic review citation is accepted ("algumas reviews apontam…"), so it no longer requires/validates specific review IDs (`R1`, `R2`…) nor throws. It only records an informational `reviewAudit` (`required` = "havia reviews no prompt"; `usedReviewIds` = whatever IDs the model happened to cite, often empty with generic citation). `review_usage` is now an OPTIONAL tool/schema field. (Earlier behavior: threw + retried when IDs weren't cited — removed because a citation slip discarded otherwise-valid evals.)
 
+## Quem escreve prosa sobre uma obra precisa saber o que os números dela QUEREM DIZER
+
+Ranking e Deep Dive recebem `category_scores: tragedy=6.0, couple_dynamics=8.0, …` como números
+**crus** — sem a rubrica e sem as justificativas que os produziram — ao lado das tags em texto e
+do digest inteiro. Sem saber que 6,0 em `tragedy` é *"perdas isoladas ou reversíveis"*, o
+consultor escreve a prosa a partir do digest e os números viram enfeite.
+
+Medido em 2026-08-09 sobre **281 itens de ranking** persistidos: **21 descrevem abuso,
+toxicidade ou violência numa obra cujo `couple_dynamics` ≥ 7** — a faixa que significa relação
+**saudável**. Caso real (`tragedy=6.0`, `couple_dynamics=8.0`): *"o tom é predominantemente 'dark
+ambience' com abuso físico extremo e tragédia como pano de fundo constante"* — vocabulário da
+faixa 9-10 sobre um 6,0, com a lista de atributos ao lado na mesma tela.
+
+A correção é uma constante só, em `lib/ai-recommendation/prompts.ts`:
+
+| | |
+|---|---|
+| `CRITERIA_SCALE_LEGEND` | os rótulos das 4 faixas dos 9 critérios, **derivados de `CRITERIA_RUBRICS`** |
+| `CRITERIA_COHERENCE_RULE` | proíbe prosa que contradiz o número; manda **declarar** a divergência |
+
+🔴 **A legenda é DERIVADA, nunca escrita à mão.** `sync-constants` reescreve as faixas a partir
+do banco; uma cópia literal aqui é a 2ª régua pro mesmo número — mesma armadilha do
+`LOW_BALANCE_USD` e do `STRONG_TAG_WEIGHT`. Só os **rótulos** entram (o texto antes dos
+dois-pontos): a rubrica inteira são ~5k caracteres e o que falta ali é vocabulário de
+intensidade, não a casuística.
+
+⚠️ **A legenda precisa avisar que `couple_dynamics` é valência** — senão ela ENSINA o erro:
+"0-3 Destrutiva" lido na chave de presença vira "quase não tem dinâmica", que é o oposto.
+
+⚠️ **Quando o digest contradiz os atributos, isso é INFORMAÇÃO — não um empate a resolver em
+silêncio.** A regra manda registrar a divergência em `risks` nomeando os dois lados e abaixar o
+`confidence`. Escolher um lado sem dizer que havia outro é o que faz a mesma obra ser descrita de
+dois jeitos em duas telas. E a regra diz explicitamente que **não** é permissão pra ignorar as
+reviews — senão conserta um viés e abre o oposto.
+
+⚠️ **São DOIS consumidores, e o Deep Dive tem uma cópia PRÓPRIA de `formatCategoryScores`** — é
+fácil corrigir só o ranking e achar que acabou. Guardado por
+`tests/unit/ai-recommendation/legenda-de-faixas.test.ts`, que verifica os dois prompts.
+
+✅ **O que NÃO era problema, medido:** a suspeita de que avaliação e digest liam amostras
+diferentes das mesmas reviews. Os tetos de fato divergem (avaliação 30 total/12 por fonte,
+estratificada por **nota do reviewer**; digest 40 total/8 por fonte, as mais **longas**) e 358
+obras passam do teto — mas replicando os dois seletores sobre as reviews persistidas, o **Jaccard
+mediano é 78,9%** (p10 64,3%, p90 100%, **nenhuma obra abaixo de 50%**). As duas leem
+essencialmente a mesma evidência; a discordância entre os artefatos vem da TAREFA, não da
+amostra. Unificar os seletores não vale o custo de re-rodar tudo.
+
 ## Quatro critérios tinham colapsado numa faixa só — e cada um por um motivo diferente
 
 Medido em 2.393 avaliações (2026-08-09), share por faixa da rubrica:
