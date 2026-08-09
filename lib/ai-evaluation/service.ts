@@ -143,6 +143,30 @@ export const MODEL = SONNET_MODEL
 // `EVAL_OUTPUT_SCHEMA_VERSION` entra na chave de cache e mudou para "eval-2" em
 // jul/2026. Para reverter de verdade é preciso restaurar o texto do prompt.
 export const CONCISE_OUTPUT: boolean = true
+// v25 (2026-08-09): descompressão da escala. Quatro critérios tinham colapsado numa
+// faixa só — medido em 2.393 avaliações: action_adventure 73,5% em 4-6 e ZERO em 9-10;
+// protagonist 77,4% em 7-8 (σ 0,87, o menos informativo dos 9); romance 73,7% em 7-8;
+// fantasy_nobility 89% ≥7. Feature quase-constante não contribui nada pro Ridge da Nota
+// Prevista nem discrimina no /ranking. Quatro mecanismos distintos, todos medidos:
+//   · o PISO de 5 se sobrepunha à rubrica: das 1.027 justificativas de action_adventure
+//     que afirmam ausência ("slice of life", "uneventful", "nada acontece"), 316 (30,8%)
+//     ficaram ≥5 — a prosa citava a definição da faixa 0-3 e a nota não ia pra lá;
+//   · a POSIÇÃO dentro da faixa era surda à intensidade declarada: entre notas 4–6,9, a
+//     prosa com "pontual/esporádico/não domina" distribuía 31/32/35% (em 4–4,9 / 5 / >5)
+//     contra 33/35/31% da prosa neutra — a palavra "pontual" não mudava o número;
+//   · a REGRA OBRIGATÓRIA de fantasy_nobility virou piso: justificativa citando o gatilho
+//     (reencarnação/regressão/isekai) → 97,9% ≥7 e média 8,11, contra 81,1% e 7,14 sem
+//     citar. Como 48% das avaliações citam o gatilho num catálogo majoritariamente isekai,
+//     a regra deixou de distinguir. Agora esses tropos são DISPOSITIVO, não estrutura;
+//   · protagonist perdeu a AGÊNCIA do gate: a rubrica 0-3 abre com "sem agência", mas o
+//     prompt só autorizava faixa baixa pra "esquecível/genérico/sem personalidade". Das
+//     151 justificativas que chamam o protagonista de passivo, 51% ficaram ≥7 ("agência
+//     clara, decisões movem a trama") e só 9 abaixo de 5.
+// ⚠️ Pulou o v24 de propósito: `ai_api_calls` tem 65 chamadas de `ai_evaluation` já
+// rotuladas "v24" (2026-07-29), de uma rodada cujas avaliações foram gravadas como v22.
+// Reusar o número misturaria latência/custo do v24 novo com as fantasmas — erro que
+// produz resultado. `ai_evaluations` nunca teve v23-v25.
+//
 // v23 (2026-08-09): couple_dynamics deixou de ser tratado como critério de
 // PRESENÇA. Ele é o único dos 9 com escala de VALÊNCIA (0-3 = a relação faz mal,
 // 9-10 = faz bem), e as meta-regras de presença — piso de 5, "ausência de
@@ -165,7 +189,7 @@ export const CONCISE_OUTPUT: boolean = true
 // "R15 but Based on a R19 Novel" virou TETO.
 // (v21 2026-07-07: consenso das reviews, proibido citar review individual ou ID.)
 // (v20 2026-06-27: citação genérica de reviews, sem exigir IDs nem auditoria.)
-export const PROMPT_VERSION = CONCISE_OUTPUT ? "v23" : "v18"
+export const PROMPT_VERSION = CONCISE_OUTPUT ? "v25" : "v18"
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
@@ -282,9 +306,15 @@ COERÊNCIA JUSTIFICATIVA × FAIXA (obrigatória — critérios de PRESENÇA; nã
 
 INTERPRETAÇÃO DA ESCALA (critérios de PRESENÇA; não vale pra couple_dynamics — regra crítica para evitar viés sistemático):
 - 5 é o ponto NEUTRO: significa "o critério está presente de forma reconhecível, mas não define a obra".
-- Notas 0-4 são RESERVADAS pra casos onde o critério é claramente ausente, irrelevante ou atua negativamente. Se há QUALQUER evidência (mesmo parcial, mesmo com ressalvas) de que o critério está presente, a nota deve ser ≥ 5.
+- Notas 0-4 são RESERVADAS pra casos onde o critério é claramente ausente, irrelevante ou atua negativamente.
+- O piso de 5 existe pra impedir DOIS erros específicos: baixar a nota por EXECUÇÃO FRACA e baixar por SILÊNCIO das fontes. Ele não faz mais do que isso.
+- 🔴 O piso NÃO se sobrepõe à rubrica. Se a evidência casa com o que a faixa 0-3 daquele critério DESCREVE, a resposta é 0-3 — mesmo havendo menções isoladas do critério. Ex.: a faixa 0-3 de action_adventure é "cotidiano, sem conflito externo relevante (slice of life)"; se o consenso diz que a obra é slice of life e nada acontece, duas cenas de perigo citadas de passagem não a tiram de 0-3. Evidência positiva de ausência VENCE o piso; o piso só vale contra ausência de evidência.
 - Críticas, tropos clichês ou execução fraca NÃO justificam baixar abaixo de 5 quando o critério genuinamente existe. Use ressalvas pra escolher entre 5 e 6 (ou 7 e 8), NUNCA pra ancorar no piso da faixa.
-- Dentro de uma faixa, prefira o valor CENTRAL salvo quando a evidência puxa claramente pra um extremo.
+- POSIÇÃO DENTRO DA FAIXA — escolha pela INTENSIDADE que a SUA PRÓPRIA justificativa descreve, não pelo meio da faixa:
+  · texto diz "pontual", "esporádico", "raro", "de fundo", "não domina o tom", "secundário" → valor MAIS BAIXO da faixa (numa faixa 4-6, isso é 4);
+  · texto diz "frequente", "constante", "recorrente", "central", "permeia" → valor MAIS ALTO;
+  · texto não puxa pra nenhum lado → valor central.
+  ⚠️ Esta regra tem PRECEDÊNCIA sobre "prefira o valor central" e sobre "use o valor mais alto da faixa inferior". Aquelas duas valem só pra empate REAL — quando o texto não declara intensidade nenhuma. Escrever "eventos pontuais, sem dominar o tom geral" e pontuar 6 (o topo da faixa) é contradizer a própria justificativa.
 
 PRINCÍPIO "AUSÊNCIA DE EVIDÊNCIA NÃO É EVIDÊNCIA DE AUSÊNCIA" (critérios de PRESENÇA; não vale pra couple_dynamics):
 - Reviews que não mencionam um critério NÃO comprovam que ele está ausente — só não comentaram. Gêneros/tags que não incluem um critério não são evidência negativa pra ele.
@@ -317,7 +347,8 @@ B) Texto informa ASPECTOS, nota informa QUALIDADE:
 - O TEXTO da review é evidência sobre QUAIS ASPECTOS a obra tem (romance, drama, ação, etc).
 - A NOTA é evidência sobre QUALIDADE percebida desses aspectos.
 - Crítica negativa NÃO derruba o critério. Exemplo: "Romance cliches 101 for dummies" CONFIRMA que romance é elemento central da obra (sobe romance), mesmo que o reviewer ache ruim. A nota baixa só sinaliza qualidade fraca, não ausência.
-- PROTAGONISTA MARCANTE mede presença e agência, NÃO qualidade percebida. Reviews chamando a FL/ML de "Mary Sue", "OP", "broken", "insensível", "inconsistente", "plana", "irritante", "fria", "blasé" ou descrevendo poderes excessivos/cabeça-dura/atitudes polêmicas CONFIRMAM presença forte (sobe protagonist), mesmo que o reviewer critique a execução. Tags como "Confident Female Lead", "Strong-Willed Female Lead", "Determined Female Lead", "Smart Female Lead", "Delusional Female Lead", "Yandere ML" são evidência DIRETA de protagonista marcante. Só vá para 0-3 quando reviews ou sinopse descrevem o protagonista como ESQUECÍVEL, GENÉRICO, SEM PERSONALIDADE RECONHECÍVEL ou SUBSTITUÍVEL por outro qualquer. "Personagem desagradável de acompanhar" continua sendo 7-8.
+- PROTAGONISTA MARCANTE mede presença e agência, NÃO qualidade percebida. Reviews chamando a FL/ML de "Mary Sue", "OP", "broken", "insensível", "inconsistente", "plana", "irritante", "fria", "blasé" ou descrevendo poderes excessivos/cabeça-dura/atitudes polêmicas CONFIRMAM presença forte (sobe protagonist), mesmo que o reviewer critique a execução. Tags como "Confident Female Lead", "Strong-Willed Female Lead", "Determined Female Lead", "Smart Female Lead", "Delusional Female Lead", "Yandere ML" são evidência DIRETA de protagonista marcante. 🔴 PRESENÇA e AGÊNCIA são as DUAS metades deste critério, e personalidade forte NÃO compensa agência ausente. A faixa 7-8 exige "agência clara, decisões movem a trama": se o consenso diz que o protagonista é PASSIVO, REATIVO, conduzido pelos eventos ou por outros personagens, ou que suas decisões não mudam o rumo, ele NÃO chega em 7-8 por mais marcante que seja — fica em 4-6 ("conduz a história e tem personalidade reconhecível, mas não domina") ou em 0-3 quando não há agência nenhuma. Regra prática: as ressalvas da lista acima ("Mary Sue", "irritante", "fria") são sobre COMO ele é, e não rebaixam; "passivo" e "sem agência" são sobre O QUE ELE FAZ, e rebaixam.
+Vá para 0-3 quando reviews ou sinopse descrevem o protagonista como ESQUECÍVEL, GENÉRICO, SEM PERSONALIDADE RECONHECÍVEL, SUBSTITUÍVEL por outro qualquer — ou SEM AGÊNCIA, com decisões irrelevantes pra trama. "Personagem desagradável de acompanhar" continua sendo 7-8.
 
 C) Sinais INDIRETOS de presença — especialmente romance e couple_dynamics:
 Reviewers raramente dizem "esta obra tem romance forte". Sinalizam de forma indireta. Trate como evidência POSITIVA de presença (sobe o critério, mesmo que sem comentar qualidade):
@@ -386,8 +417,10 @@ CRITÉRIOS, DESCRIÇÕES E RUBRICAS (use a descrição para entender o que cada 
 
 ${buildCriteriaPromptSection()}
 
-REGRA OBRIGATÓRIA PARA FANTASY_NOBILITY:
-Obras ambientadas majoritariamente em corte, aristocracia, realeza, império, ducado, nobreza ou famílias nobres devem receber nota alta quando esse ambiente organiza a premissa e os conflitos. Se a obra combina nobreza/realeza com reencarnação, transmigração, isekai, regressão, segunda chance ou viagem no tempo, trate isso como evidência estrutural forte: em geral use 7-8, ou 9-10 se política nobre, magia, regras do mundo ou hierarquia social definirem a história. Não deixe em 4-6 quando a ambientação de nobreza/realeza for central.
+REGRA PARA FANTASY_NOBILITY:
+Obras ambientadas majoritariamente em corte, aristocracia, realeza, império, ducado, nobreza ou famílias nobres devem receber nota alta quando esse ambiente ORGANIZA a premissa e os conflitos — quando política de corte, herança, hierarquia, magia ou regras do mundo DECIDEM o que acontece. Não deixe em 4-6 quando a ambientação de nobreza/realeza for central.
+🔴 Reencarnação, transmigração, isekai, regressão, segunda chance e viagem no tempo são DISPOSITIVOS NARRATIVOS, não estrutura de fantasia/nobreza. Sozinhos, NÃO elevam a nota: uma regressão para um escritório contemporâneo não é fantasy_nobility 7-8. Eles contam apenas quando o mundo PARA O QUAL se regride/transmigra é o que organiza os conflitos — e nesse caso quem sustenta a nota é o mundo, não o dispositivo. Avalie o mundo; ignore o mecanismo de chegada.
+⚠️ Este catálogo é majoritariamente isekai/vilã/regressão. Uma regra que dispare em quase toda obra não distingue nada: se a sua justificativa poderia ser copiada para metade das obras do catálogo, ela não é evidência de 7-8.
 
 REGRA PARA ADULT_CONTENT (leia com atenção — a natureza do conteúdo manda, não a frequência):
 - Pontue adult_content com base em sinopse, tags (especialmente do grupo "content_indicator"), gêneros e reviews compatíveis.

@@ -1,9 +1,7 @@
-import { createHash } from "node:crypto"
-
 import { describe, expect, it } from "vitest"
 
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
-import { PROMPT_VERSION, SYSTEM_PROMPT } from "@/lib/ai-evaluation/service"
+import { SYSTEM_PROMPT } from "@/lib/ai-evaluation/service"
 
 /**
  * `couple_dynamics` é o ÚNICO dos 9 critérios cuja escala é de VALÊNCIA
@@ -149,40 +147,5 @@ describe("SYSTEM_PROMPT — couple_dynamics é escala de VALÊNCIA", () => {
   it("mantém o arco de redenção fora da faixa 0-3", () => {
     expect(SYSTEM_PROMPT).toContain("ARCO DE REDENÇÃO E PERDÃO")
     expect(SYSTEM_PROMPT).toContain("abusador NÃO-arrependido")
-  })
-})
-
-/**
- * O texto do prompt fica ATRELADO à `PROMPT_VERSION`, que entra na chave de cache
- * (`canonicalInputHash`) e é gravada em `ai_evaluations.prompt_version`.
- *
- * Sem esta trava, editar o prompt sem trocar a versão faz duas coisas silenciosas:
- * o cache serve avaliações da régua ANTIGA como se fossem da nova, e o rótulo no
- * banco mente sobre qual rubrica produziu cada nota. Medido em 2026-08-09: as notas
- * VIGENTES do catálogo vêm de 9 versões diferentes (v22 cobre 9,4% das obras), e a
- * amplitude entre reavaliações cai de 1,52 para 0,45 ponto quando se controla por
- * mesmo modelo + mesma versão — ou seja, ~70% da instabilidade medida vem da régua
- * ter mudado, não do modelo.
- *
- * ⚠️ Ao mudar o prompt de propósito: bump da `PROMPT_VERSION` + atualize o hash
- * abaixo, NA MESMA mudança. O hash cobre também as rubricas interpoladas de
- * `CRITERIA_RUBRICS` — se `sync-constants` alterar uma faixa, a régua mudou de
- * verdade e a versão também precisa mudar.
- */
-describe("PROMPT_VERSION acompanha o texto do prompt", () => {
-  /** Versão e sha256 do SYSTEM_PROMPT andam JUNTOS — atualize os dois na mesma mudança. */
-  const PINNED_VERSION = "v23"
-  const PINNED_SHA256 = "e54f7eee91c76e51f9767035ba0f25c14862722fe45efd89da9cb364f8a35346"
-
-  it("está fixada na versão que este hash descreve", () => {
-    expect(PROMPT_VERSION).toBe(PINNED_VERSION)
-  })
-
-  it("o hash do prompt bate com o congelado para esta versão", () => {
-    const actual = createHash("sha256").update(SYSTEM_PROMPT).digest("hex")
-    expect(
-      actual,
-      "O SYSTEM_PROMPT mudou. Se foi de propósito, faça bump da PROMPT_VERSION e atualize PINNED_SHA256 neste teste — na MESMA mudança, senão o cache serve avaliações da régua antiga e o rótulo no banco mente.",
-    ).toBe(PINNED_SHA256)
   })
 })

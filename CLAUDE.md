@@ -1143,6 +1143,58 @@ verdade conferida. Ao anotar pendência aqui, escreva a **data** e a **forma de 
 - ~~`enforceNeutralCoupleDynamicsWhenNoRomance`~~: **removido na v23** (2026-08-09). Forçava `couple_dynamics = 5.0` quando `romance ≤ 3`, partindo de "sem romance, não há dinâmica" — premissa que morreu com a ampliação do critério pra vínculos centrais. Travava **17 das 18** obras sem romance. Quem decide "não aplicável" agora é o prompt, por ausência de VÍNCULO — não de romance. ⚠️ As ~31 justificativas que ele reescreveu seguem no banco (ver `lib/criteria/justification.ts`)
 - `enforceAuditableReviewUsage`: **non-fatal since v20 (2026-06-27)** — generic review citation is accepted ("algumas reviews apontam…"), so it no longer requires/validates specific review IDs (`R1`, `R2`…) nor throws. It only records an informational `reviewAudit` (`required` = "havia reviews no prompt"; `usedReviewIds` = whatever IDs the model happened to cite, often empty with generic citation). `review_usage` is now an OPTIONAL tool/schema field. (Earlier behavior: threw + retried when IDs weren't cited — removed because a citation slip discarded otherwise-valid evals.)
 
+## Quatro critérios tinham colapsado numa faixa só — e cada um por um motivo diferente
+
+Medido em 2.393 avaliações (2026-08-09), share por faixa da rubrica:
+
+| critério | 0-3 | 4-6 | 7-8 | 9-10 | σ |
+|---|---|---|---|---|---|
+| `action_adventure` | 19,9% | **73,5%** | 6,6% | **0,0%** | 1,31 |
+| `protagonist` | 0,1% | 18,8% | **77,4%** | 3,7% | **0,87** |
+| `romance` | 1,5% | 16,3% | **73,7%** | 8,4% | 1,16 |
+| `fantasy_nobility` | 3,4% | 7,4% | 76,2% | 13,0% | 1,42 |
+
+Isso custa duas vezes: **feature quase-constante não contribui nada pro Ridge** da Nota Prevista
+e não discrimina em filtro nem em ordenação do `/ranking`. Corrigido na **v25**, com quatro
+mecanismos distintos — a tentação é tratar como um problema só, e não é:
+
+🔴 **1. O piso de 5 se sobrepunha à RUBRICA.** Ele existe contra dois vieses reais (baixar por
+execução fraca, baixar por silêncio das fontes) — mas estava vencendo até evidência POSITIVA de
+ausência. Medido: das 1.027 justificativas de `action_adventure` que afirmam ausência ("slice of
+life", "uneventful", "nada acontece"), **316 (30,8%) ficaram ≥5** — enquanto a faixa 0-3 do
+critério diz literalmente *"cotidiano, sem conflito externo relevante (slice of life)"*. A prosa
+citava a definição da faixa e a nota não ia pra lá. ⚠️ Ao mexer nisto, mantenha explícito o que o
+piso ainda protege: corrigir um viés reabre o outro.
+
+🔴 **2. A posição DENTRO da faixa era surda à intensidade que a própria prosa declarava.** Entre
+notas 4–6,9, a justificativa com "pontual/esporádico/não domina" distribuía **31/32/35%** (em
+4–4,9 / 5 / >5) contra **33/35/31%** da prosa neutra — idênticas. A palavra "pontual" não mudava
+o número. Caso real: *"eventos pontuais, sem dominar o tom geral"* → **6,0**, o topo da faixa. A
+regra nova tem PRECEDÊNCIA explícita sobre "prefira o valor central" e sobre "use o valor mais
+alto da faixa inferior" — sem isso ela nasce letra morta.
+
+🔴 **3. A "REGRA OBRIGATÓRIA" de `fantasy_nobility` virou piso.** Justificativa citando o gatilho
+(reencarnação/regressão/transmigração/isekai) → **97,9% ≥7**, média 8,11; sem citar → 81,1% e
+7,14. Como **48%** das avaliações citam o gatilho num catálogo majoritariamente isekai/vilã, a
+regra deixou de distinguir qualquer coisa. Hoje esses tropos são **dispositivo narrativo**, não
+estrutura: uma regressão para um escritório contemporâneo não é `fantasy_nobility` 7-8. ⚠️ O
+antídoto ficou escrito no prompt — *"se a sua justificativa poderia ser copiada para metade das
+obras do catálogo, ela não é evidência de 7-8"*.
+
+🔴 **4. `protagonist` perdeu a AGÊNCIA do gate.** A faixa 0-3 abre com *"sem agência, decisões
+irrelevantes"*, mas o prompt só autorizava faixa baixa pra "ESQUECÍVEL / GENÉRICO / SEM
+PERSONALIDADE / SUBSTITUÍVEL". Medido: das **151** justificativas que chamam o protagonista de
+passivo ou sem agência, **51% ficaram ≥7** — a faixa que exige "agência clara, decisões movem a
+trama" — e só 9 abaixo de 5. ⚠️ A régua que separa os dois casos: *"Mary Sue", "irritante",
+"fria" são sobre COMO ele é e não rebaixam; "passivo" e "sem agência" são sobre O QUE ELE FAZ e
+rebaixam.* Sem essa distinção nomeada, consertar a agência reabre o viés de qualidade.
+
+⚠️ **A v25 pulou o v24 de propósito:** `ai_api_calls` tem 65 chamadas de `ai_evaluation` já
+rotuladas `v24` (2026-07-29), de uma rodada cujas avaliações foram gravadas como **v22** — o log
+e a tabela discordaram. Reusar o número misturaria latência/custo/qualidade do v24 novo com as
+fantasmas, e a análise sairia inteira plausível. Guardado em
+`tests/unit/ai-evaluation/prompt-version-pin.test.ts`, junto do pin de hash.
+
 ## A rubrica tem DUAS naturezas de escala, e `couple_dynamics` é a única de valência
 
 Oito critérios medem **presença/intensidade** (0 = não está lá). `couple_dynamics` mede
