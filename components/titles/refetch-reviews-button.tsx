@@ -28,11 +28,18 @@ export function RefetchReviewsButton({
   variant = "outline",
   size = "sm",
   className,
+  iconOnly = false,
 }: {
   workId: string
   variant?: BtnVariant
   size?: BtnSize
   className?: string
+  /**
+   * Só o ícone, com o rótulo no `title`/`aria-label`. É a forma usada no card de reviews:
+   * ali a ação é de CURADORIA e não pode ter mais peso visual que o conteúdo, que é o que
+   * o leitor veio ler.
+   */
+  iconOnly?: boolean
 }) {
   const [loading, setLoading] = useState(false)
   const refresh = useRefresh()
@@ -93,10 +100,20 @@ export function RefetchReviewsButton({
     }
   }
 
+  const label = loading ? "Buscando reviews…" : "Buscar reviews"
+
   return (
-    <Button variant={variant} size={size} onClick={onClick} disabled={loading} className={cn("gap-1.5", className)}>
+    <Button
+      variant={variant}
+      size={size}
+      onClick={onClick}
+      disabled={loading}
+      title={iconOnly ? label : undefined}
+      aria-label={iconOnly ? label : undefined}
+      className={cn("gap-1.5", iconOnly && "size-8 p-0", className)}
+    >
       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquareText className="h-4 w-4" />}
-      {loading ? "Buscando reviews…" : "Buscar reviews"}
+      {!iconOnly && label}
     </Button>
   )
 }
