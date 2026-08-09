@@ -42,6 +42,7 @@ import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 import { STATUS_FILTER_PARAMS, setStatusRule } from "@/lib/status-filter-toggle"
 import type { StatusFilterKind, StatusRule } from "@/lib/status-filter-toggle"
 import { ActiveFilterChips } from "@/components/ranking/active-filter-chips"
+import { CollapseIconTrigger, CollapseTitleTrigger } from "@/components/ui/collapse-trigger"
 import type { ActiveFilterChip, ActiveFilterValue } from "@/components/ranking/active-filter-chips"
 
 interface SavedFilterPreset {
@@ -2921,30 +2922,18 @@ export function RankingFilters({
     <div className="rounded-xl border border-border/70 bg-card/58 p-4 shadow-sm shadow-black/5 backdrop-blur">
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 items-center gap-3">
-          {/* O ícone é um alvo de clique, não um foco de teclado: ele repete a ação do
-              título logo ao lado, e dois botões idênticos na ordem de tabulação fariam
-              o leitor de tela anunciar "ocultar filtros" duas vezes seguidas. Quem
-              carrega a semântica é o título (aria-expanded), e o ⌃ à direita segue
-              inteiro para quem chega pelo teclado. */}
-          <div
-            role="presentation"
-            onClick={toggleCollapsed}
-            className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-lg bg-primary/10 text-primary transition-colors hover:bg-primary/20"
+          <CollapseIconTrigger
+            onToggle={toggleCollapsed}
+            className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary hover:bg-primary/20"
           >
             <Filter className="h-4 w-4" />
-          </div>
+          </CollapseIconTrigger>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base font-semibold">
-                <button
-                  type="button"
-                  onClick={toggleCollapsed}
-                  aria-expanded={!collapsed}
-                  title={collapsed ? "Mostrar filtros" : "Ocultar filtros"}
-                  className="rounded transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                >
+                <CollapseTitleTrigger collapsed={collapsed} onToggle={toggleCollapsed}>
                   Filtros
-                </button>
+                </CollapseTitleTrigger>
               </h2>
               {activeFilterChips.length > 0 && (
                 <span className="rounded-full border border-border/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
