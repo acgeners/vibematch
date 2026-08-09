@@ -11,8 +11,10 @@ import { getLowCoverageWorkIds } from "@/server/queries/calibration-guards"
 import { getAllGenres, getGenreCatTypes } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
+import { STRONG_TAG_WEIGHT } from "@/lib/tags/segment"
 import { getStatusOptions } from "@/server/queries/status-options"
 import { getFilterPresets } from "@/server/queries/filter-presets"
+import { getListsForPicker } from "@/server/queries/lists"
 import { countStaleAlignmentWorks } from "@/server/queries/recommendations"
 import { getRecalcPendingState } from "@/server/recalc/queue"
 import { Header } from "@/components/layout/header"
@@ -31,6 +33,7 @@ import { unstable_cache } from "next/cache"
 import { after } from "next/server"
 import { recordRankingSnapshots } from "@/lib/server/predictions/record-prediction"
 import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
+import { readStatusFilter } from "@/lib/status-filter-toggle"
 
 interface RankingPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -179,7 +182,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     hideMode === "all"
       ? avoided.map((p) => p.slug)
       : hideMode === "strong"
-        ? avoided.filter((p) => p.weight >= 2).map((p) => p.slug)
+        ? avoided.filter((p) => p.weight >= STRONG_TAG_WEIGHT).map((p) => p.slug)
         : []
   const isPaid = canAi
   const defaultSort = isPaid
@@ -201,21 +204,9 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   }
 
   const aiStatus = str("ai_status")
-  const perStatusParam = str("per_status")
-  const personalStatus =
-    perStatusParam === "all"
-      ? undefined
-      : perStatusParam
-        ? perStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
-        : [...UNREAD_PERSONAL_STATUSES]
-
-  const pubStatusParam = str("pub_status")
-  const publicationStatus =
-    pubStatusParam === "all"
-      ? undefined
-      : pubStatusParam
-        ? pubStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
-        : ["Completed"]
+  // Inclusão E exclusão de cada dimensão saem do dono único (STATUS_FILTER_PARAMS).
+  const personalFilter = readStatusFilter(str, "personal", UNREAD_PERSONAL_STATUSES)
+  const publicationFilter = readStatusFilter(str, "publication", ["Completed"])
 
   // URL pode sobrescrever as preferências (ex: usuário ajusta direto na barra).
   // A preferência "Nota Prevista mínima" é persistida em min_final_score (repurposada).
@@ -240,8 +231,10 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   const filters: RankingFilters = {
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
     criterionMax: Object.keys(criterionMax).length ? criterionMax : undefined,
-    publicationStatus,
-    personalStatus: personalStatus?.length ? personalStatus : undefined,
+    publicationStatus: publicationFilter.include,
+    publicationStatusExclude: publicationFilter.exclude,
+    personalStatus: personalFilter.include,
+    personalStatusExclude: personalFilter.exclude,
     aiEvalStatus: aiStatus ? [aiStatus] : undefined,
     genreAll: multi("genres_all"),
     genreAny: multi("genres_any") ?? multi("genres"),
@@ -287,7 +280,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     rawEntries,
     allGenres, genreCatTypes, allTags, statusOptions, savedPresets,
     scoreThresholds, tierBandWidth, lowCoverageIds, staleAlignmentCount, recalcState, criterionPrefs,
-    criterionMoments, highlightWeights,
+    criterionMoments, highlightWeights, favoriteGroups,
   ] = await Promise.all([
     getRanking(filters),
     getAllGenres(),
@@ -303,6 +296,10 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     getCriterionColorRanges(),
     momentsPromise,
     getHighlightWeightsSafe(),
+    // Grupos de favoritos — habilitam "Adicionar a grupo" na barra de seleção.
+    // Vazio (sem sessão ou sem grupos) some com o botão em vez de abrir um
+    // diálogo sem destino.
+    getListsForPicker(),
   ])
   // Marca obras não-lidas com baixa cobertura de gênero (badge ⚠ na Nota esperada).
   const entries = rawEntries.map((e) => ({ ...e, lowCoverage: lowCoverageIds.has(e.workId) }))
@@ -375,10 +372,11 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         criterionPresets={prefs.criterionPresets}
         confidenceVotes={prefs.confidenceVotes}
         criterionMoments={criterionMoments}
+        criterionRanges={criterionPrefs}
         showAdultFilter
       />
 
-      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} criterionPrefs={criterionPrefs} criterionMoments={criterionMoments} highlightWeights={highlightWeights} />
+      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} criterionPrefs={criterionPrefs} criterionMoments={criterionMoments} highlightWeights={highlightWeights} favoriteGroups={favoriteGroups} />
     </div>
   )
 }

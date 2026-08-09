@@ -2,6 +2,7 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import { sanitizeInterestSelection } from "@/lib/interest-sentinels"
 import type { RankingFilters } from "@/server/queries/ranking"
 import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
+import { readStatusFilter } from "@/lib/status-filter-toggle"
 
 /**
  * Converte uma URLSearchParams da página /ranking em RankingFilters. Compartilhado
@@ -30,27 +31,19 @@ export function parseFiltersFromSearchParams(sp: URLSearchParams): RankingFilter
     if (mx != null) criterionMax[slug] = mx
   }
 
-  const perStatusParam = sp.get("per_status")
-  const personalStatus =
-    perStatusParam === "all"
-      ? undefined
-      : perStatusParam
-        ? perStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
-        : [...UNREAD_PERSONAL_STATUSES]
-
-  const pubStatusParam = sp.get("pub_status")
-  const publicationStatus =
-    pubStatusParam === "all"
-      ? undefined
-      : pubStatusParam
-        ? pubStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
-        : ["Completed"]
+  // Os dois params de cada dimensão saem do dono único — ver STATUS_FILTER_PARAMS.
+  // Ler `pub_status` à mão aqui é como a recomendação/rerank rodaria com um filtro
+  // DIFERENTE do que a tela mostra quando o usuário exclui um status: sem erro, sem log.
+  const personal = readStatusFilter((k) => sp.get(k), "personal", UNREAD_PERSONAL_STATUSES)
+  const publication = readStatusFilter((k) => sp.get(k), "publication", ["Completed"])
 
   return {
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
     criterionMax: Object.keys(criterionMax).length ? criterionMax : undefined,
-    publicationStatus,
-    personalStatus: personalStatus?.length ? personalStatus : undefined,
+    publicationStatus: publication.include,
+    publicationStatusExclude: publication.exclude,
+    personalStatus: personal.include,
+    personalStatusExclude: personal.exclude,
     genreAll: multi("genres_all"),
     genreAny: multi("genres_any") ?? multi("genres"),
     genreExclude: multi("genres_exclude"),

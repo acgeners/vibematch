@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -32,12 +32,17 @@ import {
   SD_STEP,
 } from "@/lib/ranking/criterion-unit"
 import type { CriterionMoments, CriterionUnit } from "@/lib/ranking/criterion-unit"
+import { MY_RANGE_STEPS, myRangeParams, ownedSlugs, readMyRangeState } from "@/lib/ranking/my-range"
+import type { IdealRange } from "@/lib/ranking/my-range"
 import type { CriterionScorePresets } from "@/types/domain"
 import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 import { saveFilterPreset, renameFilterPreset, deleteFilterPreset } from "@/server/actions/filter-presets"
 import { TERMINAL_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
-import { toggleStatusParam } from "@/lib/status-filter-toggle"
+import { STATUS_FILTER_PARAMS, setStatusRule } from "@/lib/status-filter-toggle"
+import type { StatusFilterKind, StatusRule } from "@/lib/status-filter-toggle"
+import { ActiveFilterChips } from "@/components/ranking/active-filter-chips"
+import type { ActiveFilterChip, ActiveFilterValue } from "@/components/ranking/active-filter-chips"
 
 interface SavedFilterPreset {
   id: string
@@ -57,29 +62,65 @@ const CRITERION_LABELS: Record<string, string> = {
   tragedy: "Tragédia",
 }
 
-const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
-  { value: "recommended", label: "Recomendado" },
-  { value: "decision", label: LABELS.decision.short },
-  { value: "expected_score", label: LABELS.expected_score.short },
-  { value: "personal_fit", label: LABELS.personal_fit.short },
-  { value: "alignment_score", label: LABELS.alignment_score.short },
-  { value: "platform_avg", label: LABELS.platform_avg.short },
-  { value: "total_votes", label: LABELS.total_votes.short },
-  { value: "title", label: LABELS.title.short },
-  { value: "chapters", label: LABELS.chapters_total.short },
-  { value: "chapters_read", label: LABELS.chapters_read.short },
-  { value: "year", label: LABELS.year.short },
-  { value: "synopsis_q", label: LABELS.synopsis_q.short },
-  { value: "synopsis_pred", label: LABELS.synopsis_pred.short },
-  { value: "publication_status", label: LABELS.publication_status.short },
-  { value: "personal_status", label: LABELS.personal_status.short },
-  { value: "updated_at", label: LABELS.updated_at.short },
-  { value: "last_read_at", label: LABELS.last_read_at.short },
-  ...CRITERION_SLUGS.map((slug) => ({
-    value: `crit_${slug}`,
-    label: CRITERION_LABELS[slug] ?? slug,
-  })),
+/**
+ * Opções de ordenação AGRUPADAS — 26 itens numa lista corrida não davam pra
+ * varrer. Os três primeiros grupos são os mesmos do seletor de colunas
+ * (`WORK_COLUMN_GROUP_LABELS`: Básico/Notas/Atributos), de propósito: quem
+ * aprendeu onde está "Veredito" ali acha aqui no mesmo lugar.
+ *
+ * "Recomendação" é o único grupo próprio — `recommended` e `decision` não são
+ * coluna nem atributo, são a régua de ordem da própria página.
+ */
+const SORTABLE_FIELD_GROUPS: Array<{ label: string; fields: Array<{ value: string; label: string }> }> = [
+  {
+    label: "Recomendação",
+    fields: [
+      { value: "recommended", label: "Recomendado" },
+      { value: "decision", label: LABELS.decision.short },
+    ],
+  },
+  {
+    label: "Notas",
+    fields: [
+      { value: "expected_score", label: LABELS.expected_score.short },
+      { value: "personal_fit", label: LABELS.personal_fit.short },
+      { value: "alignment_score", label: LABELS.alignment_score.short },
+      { value: "platform_avg", label: LABELS.platform_avg.short },
+      { value: "total_votes", label: LABELS.total_votes.short },
+      { value: "synopsis_q", label: LABELS.synopsis_q.short },
+      { value: "synopsis_pred", label: LABELS.synopsis_pred.short },
+    ],
+  },
+  {
+    label: "Básico",
+    fields: [
+      { value: "title", label: LABELS.title.short },
+      { value: "chapters", label: LABELS.chapters_total.short },
+      { value: "chapters_read", label: LABELS.chapters_read.short },
+      { value: "year", label: LABELS.year.short },
+      { value: "publication_status", label: LABELS.publication_status.short },
+      { value: "personal_status", label: LABELS.personal_status.short },
+      { value: "updated_at", label: LABELS.updated_at.short },
+      { value: "last_read_at", label: LABELS.last_read_at.short },
+    ],
+  },
+  {
+    label: "Atributos",
+    fields: CRITERION_SLUGS.map((slug) => ({
+      value: `crit_${slug}`,
+      label: CRITERION_LABELS[slug] ?? slug,
+    })),
+  },
 ]
+
+/** Achatado — o parse/validação da URL não conhece grupo, só o conjunto de campos.
+ *  Derivado dos grupos (e não uma 2ª lista) pra um campo novo não poder existir
+ *  num lugar e faltar no outro. */
+const SORTABLE_FIELDS: Array<{ value: string; label: string }> = SORTABLE_FIELD_GROUPS.flatMap((g) => g.fields)
+
+const SORT_FIELD_LABEL: Record<string, string> = Object.fromEntries(
+  SORTABLE_FIELDS.map((f) => [f.value, f.label]),
+)
 
 // Personal statuses sempre ocultos no ranking = os TERMINAIS (a leitura acabou).
 // A lista vem do banco (`personal_status.is_terminal`), não de nomes escritos à mão.
@@ -147,60 +188,192 @@ function SortLevelsSection({ searchParams, updateParams, className, defaultSort 
       title="Ordenação"
       className={className}
       headerAction={
-        levels.length < 5 && (
+        <span className="text-xs font-normal normal-case tracking-normal text-muted-foreground">
+          {levels.length} {levels.length === 1 ? "nível" : "níveis"}
+        </span>
+      }
+    >
+      {/* TRILHA de prioridade, não pilha. Cada nível é um chip e a ordem da
+          esquerda pra direita É o desempate — o "›" diz isso melhor que "1. 2. 3.".
+          A pilha antiga custava +52px de altura POR NÍVEL (medido: 201px com 2,
+          ~357px com 5), e esticava a linha inteira do painel; a trilha quebra
+          linha só quando precisa. */}
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2">
+        {levels.map((level, i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            {i > 0 && (
+              <span aria-hidden className="text-[11px] leading-none text-muted-foreground/70">
+                ›
+              </span>
+            )}
+            <span
+              className={cn(
+                "inline-flex items-center gap-0.5 rounded-full border py-0.5 pl-2 pr-1 transition-colors",
+                // O nível 1 é o que de fato ordena; os demais só desempatam.
+                i === 0
+                  ? "border-primary/45 bg-primary/10"
+                  : "border-border/70 bg-card/60",
+              )}
+            >
+              <Select value={level.field} onValueChange={(v) => updateField(i, v)}>
+                <SelectTrigger
+                  size="sm"
+                  aria-label={`Nível ${i + 1} de ordenação`}
+                  className="h-6 w-fit gap-1 border-0 bg-transparent px-1 text-xs shadow-none hover:bg-transparent focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent [&_svg]:size-3"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SortFieldOptions />
+                </SelectContent>
+              </Select>
+              <button
+                type="button"
+                onClick={() => toggleDir(i)}
+                className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                title={level.dir === "desc" ? "Decrescente" : "Crescente"}
+                aria-label={`${SORT_FIELD_LABEL[level.field] ?? level.field}: ordem ${level.dir === "desc" ? "decrescente" : "crescente"}`}
+              >
+                {level.dir === "desc"
+                  ? <ArrowDown className="h-3 w-3" />
+                  : <ArrowUp className="h-3 w-3" />}
+              </button>
+              {/* Some quando é o último nível — botão que não pode agir lê como
+                  quebrado, e "remover o único critério de ordem" não existe. */}
+              {levels.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => remove(i)}
+                  className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  aria-label={`Remover ordenação por ${SORT_FIELD_LABEL[level.field] ?? level.field}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </span>
+          </div>
+        ))}
+        {levels.length < 5 && (
           <button type="button" onClick={add}>
             <Badge
               variant="outline"
-              className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
+              className="cursor-pointer rounded-full border-dashed px-2.5 py-0.5 text-xs font-normal text-muted-foreground transition-colors hover:border-solid hover:text-foreground"
             >
               + nível
             </Badge>
           </button>
-        )
-      }
-    >
-      <div className="space-y-2">
-        <div className="grid grid-cols-1 gap-2">
-        {levels.map((level, i) => (
-          <div key={i} className="grid grid-cols-[1.25rem_minmax(0,1fr)_2rem_2rem] items-center gap-2 rounded-lg border border-border/55 bg-background/45 p-1.5">
-            <span className="text-xs text-muted-foreground w-4 shrink-0 text-right">{i + 1}.</span>
-            <Select value={level.field} onValueChange={(v) => updateField(i, v)}>
-              <SelectTrigger className="h-8 w-full text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SORTABLE_FIELDS.map((f) => (
-                  <SelectItem key={f.value} value={f.value} className="text-xs">
-                    {f.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <button
-              type="button"
-              onClick={() => toggleDir(i)}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-background/45 transition-colors hover:bg-muted"
-              title={level.dir === "desc" ? "Decrescente" : "Crescente"}
-              aria-label={level.dir === "desc" ? "Ordem decrescente" : "Ordem crescente"}
-            >
-              {level.dir === "desc"
-                ? <ArrowDown className="h-3.5 w-3.5" />
-                : <ArrowUp className="h-3.5 w-3.5" />}
-            </button>
-            <button
-              type="button"
-              onClick={() => remove(i)}
-              disabled={levels.length === 1}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/70 bg-background/45 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-30"
-              aria-label="Remover ordenação"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        ))}
-        </div>
+        )}
       </div>
     </FilterSection>
+  )
+}
+
+/**
+ * "Dentro do meu range" — atalho que preenche os nove limiares por atributo com
+ * as faixas ideais do perfil. Ver `lib/ranking/my-range.ts` pro porquê de ele
+ * escrever na URL em vez de ter parâmetro próprio.
+ *
+ * Só é renderizado quando há faixas (`ranges` não vazio) — mesma condição do
+ * modo de cor "Minha faixa" na tabela, que é o outro consumidor desse dado.
+ */
+function MyRangeToggle({
+  ranges,
+  searchParams,
+  updateParams,
+}: {
+  ranges: Record<string, IdealRange>
+  searchParams: Pick<URLSearchParams, "get">
+  updateParams: (updates: Record<string, string | null>) => void
+}) {
+  const state = readMyRangeState(searchParams, ranges)
+  const owned = ownedSlugs(ranges)
+  if (owned.length === 0) return null
+
+  const apply = (tolerance: number | null) => {
+    // Clicar no degrau já ativo é no-op. Sem isso, reclicar "Desligado" limparia
+    // limiares que a pessoa tinha posto à mão nos mesmos atributos.
+    if (state === tolerance) return
+    updateParams(myRangeParams(ranges, tolerance))
+  }
+
+  return (
+    <TooltipProvider>
+      <div className="flex items-center gap-1.5">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="cursor-help text-[11px] font-normal normal-case tracking-normal text-muted-foreground">
+              Meu range
+            </span>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs">
+            Filtra pelas faixas ideais do seu perfil de gosto — o mesmo dado que pinta as células no
+            modo de cor “Minha faixa”. Preenche os limiares dos {owned.length} atributos abaixo, então
+            você pode afrouxar um deles depois.
+          </TooltipContent>
+        </Tooltip>
+        <div className="inline-flex items-center gap-0.5 rounded-lg bg-muted/60 p-0.5">
+          <button
+            type="button"
+            onClick={() => apply(null)}
+            aria-pressed={state === null}
+            className={cn(
+              "rounded-md px-2 py-0.5 text-[11px] transition-colors",
+              state === null
+                ? "bg-card font-semibold text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Desligado
+          </button>
+          {MY_RANGE_STEPS.map((step) => (
+            <Tooltip key={step.tolerance}>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => apply(step.tolerance)}
+                  aria-pressed={state === step.tolerance}
+                  className={cn(
+                    "rounded-md px-2 py-0.5 text-[11px] transition-colors",
+                    state === step.tolerance
+                      ? "bg-card font-semibold text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {step.label}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">{step.hint}</TooltipContent>
+            </Tooltip>
+          ))}
+        </div>
+        {/* Estado "custom": há limiares nos atributos do range, mas afrouxados à
+            mão. Nenhum botão marcado seria mudo — o rótulo diz por que. */}
+        {state === "custom" && (
+          <span className="text-[11px] font-normal normal-case tracking-normal text-muted-foreground">
+            ajustado
+          </span>
+        )}
+      </div>
+    </TooltipProvider>
+  )
+}
+
+/** Itens do seletor de ordenação, agrupados. Componente próprio porque a mesma
+ *  lista é aberta uma vez por chip da trilha. */
+function SortFieldOptions() {
+  return (
+    <>
+      {SORTABLE_FIELD_GROUPS.map((group) => (
+        <SelectGroup key={group.label}>
+          <SelectLabel className="text-[10px] uppercase tracking-wider">{group.label}</SelectLabel>
+          {group.fields.map((f) => (
+            <SelectItem key={f.value} value={f.value} className="text-xs">
+              {f.label}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      ))}
+    </>
   )
 }
 
@@ -263,6 +436,14 @@ interface RankingFiltersProps {
    * seletor desabilitado, com a explicação; preenchido = lente disponível.
    */
   criterionMoments?: CriterionMoments | null
+  /**
+   * Faixas ideais por atributo do perfil de gosto — habilita o segmentado
+   * "Meu range" no cabeçalho de Notas por critério. É o MESMO dado que a tabela
+   * usa no modo de cor "Minha faixa" (`getCriterionColorRanges`), passado das
+   * duas pontas pela página. Ausente/vazio = sem perfil → o controle não aparece
+   * (igual ao toggle de cor, que também some).
+   */
+  criterionRanges?: Record<string, IdealRange>
   /** Confiança do público (pseudo_votes_nota_m): acima desse nº de votos a média
    *  externa pesa ≥50% na Nota Prevista. Marca o limiar "confiável" no filtro de votos. */
   confidenceVotes?: number | null
@@ -1075,15 +1256,50 @@ function encodeCsvSet(set: Set<string>): string | null {
   return set.size === 0 ? null : [...set].join(",")
 }
 
+/**
+ * Símbolo que não desenha nada além do próprio rótulo é ruído — e num card apertado
+ * ainda rouba largura de quem tem o que dizer. Dois casos, os dois vindos do banco
+ * (`publication_status.symbol` / `personal_status.symbol`):
+ *
+ * - `？` em "Unknown" — o rótulo repetido em glifo;
+ * - `⎯` (U+23AF) em "Untracked" — um traço, que não é ícone de coisa nenhuma.
+ *
+ * Filtra pelo GLIFO, não pelo nome do status: renomear a linha no banco não devolve o
+ * ícone, e um status novo que use um desses cai na mesma regra sem ninguém lembrar
+ * dela. Os traços vizinhos entram junto porque a diferença entre `-`, `–` e `⎯` não é
+ * visível na tela — trocar um pelo outro no banco não pode ressuscitar o ruído.
+ */
+const UNINFORMATIVE_SYMBOLS = new Set(["?", "？", "-", "–", "—", "―", "−", "⎯"])
+
+/**
+ * Chip de status com TRÊS estados: neutro · incluído · excluído.
+ *
+ * A anatomia é a mesma das abas Gêneros e Tags (`[−] rótulo`) de propósito — o gesto de
+ * excluir já foi aprendido lá, e inventar outro aqui criaria duas gramáticas para a
+ * mesma ideia. A diferença é o que marca o estado EXCLUÍDO:
+ *
+ * 🔴 **Excluído é FORMA, não cor.** Cada status tem cor própria vinda do banco
+ * (`Cancelled` já é vermelho `#EF4444`, `Completed` é verde). Pintar o excluído de
+ * vermelho colidiria com a identidade do status — e "Cancelled excluído" ficaria
+ * vermelho sobre vermelho, indistinguível do neutro. Por isso: risco + borda tracejada
+ * + opacidade, que funcionam sobre qualquer cor. Mesma régua do 2º nível das tags
+ * amadas (ver CLAUDE.md, "Tag amada tem DOIS níveis").
+ */
 function StatusButton({
   option,
   active,
+  excluded,
   onClick,
+  onExclude,
   tooltip,
 }: {
   option: StatusOption
   active: boolean
+  /** Na lista de exclusão da dimensão. Nunca é `true` junto com `active`. */
+  excluded?: boolean
   onClick: () => void
+  /** Ausente = a dimensão não oferece exclusão (a zona `−` não é desenhada). */
+  onExclude?: () => void
   tooltip?: string | null
 }) {
   const style = active && option.color
@@ -1091,25 +1307,73 @@ function StatusButton({
     : option.color
       ? { borderColor: option.color, color: option.color }
       : undefined
-  const button = (
+  const symbol =
+    option.symbol && !UNINFORMATIVE_SYMBOLS.has(option.symbol.trim()) ? option.symbol : null
+  const label = (
+    <>
+      {symbol && <span className="text-xs">{symbol}</span>}
+      <span className={excluded ? "line-through decoration-[1.5px]" : undefined}>{option.status}</span>
+    </>
+  )
+
+  const chip = onExclude ? (
+    <div
+      className={cn(
+        "inline-flex h-8 shrink-0 items-stretch overflow-hidden rounded-full border transition-transform hover:-translate-y-px",
+        excluded ? "border-dashed opacity-60" : "",
+        active ? "" : "bg-transparent",
+      )}
+      style={
+        option.color
+          ? { borderColor: option.color, ...(active ? { backgroundColor: option.color } : {}) }
+          : undefined
+      }
+    >
+      <button
+        type="button"
+        onClick={onExclude}
+        aria-pressed={excluded}
+        aria-label={excluded ? `Parar de excluir ${option.status}` : `Excluir ${option.status}`}
+        title={excluded ? `Parar de excluir ${option.status}` : `Excluir ${option.status}`}
+        className={cn(
+          // px-1.5 (e não px-2): a zona "−" custa ~22px por pill, e o card de Status
+          // pessoal tem 10 deles — cada 2px aqui vale 20px de linha. Ver a nota de
+          // largura em `--l1cols2xl`.
+          "flex items-center border-r px-1.5 text-sm font-bold leading-none transition-colors",
+          active ? "border-white/35 text-white" : "border-border/60 text-muted-foreground",
+          "hover:bg-foreground/10 hover:text-foreground",
+        )}
+      >
+        <Minus className="h-3 w-3" />
+      </button>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={active}
+        className="flex cursor-pointer items-center gap-1 whitespace-nowrap px-2 text-[13px] font-medium"
+        style={active ? { color: "#fff" } : option.color ? { color: option.color } : undefined}
+      >
+        {label}
+      </button>
+    </div>
+  ) : (
     <button onClick={onClick} type="button" className="shrink-0">
       <Badge
         variant={active ? "default" : "outline"}
         className="inline-flex h-8 cursor-pointer items-center gap-1 whitespace-nowrap rounded-full px-2 text-[13px] font-medium transition-transform hover:-translate-y-px"
         style={style}
       >
-        {option.symbol && <span className="text-xs">{option.symbol}</span>}
-        {option.status}
+        {label}
       </Badge>
     </button>
   )
 
-  if (!tooltip?.trim()) return button
+  if (!tooltip?.trim()) return chip
 
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipTrigger asChild>{chip}</TooltipTrigger>
         <TooltipContent side="top" className="max-w-xs whitespace-pre-line text-left">
           {tooltip}
         </TooltipContent>
@@ -2077,6 +2341,7 @@ export function RankingFilters({
   defaultBand = 0.5,
   criterionPresets,
   criterionMoments,
+  criterionRanges,
   confidenceVotes,
   showTopN = true,
   showTierBand = true,
@@ -2300,51 +2565,69 @@ export function RankingFilters({
       ? allPersonalStatuses.map((o) => o.status)
       : [...UNREAD_PERSONAL_STATUSES]
 
-  // Toggle de um chip de status (Publicação · Status pessoal). A regra inteira mora em
-  // `toggleStatusParam` — ver lá por que o "todos" precisa ser materializado antes.
-  const toggleStatusSelection = (
-    key: string,
+  /**
+   * Põe um status na regra pedida. A regra inteira (exclusividade entre incluir e
+   * excluir, forma canônica do `"all"`, o que fazer ao sair do modo exclusão) mora em
+   * `setStatusRule` — aqui só se sabe QUAL chip foi clicado e para onde ele vai.
+   */
+  const applyStatusRule = (
+    kind: StatusFilterKind,
     status: string,
+    rule: StatusRule,
     options: StatusOption[],
     defaults: readonly string[]
   ) => {
-    updateParams({
-      [key]: toggleStatusParam(
-        searchParams.get(key),
+    const keys = STATUS_FILTER_PARAMS[kind]
+    updateParams(
+      setStatusRule(
+        kind,
+        { include: searchParams.get(keys.include), exclude: searchParams.get(keys.exclude) },
         status,
+        rule,
         options.map((o) => o.status),
         defaults
-      ),
-    })
+      )
+    )
   }
 
+  const pubExcluded = csvSet("pub_status_exclude")
+  const perExcluded = csvSet("per_status_exclude")
   const pubStatusParam = searchParams.get("pub_status")
   // Explícito ("all" literal na URL) vs. silencioso (parâmetro ausente E a página não
   // tem filtro padrão) — só o primeiro deve virar chip em "Filtros ativos": o segundo
   // não é uma escolha de ninguém, é só o estado inicial, e mostrar um chip "Todos"
   // removível pra ele contradiz "sem filtro nenhum aplicado por padrão".
+  // ⚠️ Excluindo, NENHUM chip fica marcado: a dimensão está no modo negativo, e um
+  // "todos marcados menos os riscados" diria que os outros foram escolhidos a dedo —
+  // que é justamente a leitura que a exclusão veio desfazer.
   const pubStatusExplicitAll = pubStatusParam === "all"
-  const isAllPublication = pubStatusExplicitAll || (pubStatusParam == null && pubStatusDefaultsAll)
-  const selectedPublicationStatuses = isAllPublication
+  const isAllPublication =
+    !pubExcluded.size && (pubStatusExplicitAll || (pubStatusParam == null && pubStatusDefaultsAll))
+  const selectedPublicationStatuses = pubExcluded.size
     ? new Set<string>()
-    : pubStatusParam != null
-      ? csvSet("pub_status")
-      : new Set<string>(pubStatusDefaults)
+    : isAllPublication
+      ? new Set<string>()
+      : pubStatusParam != null
+        ? csvSet("pub_status")
+        : new Set<string>(pubStatusDefaults)
 
-  const togglePublicationStatus = (status: string) =>
-    toggleStatusSelection("pub_status", status, allPublicationStatuses, pubStatusDefaults)
+  const setPublicationRule = (status: string, rule: StatusRule) =>
+    applyStatusRule("publication", status, rule, allPublicationStatuses, pubStatusDefaults)
 
   const perStatusParam = searchParams.get("per_status")
   const perStatusExplicitAll = perStatusParam === "all"
-  const isAllPersonal = perStatusExplicitAll || (perStatusParam == null && perStatusDefaultsAll)
-  const selectedPerStatuses = isAllPersonal
+  const isAllPersonal =
+    !perExcluded.size && (perStatusExplicitAll || (perStatusParam == null && perStatusDefaultsAll))
+  const selectedPerStatuses = perExcluded.size
     ? new Set<string>()
-    : perStatusParam != null
-      ? csvSet("per_status")
-      : new Set<string>(perStatusDefaults)
+    : isAllPersonal
+      ? new Set<string>()
+      : perStatusParam != null
+        ? csvSet("per_status")
+        : new Set<string>(perStatusDefaults)
 
-  const togglePersonalStatus = (status: string) =>
-    toggleStatusSelection("per_status", status, allPersonalStatuses, perStatusDefaults)
+  const setPersonalRule = (status: string, rule: StatusRule) =>
+    applyStatusRule("personal", status, rule, allPersonalStatuses, perStatusDefaults)
 
   // O contador do cabeçalho conta só os status VISÍVEIS: a seleção pode carregar os
   // terminais (que não têm chip), e "(11)" com 10 chips na tela é contador fantasma.
@@ -2397,7 +2680,7 @@ export function RankingFilters({
     [availableTags]
   )
 
-  const activeFilterChips: Array<{ key: string; label: string; onRemove: () => void }> = []
+  const activeFilterChips: ActiveFilterChip[] = []
   const pushRangeChip = (
     key: string,
     label: string,
@@ -2412,19 +2695,21 @@ export function RankingFilters({
     // Override =0 desliga um pré-filtro de preferência; ">= 0" não é filtro real.
     if (min === "0" && !max) return
     const f = fmt ?? ((raw: string) => raw)
-    const suffix = min && max ? `${f(min)} - ${f(max)}` : min ? `>= ${f(min)}` : `<= ${f(max as string)}`
+    const suffix = min && max ? `${f(min)}–${f(max)}` : min ? `≥ ${f(min)}` : `≤ ${f(max as string)}`
     activeFilterChips.push({
       key,
-      label: `${label}: ${suffix}`,
-      onRemove: () => updateParams({ [minKey]: null, [maxKey]: null }),
+      label,
+      values: [{ text: suffix }],
+      onClear: () => updateParams({ [minKey]: null, [maxKey]: null }),
     })
   }
 
   if (searchParams.has("top_n") && searchParams.get("top_n") !== "0") {
     activeFilterChips.push({
       key: "top_n",
-      label: `Top N: ${searchParams.get("top_n")}`,
-      onRemove: () => updateParams({ top_n: null }),
+      label: "Top N",
+      values: [{ text: searchParams.get("top_n") as string }],
+      onClear: () => updateParams({ top_n: null }),
     })
   }
   pushRangeChip("chapters", LABELS.chapters_total.short, "min_chapters", "max_chapters")
@@ -2451,145 +2736,184 @@ export function RankingFilters({
     activeFilterChips.push({
       key: "rated",
       label: "Só avaliadas",
-      onRemove: () => updateParams({ rated: null }),
+      onClear: () => updateParams({ rated: null }),
     })
   }
   /**
-   * Um chip por status vira ruído agora que "todos menos um" é uma seleção alcançável
-   * em UM clique (status pessoal tem 12 valores → 11 chips). Quando as exclusões são
-   * minoria, inverte a leitura: "todos menos X, Y" — e remover esse chip volta ao "todos".
+   * UM chip por dimensão de status, com os valores dentro.
+   *
+   * A exclusão agora é uma escolha própria (`*_status_exclude`), então o chip diz
+   * "Publicação exceto ~~Cancelled~~" — riscado, a mesma marca do pill no painel. A
+   * inferência antiga ("todos menos X" deduzido de uma seleção quase-completa) sumiu
+   * junto: ela só aparecia quando as exclusões eram minoria e, pior, escondia que o
+   * filtro era uma LISTA — que ignora status novos que entrem na tabela depois.
    */
   const pushStatusChips = (
     prefix: string,
     label: string,
-    key: string,
-    options: StatusOption[],
+    kind: StatusFilterKind,
     selected: Set<string>,
-    isAll: boolean,
-    toggle: (status: string) => void
+    excluded: Set<string>,
+    isExplicitAll: boolean,
+    setRule: (status: string, rule: StatusRule) => void
   ) => {
-    if (isAll) {
+    const keys = STATUS_FILTER_PARAMS[kind]
+    if (excluded.size > 0) {
+      activeFilterChips.push({
+        key: `${prefix}-except`,
+        label: `${label} exceto`,
+        tone: "exclude",
+        values: [...excluded].map((status) => ({
+          text: status,
+          struck: true,
+          onRemove: () => setRule(status, null),
+        })),
+        onClear: () => updateParams({ [keys.exclude]: null }),
+      })
+      return
+    }
+    if (isExplicitAll) {
       activeFilterChips.push({
         key: `${prefix}-all`,
         label: `${label}: Todos`,
-        onRemove: () => updateParams({ [key]: null }),
+        onClear: () => updateParams({ [keys.include]: null }),
       })
       return
     }
-    const excluded = options.map((o) => o.status).filter((s) => !selected.has(s))
-    if (excluded.length > 0 && excluded.length < selected.size) {
-      activeFilterChips.push({
-        key: `${prefix}-except`,
-        label: `${label}: todos menos ${excluded.join(", ")}`,
-        onRemove: () => updateParams({ [key]: "all" }),
-      })
-      return
-    }
-    selected.forEach((status) => {
-      activeFilterChips.push({
-        key: `${prefix}-${status}`,
-        label: `${label}: ${status}`,
-        onRemove: () => toggle(status),
-      })
+    if (selected.size === 0) return
+    activeFilterChips.push({
+      key: `${prefix}-in`,
+      label,
+      values: [...selected].map((status) => ({
+        text: status,
+        onRemove: () => setRule(status, null),
+      })),
+      onClear: () => updateParams({ [keys.include]: null, [keys.exclude]: null }),
     })
   }
 
   pushStatusChips(
     "pub",
     "Publicação",
-    "pub_status",
-    allPublicationStatuses,
+    "publication",
     selectedPublicationStatuses,
+    pubExcluded,
     pubStatusExplicitAll,
-    togglePublicationStatus
+    setPublicationRule
   )
   pushStatusChips(
     "personal",
     "Status",
-    "per_status",
-    allPersonalStatuses,
+    "personal",
     selectedPerStatuses,
+    perExcluded,
     perStatusExplicitAll,
-    togglePersonalStatus
+    setPersonalRule
   )
-  selectedSynopsisQ.forEach((quality) => {
-    // A sentinela vira o chip do travessão, logo abaixo — senão a barra de filtros ativos
-    // mostraria "Sinopse: none", que não é nome de nada na UI. Um "unknown" sobrando de
-    // filtro salvo antigo cai aqui também e some da barra, como já some do resultado.
-    if (quality === INTEREST_NONE || quality === "unknown") return
+  /**
+   * Interesse manual e previsto: UM chip por dimensão, com o nome que o painel usa.
+   *
+   * Antes eram quatro rótulos para duas dimensões — `Sinopse:` e `Interesse:` saíam do
+   * MESMO controle (`synopsis_q` + a sentinela), e `Prev. sinopse:`/`Prev. IA:` do
+   * mesmo par. Nenhum deles era o nome da seção ("Interesse na obra", linhas Manual e
+   * Int. Prev.), então quem quisesse desfazer procurava no painel um bloco "Sinopse"
+   * que não existe.
+   */
+  const pushInterestChip = (
+    key: string,
+    label: string,
+    tone: "loved" | "predicted",
+    param: string,
+    qualities: Set<string>,
+    otherActive: boolean,
+    otherLabel: string,
+    toggleOther: () => void
+  ) => {
+    const values: ActiveFilterValue[] = []
+    for (const quality of qualities) {
+      // A sentinela vira o valor por extenso, no fim — senão a barra mostraria
+      // "none", que não é nome de nada na UI. Um "unknown" sobrando de filtro salvo
+      // antigo cai aqui também e some da barra, como já some do resultado.
+      if (quality === INTEREST_NONE || quality === "unknown") continue
+      values.push({ text: quality, onRemove: () => toggleCsv(param, quality) })
+    }
+    if (otherActive) values.push({ text: otherLabel, onRemove: toggleOther })
+    if (values.length === 0) return
     activeFilterChips.push({
-      key: `synopsis-${quality}`,
-      label: `Sinopse: ${quality}`,
-      onRemove: () => toggleCsv("synopsis_q", quality),
-    })
-  })
-  if (manualOtherActive) {
-    activeFilterChips.push({
-      key: "synopsis-outros",
-      label: "Interesse: sem avaliação",
-      onRemove: toggleManualOther,
+      key,
+      label,
+      tone,
+      values,
+      onClear: () => updateParams({ [param]: null }),
     })
   }
-  selectedSynopsisPred.forEach((quality) => {
-    if (quality === INTEREST_NONE) return
-    activeFilterChips.push({
-      key: `synopsis-pred-${quality}`,
-      label: `Prev. sinopse: ${quality}`,
-      onRemove: () => toggleCsv("synopsis_pred", quality),
-    })
-  })
-  if (predOtherActive) {
-    activeFilterChips.push({
-      key: "synopsis-pred-outros",
-      label: "Prev. IA: sem previsão",
-      onRemove: togglePredOther,
-    })
-  }
-  selectedGenreAll.forEach((genre) => {
-    activeFilterChips.push({
-      key: `genre-all-${genre}`,
-      label: `+ Gênero: ${genre}`,
-      onRemove: () => setGenreRule(genre, null),
-    })
-  })
-  selectedGenreAny.forEach((genre) => {
-    activeFilterChips.push({
-      key: `genre-any-${genre}`,
-      label: `Gênero opcional: ${genre}`,
-      onRemove: () => setGenreRule(genre, null),
-    })
-  })
-  selectedGenreExclude.forEach((genre) => {
-    activeFilterChips.push({
-      key: `genre-exclude-${genre}`,
-      label: `- Gênero: ${genre}`,
-      onRemove: () => setGenreRule(genre, null),
-    })
-  })
-  selectedTagAll.forEach((slug) => {
-    activeFilterChips.push({
-      key: `tag-all-${slug}`,
-      label: `+ Tag: ${tagNameBySlug.get(slug) ?? slug}`,
-      onRemove: () => setTagRule(slug, null),
-    })
-  })
-  selectedTagAny.forEach((slug) => {
-    activeFilterChips.push({
-      key: `tag-any-${slug}`,
-      label: `Tag opcional: ${tagNameBySlug.get(slug) ?? slug}`,
-      onRemove: () => setTagRule(slug, null),
-    })
-  })
-  selectedTagExclude.forEach((slug) => {
-    activeFilterChips.push({
-      key: `tag-exclude-${slug}`,
-      label: `- Tag: ${tagNameBySlug.get(slug) ?? slug}`,
-      onRemove: () => setTagRule(slug, null),
-    })
-  })
 
-  const activeFilterLabel =
-    activeFilterChips.length === 1 ? "1 seleção" : `${activeFilterChips.length} seleções`
+  pushInterestChip(
+    "interest",
+    "Interesse",
+    "loved",
+    "synopsis_q",
+    selectedSynopsisQ,
+    manualOtherActive,
+    "sem avaliação",
+    toggleManualOther
+  )
+  pushInterestChip(
+    "interest-pred",
+    LABELS.synopsis_pred.abbrev,
+    "predicted",
+    "synopsis_pred",
+    selectedSynopsisPred,
+    predOtherActive,
+    "sem previsão",
+    togglePredOther
+  )
+
+  /**
+   * Gêneros e tags: um chip por REGRA (AND · OR · NOT), com a cor que o grid do painel
+   * já ensina — verde obrigatória, azul opcional, rosa excluída. Antes a regra vinha
+   * como prefixo textual (`+ Tag:`, `Tag opcional:`, `- Tag:`) e todos os chips eram
+   * cinza: a pista visual que o usuário aprendeu no grid era jogada fora na barra.
+   */
+  const pushFacetChips = (
+    prefix: string,
+    label: string,
+    rule: "all" | "any" | "exclude",
+    tone: "include" | "optional" | "exclude",
+    selected: Set<string>,
+    nameOf: (value: string) => string,
+    clearOne: (value: string) => void
+  ) => {
+    if (selected.size === 0) return
+    activeFilterChips.push({
+      key: `${prefix}-${rule}`,
+      label: rule === "any" ? `${label} ou` : rule === "exclude" ? `${label} exceto` : label,
+      tone,
+      values: [...selected].map((value) => ({
+        text: nameOf(value),
+        struck: rule === "exclude",
+        onRemove: () => clearOne(value),
+      })),
+      onClear: () => selected.forEach((value) => clearOne(value)),
+    })
+  }
+
+  const genreName = (genre: string) => genre
+  pushFacetChips("genre", "Gênero", "all", "include", selectedGenreAll, genreName, (g) => setGenreRule(g, null))
+  pushFacetChips("genre", "Gênero", "any", "optional", selectedGenreAny, genreName, (g) => setGenreRule(g, null))
+  pushFacetChips("genre", "Gênero", "exclude", "exclude", selectedGenreExclude, genreName, (g) => setGenreRule(g, null))
+  const tagName = (slug: string) => tagNameBySlug.get(slug) ?? slug
+  pushFacetChips("tag", "Tag", "all", "include", selectedTagAll, tagName, (s) => setTagRule(s, null))
+  pushFacetChips("tag", "Tag", "any", "optional", selectedTagAny, tagName, (s) => setTagRule(s, null))
+  pushFacetChips("tag", "Tag", "exclude", "exclude", selectedTagExclude, tagName, (s) => setTagRule(s, null))
+
+  // O contador conta VALORES, não chips: agrupar não pode fazer "12 seleções" virar
+  // "6 seleções" sem que nada tenha sido desfeito.
+  const activeFilterCount = activeFilterChips.reduce(
+    (total, chip) => total + Math.max(1, chip.values?.length ?? 1),
+    0
+  )
+  const activeFilterLabel = activeFilterCount === 1 ? "1 seleção" : `${activeFilterCount} seleções`
 
   return (
     <div className="rounded-xl border border-border/70 bg-card/58 p-4 shadow-sm shadow-black/5 backdrop-blur">
@@ -2680,7 +3004,7 @@ export function RankingFilters({
                 Sem "Obras exibidas" (roomy) o 3º card carrega só Caps+Ano (194px de
                 conteúdo medido) — a trilha encolhe e a largura vai pros pills. */}
             <div
-              className="grid gap-3 lg:[grid-template-columns:var(--l1cols)]"
+              className="grid gap-3 lg:[grid-template-columns:var(--l1cols)] 2xl:[grid-template-columns:var(--l1cols2xl)]"
               style={
                 {
                   // O mínimo em px é o que impede a trilha enxuta de esmagar
@@ -2689,15 +3013,48 @@ export function RankingFilters({
                   ["--l1cols"]: roomy
                     ? "minmax(0,1.2fr) minmax(0,2.15fr) minmax(240px,0.75fr)"
                     : "minmax(0,1.25fr) minmax(0,2.25fr) minmax(0,1.3fr)",
+                  /**
+                   * ⚠️ A partir de `2xl` Publicação ganha 0,15fr do Status pessoal.
+                   *
+                   * A zona "−" da exclusão engordou cada pill em ~22px, e Publicação (o
+                   * card mais estreito) caiu de 3 pills por linha para 2 — 3 linhas onde
+                   * a calibragem original previa 2.
+                   *
+                   * 🔴 Por que só em `2xl`, e não sempre: medido nas quatro larguras, a
+                   * transferência é de graça em 1600+ (Publicação 3→2 linhas, altura da
+                   * linha intacta em 205px) e CARA em 1280 (o Status pessoal, com 10
+                   * pills, cai pra 4 linhas e a linha vai a 245px) — sem ganho nenhum lá,
+                   * porque Publicação segue em 3 linhas de qualquer jeito. Não existe
+                   * valor único que ganhe nos dois: em 1280 o Status pessoal já está no
+                   * limite. Daí o breakpoint, em vez de escolher qual largura sacrificar.
+                   */
+                  ["--l1cols2xl"]: roomy
+                    ? "minmax(0,1.35fr) minmax(0,2fr) minmax(240px,0.75fr)"
+                    : "minmax(0,1.4fr) minmax(0,2.1fr) minmax(0,1.3fr)",
                 } as CSSProperties
               }
             >
             <FilterSection
-              title={`Publicação${isAllPublication ? " (todos)" : selectedPublicationStatuses.size ? ` (${selectedPublicationStatuses.size})` : ""}`}
+              title={`Publicação${
+                pubExcluded.size
+                  ? ` (exceto ${pubExcluded.size})`
+                  : isAllPublication
+                    ? " (todos)"
+                    : selectedPublicationStatuses.size
+                      ? ` (${selectedPublicationStatuses.size})`
+                      : ""
+              }`}
               headerAction={
                 <button
                   type="button"
-                  onClick={() => updateParams({ pub_status: isAllPublication ? null : "all" })}
+                  // "Todos" tem que zerar os DOIS params: só apagar o positivo deixaria
+                  // a exclusão de pé por baixo de um badge que promete o catálogo todo.
+                  onClick={() =>
+                    updateParams({
+                      pub_status: isAllPublication ? null : "all",
+                      pub_status_exclude: null,
+                    })
+                  }
                 >
                   <Badge
                     variant={isAllPublication ? "default" : "outline"}
@@ -2708,24 +3065,44 @@ export function RankingFilters({
                 </button>
               }
             >
-              <div className="flex flex-wrap gap-2">
-                {visiblePublicationStatuses.map((s) => (
-                  <StatusButton
-                    key={`publication-${s.status}`}
-                    option={s}
-                    active={isAllPublication || selectedPublicationStatuses.has(s.status)}
-                    onClick={() => togglePublicationStatus(s.status)}
-                  />
-                ))}
+              {/* gap-1.5: cada 2px entre pills vale ~14px de linha nos 10 status pessoais. */}
+              <div className="flex flex-wrap gap-1.5">
+                {visiblePublicationStatuses.map((s) => {
+                  const on = isAllPublication || selectedPublicationStatuses.has(s.status)
+                  const off = pubExcluded.has(s.status)
+                  return (
+                    <StatusButton
+                      key={`publication-${s.status}`}
+                      option={s}
+                      active={on}
+                      excluded={off}
+                      onClick={() => setPublicationRule(s.status, on ? null : "include")}
+                      onExclude={() => setPublicationRule(s.status, off ? null : "exclude")}
+                    />
+                  )
+                })}
               </div>
             </FilterSection>
 
             <FilterSection
-              title={`Status pessoal${isAllPersonal ? " (todos)" : selectedVisiblePerCount ? ` (${selectedVisiblePerCount})` : ""}`}
+              title={`Status pessoal${
+                perExcluded.size
+                  ? ` (exceto ${perExcluded.size})`
+                  : isAllPersonal
+                    ? " (todos)"
+                    : selectedVisiblePerCount
+                      ? ` (${selectedVisiblePerCount})`
+                      : ""
+              }`}
               headerAction={
                 <button
                   type="button"
-                  onClick={() => updateParams({ per_status: isAllPersonal ? null : "all" })}
+                  onClick={() =>
+                    updateParams({
+                      per_status: isAllPersonal ? null : "all",
+                      per_status_exclude: null,
+                    })
+                  }
                 >
                   <Badge
                     variant={isAllPersonal ? "default" : "outline"}
@@ -2736,16 +3113,22 @@ export function RankingFilters({
                 </button>
               }
             >
-              <div className="flex flex-wrap gap-2">
-                {visiblePersonalStatuses.map((s) => (
-                  <StatusButton
-                    key={`personal-${s.status}`}
-                    option={s}
-                    active={isAllPersonal || selectedPerStatuses.has(s.status)}
-                    tooltip={getPersonalStatusDescription(s.status, s.comment)}
-                    onClick={() => togglePersonalStatus(s.status)}
-                  />
-                ))}
+              <div className="flex flex-wrap gap-1.5">
+                {visiblePersonalStatuses.map((s) => {
+                  const on = isAllPersonal || selectedPerStatuses.has(s.status)
+                  const off = perExcluded.has(s.status)
+                  return (
+                    <StatusButton
+                      key={`personal-${s.status}`}
+                      option={s}
+                      active={on}
+                      excluded={off}
+                      tooltip={getPersonalStatusDescription(s.status, s.comment)}
+                      onClick={() => setPersonalRule(s.status, on ? null : "include")}
+                      onExclude={() => setPersonalRule(s.status, off ? null : "exclude")}
+                    />
+                  )
+                })}
               </div>
             </FilterSection>
 
@@ -2838,29 +3221,48 @@ export function RankingFilters({
 
             {/* LINHA 2: Interesse na obra · Conteúdo exibido · Largura dos tiers · Ordenação */}
             <div
-              className={`grid gap-3 ${
-                roomy
-                  ? // Os três cards só cabem lado a lado a partir de xl. Em lg eles
-                    // ficavam abaixo do próprio conteúdo (Conteúdo exibido estourava
-                    // 26px em 1100), então ali a linha vira 2 colunas.
-                    "lg:grid-cols-2 xl:[grid-template-columns:var(--l2cols)]"
-                  : "lg:[grid-template-columns:var(--l2cols)]"
-              }`}
+              // Lado a lado só a partir de `xl`. Em `lg` a linha vira 2 colunas —
+              // com quatro trilhas em 1024px cada card fica com ~210px, e o
+              // segmentado de "Conteúdo 18+" sozinho mede 210px: ele estourava a
+              // caixa em 26px, medido nos DOIS ramos. Era `xl` só no ramo `roomy`;
+              // o outro tentava quatro colunas já em `lg` e quebrava igual.
+              className="grid gap-3 lg:grid-cols-2 xl:[grid-template-columns:var(--l2cols)]"
               style={
                 {
                   // Sem "Largura dos tiers" a linha perde um card: as trilhas do
                   // /ranking deixariam Interesse e Conteúdo exibido com ~1/3 vazio.
                   // Os mínimos em px são o conteúdo medido + padding — sem eles o fr
                   // encolhe abaixo do que os controles ocupam, e o card estoura.
+                  // ⚠️ A Ordenação virou TRILHA horizontal (chips que quebram
+                  // linha), e aí LARGURA vale ALTURA — o grid estica a linha
+                  // toda, então o card mais alto empurra os outros três junto.
+                  // Altura da linha em 1600px com 5 níveis de ordenação:
+                  //   pilha antiga, 1,05fr   201px → 357px  (+52px por nível)
+                  //   trilha,       1,05fr   183px → 267px
+                  //   trilha,       1,30fr   183px → 221px  (+12,7px por nível)
+                  //
+                  // A folga saiu de "Largura dos tiers" (0,95 → 0,7fr), que é o
+                  // card de conteúdo mais fixo. Duas tentativas foram medidas e
+                  // descartadas, e as duas falhavam FORA de 1600px:
+                  //   • tirar de "Conteúdo exibido" (1,35 → 1,15fr) → ele passa a
+                  //     estourar também em 1440, não só em 1100/1280;
+                  //   • tirar de "Interesse na obra" → abaixo de 318px os ♥
+                  //     quebram linha e a linha inteira vai a 373px, em QUALQUER
+                  //     número de níveis (inclusive dois).
+                  // Daí os pisos em px: sem eles o `fr` encolhe abaixo do que o
+                  // conteúdo ocupa e o card estoura sem nada acusar.
+                  //
+                  // ⚠️ O estouro de "Conteúdo exibido" em 1100/1280 é ANTERIOR a
+                  // isto (medido nas duas versões) — não foi introduzido aqui.
                   ["--l2cols"]: [
-                    roomy ? "minmax(410px,1.15fr)" : "minmax(0,1.6fr)",
+                    roomy ? "minmax(410px,1.15fr)" : "minmax(318px,1.6fr)",
                     showHideAvoided || showAdultFilter
                       ? roomy
                         ? "minmax(350px,1fr)"
-                        : "minmax(0,1.35fr)"
+                        : "minmax(0,1.3fr)"
                       : null,
-                    showTierBand ? "minmax(0,0.95fr)" : null,
-                    roomy ? "minmax(260px,1fr)" : "minmax(0,1.05fr)",
+                    showTierBand ? "minmax(160px,0.7fr)" : null,
+                    roomy ? "minmax(260px,1fr)" : "minmax(0,1.3fr)",
                   ]
                     .filter(Boolean)
                     .join(" "),
@@ -2959,7 +3361,14 @@ export function RankingFilters({
                   <div className={`flex flex-col gap-3.5 ${roomy ? "mx-auto w-full max-w-[380px]" : ""}`}>
                     {showHideAvoided && (
                       /* Esconder tags evitadas — esconde obras com tags declaradas como evitadas */
-                      <div className={`flex items-center gap-3 ${roomy ? "justify-between" : ""}`}>
+                      // ⚠️ `flex-wrap`: o rótulo tem largura fixa e o segmentado NÃO
+                      // encolhe (os três rótulos não truncam), então numa trilha
+                      // estreita a linha não tinha pra onde ceder e o card
+                      // ESTOURAVA — medido em 26px a 1100px, e também a 1280px.
+                      // Quebrar linha põe o segmentado embaixo do rótulo: o card
+                      // fica mais alto, que numa linha de grid já esticada é de
+                      // graça, e nada some da tela.
+                      <div className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 ${roomy ? "justify-between" : ""}`}>
                         <Label
                           className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground leading-tight"
                           title="Esconde obras com tags que você declarou evitar (em /preferencias). Fortes = só as marcadas 2×."
@@ -2993,7 +3402,7 @@ export function RankingFilters({
 
                     {showAdultFilter && (
                       /* Conteúdo 18+ — filtra pela classificação da obra (is_adult), não por tags */
-                      <div className={`flex items-center gap-3 ${roomy ? "justify-between" : ""}`}>
+                      <div className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 ${roomy ? "justify-between" : ""}`}>
                         <Label
                           className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground leading-tight"
                           title="Filtra obras 18+ pela classificação da obra (o mesmo selo 🔞 da página da obra), não pelas tags. 'Tudo' respeita sua preferência global."
@@ -3045,18 +3454,29 @@ export function RankingFilters({
               searchParams={searchParams}
               updateParams={updateParams}
               headerAction={
-                // `undefined` = a página não oferece a lente (ex: /favorites, que
-                // não busca os momentos) → some com o seletor. `null` = ela
-                // oferece mas a leitura falhou → seletor desabilitado, com a
-                // explicação. Um estado só pros dois fazia o /favorites acusar
-                // uma falha que nunca houve.
-                criterionMoments !== undefined ? (
-                  <CriterionUnitToggle
-                    unit={criterionUnit}
-                    updateParams={updateParams}
-                    moments={criterionMoments}
-                  />
-                ) : undefined
+                <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1.5">
+                  {/* Faixas ideais do perfil viram limiares nos nove pills abaixo.
+                      Some sozinho quando não há perfil. */}
+                  {criterionRanges && (
+                    <MyRangeToggle
+                      ranges={criterionRanges}
+                      searchParams={searchParams}
+                      updateParams={updateParams}
+                    />
+                  )}
+                  {/* `undefined` = a página não oferece a lente (ex: /favorites, que
+                      não busca os momentos) → some com o seletor. `null` = ela
+                      oferece mas a leitura falhou → seletor desabilitado, com a
+                      explicação. Um estado só pros dois fazia o /favorites acusar
+                      uma falha que nunca houve. */}
+                  {criterionMoments !== undefined && (
+                    <CriterionUnitToggle
+                      unit={criterionUnit}
+                      updateParams={updateParams}
+                      moments={criterionMoments}
+                    />
+                  )}
+                </div>
               }
             />
             <ScorePillGroup
@@ -3173,18 +3593,7 @@ export function RankingFilters({
                 Filtros ativos
               </span>
             )}
-            {activeFilterChips.map((chip) => (
-              <button
-                key={chip.key}
-                type="button"
-                onClick={chip.onRemove}
-                className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border/80 bg-background/55 px-2.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/10"
-                title="Remover filtro"
-              >
-                {chip.label}
-                <X className="h-3 w-3 text-muted-foreground" />
-              </button>
-            ))}
+            <ActiveFilterChips chips={activeFilterChips} />
             {activeFilterChips.length > 0 && (
               <button
                 type="button"
