@@ -1,10 +1,10 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useMemo, useState } from "react"
 import {
   ArrowRight,
+  Ban,
   BarChart3,
-  Check,
   ChevronRight,
   Clock,
   Crown,
@@ -14,11 +14,11 @@ import {
   Loader2,
   RefreshCw,
   Sparkles,
-  Tags,
   TrendingUp,
   Trophy,
   Wrench,
 } from "lucide-react"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { CoverImage } from "@/components/ui/cover-image"
 import {
@@ -27,14 +27,19 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { AiProvenanceSeal } from "@/components/ui/ai-provenance"
 import { AlignmentCell } from "@/components/ranking/ranking-cells"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
-import { TAG_GROUP_LABELS } from "@/lib/constants/tag-groups"
 import { GENRE_NAMES, TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
 import type { PredictionDriver } from "@/lib/calculations/ridge-feature-labels"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { formatUsdApprox } from "@/lib/format/money"
+import { classifyProfileTagOrigin } from "@/lib/ai-recommendation/profile-tag-origin"
+import type {
+  DeclaredTagLite,
+  ProfileTagWithOrigin,
+} from "@/lib/ai-recommendation/profile-tag-origin"
 import {
   classifyProfileStalenessLevel,
   profileStalenessTriggers,
@@ -66,8 +71,6 @@ import { cn } from "@/lib/utils"
 const TASTE_PROFILE_TASK_ID = "taste-profile"
 
 const MIN_WORKS = 5
-// Prévia mostra até N tags por lado; o resto vai no "+N" → container detalhado.
-const AFFINITY_COLLAPSED = 8
 
 // Nomes reais do catálogo (lower-case). A IA às vezes gera "tags" que na verdade
 // são FRASES descritivas (ex.: "Slice-of-life adulto contemporâneo sem fantasia") —
@@ -102,32 +105,39 @@ function timeAgo(iso: string): string {
   return date.toLocaleDateString("pt-BR")
 }
 
+const nf = (v: number, digits = 1) =>
+  v.toLocaleString("pt-BR", { maximumFractionDigits: digits })
+
+type TabKey = "prova" | "criterios" | "tags" | "recomendacao"
+
 /**
- * Painel de /conta/perfil — layout dashboard (v2, aprovado 2026-07-27, base no
- * mockup imagem-4). Seções, de cima pra baixo:
+ * Painel de /conta/perfil — v3 (2026-08-09). A página responde UMA pergunta ("o quanto
+ * vocês entendem meu gosto?"), e a v2 respondia em 4.020px com a prova em 6º lugar.
  *
- *  • Hero        — identidade + saúde + RESUMO CURTO (short_summary, com "ver
- *                  completo") + 3 chips-resumo + linha "evita" | medidor de
- *                  alinhamento (74% = correlação real; NÃO uma "confiança").
- *  • Assinatura  — barras por critério (0–10), ordenadas por peso, CONTIDAS.
- *  • Afinidades  — tags = pílulas (contorno) · temas = texto (formatos distintos);
- *                  evitadas em vermelho, SEM tachado.
- *  • O que a IA aprendeu — narrative_patterns como cards legíveis (sem selos de
- *                  confiança/contagem: esse dado não existe por-insight).
- *  • Prova       — "quanto o perfil te representa": 74% + média top×geral +
- *                  obras que confirmam.
- *  • Próximas    — maior Nota Prevista entre o não-lido (troca o bloco de 1 obra
- *                  do image-4, que dependia de Deep Dive por obra).
- *  • Detalhes avançados — telemetria crua (personal_fit, drift, modelo), colapsada.
+ *  • Hero (sempre visível) — identidade + selo ✨ de procedência + resumo + as DUAS
+ *    provas lado a lado, cada uma com seu rótulo:
+ *      – concordância independente (17 de 17): a IA nunca viu o que a pessoa declarou
+ *      – correlação (77%) + as 3 parcelas da MESMA medição (8,7 · 7,8 · 17 de 20)
+ *    Na v2 o mesmo 77% aparecia duas vezes, com dois textos diferentes e 2.900px de
+ *    distância — lido como duas métricas.
+ *  • Abas — A prova · Seus critérios · Tags e temas · O que isso muda.
+ *
+ * O estado das abas (página da trilha, critérios abertos) mora AQUI e não dentro de
+ * cada painel: os painéis desmontam ao trocar de aba, e estado lá dentro zeraria a
+ * cada ida e volta.
  */
 export function TasteProfilePanel({
   status,
   aligned,
   drivers,
+  declared,
+  unreadPageSize = 6,
 }: {
   status: ProfileStatus
   aligned: AlignedWorkSplit
   drivers: PredictionDriver[]
+  declared: DeclaredTagLite[]
+  unreadPageSize?: number
 }) {
   const [profile, setProfile] = useState<TasteProfileRow | null>(status.profile)
   const [staleness, setStaleness] = useState<ProfileStaleness | null>(status.staleness)
@@ -139,10 +149,9 @@ export function TasteProfilePanel({
   const tasks = useAppTasks()
   const recompute = tasks.some((t) => t.id === TASTE_PROFILE_TASK_ID && t.status === "running")
   const [summaryOpen, setSummaryOpen] = useState(false)
-  // "Ver todos" e "+N" rolam até o container detalhado (não expandem inline).
-  const detailRef = useRef<HTMLElement>(null)
-  const scrollToDetail = () =>
-    detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+  const [tab, setTab] = useState<TabKey>("prova")
+  const [unreadPage, setUnreadPage] = useState(0)
+  const [openCriteria, setOpenCriteria] = useState<Set<string>>(() => new Set())
 
   const insufficient = status.ratedWorksCount < MIN_WORKS
 
@@ -175,27 +184,39 @@ export function TasteProfilePanel({
   const level = staleness ? classifyProfileStalenessLevel(staleness) : null
 
   const p = profile?.profile
-  const lovedTags = [...(p?.loved_tags ?? [])].sort((a, b) => b.strength - a.strength)
-  const avoidedTags = [...(p?.avoided_tags ?? [])].sort((a, b) => b.strength - a.strength)
-  const lovedThemes = p?.loved_themes ?? []
-  const avoidedThemes = p?.avoided_themes ?? []
+  const lovedTags = useMemo(
+    () => [...(p?.loved_tags ?? [])].sort((a, b) => b.strength - a.strength),
+    [p],
+  )
+  const avoidedTags = useMemo(
+    () => [...(p?.avoided_tags ?? [])].sort((a, b) => b.strength - a.strength),
+    [p],
+  )
   const narrativePatterns = p?.narrative_patterns ?? []
 
-  // Só tags REAIS viram chip; frases-tag (temas disfarçados) entram nos temas,
-  // à frente dos temas próprios (elas têm strength → já vêm ranqueadas).
-  const lovedSplit = partitionTags(lovedTags)
-  const avoidedSplit = partitionTags(avoidedTags)
-  const lovedRealTags = lovedSplit.real
-  const avoidedRealTags = avoidedSplit.real
-  const lovedAllThemes = [...lovedSplit.phrases.map((t) => t.name), ...lovedThemes]
-  const avoidedAllThemes = [...avoidedSplit.phrases.map((t) => t.name), ...avoidedThemes]
+  // Só tags REAIS viram chip; frases-tag (temas disfarçados) entram nos temas, à
+  // frente dos temas próprios (elas têm strength → já vêm ranqueadas).
+  //
+  // A classificação por origem mora no CLIENTE, e não pré-computada no servidor,
+  // porque "Recomputar" troca o perfil em estado — pré-computada, a seção continuaria
+  // descrevendo o perfil anterior até o próximo carregamento da página.
+  const { lovedRealTags, avoidedRealTags, lovedThemes, avoidedThemes, origin } = useMemo(() => {
+    const loved = partitionTags(lovedTags)
+    const avoided = partitionTags(avoidedTags)
+    return {
+      lovedRealTags: loved.real,
+      avoidedRealTags: avoided.real,
+      lovedThemes: [...loved.phrases.map((t) => t.name), ...(p?.loved_themes ?? [])],
+      avoidedThemes: [...avoided.phrases.map((t) => t.name), ...(p?.avoided_themes ?? [])],
+      origin: classifyProfileTagOrigin(loved.real, avoided.real, declared),
+    }
+  }, [lovedTags, avoidedTags, p, declared])
 
   const criterionEntries = Object.entries(p?.criterion_preferences ?? {})
     .filter((e): e is [string, ProfileCriterionPreference] => e[1] != null)
     .sort(([, a], [, b]) => b.weight - a.weight)
   const criteriaWithPref = criterionEntries.length
   const criteriaWithStrongWeight = criterionEntries.filter((e) => e[1].weight >= 0.5).length
-  const criterionHalf = Math.ceil(criterionEntries.length / 2)
 
   const isStub = profile?.is_stub ?? false
   const isThin = lovedRealTags.length < 5 || criteriaWithStrongWeight < 3
@@ -210,15 +231,11 @@ export function TasteProfilePanel({
   // pré-v7 não tem short_summary → cai no summary com clamp de 4 linhas.
   const fullSummary = p?.summary?.trim() ?? ""
   const shortSummary = p?.short_summary?.trim() || null
-  // "Principal coisa que evita" = maior STRENGTH entre as tags evitadas (elas SÃO
-  // ranqueadas). Antes usava `avoided_themes[0]` — o 1º tema do array da IA, SEM
-  // ranking: pegava um ponto arbitrário e superficial. Só cai nos temas se não
-  // houver tag evitada. Top-3 pra não resumir demais.
   // Hero: prioriza as FRASES descritivas (mais legíveis que uma tag como
   // "Borderline H"), já ranqueadas por strength; cai nas tags reais se não houver.
   const topAvoided =
-    avoidedAllThemes.length > 0
-      ? avoidedAllThemes.slice(0, 3)
+    avoidedThemes.length > 0
+      ? avoidedThemes.slice(0, 3)
       : avoidedRealTags.slice(0, 3).map((t) => t.name)
   // Recomputar ganha a cor da defasagem quando vale a pena rodar (âmbar/rosa),
   // sinalizando a ação sem a barra full-width que existia no rodapé do hero.
@@ -229,11 +246,25 @@ export function TasteProfilePanel({
         ? "text-rose-600 hover:text-rose-700 dark:text-rose-400"
         : "text-amber-600 hover:text-amber-700 dark:text-amber-400"
 
+  const toggleCriterion = (slug: string) =>
+    setOpenCriteria((prev) => {
+      const next = new Set(prev)
+      if (next.has(slug)) next.delete(slug)
+      else next.add(slug)
+      return next
+    })
+
+  const TABS: Array<{ key: TabKey; label: string; count?: number }> = [
+    { key: "prova", label: "A prova" },
+    { key: "criterios", label: "Seus critérios", count: criterionEntries.length },
+    { key: "tags", label: "Tags e temas", count: origin.profileTotal },
+    { key: "recomendacao", label: "O que isso muda" },
+  ]
+
   return (
     <div className="space-y-4">
       {/* ═══════════ HERO ═══════════ */}
       <section className="overflow-hidden rounded-xl border border-border/70 bg-gradient-to-br from-violet-500/10 via-card to-card p-4 shadow-sm shadow-black/5 sm:p-5">
-        {/* topo (largura total): identidade + custo/recomputar/defasagem */}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-start gap-3">
             <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-violet-500/15 text-violet-500 ring-1 ring-violet-500/25 [&_svg]:size-5">
@@ -250,6 +281,28 @@ export function TasteProfilePanel({
                 >
                   {profile ? healthLabel : "Sem perfil"}
                 </span>
+                {/*
+                 * Régua do CLAUDE.md: todo bloco cujo conteúdo saiu de um modelo leva o
+                 * selo, e a procedência mora SÓ no tooltip dele. Esta página inteira é
+                 * saída de LLM e não tinha nenhum — modelo e prompt viviam enterrados em
+                 * "Detalhes avançados".
+                 */}
+                {profile && (
+                  <AiProvenanceSeal
+                    title="Perfil de gosto por IA"
+                    model={profile.model_name}
+                    promptVersion={profile.prompt_version}
+                    at={profile.created_at}
+                    extra={[
+                      { label: "Base", value: `${profile.n_works_used} obras com nota sua` },
+                      { label: "Versão", value: `v${profile.version}` },
+                    ]}
+                    note="Resumo, padrões, tags e faixas ideais foram escritos por um modelo a partir das suas notas — não de um formulário."
+                    label="gerado por IA"
+                    side="bottom"
+                    align="start"
+                  />
+                )}
               </div>
               <p className="text-xs tabular-nums text-muted-foreground">
                 {profile ? (
@@ -297,21 +350,13 @@ export function TasteProfilePanel({
           </div>
         </div>
 
-        {/* corpo: resumo (esq) + medidor de alinhamento (dir) */}
         {profile && (fullSummary || criterionEntries.length > 0 || topAvoided.length > 0) && (
-          <div
-            className={cn(
-              "mt-5",
-              aligned.confirmation
-                ? "grid gap-6 sm:grid-cols-[1.7fr_1fr] sm:items-center sm:gap-8"
-                : "max-w-[72ch]",
-            )}
-          >
+          <div className="mt-5 grid gap-6 lg:grid-cols-[1.15fr_1fr] lg:items-start lg:gap-8">
             <div className="min-w-0">
               {fullSummary && (
                 <>
                   <h3 className="text-[15px] font-semibold text-foreground sm:text-base">
-                    O que a SatorIA descobriu sobre seus gostos e preferências
+                    O que a SatorIA descobriu sobre seus gostos
                   </h3>
                   <p
                     className={cn(
@@ -346,12 +391,7 @@ export function TasteProfilePanel({
 
               {topAvoided.length > 0 && (
                 <p className="mt-3 flex items-start gap-1.5 text-xs text-muted-foreground">
-                  <span className="mt-0.5 grid size-3.5 shrink-0 place-items-center text-rose-500">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="size-3.5">
-                      <circle cx="12" cy="12" r="9" />
-                      <path d="M6 6l12 12" />
-                    </svg>
-                  </span>
+                  <Ban className="mt-0.5 size-3.5 shrink-0 text-rose-500" />
                   <span>
                     Você tende a evitar{" "}
                     {topAvoided.map((name, i) => (
@@ -361,19 +401,23 @@ export function TasteProfilePanel({
                           ? i === topAvoided.length - 2
                             ? " e "
                             : ", "
-                          : "."}
+                          : ". "}
                       </span>
                     ))}
+                    {/* A página afirma coisas sobre a pessoa; sem esta porta, não há
+                        como discordar delas. */}
+                    <Link
+                      href="/preferencias"
+                      className="font-semibold text-sky-600 hover:underline dark:text-sky-400"
+                    >
+                      Não é bem assim? corrigir em Preferências →
+                    </Link>
                   </span>
                 </p>
               )}
             </div>
 
-            {aligned.confirmation && (
-              <div className="sm:border-l sm:border-border/60 sm:pl-8">
-                <AlignmentGauge c={aligned.confirmation} />
-              </div>
-            )}
+            <HeroProofs origin={origin} confirmation={aligned.confirmation} />
           </div>
         )}
       </section>
@@ -382,166 +426,100 @@ export function TasteProfilePanel({
         <EmptyState insufficient={insufficient} />
       ) : (
         <>
-          {/* ═══════════ ASSINATURA (faixa full-width: radar + barras em 2 colunas) ═══════════ */}
-          {criterionEntries.length > 0 && (
-            <section className="rounded-xl border border-border/70 bg-card/60 p-4 shadow-sm shadow-black/5 sm:p-5">
-              <ModHeader
-                icon={<BarChart3 />}
-                accent="blue"
-                title="Sua assinatura de gosto"
-                subtitle="Escala 0–10 · do sinal mais forte ao mais fraco"
-              />
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:gap-8">
-                {criterionEntries.length >= 3 && (
-                  <div className="mx-auto shrink-0 lg:mx-0">
-                    <RadarSignature entries={criterionEntries.slice(0, 6)} size={180} />
-                  </div>
+          {/* ═══════════ ABAS ═══════════ */}
+          <div
+            role="tablist"
+            aria-label="Seções do perfil de gosto"
+            className="flex flex-wrap gap-1 border-b border-border/70"
+          >
+            {TABS.map((t, i) => (
+              <button
+                key={t.key}
+                role="tab"
+                id={`perfil-tab-${t.key}`}
+                aria-controls={`perfil-painel-${t.key}`}
+                aria-selected={tab === t.key}
+                tabIndex={tab === t.key ? 0 : -1}
+                onClick={() => setTab(t.key)}
+                onKeyDown={(e) => {
+                  const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0
+                  if (!d) return
+                  e.preventDefault()
+                  const next = TABS[(i + d + TABS.length) % TABS.length]
+                  setTab(next.key)
+                  document.getElementById(`perfil-tab-${next.key}`)?.focus()
+                }}
+                className={cn(
+                  "-mb-px border-b-2 px-3 py-2 text-[13.5px] font-medium outline-none transition-colors",
+                  "focus-visible:rounded-t-md focus-visible:ring-2 focus-visible:ring-ring",
+                  tab === t.key
+                    ? "border-sky-500 text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
-                <div className="grid min-w-0 flex-1 gap-x-10 sm:grid-cols-2">
-                  <BarGroup entries={criterionEntries.slice(0, criterionHalf)} minRows={criterionHalf} />
-                  <BarGroup entries={criterionEntries.slice(criterionHalf)} minRows={criterionHalf} />
-                </div>
-              </div>
-            </section>
-          )}
+              >
+                {t.label}
+                {t.count != null && (
+                  <span className="ml-1.5 text-[11px] tabular-nums text-muted-foreground">
+                    {t.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
 
-          {/* ═══════════ AFINIDADES (faixa full-width: Ama sobre Evita) ═══════════ */}
-          {(lovedRealTags.length > 0 || avoidedRealTags.length > 0) && (
-            <section className="rounded-xl border border-border/70 bg-card/60 p-4 shadow-sm shadow-black/5 sm:p-5">
-              <ModHeader
-                icon={<Heart fill="currentColor" stroke="none" />}
-                accent="emerald"
-                title="Afinidades e limites"
-                subtitle="as tags mais fortes de cada lado"
-                action={
-                  <button
-                    type="button"
-                    onClick={scrollToDetail}
-                    className="rounded-md px-2 py-1 text-[11.5px] font-medium text-muted-foreground outline-none ring-1 ring-inset ring-border transition-colors hover:text-foreground focus-visible:ring-2"
-                  >
-                    Ver todos
-                  </button>
+          <div
+            role="tabpanel"
+            id={`perfil-painel-${tab}`}
+            aria-labelledby={`perfil-tab-${tab}`}
+            className="space-y-4"
+          >
+            {tab === "prova" && (
+              <ProofTab
+                aligned={aligned}
+                patterns={narrativePatterns}
+                model={profile.model_name}
+                promptVersion={profile.prompt_version}
+                createdAt={profile.created_at}
+              />
+            )}
+
+            {tab === "criterios" && (
+              <CriteriaTab
+                entries={criterionEntries}
+                open={openCriteria}
+                onToggle={toggleCriterion}
+                onToggleAll={() =>
+                  setOpenCriteria((prev) =>
+                    prev.size === criterionEntries.length
+                      ? new Set()
+                      : new Set(criterionEntries.map(([slug]) => slug)),
+                  )
                 }
+                model={profile.model_name}
+                promptVersion={profile.prompt_version}
+                createdAt={profile.created_at}
               />
-              {drivers.length > 0 ? (
-                <div className="grid gap-x-8 gap-y-6 lg:grid-cols-2">
-                  <div className="space-y-5">
-                    <AffinityBlock tone="love" title="Você ama" tags={lovedRealTags} onSeeAll={scrollToDetail} />
-                    <AffinityBlock tone="avoid" title="Você evita" tags={avoidedRealTags} onSeeAll={scrollToDetail} />
-                  </div>
-                  <div className="lg:border-l lg:border-border/60 lg:pl-8">
-                    <PredictionDrivers drivers={drivers} />
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-5">
-                  <AffinityBlock tone="love" title="Você ama" tags={lovedRealTags} onSeeAll={scrollToDetail} />
-                  <AffinityBlock tone="avoid" title="Você evita" tags={avoidedRealTags} onSeeAll={scrollToDetail} />
-                </div>
-              )}
-            </section>
-          )}
+            )}
 
-          {/* ═══════════ TAGS EM DETALHE (alvo do "Ver todos") ═══════════ */}
-          {(lovedTags.length > 0 ||
-            avoidedTags.length > 0 ||
-            lovedThemes.length > 0 ||
-            avoidedThemes.length > 0) && (
-            <section
-              ref={detailRef}
-              className="scroll-mt-4 rounded-xl border border-border/70 bg-card/60 p-4 shadow-sm shadow-black/5 sm:p-5"
-            >
-              <ModHeader
-                icon={<Tags />}
-                accent="emerald"
-                title="Tags em detalhe"
-                subtitle="todas as tags do seu perfil, agrupadas por grupo"
+            {tab === "tags" && (
+              <TagsTab
+                origin={origin}
+                lovedThemes={lovedThemes}
+                avoidedThemes={avoidedThemes}
               />
-              <div className="grid gap-x-8 gap-y-6 lg:grid-cols-2">
-                <PolarityDetail
-                  tone="love"
-                  title="Você ama"
-                  tags={lovedRealTags}
-                  themes={lovedAllThemes}
-                />
-                <PolarityDetail
-                  tone="avoid"
-                  title="Você evita"
-                  tags={avoidedRealTags}
-                  themes={avoidedAllThemes}
-                />
-              </div>
-            </section>
-          )}
+            )}
 
-          {/* ═══════════ O QUE A IA APRENDEU ═══════════ */}
-          {narrativePatterns.length > 0 && (
-            <section className="rounded-xl border border-border/70 bg-card/60 p-4 shadow-sm shadow-black/5 sm:p-5">
-              <ModHeader
-                icon={<Lightbulb />}
-                accent="violet"
-                title="O que a IA aprendeu com suas notas"
-                subtitle="padrões que aparecem nas obras que você mais gosta"
+            {tab === "recomendacao" && (
+              <RecommendationTab
+                drivers={drivers}
+                aligned={aligned}
+                page={unreadPage}
+                pageSize={unreadPageSize}
+                onPage={setUnreadPage}
               />
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {narrativePatterns.map((pattern, i) => (
-                  <LearnCard key={pattern} text={pattern} index={i} />
-                ))}
-              </div>
-            </section>
-          )}
+            )}
+          </div>
 
-          {/* ═══════════ PROVA ═══════════ */}
-          {(aligned.confirmation || aligned.read.length > 0) && (
-            <section className="rounded-xl border border-border/70 bg-card/60 p-4 shadow-sm shadow-black/5 sm:p-5">
-              <ModHeader
-                icon={<Trophy />}
-                accent="emerald"
-                title="Quanto este perfil representa suas avaliações?"
-                subtitle="nas obras que você já leu, alinhamento alto anda junto com nota alta"
-              />
-              {aligned.confirmation && <ProofStats c={aligned.confirmation} />}
-              {aligned.read.length > 0 && (
-                <div className={cn(aligned.confirmation && "mt-4")}>
-                  <Rail
-                    icon={<Check className="size-3.5" />}
-                    tone="emerald"
-                    title="Obras que mais confirmam seu gosto"
-                    total={aligned.readTotal}
-                    works={aligned.read}
-                    showUserScore
-                  />
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* ═══════════ PRÓXIMAS LEITURAS ═══════════ */}
-          {aligned.unread.length > 0 && (
-            <section className="rounded-xl border border-border/70 bg-card/60 p-4 shadow-sm shadow-black/5 sm:p-5">
-              <ModHeader
-                icon={<ArrowRight />}
-                accent="blue"
-                title="Como isso vira recomendação pra você"
-                subtitle="maior Nota Prevista entre o que você ainda não leu"
-              />
-              <Rail
-                icon={<ArrowRight className="size-3.5" />}
-                tone="sky"
-                title="Próximas leituras alinhadas"
-                total={aligned.unreadTotal}
-                works={aligned.unread}
-              />
-              {aligned.otherTotal > 0 && (
-                <p className="mt-3 border-t border-border/60 pt-2.5 text-[11px] leading-relaxed text-muted-foreground">
-                  {aligned.otherTotal} obras em andamento ou pausadas não entram em nenhuma das duas
-                  linhas — não confirmam o gosto nem são sugestão de próxima leitura.
-                </p>
-              )}
-            </section>
-          )}
-
-          {/* ═══════════ DETALHES AVANÇADOS ═══════════ */}
           <AdvancedDetails
             profile={profile}
             staleness={staleness}
@@ -567,60 +545,861 @@ export function TasteProfilePanel({
 }
 
 // ─────────────────────────────────────────────────────────────
-// Hero — medidor de alinhamento + linha de defasagem
+// Hero — as DUAS provas
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Medidor do hero. Mostra a CORRELAÇÃO real (personal_fit × sua nota) como
- * "% de alinhamento" — o número honesto que temos. NÃO é uma "confiança" do
- * modelo (o app não tem esse dado). Clampada a 0–100.
+ * As duas provas do hero, lado a lado e com rótulos DIFERENTES, porque respondem a
+ * perguntas diferentes:
+ *
+ *  A) concordância independente — a IA chegou nas mesmas tags sem ver a declaração
+ *  B) correlação — obra mais alinhada recebe nota mais alta
+ *
+ * ⚠️ As três parcelas (8,7 · 7,8 · 17 de 20) moram DENTRO de B porque saem da mesma
+ * `AlignmentConfirmation`, sobre `personal_fit`. Na v2 elas viviam numa seção a
+ * 2.900px, com o 77% repetido em cima — dois rótulos para o mesmo número.
  */
-function AlignmentGauge({ c }: { c: AlignmentConfirmation }) {
-  const pct = Math.max(0, Math.min(100, Math.round(c.correlation * 100)))
-  const r = 46
-  const circ = 2 * Math.PI * r
-  const offset = circ * (1 - pct / 100)
+function HeroProofs({
+  origin,
+  confirmation,
+}: {
+  origin: ReturnType<typeof classifyProfileTagOrigin>
+  confirmation: AlignmentConfirmation | null
+}) {
+  const hasAgreement = origin.agreementBase > 0
+  if (!hasAgreement && !confirmation) return null
+  const pct = confirmation
+    ? Math.max(0, Math.min(100, Math.round(confirmation.correlation * 100)))
+    : 0
+
   return (
-    <div className="w-full">
-      <span className="block text-center text-[11px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400 sm:text-left">
-        O perfil te representa
-      </span>
-      <div className="mt-3 flex items-center justify-center gap-4 sm:justify-start">
-        <div className="relative size-[110px] shrink-0">
-          <svg width="110" height="110" viewBox="0 0 110 110">
-            <circle cx="55" cy="55" r={r} fill="none" strokeWidth={9} className="stroke-muted" />
-            <circle
-              cx="55"
-              cy="55"
-              r={r}
-              fill="none"
-              strokeWidth={9}
-              strokeLinecap="round"
-              strokeDasharray={circ}
-              strokeDashoffset={offset}
-              transform="rotate(-90 55 55)"
-              className="stroke-emerald-500 transition-[stroke-dashoffset] duration-500"
+    <div className="grid gap-px overflow-hidden rounded-xl border border-border/70 bg-border/70 sm:grid-cols-2">
+      {hasAgreement && (
+        <div className="bg-card p-4">
+          {/* min-h de 2 linhas: um rótulo que quebra e outro que não desalinham os
+              dois números — que existem justamente pra serem comparados. */}
+          <p className="min-h-[2.7em] text-[10.5px] font-bold uppercase leading-[1.35] tracking-wider text-violet-600 dark:text-violet-400">
+            A IA chegou sozinha
+          </p>
+          <p className="mt-1 font-mono text-[32px] font-bold leading-none tabular-nums text-violet-600 dark:text-violet-400">
+            {origin.confirmed.length}
+            <span className="ml-1 text-lg font-semibold opacity-60">
+              de {origin.agreementBase}
+            </span>
+          </p>
+          <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-muted">
+            <span
+              className="block h-full rounded-full bg-violet-500"
+              style={{ width: `${(origin.confirmed.length / origin.agreementBase) * 100}%` }}
             />
-          </svg>
-          <div className="absolute inset-0 grid place-items-center">
-            <div className="text-center">
-              <div className="font-mono text-[26px] font-bold leading-none tabular-nums text-emerald-600 dark:text-emerald-400">
-                {pct}%
-              </div>
-              <div className="mt-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">
-                alinhamento
-              </div>
-            </div>
+          </div>
+          <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">
+            Das {origin.profileTotal} tags do seu perfil,{" "}
+            <b className="text-foreground/80">{origin.agreementBase} você já tinha declarado</b> em
+            Preferências. A IA nunca viu essa lista — ela lê só as obras que você avaliou.{" "}
+            {origin.conflicts.length > 0 && (
+              <b className="text-rose-600 dark:text-rose-400">
+                {origin.conflicts.length} discordam de você.
+              </b>
+            )}{" "}
+            <b className="text-foreground/80">
+              Outras {origin.discovered.length} ela descobriu sozinha.
+            </b>
+          </p>
+        </div>
+      )}
+
+      {confirmation && (
+        <div className="bg-card p-4">
+          <p className="min-h-[2.7em] text-[10.5px] font-bold uppercase leading-[1.35] tracking-wider text-emerald-600 dark:text-emerald-400">
+            E isso aparece nas suas notas
+          </p>
+          <p className="mt-1 font-mono text-[32px] font-bold leading-none tabular-nums text-emerald-600 dark:text-emerald-400">
+            {pct}%
+          </p>
+          <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-muted">
+            <span
+              className="block h-full rounded-full bg-emerald-500"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">
+            Nas <b className="tabular-nums text-foreground/80">{confirmation.ratedRead} obras</b>{" "}
+            que você leu e avaliou, quanto mais alinhada ao perfil, mais alta a sua nota.
+          </p>
+          <div className="mt-3 grid grid-cols-3 gap-x-2.5 border-t border-border/60 pt-2.5">
+            <ProofPart
+              value={nf(confirmation.topAvgScore)}
+              label={`média das ${confirmation.topN} mais alinhadas`}
+              tone="up"
+            />
+            <ProofPart value={nf(confirmation.overallAvgScore)} label="contra a média geral" />
+            <ProofPart
+              value={`${confirmation.topHighCount}`}
+              suffix={` de ${confirmation.topN}`}
+              label={`levaram nota ≥ ${confirmation.highScoreThreshold}`}
+              tone="up"
+            />
           </div>
         </div>
-        <p className="max-w-[22ch] text-[13px] leading-relaxed text-muted-foreground">
-          suas notas confirmam o perfil em{" "}
-          <b className="tabular-nums text-foreground/70">{c.ratedRead}</b> obras lidas
-        </p>
-      </div>
+      )}
     </div>
   )
 }
+
+function ProofPart({
+  value,
+  suffix,
+  label,
+  tone,
+}: {
+  value: string
+  suffix?: string
+  label: string
+  tone?: "up"
+}) {
+  return (
+    <div className="min-w-0">
+      <span
+        className={cn(
+          "block font-mono text-[15px] font-bold leading-tight tabular-nums",
+          tone === "up" ? "text-emerald-600 dark:text-emerald-400" : "text-foreground/75",
+        )}
+      >
+        {value}
+        {suffix && <span className="text-[11px] font-semibold opacity-70">{suffix}</span>}
+      </span>
+      <span className="mt-0.5 block text-[10px] leading-tight text-muted-foreground">{label}</span>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// Aba 1 — A prova
+// ─────────────────────────────────────────────────────────────
+
+function ProofTab({
+  aligned,
+  patterns,
+  model,
+  promptVersion,
+  createdAt,
+}: {
+  aligned: AlignedWorkSplit
+  patterns: string[]
+  model: string
+  promptVersion: string
+  createdAt: string
+}) {
+  return (
+    <>
+      {aligned.read.length > 0 && (
+        <section className="rounded-xl border border-border/70 bg-card/60 p-4 shadow-sm shadow-black/5 sm:p-5">
+          <ModHeader
+            icon={<Trophy />}
+            accent="emerald"
+            title="O que o modelo previu, ao lado do que você deu"
+            subtitle={`entre as ${aligned.readTotal} que você leu e avaliou · ordenadas pela Nota Prevista`}
+          />
+          <ol className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6 lg:gap-3">
+            {aligned.read.map((work, i) => (
+              <ReadWorkCard key={work.id} work={work} rank={i + 1} />
+            ))}
+          </ol>
+        </section>
+      )}
+
+      {patterns.length > 0 && (
+        <section className="rounded-xl border border-border/70 bg-card/60 p-4 shadow-sm shadow-black/5 sm:p-5">
+          <ModHeader
+            icon={<Lightbulb />}
+            accent="violet"
+            title="Os padrões que a IA achou nas suas notas altas"
+            subtitle="padrões que se repetem nas obras que você mais gosta"
+            action={
+              <AiProvenanceSeal
+                title="Padrões narrativos por IA"
+                model={model}
+                promptVersion={promptVersion}
+                at={createdAt}
+                note="Frases escritas por um modelo a partir das obras que você avaliou."
+              />
+            }
+          />
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {patterns.map((pattern, i) => (
+              <LearnCard key={pattern} text={pattern} index={i} />
+            ))}
+          </div>
+        </section>
+      )}
+    </>
+  )
+}
+
+/**
+ * Card da trilha de confirmação: PREVISTA → SUA NOTA, cada uma rotulada, com o erro
+ * do modelo ao lado. Mostrar só a nota da pessoa (como na v2) desperdiçava a única
+ * comparação que a página tem para provar acerto obra a obra.
+ */
+function ReadWorkCard({ work, rank }: { work: AlignedWork; rank: number }) {
+  const delta =
+    work.userScore != null && work.expectedScore != null ? work.userScore - work.expectedScore : null
+  // ±0,5 é meio ponto na escala de 0–10 que a tela mostra — abaixo disso a previsão
+  // e a nota arredondam para o mesmo lugar na maioria dos casos.
+  const closeEnough = delta != null && Math.abs(delta) <= 0.5
+  return (
+    <li className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20">
+      <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted">
+        <CoverImage
+          url={work.coverUrl}
+          alt={work.title}
+          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+        />
+        <span className="absolute left-1.5 top-1.5 grid size-5 place-items-center rounded-full bg-black/60 font-mono text-[11px] font-semibold text-white">
+          {rank}
+        </span>
+      </div>
+      <div className="flex flex-1 flex-col gap-1.5 p-2">
+        <WorkTitleLink
+          title={work.title}
+          workId={work.id}
+          className="line-clamp-2 min-h-[2rem] text-xs font-medium leading-snug hover:underline"
+        />
+        <div className="mt-auto flex flex-col gap-1.5 pt-1">
+          {work.expectedScore != null && work.userScore != null && (
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 rounded-md bg-muted/60 px-1.5 py-1">
+              <ScorePart label="prevista" value={nf(work.expectedScore)} tone="sky" />
+              <ArrowRight className="size-3 text-muted-foreground" />
+              <ScorePart label="sua nota" value={nf(work.userScore)} tone="emerald" />
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-1.5 text-[10.5px] tabular-nums text-muted-foreground">
+            <span className="truncate">
+              {work.totalChapters ? `${work.chaptersRead}/${work.totalChapters}` : "—"}
+            </span>
+            {delta != null && (
+              <span
+                title="erro do modelo nesta obra"
+                className={cn(
+                  "shrink-0 rounded-full px-1.5 font-mono font-semibold",
+                  closeEnough
+                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                    : "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+                )}
+              >
+                {delta >= 0 ? "+" : "−"}
+                {nf(Math.abs(delta))}
+              </span>
+            )}
+          </div>
+          <AlignmentCell value={work.personalFit} percentile={work.personalFitPercentile} />
+        </div>
+      </div>
+    </li>
+  )
+}
+
+function ScorePart({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: string
+  tone: "sky" | "emerald"
+}) {
+  return (
+    <span className="min-w-0 text-center">
+      <span className="block text-[8.5px] uppercase leading-tight tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <span
+        className={cn(
+          "block font-mono text-sm font-bold leading-tight tabular-nums",
+          tone === "sky"
+            ? "text-sky-600 dark:text-sky-400"
+            : "text-emerald-600 dark:text-emerald-400",
+        )}
+      >
+        {value}
+      </span>
+    </span>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// Aba 2 — Seus critérios
+// ─────────────────────────────────────────────────────────────
+
+function CriteriaTab({
+  entries,
+  open,
+  onToggle,
+  onToggleAll,
+  model,
+  promptVersion,
+  createdAt,
+}: {
+  entries: [string, ProfileCriterionPreference][]
+  open: Set<string>
+  onToggle: (slug: string) => void
+  onToggleAll: () => void
+  model: string
+  promptVersion: string
+  createdAt: string
+}) {
+  if (entries.length === 0) return null
+  const allOpen = open.size === entries.length
+  const withNote = entries.filter(([, pref]) => pref.note?.trim()).length
+  return (
+    <section className="rounded-xl border border-border/70 bg-card/60 p-4 shadow-sm shadow-black/5 sm:p-5">
+      <ModHeader
+        icon={<BarChart3 />}
+        accent="blue"
+        title={`Como a IA lê cada um dos ${entries.length} critérios`}
+        subtitle="a barra é a faixa de nota que te agrada · o peso é o quanto isso decide sua nota final"
+        action={
+          <div className="flex items-center gap-2">
+            <AiProvenanceSeal
+              title="Preferências por critério, por IA"
+              model={model}
+              promptVersion={promptVersion}
+              at={createdAt}
+              extra={[{ label: "Com explicação", value: `${withNote} de ${entries.length}` }]}
+              note="Faixa ideal, peso e a explicação de cada critério foram escritos por um modelo."
+            />
+            {withNote > 0 && (
+              <button
+                type="button"
+                onClick={onToggleAll}
+                className="rounded-md px-2 py-1 text-[11.5px] font-medium text-muted-foreground outline-none ring-1 ring-inset ring-border transition-colors hover:text-foreground focus-visible:ring-2"
+              >
+                {allOpen ? "Fechar todas" : "Abrir todas as notas"}
+              </button>
+            )}
+          </div>
+        }
+      />
+
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-8">
+        {entries.length >= 3 && (
+          <div className="mx-auto shrink-0 lg:mx-0 lg:sticky lg:top-4">
+            <RadarSignature entries={entries.slice(0, 6)} size={180} />
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          {/* Eixo em cima: sem ele a barra é uma faixa sem escala — e o número à
+              direita (peso) seria lido como se fosse a leitura da barra. */}
+          <div className="mb-1 hidden grid-cols-[minmax(0,10rem)_1fr_auto] gap-3 sm:grid">
+            <span />
+            <div className="relative h-3 font-mono text-[10px] text-muted-foreground/70">
+              <span className="absolute left-0">0</span>
+              <span className="absolute left-1/2 -translate-x-1/2">5</span>
+              <span className="absolute right-0">10</span>
+            </div>
+            <span className="w-[104px]" />
+          </div>
+          {entries.map(([slug, pref]) => (
+            <CriterionRow
+              key={slug}
+              slug={slug}
+              pref={pref}
+              open={open.has(slug)}
+              onToggle={() => onToggle(slug)}
+            />
+          ))}
+          <p className="mt-3 border-t border-border/60 pt-2.5 text-[11px] leading-relaxed text-muted-foreground">
+            Peso alto com faixa estreita é critério decisivo; peso baixo com faixa larga quer dizer
+            que você tolera quase qualquer coisa ali.
+          </p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/**
+ * Uma linha de critério. Três campos ROTULADOS, e não um número solto ao lado de uma
+ * barra: a v2 desenhava a faixa ideal e imprimia o peso na mesma linha sem dizer que
+ * eram grandezas diferentes — em Humor a barra é larga (faixa 4–8,5) com peso 50%, e
+ * em Romance a barra é estreita (7–9,5) com peso 90%, então "barra maior = número
+ * maior" se invertia.
+ *
+ * A `note` da IA (uma frase por critério) sai daqui. Ela existe no banco desde sempre
+ * e a v2 não a mostrava em lugar nenhum — era o dado mais explicativo do perfil.
+ */
+function CriterionRow({
+  slug,
+  pref,
+  open,
+  onToggle,
+}: {
+  slug: string
+  pref: ProfileCriterionPreference
+  open: boolean
+  onToggle: () => void
+}) {
+  const info = CRITERIA_INFO[slug]
+  const left = Math.max(0, Math.min(100, pref.ideal_min * 10))
+  const right = Math.max(0, Math.min(100, 100 - pref.ideal_max * 10))
+  const strong = pref.weight >= 0.5
+  const note = pref.note?.trim()
+  const name = info?.name ?? slug
+
+  const body = (
+    <>
+      <span className="flex items-center gap-1.5 truncate text-xs text-foreground/85">
+        <span className="shrink-0">{info?.emoji}</span>
+        <span className="truncate">{name}</span>
+        {note && (
+          <ChevronRight
+            className={cn(
+              "ml-auto size-3 shrink-0 text-muted-foreground transition-transform",
+              open && "rotate-90",
+            )}
+          />
+        )}
+      </span>
+      <div className="relative h-2 rounded-full bg-muted">
+        <span className="absolute inset-y-[-3px] left-1/2 w-px bg-border" />
+        <div
+          className={cn(
+            "absolute inset-y-0 rounded-full",
+            strong
+              ? "bg-gradient-to-r from-sky-500/45 to-sky-500 dark:from-sky-400/45 dark:to-sky-400"
+              : "bg-muted-foreground/35",
+          )}
+          style={{ left: `${left}%`, right: `${right}%` }}
+        />
+      </div>
+      <span className="flex w-[104px] shrink-0 items-center justify-end gap-2 text-[11px] text-muted-foreground">
+        <span className="font-mono tabular-nums" title="faixa de nota que te agrada">
+          {nf(pref.ideal_min)}–{nf(pref.ideal_max)}
+        </span>
+        <span className="flex items-center gap-1" title="peso: o quanto decide sua nota">
+          <span className="h-1 w-6 overflow-hidden rounded-full bg-muted">
+            <span
+              className={cn("block h-full", strong ? "bg-violet-500" : "bg-muted-foreground/40")}
+              style={{ width: `${pref.weight * 100}%` }}
+            />
+          </span>
+          <b
+            className={cn(
+              "font-mono tabular-nums",
+              strong ? "text-foreground/70" : "text-muted-foreground",
+            )}
+          >
+            {Math.round(pref.weight * 100)}%
+          </b>
+        </span>
+      </span>
+    </>
+  )
+
+  const rowClass =
+    "grid w-full grid-cols-1 items-center gap-1.5 py-2 text-left sm:grid-cols-[minmax(0,10rem)_1fr_auto] sm:gap-3"
+
+  return (
+    <div className="border-t border-border/50 first:border-t-0">
+      {note ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          className={cn(
+            rowClass,
+            "rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          )}
+        >
+          {body}
+        </button>
+      ) : (
+        <div className={rowClass}>{body}</div>
+      )}
+      {note && open && (
+        <p className="mb-2.5 border-l-2 border-violet-500/45 pl-3 text-[13px] leading-relaxed text-muted-foreground">
+          {note}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// Aba 3 — Tags e temas
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 🔴 TAG e TEMA são coisas diferentes, e a diferença é FUNCIONAL — não de estilo.
+ *
+ * `computePersonalFit` só consome `loved_tags`/`avoided_tags` e os critérios: um TEMA
+ * (frase livre da IA) não existe no catálogo, não casa com obra nenhuma e **não entra
+ * no cálculo do alinhamento** — só contextualiza os prompts de IA. Na v2 os dois
+ * saíam como a mesma pílula colorida, afirmando que pesavam igual.
+ *
+ * Por isso a distinção é de FORMA (pílula × linha de texto) e não de cor: os dois já
+ * dividem a cor de stance (verde ama / vermelho evita), e uma frase de ~60 caracteres
+ * nunca foi um chip.
+ */
+function TagsTab({
+  origin,
+  lovedThemes,
+  avoidedThemes,
+}: {
+  origin: ReturnType<typeof classifyProfileTagOrigin>
+  lovedThemes: string[]
+  avoidedThemes: string[]
+}) {
+  const themeCount = lovedThemes.length + avoidedThemes.length
+  return (
+    <section className="rounded-xl border border-border/70 bg-card/60 p-4 shadow-sm shadow-black/5 sm:p-5">
+      <ModHeader
+        icon={<Heart />}
+        accent="emerald"
+        title={`As ${origin.profileTotal} tags do seu perfil, pela origem de cada uma`}
+        subtitle="agrupadas por de onde vieram — é isso que responde “vocês me entendem?”"
+      />
+
+      <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5 text-[11.5px] text-muted-foreground">
+        <span className="flex items-center gap-2">
+          <span className="rounded-full border border-emerald-500/40 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+            <Heart className="mr-1 inline size-3" />
+            tag
+          </span>
+          existe no catálogo, casa com a obra e move o alinhamento
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="border-l-2 border-emerald-500/50 pl-2 font-medium text-foreground/80">
+            tema
+          </span>
+          frase da IA: não casa com obra nenhuma, só contextualiza os prompts
+        </span>
+      </div>
+
+      <div className="space-y-3">
+        {origin.conflicts.length > 0 && (
+          <Bucket
+            tone="alert"
+            title="Vocês discordam"
+            count={origin.conflicts.length}
+            description="A IA leu suas obras e concluiu o oposto do que você declarou. Vale conferir qual dos dois está desatualizado."
+          >
+            <TagRow tags={origin.conflicts} showOpposite />
+          </Bucket>
+        )}
+
+        {origin.confirmed.length > 0 && (
+          <Bucket
+            tone="violet"
+            title="Você declarou, e a IA confirmou"
+            count={origin.confirmed.length}
+            description="A IA chegou nessas lendo só as obras que você avaliou — ela nunca vê suas Preferências."
+          >
+            <TagRow tags={origin.confirmed} />
+          </Bucket>
+        )}
+
+        {origin.discovered.length > 0 && (
+          <Bucket
+            title="A IA descobriu sozinha"
+            count={origin.discovered.length}
+            description="Não estão nas suas Preferências. Se alguma estiver errada, declarar o contrário corrige o ranking na hora — sem esperar o próximo perfil."
+          >
+            <TagRow tags={origin.discovered} />
+          </Bucket>
+        )}
+
+        {origin.declaredOnly > 0 && (
+          <Bucket
+            title="Você declarou e não entrou no destilado"
+            count={origin.declaredOnly}
+            description={
+              <>
+                Isso <b className="text-foreground/80">não</b> é falha: o perfil é um destilado das
+                tags mais fortes, não um inventário. Elas continuam valendo integralmente no cálculo
+                do alinhamento.{" "}
+                <Link
+                  href="/preferencias"
+                  className="font-semibold text-sky-600 hover:underline dark:text-sky-400"
+                >
+                  ver em Preferências →
+                </Link>
+              </>
+            }
+          />
+        )}
+
+        {themeCount > 0 && (
+          <Bucket
+            title="Temas — o que a IA descreveu com frase"
+            count={themeCount}
+            description="Não são tags: não existem no catálogo, então não casam com nenhuma obra e não entram no cálculo do alinhamento. Entram como contexto nos prompts de IA."
+          >
+            <ThemeList loved={lovedThemes} avoided={avoidedThemes} />
+          </Bucket>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function Bucket({
+  title,
+  count,
+  description,
+  tone,
+  children,
+}: {
+  title: string
+  count: number
+  description: React.ReactNode
+  tone?: "violet" | "alert"
+  children?: React.ReactNode
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-xl border bg-muted/20 p-4",
+        tone === "violet"
+          ? "border-violet-500/35"
+          : tone === "alert"
+            ? "border-rose-500/40"
+            : "border-border/60",
+      )}
+    >
+      <div className="flex items-baseline gap-2">
+        <h4
+          className={cn(
+            "text-[13px] font-semibold",
+            tone === "violet"
+              ? "text-violet-600 dark:text-violet-400"
+              : tone === "alert"
+                ? "text-rose-600 dark:text-rose-400"
+                : "text-foreground",
+          )}
+        >
+          {title}
+        </h4>
+        <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
+      </div>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p>
+      {children && <div className="mt-3">{children}</div>}
+    </div>
+  )
+}
+
+/**
+ * ⚠️ Coração de CONTORNO, nunca preenchido: o ♥ preenchido é o marcador de ênfase 2×
+ * (`TagStanceMark`, em 3 outras superfícies), e tag vinda do perfil nunca é forte —
+ * a régua de lá é `strength` 0–1, outra escala. Preencher aqui afirmaria uma ênfase
+ * que a pessoa nunca declarou.
+ */
+function TagRow({ tags, showOpposite }: { tags: ProfileTagWithOrigin[]; showOpposite?: boolean }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {tags.map((tag) => {
+        const love = tag.stance === "love"
+        return (
+          <span
+            key={`${tag.group ?? ""}::${tag.name}`}
+            title={
+              showOpposite
+                ? `o perfil diz que você ${love ? "ama" : "evita"}; você declarou o contrário`
+                : `força no perfil: ${Math.round(tag.strength * 100)}%${tag.group ? ` • grupo: ${tag.group}` : ""}`
+            }
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px] font-medium ring-1 ring-inset",
+              love
+                ? "text-emerald-700 ring-emerald-500/40 dark:text-emerald-300"
+                : "text-rose-700 ring-rose-500/40 dark:text-rose-300",
+            )}
+          >
+            {love ? <Heart className="size-3" /> : <Ban className="size-3" />}
+            {tag.name}
+            <span className="font-mono text-[10px] tabular-nums opacity-65">
+              {Math.round(tag.strength * 100)}%
+            </span>
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Tema é LINHA, não pílula — ver a régua em `TagsTab`. */
+function ThemeList({ loved, avoided }: { loved: string[]; avoided: string[] }) {
+  const rows: Array<{ text: string; love: boolean }> = [
+    ...loved.map((text) => ({ text, love: true })),
+    ...avoided.map((text) => ({ text, love: false })),
+  ]
+  return (
+    <div className="overflow-hidden rounded-lg border border-dashed border-border">
+      {rows.map((row) => (
+        <p
+          key={row.text}
+          className="m-0 grid grid-cols-[auto_1fr] items-baseline gap-2.5 border-t border-dashed border-border/70 bg-muted/25 px-3 py-2 text-[13px] leading-relaxed text-foreground/85 first:border-t-0"
+        >
+          {row.love ? (
+            <Heart className="size-3 shrink-0 translate-y-0.5 text-emerald-600 dark:text-emerald-400" />
+          ) : (
+            <Ban className="size-3 shrink-0 translate-y-0.5 text-rose-600 dark:text-rose-400" />
+          )}
+          <span>{row.text}</span>
+        </p>
+      ))}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// Aba 4 — O que isso muda
+// ─────────────────────────────────────────────────────────────
+
+function RecommendationTab({
+  drivers,
+  aligned,
+  page,
+  pageSize,
+  onPage,
+}: {
+  drivers: PredictionDriver[]
+  aligned: AlignedWorkSplit
+  page: number
+  pageSize: number
+  onPage: (p: number) => void
+}) {
+  const pages = Math.max(1, Math.ceil(aligned.unread.length / pageSize))
+  // Defensivo: o servidor pode devolver menos obras do que na última renderização
+  // (obra lida no meio-tempo) e a página guardada ficaria fora do intervalo.
+  const current = Math.min(page, pages - 1)
+  const slice = aligned.unread.slice(current * pageSize, current * pageSize + pageSize)
+
+  return (
+    <>
+      {drivers.length > 0 && (
+        <section className="rounded-xl border border-border/70 bg-card/60 p-4 shadow-sm shadow-black/5 sm:p-5">
+          <ModHeader
+            icon={<TrendingUp />}
+            accent="violet"
+            title="O que mais pesa na sua Nota Prevista"
+            subtitle="fora os 9 critérios · tamanho = importância no modelo"
+          />
+          <PredictionDrivers drivers={drivers} />
+        </section>
+      )}
+
+      {aligned.unread.length > 0 && (
+        <section className="rounded-xl border border-border/70 bg-card/60 p-4 shadow-sm shadow-black/5 sm:p-5">
+          <ModHeader
+            icon={<ArrowRight />}
+            accent="blue"
+            title="Próximas leituras alinhadas"
+            subtitle={`maior Nota Prevista entre as ${aligned.unreadTotal} que você ainda não leu`}
+          />
+          <ol className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6 lg:gap-3">
+            {slice.map((work, i) => (
+              <UnreadWorkCard key={work.id} work={work} rank={current * pageSize + i + 1} />
+            ))}
+          </ol>
+
+          {pages > 1 && (
+            <div className="mt-3 flex items-center gap-2.5">
+              <span className="mr-auto text-[11.5px] tabular-nums text-muted-foreground">
+                {current * pageSize + 1}–{current * pageSize + slice.length} de{" "}
+                {aligned.unread.length} · ordenadas pela Nota Prevista
+              </span>
+              <span className="flex gap-1.5" aria-hidden="true">
+                {Array.from({ length: pages }).map((_, i) => (
+                  <span
+                    key={i}
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      i === current ? "bg-sky-500" : "bg-border",
+                    )}
+                  />
+                ))}
+              </span>
+              <Button
+                size="icon"
+                variant="outline"
+                className="size-7"
+                onClick={() => onPage(current - 1)}
+                disabled={current === 0}
+                aria-label="Página anterior"
+              >
+                <ChevronRight className="rotate-180" />
+              </Button>
+              <Button
+                size="icon"
+                variant="outline"
+                className="size-7"
+                onClick={() => onPage(current + 1)}
+                disabled={current >= pages - 1}
+                aria-label="Próxima página"
+              >
+                <ChevronRight />
+              </Button>
+            </div>
+          )}
+
+          {aligned.otherTotal > 0 && (
+            <p className="mt-3 border-t border-border/60 pt-2.5 text-[11px] leading-relaxed text-muted-foreground">
+              {aligned.otherTotal} obras em andamento ou pausadas não entram em nenhuma das duas
+              linhas — não confirmam o gosto nem são sugestão de próxima leitura.
+            </p>
+          )}
+        </section>
+      )}
+    </>
+  )
+}
+
+function UnreadWorkCard({ work, rank }: { work: AlignedWork; rank: number }) {
+  return (
+    <li className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20">
+      <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted">
+        <CoverImage
+          url={work.coverUrl}
+          alt={work.title}
+          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+        />
+        <span className="absolute left-1.5 top-1.5 grid size-5 place-items-center rounded-full bg-black/60 font-mono text-[11px] font-semibold text-white">
+          {rank}
+        </span>
+      </div>
+      <div className="flex flex-1 flex-col gap-1.5 p-2">
+        <WorkTitleLink
+          title={work.title}
+          workId={work.id}
+          className="line-clamp-2 min-h-[2rem] text-xs font-medium leading-snug hover:underline"
+        />
+        <div className="mt-auto flex flex-col gap-1.5 pt-1">
+          {work.expectedScore != null && (
+            <div className="rounded-md bg-muted/60 px-1.5 py-1 text-center">
+              <span className="block text-[8.5px] uppercase leading-tight tracking-wide text-muted-foreground">
+                nota prevista
+              </span>
+              <span className="block font-mono text-sm font-bold leading-tight tabular-nums text-sky-600 dark:text-sky-400">
+                {nf(work.expectedScore)}
+              </span>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-1.5 text-[10.5px] tabular-nums text-muted-foreground">
+            <span className="truncate">
+              {work.totalChapters ? `${work.totalChapters} cap` : "—"}
+            </span>
+          </div>
+          <AlignmentCell value={work.personalFit} percentile={work.personalFitPercentile} />
+        </div>
+      </div>
+    </li>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// Defasagem (canto do hero)
+// ─────────────────────────────────────────────────────────────
 
 const LEVEL_STYLE: Record<
   ProfileStalenessLevel,
@@ -656,9 +1435,8 @@ const LEVEL_STYLE: Record<
   },
 }
 
-/** Radar da assinatura (dentro do card "Sua assinatura"): um valor por eixo =
- *  PESO do critério. É a "forma" reconhecível do gosto; as barras abaixo dão os
- *  números exatos (faixa ideal + peso). Até 6 eixos de maior peso. */
+/** Radar da assinatura: um valor por eixo = PESO do critério. É a "forma"
+ *  reconhecível do gosto; as linhas ao lado dão faixa, peso e a explicação. */
 function RadarSignature({
   entries,
   size = 190,
@@ -733,8 +1511,8 @@ const FRESHLY_GENERATED: ProfileStaleness = {
 
 /**
  * Indicador COMPACTO de defasagem, no canto superior direito do hero (ao lado de
- * Recomputar) — substitui a barra full-width do rodapé. Barrinha do drift medido
- * (com a marca do limiar) + %, tingidos pelo nível; o detalhe fica no tooltip.
+ * Recomputar). Barrinha do drift medido (com a marca do limiar) + %, tingidos pelo
+ * nível; o detalhe fica no tooltip.
  */
 function CompactFreshness({
   staleness: st,
@@ -840,163 +1618,9 @@ function ModHeader({
   )
 }
 
-// ─────────────────────────────────────────────────────────────
-// Assinatura — barras por critério (contidas, ordem = peso)
-// ─────────────────────────────────────────────────────────────
-
-/** Uma coluna de barras + o eixo 0/5/10 embaixo (a Assinatura usa duas, lado a lado). */
-function BarGroup({
-  entries,
-  minRows = 0,
-}: {
-  entries: [string, ProfileCriterionPreference][]
-  minRows?: number
-}) {
-  if (entries.length === 0) return null
-  const pad = Math.max(0, minRows - entries.length)
-  return (
-    <div>
-      <div className="flex flex-col">
-        {entries.map(([slug, pref]) => (
-          <CriterionBar key={slug} slug={slug} pref={pref} />
-        ))}
-        {Array.from({ length: pad }).map((_, i) => (
-          <div key={`pad-${i}`} className="h-[26px]" aria-hidden="true" />
-        ))}
-      </div>
-      <div className="mt-1 grid grid-cols-[104px_1fr_38px] gap-2.5 sm:grid-cols-[128px_1fr_40px]">
-        <span />
-        <div className="relative h-3 font-mono text-[10px] text-muted-foreground/70">
-          <span className="absolute left-0">0</span>
-          <span className="absolute left-1/2 -translate-x-1/2">5</span>
-          <span className="absolute right-0">10</span>
-        </div>
-        <span />
-      </div>
-    </div>
-  )
-}
-
-function CriterionBar({ slug, pref }: { slug: string; pref: ProfileCriterionPreference }) {
-  const info = CRITERIA_INFO[slug]
-  const left = Math.max(0, Math.min(100, pref.ideal_min * 10))
-  const right = Math.max(0, Math.min(100, 100 - pref.ideal_max * 10))
-  const strong = pref.weight >= 0.5
-  return (
-    <div className="grid grid-cols-[104px_1fr_38px] items-center gap-2.5 py-[5px] sm:grid-cols-[128px_1fr_40px]">
-      <span className="flex items-center gap-1.5 truncate text-xs text-foreground/85">
-        <span className="shrink-0">{info?.emoji}</span>
-        <span className="truncate">{info?.name ?? slug}</span>
-      </span>
-      <div className="relative h-2 rounded-full bg-muted">
-        <span className="absolute inset-y-[-3px] left-1/2 w-px bg-border" />
-        <div
-          className={cn(
-            "absolute inset-y-0 rounded-full",
-            strong
-              ? "bg-gradient-to-r from-sky-500/45 to-sky-500 dark:from-sky-400/45 dark:to-sky-400"
-              : "bg-muted-foreground/35",
-          )}
-          style={{ left: `${left}%`, right: `${right}%` }}
-        />
-      </div>
-      <span
-        className={cn(
-          "text-right font-mono text-[11.5px] tabular-nums",
-          strong ? "text-foreground/70" : "text-muted-foreground",
-        )}
-      >
-        {Math.round(pref.weight * 100)}%
-      </span>
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────
-// Afinidades — tags = pílula (contorno) · temas = texto
-// ─────────────────────────────────────────────────────────────
-
-function AvoidIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="size-3.5">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M6 6l12 12" />
-    </svg>
-  )
-}
-
-const AFFINITY_TONE = {
-  love: {
-    head: "text-emerald-600 dark:text-emerald-400",
-    chip: "text-emerald-700 ring-emerald-500/40 dark:text-emerald-300",
-    more: "text-emerald-600 ring-emerald-500/40 hover:bg-emerald-500/10 dark:text-emerald-400",
-  },
-  avoid: {
-    head: "text-rose-600 dark:text-rose-400",
-    chip: "text-rose-700 ring-rose-500/40 dark:text-rose-300",
-    more: "text-rose-600 ring-rose-500/40 hover:bg-rose-500/10 dark:text-rose-400",
-  },
-} as const
-
-/** Prévia (topo N por strength) de uma polaridade. Count = SÓ tags (bate com os
- *  chips). "+N" leva ao container detalhado. Temas saem daqui pro detalhe. */
-function AffinityBlock({
-  tone,
-  title,
-  tags,
-  onSeeAll,
-}: {
-  tone: "love" | "avoid"
-  title: string
-  tags: ProfileTag[]
-  onSeeAll: () => void
-}) {
-  if (tags.length === 0) return null
-  const shown = tags.slice(0, AFFINITY_COLLAPSED)
-  const hidden = tags.length - shown.length
-  const t = AFFINITY_TONE[tone]
-  return (
-    <div>
-      <p className={cn("mb-2.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide", t.head)}>
-        {tone === "love" ? <Heart className="size-3.5" fill="currentColor" stroke="none" /> : <AvoidIcon />}
-        {title}
-        <span className="font-normal text-muted-foreground/70">({tags.length})</span>
-      </p>
-      <div className="flex flex-wrap gap-2">
-        {shown.map((tag) => (
-          <span
-            key={`${tag.group ?? ""}::${tag.name}`}
-            title={
-              tag.group
-                ? `grupo: ${tag.group} • força: ${(tag.strength * 100).toFixed(0)}%`
-                : `força: ${(tag.strength * 100).toFixed(0)}%`
-            }
-            className={cn("rounded-full px-3 py-1 text-sm font-medium ring-1 ring-inset", t.chip)}
-          >
-            {tag.name}
-          </span>
-        ))}
-        {hidden > 0 && (
-          <button
-            type="button"
-            onClick={onSeeAll}
-            title="Ver todas as tags no detalhe abaixo"
-            className={cn(
-              "rounded-full px-3 py-1 text-sm font-medium ring-1 ring-inset outline-none transition-colors focus-visible:ring-2",
-              t.more,
-            )}
-          >
-            +{hidden}
-          </button>
-        )}
-      </div>
-    </div>
-  )
-}
-
 /**
  * "O que mais pesa na sua Nota Prevista" — top features do Ridge (fora os 9
- * critérios, que já estão na Assinatura), como barras ranqueadas com sinal:
+ * critérios, que já estão nos critérios), como barras ranqueadas com sinal:
  * verde puxa a nota pra cima, vermelho pra baixo, tamanho = importância.
  */
 function PredictionDrivers({ drivers }: { drivers: PredictionDriver[] }) {
@@ -1004,13 +1628,6 @@ function PredictionDrivers({ drivers }: { drivers: PredictionDriver[] }) {
   const maxAbs = Math.max(...drivers.map((d) => Math.abs(d.coef)), 1e-9)
   return (
     <div>
-      <p className="mb-3 flex flex-wrap items-center gap-x-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-400">
-        <TrendingUp className="size-3.5" />
-        O que mais pesa na sua Nota Prevista
-        <span className="font-normal normal-case tracking-normal text-muted-foreground">
-          · fora os 9 critérios
-        </span>
-      </p>
       <div className="flex flex-col">
         {drivers.map((d) => {
           const up = d.coef >= 0
@@ -1056,95 +1673,7 @@ function PredictionDrivers({ drivers }: { drivers: PredictionDriver[] }) {
           <span className="size-2 rounded-full bg-rose-500" />
           puxa pra baixo
         </span>
-        <span className="ml-auto">tamanho = importância</span>
-      </div>
-    </div>
-  )
-}
-
-/** Agrupa tags por `group` (label via TAG_GROUP_LABELS), maior grupo primeiro,
- *  tags ordenadas por strength dentro do grupo. */
-function groupTagsByGroup(tags: ProfileTag[]): Array<[string, ProfileTag[]]> {
-  const map = new Map<string, ProfileTag[]>()
-  for (const tag of tags) {
-    const key = tag.group ?? "other"
-    const arr = map.get(key)
-    if (arr) arr.push(tag)
-    else map.set(key, [tag])
-  }
-  const label = (slug: string) =>
-    (TAG_GROUP_LABELS as Record<string, string>)[slug] ??
-    slug
-      .split(/[_\s]+/)
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(" ")
-  return [...map.entries()]
-    .map(
-      ([slug, ts]) =>
-        [label(slug), [...ts].sort((a, b) => b.strength - a.strength)] as [string, ProfileTag[]],
-    )
-    .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
-}
-
-/** Uma polaridade no container "Tags em detalhe": tags agrupadas por grupo +
- *  bloco de Temas. Nomes completos (o container tem largura pra isso). */
-function PolarityDetail({
-  tone,
-  title,
-  tags,
-  themes,
-}: {
-  tone: "love" | "avoid"
-  title: string
-  tags: ProfileTag[]
-  themes: string[]
-}) {
-  if (tags.length === 0 && themes.length === 0) return null
-  const t = AFFINITY_TONE[tone]
-  const groups = groupTagsByGroup(tags)
-  const chip = (key: string, label: string, titleAttr?: string) => (
-    <span
-      key={key}
-      title={titleAttr}
-      className={cn("rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset", t.chip)}
-    >
-      {label}
-    </span>
-  )
-  return (
-    <div>
-      <p className={cn("mb-3 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide", t.head)}>
-        {tone === "love" ? <Heart className="size-3.5" fill="currentColor" stroke="none" /> : <AvoidIcon />}
-        {title}
-        <span className="font-normal text-muted-foreground/70">({tags.length + themes.length})</span>
-      </p>
-      <div className="space-y-3">
-        {groups.map(([label, gtags]) => (
-          <div key={label}>
-            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/80">
-              {label} <span className="text-muted-foreground/50">· {gtags.length}</span>
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {gtags.map((tag) =>
-                chip(
-                  `${tag.group ?? ""}::${tag.name}`,
-                  tag.name,
-                  `força: ${(tag.strength * 100).toFixed(0)}%`,
-                ),
-              )}
-            </div>
-          </div>
-        ))}
-        {themes.length > 0 && (
-          <div>
-            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/80">
-              Temas <span className="text-muted-foreground/50">· {themes.length}</span>
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {themes.map((theme) => chip(theme, theme))}
-            </div>
-          </div>
-        )}
+        <span className="ml-auto">regressão Ridge · sem LLM</span>
       </div>
     </div>
   )
@@ -1165,144 +1694,6 @@ function LearnCard({ text, index }: { text: string; index: number }) {
       </span>
       <p className="text-[13px] leading-relaxed text-foreground/85">{text}</p>
     </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────
-// Prova — stats de confirmação + trilhas de capas
-// ─────────────────────────────────────────────────────────────
-
-function ProofStats({ c }: { c: AlignmentConfirmation }) {
-  const n = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })
-  const pct = Math.max(0, Math.min(100, Math.round(c.correlation * 100)))
-  return (
-    <div className="grid items-center gap-x-5 gap-y-3 rounded-xl bg-emerald-500/[0.08] p-4 ring-1 ring-inset ring-emerald-500/20 sm:grid-cols-[auto_1fr]">
-      <div className="sm:border-r sm:border-emerald-500/20 sm:pr-5">
-        <div className="font-mono text-3xl font-bold leading-none tracking-tight tabular-nums text-emerald-600 dark:text-emerald-400">
-          {pct}%
-        </div>
-        <div className="mt-1 max-w-[24ch] text-[11px] leading-snug text-muted-foreground">
-          obras compatíveis com o perfil tendem a receber suas notas mais altas
-        </div>
-      </div>
-      <div className="grid grid-cols-3 gap-3 max-[420px]:grid-cols-1">
-        <div>
-          <div className="text-[10.5px] text-muted-foreground">média das compatíveis</div>
-          <div className="mt-0.5 font-mono text-base font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
-            {n(c.topAvgScore)}
-          </div>
-        </div>
-        <div>
-          <div className="text-[10.5px] text-muted-foreground">contra a média geral</div>
-          <div className="mt-0.5 font-mono text-base font-semibold tabular-nums text-foreground/80">
-            {n(c.overallAvgScore)}
-          </div>
-        </div>
-        <div>
-          <div className="text-[10.5px] text-muted-foreground">confirmam o perfil</div>
-          <div className="mt-0.5 font-mono text-base font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
-            {c.topHighCount} de {c.topN}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-const ROW_TONE = {
-  emerald: "text-emerald-600 dark:text-emerald-400",
-  sky: "text-sky-600 dark:text-sky-400",
-} as const
-
-function Rail({
-  icon,
-  tone,
-  title,
-  total,
-  works,
-  showUserScore = false,
-}: {
-  icon: React.ReactNode
-  tone: keyof typeof ROW_TONE
-  title: string
-  total: number
-  works: AlignedWork[]
-  showUserScore?: boolean
-}) {
-  return (
-    <div>
-      <p className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
-        <span
-          className={cn(
-            "inline-flex items-center gap-1 font-semibold uppercase tracking-wide",
-            ROW_TONE[tone],
-          )}
-        >
-          {icon}
-          {title}
-        </span>
-        <span className="tabular-nums text-muted-foreground">· {total} obras</span>
-      </p>
-      <ol className="grid grid-cols-3 gap-2.5 sm:grid-cols-5 sm:gap-3">
-        {works.map((work, i) => (
-          <AlignedCard key={work.id} work={work} rank={i + 1} showUserScore={showUserScore} />
-        ))}
-      </ol>
-    </div>
-  )
-}
-
-function AlignedCard({
-  work,
-  rank,
-  showUserScore,
-}: {
-  work: AlignedWork
-  rank: number
-  showUserScore: boolean
-}) {
-  const score = showUserScore ? work.userScore : work.expectedScore
-  const progress =
-    showUserScore && work.totalChapters
-      ? `${work.chaptersRead}/${work.totalChapters}`
-      : work.totalChapters
-        ? `${work.totalChapters} cap`
-        : null
-  return (
-    <li className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20">
-      <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted">
-        <CoverImage
-          url={work.coverUrl}
-          alt={work.title}
-          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
-        />
-        <span className="absolute left-1.5 top-1.5 grid size-5 place-items-center rounded-full bg-black/60 font-mono text-[11px] font-semibold text-white">
-          {rank}
-        </span>
-      </div>
-      <div className="flex flex-1 flex-col gap-1.5 p-2">
-        <WorkTitleLink
-          title={work.title}
-          workId={work.id}
-          className="line-clamp-2 text-xs font-medium leading-snug hover:underline"
-        />
-        <div className="mt-auto flex flex-col gap-1 pt-1">
-          <AlignmentCell value={work.personalFit} percentile={work.personalFitPercentile} />
-          <div className="flex items-center justify-between gap-1.5 text-[10.5px] tabular-nums text-muted-foreground">
-            <span className="truncate">{progress ?? "—"}</span>
-            {score != null && (
-              <span
-                className={cn("shrink-0 font-mono font-semibold", showUserScore && "text-foreground")}
-                title={showUserScore ? "Sua nota" : "Nota Prevista"}
-              >
-                {score.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}
-                {!showUserScore && <span className="ml-0.5 font-normal opacity-70">prev</span>}
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-    </li>
   )
 }
 
