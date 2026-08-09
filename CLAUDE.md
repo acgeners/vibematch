@@ -1294,8 +1294,32 @@ com tag desse tipo, 256 delas hoje com `couple_dynamics` ≤ 6.
 
 ⚠️ **O sinal decisivo é a REAÇÃO do outro personagem, não a intensidade do comportamento.**
 Tag de posse descreve um lado; sem indício de como o outro reage, ela **perde peso** em vez de
-puxar pra baixo. E opinião de leitor é evidência sobre o que ACONTECE, nunca sobre se aquilo é
-bom pro casal.
+puxar pra baixo.
+
+🔴 **Opinião de leitor não escolhe faixa — mas a RECLAMAÇÃO é a melhor fonte da reação do
+personagem, e descartá-la joga a evidência fora junto.** A 1ª redação da regra mandava "extraia o
+FATO e DESCARTE o julgamento" listando como descartáveis justo as frases que **carregam** o fato:
+leitores comentam o que os incomodou, e pra isso descrevem o que a personagem fez ou sentiu.
+
+A separação é pelo **SUJEITO da frase**, nunca pelo tom:
+
+| frase fala de… | exemplo | uso |
+|---|---|---|
+| **o leitor** | "eu não aguentaria", "achei sufocante", "tenho raiva do ML" | preferência — não escolhe faixa |
+| **a personagem** | "ela aceita", "ela está desconfortável", "ela perdoou" | **fato sobre a reação** — peso alto |
+
+Uma frase costuma ter as duas. Três casos de **mesmo tom e faixas opostas** — é isso que prova
+que o tom não pode decidir:
+
+| reclamação | fato extraído | faixa |
+|---|---|---|
+| "ela é **idiota de aceitar** o ciúme dele" | ela **aceita** | 7-8 |
+| "é **absurdo** ela **perdoar** como ele a tratou **na linha do tempo original**" | ela **perdoou** + item **(d)** | 7-8, e o maltrato não conta |
+| "**tenho raiva** desse ML que não respeita a FL **mesmo quando ela está desconfortável**" | ela está **desconfortável** e ele ignora | **0-3** |
+
+⚠️ Leitores discordando sobre a REAÇÃO dela ("ela aceita numa boa" × "ela sofre") é divergência
+**real sobre a obra** — pontue pelo sinal mais frequente e abaixe a `confidence`. Não é o mesmo
+que divergência de gosto.
 
 🔴 **Mudar o texto do prompt sem trocar a `PROMPT_VERSION` é erro silencioso duplo:** a versão
 entra na chave de cache (`canonicalInputHash`) e é gravada em `ai_evaluations.prompt_version`,

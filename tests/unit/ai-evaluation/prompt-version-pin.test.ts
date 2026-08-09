@@ -29,7 +29,7 @@ import { PROMPT_VERSION, SYSTEM_PROMPT } from "@/lib/ai-evaluation/service"
 describe("PROMPT_VERSION acompanha o texto do prompt", () => {
   /** Versão e sha256 do SYSTEM_PROMPT andam JUNTOS — atualize os dois na mesma mudança. */
   const PINNED_VERSION = "v25"
-  const PINNED_SHA256 = "bc4bc69c15b288345a54fe427fa0d1dc82c21b4a7a2ddbda887e66225d1a4707"
+  const PINNED_SHA256 = "bbe6a7e4577cf6c6032b25bc0f84b8931605b02900720ef8bd7dcd53dfd4e8f2"
 
   it("está fixada na versão que este hash descreve", () => {
     expect(PROMPT_VERSION).toBe(PINNED_VERSION)

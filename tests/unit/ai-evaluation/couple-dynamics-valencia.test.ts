@@ -69,8 +69,39 @@ describe("SYSTEM_PROMPT — couple_dynamics é escala de VALÊNCIA", () => {
     // GOSTA virava nota 0-3.
     const linha = SYSTEM_PROMPT.split("\n").find((l) => /possessive but I love it/i.test(l))
     expect(linha, '"possessive but I love it" saiu do prompt sem substituto').toBeTruthy()
-    expect(linha).toMatch(/PREFERÊNCIA/)
-    expect(linha).toMatch(/ZERO/)
+    expect(linha).toMatch(/o leitor fala DELE|PREFERÊNCIA/)
+    expect(linha).toMatch(/sozinho não escolhe faixa/)
+  })
+
+  it("NÃO manda descartar a reclamação — ela carrega a reação do personagem", () => {
+    // 🔴 A 1ª redação mandava "extraia o FATO e DESCARTE o julgamento" e listava como
+    // descartáveis justamente as frases que CARREGAM o fato. Leitor comenta o que o
+    // incomodou, e pra isso descreve o que a personagem fez ou sentiu: "ela é idiota de
+    // aceitar o ciúme dele" é a evidência mais direta de consentimento que existe.
+    const regra = couple_dynamicsRule()
+    expect(regra).toMatch(/NÃO DESCARTE A RECLAMAÇÃO/)
+    expect(regra).toMatch(/COMO SEPARAR — pelo SUJEITO da frase, não pelo tom/)
+  })
+
+  it("dá exemplos de mesmo TOM com faixas OPOSTAS", () => {
+    // É isso que prova que o tom não pode decidir. Um exemplo só (ou três do mesmo lado)
+    // ensinaria o modelo a mapear "reclamação → faixa X", que é o erro original com outra
+    // roupa. Os três casos vêm do uso real relatado pelo dono do catálogo.
+    const regra = couple_dynamicsRule()
+    // aceitação → 7-8
+    expect(regra).toMatch(/ela é idiota de aceitar[^\n]*7-8/)
+    // perdão + linha do tempo original → 7-8 e item (d)
+    expect(regra).toMatch(/perdoar[^\n]*linha do tempo/)
+    expect(regra).toMatch(/ela perdoou/)
+    // desconforto ignorado → 0-3
+    expect(regra).toMatch(/desconfortável[^\n]*0-3/)
+    expect(regra).toMatch(/faixas OPOSTAS/)
+  })
+
+  it("trata discordância sobre a REAÇÃO como divergência real, não de gosto", () => {
+    const regra = couple_dynamicsRule()
+    expect(regra).toMatch(/ABAIXE a "confidence"/)
+    expect(regra).toMatch(/Não é o mesmo que divergência de gosto/)
   })
 
   it("proíbe usar opinião do leitor como valência e manda buscar a reação do personagem", () => {

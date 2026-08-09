@@ -143,6 +143,15 @@ export const MODEL = SONNET_MODEL
 // `EVAL_OUTPUT_SCHEMA_VERSION` entra na chave de cache e mudou para "eval-2" em
 // jul/2026. Para reverter de verdade é preciso restaurar o texto do prompt.
 export const CONCISE_OUTPUT: boolean = true
+// v25 (2026-08-09): descompressão da escala + a reclamação do leitor virou FONTE da
+// reação do personagem, não lixo a descartar. A 1ª redação da regra de valência mandava
+// "extraia o FATO e DESCARTE o julgamento" e listava como descartáveis justo as frases
+// que CARREGAM o fato: leitor comenta o que o incomodou, e pra isso descreve o que a
+// personagem fez ou sentiu. "Ela é idiota de aceitar o ciúme dele" é a evidência mais
+// direta de consentimento que existe — e ia pro lixo. Hoje a separação é pelo SUJEITO
+// da frase (fala do leitor = preferência; fala da personagem = fato), com três exemplos
+// de mesmo TOM e faixas OPOSTAS, que é o que prova que o tom não pode decidir.
+//
 // v25 (2026-08-09): descompressão da escala. Quatro critérios tinham colapsado numa
 // faixa só — medido em 2.393 avaliações: action_adventure 73,5% em 4-6 e ZERO em 9-10;
 // protagonist 77,4% em 7-8 (σ 0,87, o menos informativo dos 9); romance 73,7% em 7-8;
@@ -363,7 +372,8 @@ Romance presente:
 Couple dynamics (= vínculos centrais, não só o casal) — atenção: os itens abaixo dizem O QUE o vínculo tem, e usam vocabulário de casal só porque é o mais comum nas reviews; leia-os valendo para irmãos, família, mestre/discípulo, equipe ou rivais. A FAIXA sai da seção "REGRA PARA COUPLE_DYNAMICS" (valência), nunca do rótulo do trope:
 - "Banter is great" / "way they tease each other" → dinâmica leve/divertida
 - "Toxic ship", "yandere", "obsessive ML/FL", "possessive ML" → comportamento intenso de UM dos lados. NÃO conclua 0-3 daqui: vá checar a REAÇÃO do outro personagem e a LINHA DO TEMPO, itens (a)–(d) da regra própria.
-- "Possessive but I love it", "toxic but I'm here for it", "eu não aguentaria isso", "sufocante demais pra mim" → o leitor está declarando PREFERÊNCIA dele. Vale como sinal de que o trope EXISTE; vale ZERO na escolha da faixa.
+- "Possessive but I love it", "toxic but I'm here for it", "eu não aguentaria isso", "sufocante demais pra mim" → o leitor fala DELE. Confirma que o trope existe; sozinho não escolhe faixa.
+- ⚠️ Mas leia a frase INTEIRA antes de descartar: a reclamação costuma vir grudada no fato. "She's an idiot for putting up with him" diz que **ela aguenta/aceita**; "I hate that he ignores her when she's clearly uncomfortable" diz que **ela está desconfortável**; "absurd that she forgave him for the first timeline" diz que **ela perdoou** e que o maltrato foi na linha do tempo ORIGINAL. Esses pedaços são FATO sobre a reação dela — extraia-os e use, mesmo com o julgamento em volta apontando pro contrário.
 - "He scares her", "she's trying to escape him", "she's miserable with him", "ela perde a autonomia" → dano RETRATADO no personagem (0-3)
 - "Mutual support", "communication goals", "they really get each other" → dinâmica saudável (7-8 ou 9-10)
 - "Misunderstandings drag on", "constant fighting" → conflituosa (4-6)
@@ -443,7 +453,23 @@ Diga na justificativa QUAL vínculo você avaliou. Use 5 (não aplicável) apena
 
 O QUE A NOTA MEDE: o resultado emocional do vínculo PARA OS PERSONAGENS NELE, no desenvolvimento da obra. NÃO mede a forma da dinâmica, nem se um leitor gostaria de viver aquilo. Tags como BDSM, Femdom, Dom/Sub, Master-Pet, posse, ciúme intenso, "Yandere ML/FL", "Obsessive Male Lead", "Masochistic ML", "Submissive ML/FL", "Crazy ML/FL" NÃO determinam automaticamente 0-3.
 
-OPINIÃO DE LEITOR NÃO DEFINE A VALÊNCIA (regra crítica). Reviews são evidência sobre O QUE ACONTECE no vínculo — nunca sobre se aquilo é bom ou ruim para quem está nele. Gostar ou não de um trope é PREFERÊNCIA de quem leu. Da mesma review, extraia o FATO ("o ML vigia as conversas dela") e DESCARTE o julgamento ("o que é sufocante", "eu não aguentaria", "possessive but I love it"). Consenso de leitores desgostando de um comportamento NÃO é evidência de dano ao personagem, e consenso adorando não é evidência de saúde.
+OPINIÃO DE LEITOR NÃO DEFINE A VALÊNCIA — MAS É A MELHOR FONTE SOBRE A REAÇÃO DO PERSONAGEM (regra crítica, leia inteira).
+
+Gostar ou não de um trope é PREFERÊNCIA de quem leu, e não escolhe faixa. Consenso desgostando de um comportamento não é evidência de dano ao personagem; consenso adorando não é evidência de saúde.
+
+🔴 MAS NÃO DESCARTE A RECLAMAÇÃO — ela quase sempre CARREGA o fato que você precisa. Leitores comentam justamente o que os incomodou, e pra isso descrevem o que a personagem FEZ ou SENTIU. Jogar a frase fora joga fora a evidência junto.
+
+COMO SEPARAR — pelo SUJEITO da frase, não pelo tom:
+- Frase sobre O LEITOR ("eu não aguentaria", "achei sufocante", "possessive but I love it", "tenho raiva do ML") → PREFERÊNCIA. Não escolhe faixa.
+- Frase sobre O PERSONAGEM ("ela aceita", "ela não se importa", "ela está desconfortável", "ela perdoou", "ela tenta escapar") → FATO sobre a reação. USE, com peso alto — mesmo vindo embrulhado em julgamento, e mesmo que o julgamento aponte pro lado contrário.
+
+Uma frase costuma ter as DUAS coisas. Extraia a segunda e descarte a primeira:
+- "ela é idiota de aceitar o ciúme dele" → julgamento: "é idiota" (descarte). FATO: **ela ACEITA** → consentimento presente, faixa 7-8.
+- "é um absurdo ela perdoar como ele a tratou na linha do tempo original" → julgamento: "é um absurdo" (descarte). FATOS: **ela perdoou** (arco de redenção → 7-8) e **o maltrato foi na linha do tempo ORIGINAL** (item (d) → não conta).
+- "tenho raiva desse ML que não respeita a FL mesmo quando ela está desconfortável" → julgamento: "tenho raiva" (descarte). FATO: **ela está DESCONFORTÁVEL e ele ignora** → não-consentimento, dano real, faixa 0-3.
+Repare que nos três a reclamação tem o mesmo tom, e os fatos apontam pra faixas OPOSTAS. É por isso que o tom não pode decidir.
+
+⚠️ Quando os leitores DISCORDAM sobre a reação da personagem (uns dizem que ela aceita numa boa, outros que ela sofre), isso é divergência REAL sobre a obra: pontue pelo sinal mais frequente e ABAIXE a "confidence". Não é o mesmo que divergência de gosto.
 
 Antes de pontuar, responda estas quatro:
 (a) CONSENSO — a dinâmica é retratada como mútua/aceita pelos envolvidos, ou imposta contra a vontade de um deles?
