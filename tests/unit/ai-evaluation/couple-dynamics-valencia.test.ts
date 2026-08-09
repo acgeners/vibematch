@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 
 import { describe, expect, it } from "vitest"
 
+import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { PROMPT_VERSION, SYSTEM_PROMPT } from "@/lib/ai-evaluation/service"
 
 /**
@@ -103,19 +104,46 @@ describe("SYSTEM_PROMPT — couple_dynamics é escala de VALÊNCIA", () => {
     // restrita e rubrica ampla. Sem esta contra-instrução explícita, o modelo segue
     // a palavra "couple" e devolve 5 pra toda obra sem romance.
     const regra = couple_dynamicsRule()
-    expect(regra).toContain("VÍNCULOS CENTRAIS")
+    expect(regra).toContain("VÍNCULO MAIS CENTRAL")
     expect(regra, "a regra não desarma o nome do slug").toMatch(/NOME DO SLUG ENGANA/)
     // Os vínculos não-românticos precisam estar NOMEADOS: "vínculos centrais" sozinho
     // é abstrato demais pra o modelo aplicar a uma obra de shounen ou de família.
-    for (const vinculo of ["irmãos", "família", "mestre", "equipe", "rivais"]) {
+    for (const vinculo of ["irmãos", "FAMÍLIA", "mestre e discípulo", "equipe", "rivalidade"]) {
       expect(regra, `vínculo não-romântico ausente: ${vinculo}`).toContain(vinculo)
     }
+  })
+
+  it("define a ORDEM de prioridade do vínculo, não uma lista solta", () => {
+    // Sem ordem, obra que tem casal E família fica ambígua: dois avaliadores escolhem
+    // vínculos diferentes e as notas deixam de ser comparáveis entre si — mesma classe
+    // de problema das réguas de prompt misturadas.
+    const regra = couple_dynamicsRule()
+    expect(regra).toContain("QUAL VÍNCULO AVALIAR")
+    expect(regra).toMatch(/PRIMEIRO que a obra tiver/)
+    const casal = regra.indexOf("1. o CASAL principal")
+    const familia = regra.indexOf("2. a FAMÍLIA")
+    const resto = regra.indexOf("3. o restante")
+    expect(casal, "prioridade 1 (casal) ausente").toBeGreaterThan(-1)
+    expect(familia, "prioridade 2 (família) ausente").toBeGreaterThan(casal)
+    expect(resto, "prioridade 3 (demais vínculos) ausente").toBeGreaterThan(familia)
+    // O modelo precisa dizer qual vínculo usou, senão a nota não é auditável.
+    expect(regra).toMatch(/Diga na justificativa QUAL vínculo/)
+  })
+
+  it("a description do critério (que vai colada no prompt) carrega a mesma prioridade", () => {
+    // `buildCriteriaPromptSection()` cola CRITERIA_INFO[slug].description ACIMA das
+    // faixas. Até a migration 181 ela dizia "a relação entre o casal principal" —
+    // descrição restrita dentro de um bloco de título e rubrica já ampliados.
+    const desc = CRITERIA_INFO.couple_dynamics?.description ?? ""
+    expect(desc).not.toMatch(/relação entre o casal principal/)
+    expect(desc).toContain("vínculo MAIS CENTRAL")
+    expect(desc.indexOf("casal principal")).toBeLessThan(desc.indexOf("família"))
   })
 
   it("reserva o 5 pra ausência de VÍNCULO, não pra ausência de romance", () => {
     const regra = couple_dynamicsRule()
     expect(regra).toMatch(/não devolva 5 só porque não há casal/)
-    expect(regra).toMatch(/vínculo central avaliável/)
+    expect(regra).toMatch(/vínculo central recorrente/)
   })
 
   it("mantém o arco de redenção fora da faixa 0-3", () => {
@@ -144,7 +172,7 @@ describe("SYSTEM_PROMPT — couple_dynamics é escala de VALÊNCIA", () => {
 describe("PROMPT_VERSION acompanha o texto do prompt", () => {
   /** Versão e sha256 do SYSTEM_PROMPT andam JUNTOS — atualize os dois na mesma mudança. */
   const PINNED_VERSION = "v23"
-  const PINNED_SHA256 = "7e7ad88ab4b847bc0afa964616856032467d39faf7d961adb8dc3a8abe336dfa"
+  const PINNED_SHA256 = "e54f7eee91c76e51f9767035ba0f25c14862722fe45efd89da9cb364f8a35346"
 
   it("está fixada na versão que este hash descreve", () => {
     expect(PROMPT_VERSION).toBe(PINNED_VERSION)

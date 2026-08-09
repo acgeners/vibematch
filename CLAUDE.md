@@ -1113,14 +1113,29 @@ verdade conferida. Ao anotar pendência aqui, escreva a **data** e a **forma de 
 ([[project-conferir-migration-na-nuvem]]) — e apague o aviso no mesmo PR que aplica.
 - `enforceR19AdultContentRule`: raises `adult_content` to ≥ 7.0 if R19 marker detected anywhere in input
 - `enforceExternalContentRatingRule`: raises `adult_content` to a floor from the accepted external sources' content rating (MangaDex `contentRating` / ComicK `content_rating`) — `suggestive`→5, `erotica`→7, `pornographic`→8. Chained with the R19 rule; both are monotonic so the effective floor is the max of whichever triggered.
-- `enforceNeutralCoupleDynamicsWhenNoRomance`: raises `couple_dynamics` to 5.0 when romance ≤ 3 and couple_dynamics < 5
+- ~~`enforceNeutralCoupleDynamicsWhenNoRomance`~~: **removido na v23** (2026-08-09). Forçava `couple_dynamics = 5.0` quando `romance ≤ 3`, partindo de "sem romance, não há dinâmica" — premissa que morreu com a ampliação do critério pra vínculos centrais. Travava **17 das 18** obras sem romance. Quem decide "não aplicável" agora é o prompt, por ausência de VÍNCULO — não de romance. ⚠️ As ~31 justificativas que ele reescreveu seguem no banco (ver `lib/criteria/justification.ts`)
 - `enforceAuditableReviewUsage`: **non-fatal since v20 (2026-06-27)** — generic review citation is accepted ("algumas reviews apontam…"), so it no longer requires/validates specific review IDs (`R1`, `R2`…) nor throws. It only records an informational `reviewAudit` (`required` = "havia reviews no prompt"; `usedReviewIds` = whatever IDs the model happened to cite, often empty with generic citation). `review_usage` is now an OPTIONAL tool/schema field. (Earlier behavior: threw + retried when IDs weren't cited — removed because a citation slip discarded otherwise-valid evals.)
 
 ## A rubrica tem DUAS naturezas de escala, e `couple_dynamics` é a única de valência
 
 Oito critérios medem **presença/intensidade** (0 = não está lá). `couple_dynamics` mede
-**valência**: 0-3 = a relação faz MAL aos personagens, 9-10 = faz BEM. Nota baixa ali não
-quer dizer "não tem casal" — sem casal a nota é 5 (`enforceNeutralCoupleDynamicsWhenNoRomance`).
+**valência**: 0-3 = o vínculo faz MAL a quem está nele, 9-10 = faz BEM. Nota baixa ali não
+quer dizer "não tem vínculo".
+
+🔴 **E o slug MENTE: `couple_dynamics` não é sobre casal.** O critério virou "Dinâmica entre
+Protagonistas" em `95226f7` (2026-07-27) e as faixas passaram a falar de **vínculos centrais**
+— mas a ampliação ficou **pela metade por 13 dias, e nada acusava**: a `description` no banco
+continuou "a relação entre o **casal principal**", o guia de tags dizia "apenas quando a tag
+descreve o casal", e o clamp de romance seguia vivo. Como `buildCriteriaPromptSection()` cola a
+description ACIMA das faixas, o modelo lia título amplo + descrição restrita + rubrica ampla no
+mesmo bloco. Fechado pela **migration 181** + v23.
+
+⚠️ **O vínculo a avaliar tem ORDEM, não é uma lista solta:** casal principal → família (pais,
+irmãos, filhos) → demais recorrentes (mestre/discípulo, equipe, rivalidade, amizade). Pegue o
+PRIMEIRO que a obra tiver, e diga na justificativa qual foi. Sem a ordem, obra com casal E
+família fica ambígua e as notas deixam de ser comparáveis entre si — mesma classe das réguas
+misturadas. O **5 significa "sem vínculo central recorrente"** (protagonista isolado), nunca
+"sem romance".
 
 Até a **v22** as meta-regras de presença do `SYSTEM_PROMPT` valiam pros 9, e isso produzia
 três absurdos silenciosos:

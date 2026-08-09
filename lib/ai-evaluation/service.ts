@@ -399,7 +399,14 @@ REGRA PARA ADULT_CONTENT (leia com atenção — a natureza do conteúdo manda, 
 
 REGRA PARA COUPLE_DYNAMICS (escala de VALÊNCIA — leia inteira antes de pontuar):
 
-⚠️ O NOME DO SLUG ENGANA: apesar de "couple", este critério é "Dinâmica entre Protagonistas" e avalia os VÍNCULOS CENTRAIS da obra, sejam eles quais forem — casal romântico, irmãos, família, mestre e discípulo, party/equipe, rivais, amizade central. Obra SEM romance tem vínculos centrais e é pontuável normalmente aqui; não devolva 5 só porque não há casal. Use 5 (não aplicável) apenas quando a obra não tem nenhum vínculo central avaliável — protagonista isolado, sem relação recorrente com ninguém.
+⚠️ O NOME DO SLUG ENGANA: apesar de "couple", este critério é "Dinâmica entre Protagonistas" e avalia o VÍNCULO MAIS CENTRAL da obra, seja ele qual for. Obra SEM romance tem vínculo central e é pontuável normalmente aqui; não devolva 5 só porque não há casal.
+
+QUAL VÍNCULO AVALIAR (ordem de prioridade — pegue o PRIMEIRO que a obra tiver, não some os outros):
+1. o CASAL principal, quando há um par romântico central;
+2. a FAMÍLIA do protagonista (pais, irmãos, filhos) quando não há casal central, ou quando a obra é declaradamente um drama familiar;
+3. o restante dos vínculos recorrentes: mestre e discípulo, party/equipe, rivalidade, amizade central.
+Então: obra de romance → o casal; drama familiar → protagonista e família; shounen de equipe → o grupo; obra de vingança sem par nem família → a relação recorrente com o alvo ou com o aliado.
+Diga na justificativa QUAL vínculo você avaliou. Use 5 (não aplicável) apenas quando a obra não tem nenhum vínculo central recorrente — protagonista isolado.
 
 O QUE A NOTA MEDE: o resultado emocional do vínculo PARA OS PERSONAGENS NELE, no desenvolvimento da obra. NÃO mede a forma da dinâmica, nem se um leitor gostaria de viver aquilo. Tags como BDSM, Femdom, Dom/Sub, Master-Pet, posse, ciúme intenso, "Yandere ML/FL", "Obsessive Male Lead", "Masochistic ML", "Submissive ML/FL", "Crazy ML/FL" NÃO determinam automaticamente 0-3.
 
@@ -978,40 +985,25 @@ function enforceAdultContentBounds(
 }
 
 /**
- * Quando romance é baixo (≤ 3), couple_dynamics é forçado a 5.0 — tanto pra
- * cima (modelo deu nota baixa por "ausência de casal") quanto pra baixo (modelo
- * alucinou dinâmica saudável sem evidência de casal). 5.0 sinaliza "não aplicável".
+ * `enforceNeutralCoupleDynamicsWhenNoRomance` foi REMOVIDO em 2026-08-09 (v23).
+ *
+ * Ele forçava `couple_dynamics = 5.0` sempre que `romance ≤ 3`, com a justificativa
+ * "critério não é aplicável". A premissa — "sem romance, não há dinâmica a avaliar" —
+ * morreu quando o critério foi renomeado "Dinâmica do Casal" → "Dinâmica entre
+ * Protagonistas" (95226f7, 2026-07-27) e a rubrica passou a falar de VÍNCULOS
+ * CENTRAIS: numa obra sem romance os vínculos continuam existindo (família, irmãos,
+ * mestre/discípulo, equipe, rivais) e a rubrica sabe pontuá-los.
+ *
+ * Medido antes da remoção: das 18 obras com `romance ≤ 3`, **17 (94,4%)** estavam
+ * travadas em 5,0 — o clamp apagava o critério justamente no público que a ampliação
+ * queria atender.
+ *
+ * ⚠️ O guard-rail não sumiu, MUDOU DE LUGAR: quem decide "não aplicável" agora é o
+ * prompt (`REGRA PARA COUPLE_DYNAMICS`), que reserva o 5 pra ausência de VÍNCULO
+ * CENTRAL avaliável — não pra ausência de romance. Se o modelo voltar a devolver
+ * 0-3 alegando "não há casal", o conserto é a instrução, não um clamp derivado de
+ * outro critério.
  */
-function enforceNeutralCoupleDynamicsWhenNoRomance(
-  response: AiEvaluationResponse
-): AiEvaluationResponse {
-  const romance = response.scores.find((score) => score.criterionSlug === "romance")
-  const couple = response.scores.find((score) => score.criterionSlug === "couple_dynamics")
-
-  if (!romance || !couple || romance.suggestedScore > 3 || couple.suggestedScore === 5) {
-    return response
-  }
-
-  const direction = couple.suggestedScore < 5 ? "elevada" : "rebaixada"
-
-  return {
-    ...response,
-    scores: response.scores.map((score) => {
-      if (score.criterionSlug !== "couple_dynamics") return score
-      return {
-        ...score,
-        suggestedScore: 5,
-        justification: score.justification.includes("critério não é aplicável")
-          ? score.justification
-          : `${score.justification} Como a avaliação de romance indica ausência/irrelevância de casal, couple_dynamics foi ${direction} para 5.0 (não aplicável).`,
-      }
-    }),
-    rawResponse: {
-      ...rawObject(response.rawResponse),
-      neutralCoupleDynamicsRuleApplied: true,
-    },
-  }
-}
 
 const SYNOPSIS_MIN_CHARS = 50
 const LOW_EVIDENCE_CONFIDENCE_CAP = 0.55
@@ -1167,9 +1159,7 @@ function postProcessEvaluation(
   return attachEvaluationContext(
     enforceAuditableReviewUsage(
       enforceConfidenceCapWhenLowEvidence(
-        enforceNeutralCoupleDynamicsWhenNoRomance(
-          enforceAdultContentBounds(response, req)
-        ),
+        enforceAdultContentBounds(response, req),
         req
       ),
       prepared
