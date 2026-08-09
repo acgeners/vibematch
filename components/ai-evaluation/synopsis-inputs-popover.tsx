@@ -6,6 +6,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { ReviewDigest } from "@/lib/ai-recommendation/types"
+import type { TagStanceInfo } from "@/lib/tags/segment"
+import { TagStanceMark, tagStanceTitle } from "@/components/ui/tag-stance-mark"
 import { getEffectiveTagStanceAction, getSynopsisInputsAction } from "@/server/actions/recommendations"
 
 /** Inputs do preditor de Interesse — carregados sob demanda ao abrir o popover. */
@@ -21,8 +23,8 @@ function polarityClass(polarity: "positive" | "negative" | "mixed"): string {
   return "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
 }
 
-type TasteTags = { loved: Set<string>; avoided: Set<string> }
-const EMPTY_TASTE: TasteTags = { loved: new Set(), avoided: new Set() }
+type TasteTags = { loved: Set<string>; avoided: Set<string>; strong: Set<string>; declared: Set<string> }
+const EMPTY_TASTE: TasteTags = { loved: new Set(), avoided: new Set(), strong: new Set(), declared: new Set() }
 
 /**
  * Carrega as tags amadas/evitadas do perfil UMA vez por página (promise cacheada
@@ -39,7 +41,12 @@ let tasteTagsPromise: Promise<TasteTags> | null = null
 function loadTasteTags(): Promise<TasteTags> {
   if (!tasteTagsPromise) {
     tasteTagsPromise = getEffectiveTagStanceAction()
-      .then(({ loved, avoided }) => ({ loved: new Set(loved), avoided: new Set(avoided) }))
+      .then(({ loved, avoided, strong, declared }) => ({
+        loved: new Set(loved),
+        avoided: new Set(avoided),
+        strong: new Set(strong),
+        declared: new Set(declared),
+      }))
       .catch((e) => {
         console.error(e)
         tasteTagsPromise = null // permite retry
@@ -90,6 +97,8 @@ export function SynopsisInputsPopover({ workId }: { workId: string }) {
   }, [])
   const lovedTagsSet = taste?.loved ?? EMPTY_TASTE.loved
   const avoidedTagsSet = taste?.avoided ?? EMPTY_TASTE.avoided
+  const strongTagsSet = taste?.strong ?? EMPTY_TASTE.strong
+  const declaredTagsSet = taste?.declared ?? EMPTY_TASTE.declared
 
   return (
     <Popover onOpenChange={onOpenChange}>
@@ -123,21 +132,34 @@ export function SynopsisInputsPopover({ workId }: { workId: string }) {
                     const lowerTag = t.toLowerCase()
                     const isLoved = lovedTagsSet.has(lowerTag)
                     const isAvoided = avoidedTagsSet.has(lowerTag)
+                    // Ênfase 2× e origem (declarada × perfil) — o tooltip precisa
+                    // das duas: sem a origem ele afirmaria "você marcou" pra tag
+                    // que o modelo inferiu sozinho.
+                    const stance: TagStanceInfo | null =
+                      isLoved || isAvoided
+                        ? {
+                            stance: isLoved ? "love" : "avoid",
+                            strong: strongTagsSet.has(lowerTag),
+                            source: declaredTagsSet.has(lowerTag) ? "declared" : "profile",
+                          }
+                        : null
 
                     return (
                       <Badge
                         key={t}
                         variant="outline"
                         className={cn(
-                          "px-2 py-0.5 text-[11px] font-normal rounded-md border transition-colors",
+                          "gap-1 px-2 py-0.5 text-[11px] font-normal rounded-md border transition-colors",
                           isLoved
                             ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/40"
                             : isAvoided
                               ? "bg-rose-500/10 text-rose-700 border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/40"
-                              : "bg-muted/30 border-border/80 text-muted-foreground"
+                              : "bg-muted/30 border-border/80 text-muted-foreground",
+                          stance?.strong && "font-medium"
                         )}
-                        title={isLoved ? "Tag amada por você" : isAvoided ? "Tag evitada por você" : undefined}
+                        title={stance ? tagStanceTitle(stance) : undefined}
                       >
+                        {stance?.strong && <TagStanceMark stance={stance.stance} />}
                         {t}
                       </Badge>
                     )

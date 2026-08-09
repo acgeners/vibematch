@@ -68,7 +68,7 @@ export default async function PainelPage() {
               <Button asChild size="sm">
                 <Link href="/titles/new">
                   <Plus className="size-4" />
-                  Novo título
+                  Nova obra
                 </Link>
               </Button>
             )}

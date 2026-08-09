@@ -15,6 +15,7 @@ import { submitPostReadingAttributes } from "@/server/actions/post-reading-attri
 import { bandForScore, rubricSummary, rubricTitle } from "@/lib/criteria/justification"
 import { cn } from "@/lib/utils"
 import { ChevronDown, Sparkles } from "lucide-react"
+import { AiProvenanceSeal } from "@/components/ui/ai-provenance"
 
 export interface PostAttributeAssessmentFormProps {
   workId: string
@@ -22,6 +23,8 @@ export interface PostAttributeAssessmentFormProps {
     evaluationId: string
     modelName: string
     promptVersion: string
+    /** ISO da avaliação; opcional porque nem todo caller carrega o campo. */
+    createdAt?: string | null
     attributes: Partial<Record<CriterionSlug, number>>
   } | null
   existingAssessment: Partial<Record<CriterionSlug, number>> | null
@@ -219,18 +222,32 @@ export function PostAttributeAssessmentForm({
   return (
     <Card className="bg-card/50">
       <CardHeader className="space-y-1">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center justify-between gap-2 text-left"
-        >
-          <CardTitle className="text-base font-bold">Atributos da obra</CardTitle>
-          <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
-        </button>
+        <div className="flex w-full items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="flex flex-1 items-center justify-between gap-2 text-left"
+          >
+            <CardTitle className="text-base font-bold">Atributos da obra</CardTitle>
+            <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+          </button>
+          {/* Fora do <button>: o selo é ele próprio um botão, e botão dentro de botão
+              não é HTML válido — o navegador desaninha e o clique vira colapso do card. */}
+          <AiProvenanceSeal
+            title="Avaliação por IA"
+            model={latestAiEvaluation.modelName === "unknown" ? null : latestAiEvaluation.modelName}
+            promptVersion={
+              latestAiEvaluation.promptVersion === "unknown" ? null : latestAiEvaluation.promptVersion
+            }
+            at={latestAiEvaluation.createdAt}
+            note="É contra estas notas que a sua reavaliação calcula o desvio."
+            side="left"
+          />
+        </div>
         {open && (
           <p className="text-xs text-muted-foreground">
             Como você viu a obra <strong>depois de ler</strong>. A diferença pro que a IA avaliou
-            ({latestAiEvaluation.modelName}/{latestAiEvaluation.promptVersion}) calibra as previsões.
+            calibra as previsões.
           </p>
         )}
       </CardHeader>

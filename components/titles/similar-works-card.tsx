@@ -16,11 +16,20 @@ import { LABELS } from "@/lib/constants/ui-labels"
 import { cn, titleToSlug } from "@/lib/utils"
 import { CoverImage } from "@/components/ui/cover-image"
 import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
+import { formatProvenanceDate } from "@/components/ui/ai-provenance"
 import type { SimilarWork } from "@/server/queries/similar-works"
 
 interface SimilarWorksCardProps {
   works: SimilarWork[]
   className?: string
+  /**
+   * Modelo e data do embedding DESTA obra — o que ordena a lista.
+   *
+   * Vai no tooltip que já explica o método, e não num selo ✨ como o resto da
+   * página: aqui nenhum texto foi escrito por um LLM: é busca vetorial. Dar a ela
+   * a mesma marca da sinopse consolidada afirmaria uma coisa que não é verdade.
+   */
+  embedding?: { model: string | null; at: string | null } | null
 }
 
 function formatSimilarity(s: number): string {
@@ -195,7 +204,7 @@ function Metric({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
+export function SimilarWorksCard({ works, className, embedding }: SimilarWorksCardProps) {
   const [sortBy, setSortBy] = useState<"sim" | "nota">("sim")
   // "Não lidas" por padrão: recomendação serve pra achar a PRÓXIMA leitura.
   // O toggle "Todas" traz de volta as já lidas/em andamento.
@@ -265,6 +274,12 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
                   avaliados pela IA e um resumo das reviews — e transformamos esse texto
                   num vetor (<strong>embedding</strong>). O <strong>%</strong> é a
                   proximidade entre os dois vetores, medida por distância cosseno.
+                  {embedding && (
+                    <span className="mt-2 block border-t border-background/20 pt-1.5 text-[11px] text-muted-foreground">
+                      Vetor desta obra: <span className="font-mono font-semibold">{embedding.model ?? "sem registro"}</span>
+                      {formatProvenanceDate(embedding.at) && <> · {formatProvenanceDate(embedding.at)}</>}
+                    </span>
+                  )}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>

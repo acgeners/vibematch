@@ -29,6 +29,8 @@ import { getAllTags } from "@/server/queries/tags"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { buildTagStanceLookup, resolveTagStance, segmentTags, lowercasedNameSet } from "@/lib/tags/segment"
+import type { TagStance, TagStanceInfo } from "@/lib/tags/segment"
+import { TagStanceMark, tagStanceTitle } from "@/components/ui/tag-stance-mark"
 import {
   getLatestAiEvaluationAttributes,
   getExistingPostReadingAssessment,
@@ -48,6 +50,11 @@ import { getLastDeepDive } from "@/server/queries/deep-dive"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getGenerationReadinessMany } from "@/server/queries/generation-readiness"
 import { getWorkAiCost, getFromScratchBaselineCost } from "@/server/queries/ai-usage"
+import {
+  getWorkAiProvenance,
+  getAlignmentRunModel,
+  getWorkEmbeddingProvenance,
+} from "@/server/queries/ai-provenance"
 import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
 import { RegenerateSynopsisAction } from "@/components/works/regenerate-actions"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
@@ -59,6 +66,8 @@ import { computeWorkForces } from "@/lib/calculations/forces"
 import { balanceScoreCardColumns } from "@/lib/ui/score-card-columns"
 import { PublicationStatusBadge } from "@/components/ui/status-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { AiProvenanceSeal } from "@/components/ui/ai-provenance"
+import type { AiProvenanceSealProps } from "@/components/ui/ai-provenance"
 import { SimilarWorksCard } from "@/components/titles/similar-works-card"
 import { getSimilarWorks } from "@/server/queries/similar-works"
 import { getFavoriteFolderMenu } from "@/server/queries/lists"
@@ -117,7 +126,8 @@ type DetailTag = {
   key: string
   label: string
   subGroupName?: string
-  stance?: "love" | "avoid"
+  /** Stance + intensidade (ênfase 2×) + de onde veio. Ausente = tag neutra. */
+  stance?: TagStanceInfo
   /** Proveniência: "ai_inferred" = inferida por IA; null/ausente = externa/manual. */
   source?: string | null
   confidence?: number | null
@@ -160,7 +170,7 @@ function getTagGroupLabel(tagGroupId: string | null | undefined) {
 }
 
 /** Cor do badge conforme a stance declarada (amo=verde, evito=vermelho). */
-function tagStanceClass(stance?: "love" | "avoid"): string {
+function tagStanceClass(stance?: TagStance): string {
   if (stance === "love")
     return "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200"
   if (stance === "avoid")
@@ -182,25 +192,35 @@ function tagProvenanceLabel(tag: DetailTag): string | null {
  * Badge de tag com proveniência: contorno tracejado + ponto violeta quando a tag
  * foi inferida por IA (source="ai_inferred"), com tooltip de fonte/confiança. A
  * cor de stance (amada/evitada) manda no corpo; o marcador de IA só se soma.
+ *
+ * ⚠️ São TRÊS marcas independentes no mesmo chip e elas não podem se confundir:
+ * a COR diz a stance, o ♥/⊘ à esquerda diz que a declaração tem ênfase 2×, e o
+ * tracejado + ponto violeta à direita dizem que a tag veio de IA. Uma tag pode
+ * ter as três (medido: existem amadas fortes inferidas por IA).
  */
-function TagBadge({ tag, stance }: { tag: DetailTag; stance?: "love" | "avoid" }) {
-  const effectiveStance = stance ?? tag.stance
+function TagBadge({ tag }: { tag: DetailTag }) {
   const isAi = tag.source === "ai_inferred"
   const badge = (
     <Badge
       variant="outline"
       className={cn(
         "rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors",
-        effectiveStance ? tagStanceClass(effectiveStance) : "hover:bg-accent hover:text-accent-foreground",
+        tag.stance ? tagStanceClass(tag.stance.stance) : "hover:bg-accent hover:text-accent-foreground",
+        tag.stance?.strong && "font-medium",
         isAi && "border-dashed",
       )}
     >
+      {tag.stance?.strong && <TagStanceMark stance={tag.stance.stance} className="mr-1 -ml-0.5 inline-block align-[-0.05em]" />}
       {tag.label}
       {isAi && <span aria-hidden className="ml-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500" />}
     </Badge>
   )
-  const tip = tagProvenanceLabel(tag)
-  if (!tip) return badge
+  // Uma linha por marca presente — juntar num parágrafo só faz o tooltip da tag
+  // forte inferida por IA virar uma frase que não se lê.
+  const lines = [tag.stance ? tagStanceTitle(tag.stance) : null, tagProvenanceLabel(tag)].filter(
+    (l): l is string => l != null,
+  )
+  if (lines.length === 0) return badge
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -211,7 +231,11 @@ function TagBadge({ tag, stance }: { tag: DetailTag; stance?: "love" | "avoid" }
           {badge}
         </span>
       </TooltipTrigger>
-      <TooltipContent>{tip}</TooltipContent>
+      <TooltipContent>
+        {lines.map((l) => (
+          <p key={l}>{l}</p>
+        ))}
+      </TooltipContent>
     </Tooltip>
   )
 }
@@ -334,7 +358,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData, hideAdultContent, archivedCovers, favoriteFolderMenu] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData, hideAdultContent, archivedCovers, favoriteFolderMenu, aiProvenance, alignmentModel, embeddingProvenance] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
@@ -351,6 +375,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getHideAdultContent(),
     getArchivedCovers(work.id as string),
     getFavoriteFolderMenu(work.id as string),
+    // Proveniência dos artefatos de IA que não têm coluna de modelo própria
+    // (sinopse consolidada, síntese/resumo das reviews) + a run do Veredito e o
+    // embedding. Entram AQUI, no mesmo Promise.all, pra não somar round-trip:
+    // três queries pequenas em paralelo com as 16 que a página já fazia.
+    getWorkAiProvenance(work.id as string),
+    getAlignmentRunModel(work.calculated_scores?.alignment_run_id as string | null | undefined),
+    getWorkEmbeddingProvenance(work.id as string),
   ])
   // Capas que você apagou na edição (migration 163): o "Atualizar dados" não as
   // traz de volta sozinho, mas as lista numa seção "Arquivadas (N)" de onde podem
@@ -373,7 +404,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   // Stance (amada/evitada) por tag: preferências declaradas (por slug) ∪ perfil
   // de gosto (loved_tags/avoided_tags, por nome).
   const tagStanceLookup = buildTagStanceLookup(
-    declaredTagPrefs.map((p) => ({ slug: p.slug, stance: p.stance })),
+    declaredTagPrefs.map((p) => ({ slug: p.slug, stance: p.stance, weight: p.weight })),
     tasteProfileRow?.profile.loved_tags ?? [],
     tasteProfileRow?.profile.avoided_tags ?? [],
   )
@@ -464,6 +495,32 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   )
   const reviewUsage = extractReviewUsage(latestAiEval?.raw_response)
 
+  // Proveniência da avaliação IA: UMA fonte pros DOIS selos que a exibem — o do
+  // "Resumo da última avaliação IA" (aba Geral) e o de "Notas por critério" (aba
+  // Notas). Antes as duas faixas eram escritas em separado, e nada garantia que
+  // dissessem a mesma coisa sobre a MESMA avaliação.
+  const aiEvalProvenance: AiProvenanceSealProps | null = latestAiEval
+    ? {
+        title: "Avaliação por IA",
+        model: latestAiEval.model_name,
+        promptVersion: latestAiEval.prompt_version,
+        at: latestAiEval.created_at,
+        extra: [
+          {
+            label: "Confiança",
+            value:
+              latestAiEval.confidence != null
+                ? `${(latestAiEval.confidence * 100).toFixed(0)}%`
+                : null,
+          },
+          ...(reviewUsage
+            ? [{ label: "Reviews", value: reviewUsageLabel(reviewUsage).text }]
+            : []),
+        ],
+        note: reviewUsage ? reviewUsageLabel(reviewUsage).title : undefined,
+      }
+    : null
+
   const genres = Array.isArray(work.genres) ? work.genres.filter(Boolean) : []
   const tags = Array.isArray(work.tags) ? work.tags.filter(Boolean) : []
   const hasEditionNote = hasEditionNoteTag(
@@ -471,6 +528,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   )
   const primaryCover = pickPrimaryCover(work.work_covers)
   const primarySynopsis = pickPrimarySynopsis(work.work_synopses)
+  // Quantas sinopses de fonte alimentaram a consolidação (só as com texto — a mesma
+  // regra do SynopsesViewer, senão o selo prometeria uma fonte que a tela não lista).
+  const synopsisSourceCount = ((work.work_synopses ?? []) as Array<{ text?: string | null }>).filter(
+    (s) => (s.text ?? "").trim().length > 0,
+  ).length
   // Normaliza cada tag com nome/slug/grupo + stance (perfil ∪ preferências).
   type NormTag = DetailTag & { name: string; slug?: string; groupLabel: string }
   const normalizedTags: NormTag[] = []
@@ -502,11 +564,15 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   // Segmenta: Categorias (gêneros, card próprio) › Amadas › Evitadas › Resto.
   // Tags com nome de gênero saem da segmentação (já aparecem em Categorias).
   const byTagLabel = (a: DetailTag, b: DetailTag) => a.label.localeCompare(b.label)
-  // Nas Amadas/Evitadas: externas primeiro, inferidas por IA agrupadas ao fim
-  // (cada bloco alfabético). O tracejado+ponto já distingue; a ordem agrupa.
+  // Nas Amadas/Evitadas: ênfase 2× primeiro, depois externas antes das inferidas
+  // por IA (cada bloco alfabético). O tracejado+ponto já distingue; a ordem agrupa.
+  // ⚠️ `strong` precisa ser a 1ª chave: este comparador RESSORTA o que o
+  // `segmentTags` já tinha posto em ordem, então omiti-lo desfaz a partição em
+  // silêncio — os dois níveis voltam a se intercalar.
   const byProvenanceThenLabel = (a: DetailTag, b: DetailTag) => {
+    const strongRank = (t: DetailTag) => (t.stance?.strong ? 0 : 1)
     const aiRank = (t: DetailTag) => (t.source === "ai_inferred" ? 1 : 0)
-    return aiRank(a) - aiRank(b) || a.label.localeCompare(b.label)
+    return strongRank(a) - strongRank(b) || aiRank(a) - aiRank(b) || a.label.localeCompare(b.label)
   }
   const genreNameSet = lowercasedNameSet(genres)
   const segmented = segmentTags(normalizedTags, (t) => t.stance ?? null, genreNameSet)
@@ -1049,37 +1115,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       <div className="flex items-center gap-2">
                         <BrainCircuit className="h-4.5 w-4.5 text-muted-foreground" />
                         <CardTitle className="text-base font-bold text-foreground">Resumo da última avaliação IA</CardTitle>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                        <span>
-                          Modelo:{" "}
-                          <span className="font-medium text-foreground">
-                            {latestAiEval.model_name ?? "—"}
-                            {latestAiEval.prompt_version ? `/${latestAiEval.prompt_version}` : ""}
-                          </span>
-                        </span>
-                        <span>
-                          Confiança:{" "}
-                          <span className="font-medium text-foreground">
-                            {latestAiEval.confidence != null
-                              ? `${(latestAiEval.confidence * 100).toFixed(0)}%`
-                              : "—"}
-                          </span>
-                        </span>
-                        {reviewUsage && (
-                          <span title={reviewUsageLabel(reviewUsage).title}>
-                            Reviews:{" "}
-                            <span className="font-medium text-foreground">
-                              {reviewUsageLabel(reviewUsage).text}
-                            </span>
-                          </span>
-                        )}
-                        <span>
-                          Data:{" "}
-                          <span className="font-medium text-foreground">
-                            {new Date(latestAiEval.created_at).toLocaleDateString("pt-BR")}
-                          </span>
-                        </span>
+                        {/* A faixa "Modelo · Confiança · Reviews · Data" que ficava aqui era
+                            IDÊNTICA à do cabeçalho de "Notas por critério" — o mesmo dado, duas
+                            vezes na mesma página. Toda ela virou este selo. */}
+                        {aiEvalProvenance && <AiProvenanceSeal {...aiEvalProvenance} />}
                       </div>
                     </div>
                   </CardHeader>
@@ -1096,6 +1135,29 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     <div className="flex items-center gap-2">
                       <FileText className="h-4.5 w-4.5 text-muted-foreground" />
                       <CardTitle className="text-base font-bold text-foreground">Sinopses</CardTitle>
+                      {/* ⚠️ Só quando existe sinopse canônica. Sem ela o card mostra as
+                          originais das fontes, que NÃO são de IA — o selo ali afirmaria
+                          uma coisa falsa sobre texto de terceiro. */}
+                      {work.canonical_synopsis && (
+                        <AiProvenanceSeal
+                          title="Sinopse consolidada por IA"
+                          model={aiProvenance.synopsis_consolidator?.model}
+                          promptVersion={aiProvenance.synopsis_consolidator?.promptVersion}
+                          // A data sai da COLUNA da obra, não do log: ela existe pra toda obra
+                          // com sinopse canônica, enquanto o log só cobre de 03/07/2026 pra cá.
+                          at={
+                            (work as { canonical_synopsis_at?: string | null }).canonical_synopsis_at ??
+                            aiProvenance.synopsis_consolidator?.at
+                          }
+                          extra={[
+                            {
+                              label: "Fontes",
+                              value: synopsisSourceCount > 0 ? `${synopsisSourceCount} sinopses` : null,
+                            },
+                          ]}
+                          note="O texto acima é escrito por um modelo a partir das sinopses das fontes."
+                        />
+                      )}
                     </div>
                     {isAdmin && <RegenerateSynopsisAction workId={work.id as string} />}
                   </div>
@@ -1148,7 +1210,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             </TabsContent>
 
             <TabsContent value="recommendations" className="mt-0 space-y-5">
-              <SimilarWorksCard works={similarWorks} />
+              <SimilarWorksCard works={similarWorks} embedding={embeddingProvenance} />
             </TabsContent>
 
             <TabsContent value="scores" className="mt-0 space-y-6">
@@ -1293,6 +1355,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 const rk = work.calculated_scores.alignment_score
                 const stale = work.calculated_scores.alignment_stale ?? false
                 const alignAt = work.calculated_scores.alignment_at
+                const alignConfidence =
+                  (work.calculated_scores.alignment_payload as { confidence?: number } | null)
+                    ?.confidence ?? null
                 const cls =
                   rk >= 80 ? "bg-violet-500/15 text-violet-700 border-violet-500/40 dark:text-violet-300"
                   : rk >= 60 ? "bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300"
@@ -1313,16 +1378,37 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   )}>
                     <div className="flex min-w-0 items-center justify-between gap-3">
                       <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
-                        <span className="text-xs font-medium text-muted-foreground">{LABELS.alignment_score.full}</span>
+                        <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                          {LABELS.alignment_score.full}
+                          {/* Com a data no selo, a linha de baixo volta a dizer o que o número
+                              É — que é a pergunta de quem vê "87" pela primeira vez. */}
+                          <AiProvenanceSeal
+                            title="Veredito por IA"
+                            model={alignmentModel}
+                            at={alignAt}
+                            extra={[
+                              {
+                                label: "Confiança",
+                                value:
+                                  alignConfidence != null
+                                    ? `${(alignConfidence * 100).toFixed(0)}%`
+                                    : null,
+                              },
+                            ]}
+                            note={
+                              stale
+                                ? "Desatualizado: seu perfil de gosto ou os dados da obra mudaram desde o cálculo."
+                                : undefined
+                            }
+                          />
+                        </span>
                         {stale ? (
                           <span className="inline-flex max-w-full items-center rounded-full border border-amber-500/55 bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
                             Desatualizado
                           </span>
                         ) : (
                           <span className="text-[11px] text-muted-foreground">
-                            {alignAt
-                              ? `Calculado em ${new Date(alignAt).toLocaleDateString("pt-BR")}`
-                              : "Veredito do consultor IA (0–100)"}
+                            Veredito do consultor IA (0–100)
                           </span>
                         )}
                       </div>
@@ -1361,9 +1447,26 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   calcTwoCols && spanLastVerdict && lastVerdict === "deep" && "@md:col-span-2",
                 )}>
                   <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
-                    <span className="text-xs font-medium text-muted-foreground">Deep Dive</span>
+                    <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                      Deep Dive
+                      <AiProvenanceSeal
+                        title="Análise por IA"
+                        model={lastDeepDive!.model_name}
+                        promptVersion={lastDeepDive!.prompt_version}
+                        at={lastDeepDive!.created_at}
+                        extra={[
+                          {
+                            label: "Confiança",
+                            value:
+                              lastDeepDive!.confidence != null
+                                ? `${(lastDeepDive!.confidence * 100).toFixed(0)}%`
+                                : null,
+                          },
+                        ]}
+                      />
+                    </span>
                     <span className="text-[11px] text-muted-foreground">
-                      {new Date(lastDeepDive!.created_at).toLocaleDateString("pt-BR")}
+                      Análise do consultor IA (0–100)
                     </span>
                   </div>
                   {(() => {
@@ -1533,46 +1636,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       {/* Notas por critério */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <Sliders className="h-4.5 w-4.5 text-muted-foreground" />
-                <CardTitle className="text-base font-bold text-foreground">Notas por critério</CardTitle>
-              </div>
-              {latestAiEval && (
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  <span>
-                    Modelo:{" "}
-                    <span className="font-medium text-foreground">
-                      {latestAiEval.model_name ?? "—"}
-                      {latestAiEval.prompt_version ? `/${latestAiEval.prompt_version}` : ""}
-                    </span>
-                  </span>
-                  <span>
-                    Confiança:{" "}
-                    <span className="font-medium text-foreground">
-                      {latestAiEval.confidence != null
-                        ? `${(latestAiEval.confidence * 100).toFixed(0)}%`
-                        : "—"}
-                    </span>
-                  </span>
-                  <span>
-                    Data:{" "}
-                    <span className="font-medium text-foreground">
-                      {new Date(latestAiEval.created_at).toLocaleDateString("pt-BR")}
-                    </span>
-                  </span>
-                  {reviewUsage && (
-                    <span title={reviewUsageLabel(reviewUsage).title}>
-                      Reviews:{" "}
-                      <span className="font-medium text-foreground">
-                        {reviewUsageLabel(reviewUsage).text}
-                      </span>
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
+          <div className="flex items-center gap-2">
+            <Sliders className="h-4.5 w-4.5 text-muted-foreground" />
+            <CardTitle className="text-base font-bold text-foreground">Notas por critério</CardTitle>
+            {/* Mesmo objeto de proveniência do "Resumo da última avaliação IA": as
+                9 notas e o resumo saem da MESMA avaliação. */}
+            {aiEvalProvenance && <AiProvenanceSeal {...aiEvalProvenance} />}
           </div>
         </CardHeader>
         <CardContent>
@@ -1651,7 +1720,17 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       </Card>
 
       {/* Reviews externas — apoiam visualmente os scores da IA. "Buscar reviews" vive no header do card. */}
-      <WorkReviewsCard snapshot={reviewsSnapshot} workId={work.id as string} />
+      {/* A síntese estruturada e o resumo em prosa são gerações SEPARADAS, com
+          modelos e datas próprios — por isso as duas descem no mesmo objeto. */}
+      <WorkReviewsCard
+        snapshot={reviewsSnapshot}
+        workId={work.id as string}
+        provenance={{
+          digestModel: aiProvenance.review_digest?.model ?? null,
+          digestPromptVersion: aiProvenance.review_digest?.promptVersion ?? null,
+          summaryModel: aiProvenance.review_summarizer?.model ?? null,
+        }}
+      />
         </TabsContent>
 
             <TabsContent value="tags" className="mt-0 space-y-6">
@@ -1718,7 +1797,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     </summary>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {lovedTags.map((tag) => (
-                        <TagBadge key={tag.key} tag={tag} stance="love" />
+                        <TagBadge key={tag.key} tag={tag} />
                       ))}
                     </div>
                   </details>
@@ -1734,7 +1813,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     </summary>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {avoidedTags.map((tag) => (
-                        <TagBadge key={tag.key} tag={tag} stance="avoid" />
+                        <TagBadge key={tag.key} tag={tag} />
                       ))}
                     </div>
                   </details>
@@ -1799,28 +1878,27 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       <span>cobertura: <b className="font-semibold text-foreground/80">{aiTagCount}</b> por IA · {externalTagCount} externas</span>
                     )}
                     {tagsInferenceRan ? (
-                      <span
-                        className="inline-flex items-center gap-1"
-                        title={tagsInferredAt ? `Inferência rodou em ${new Date(tagsInferredAt).toLocaleString("pt-BR")}` : "Tem tags inferidas por IA (backfill anterior ao registro de data)"}
-                      >
-                        <Sparkles className="h-3 w-3 text-violet-500" />
-                        {tagsInferredAt ? (
-                          <>
-                            tags inferidas em{" "}
-                            <span className="font-medium text-foreground/80">
-                              {new Date(tagsInferredAt).toLocaleDateString("pt-BR", {
-                                day: "2-digit",
-                                month: "2-digit",
-                                year: "numeric",
-                              })}
-                            </span>
-                          </>
-                        ) : (
-                          // Backfill anterior à migration 119: tem tag de IA, mas
-                          // nunca registrou quando. Sem data pra mostrar.
-                          "inferência de tags aplicada"
-                        )}
-                      </span>
+                      // Selo COM rótulo: este rodapé tem 4 itens, e um ✨ solto no meio
+                      // deles não diz a que se refere.
+                      // 🔴 O modelo aqui é o único que não existe em lugar NENHUM: as 587
+                      // chamadas de `tag_inference` medidas gravam `nCandidates`/`withReviews`
+                      // no metadata e nenhuma grava `work_id` — não há como ligá-las à obra.
+                      // Ver server/queries/ai-provenance.ts.
+                      <AiProvenanceSeal
+                        title="Inferência de tags"
+                        label="inferência"
+                        at={tagsInferredAt}
+                        extra={[
+                          { label: "Inferidas", value: aiTagCount > 0 ? `${aiTagCount} tags` : null },
+                        ]}
+                        note={
+                          tagsInferredAt
+                            ? "Cada tag tem a própria confiança no tooltip do chip."
+                            : "Backfill anterior à migration 119: tem tag de IA, mas nunca registrou quando."
+                        }
+                        side="top"
+                        align="end"
+                      />
                     ) : (
                       <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
                         <Sparkles className="h-3 w-3" /> inferência de tags: nunca rodou

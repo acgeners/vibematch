@@ -10,7 +10,8 @@ import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/consta
 import { getAllTags } from "@/server/queries/tags"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
-import { buildTagStanceLookup, resolveTagStance, type TagStance, type TagStanceLookup } from "@/lib/tags/segment"
+import { buildTagStanceLookup, resolveTagStance } from "@/lib/tags/segment"
+import type { TagStanceInfo, TagStanceLookup } from "@/lib/tags/segment"
 
 export interface CompareCriterionEntry {
   slug: CriterionSlug
@@ -48,8 +49,8 @@ export interface CompareWork {
   alignmentJustification: string | null
   alignmentAt: string | null
   genres: string[]
-  /** `stance` = amada/evitada pelo gosto do usuário (perfil ∪ preferências declaradas). */
-  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null; subGroupName: string | null; stance: TagStance | null }>
+  /** `stance` = amada/evitada pelo gosto do usuário (perfil ∪ preferências declaradas) + ênfase 2×. */
+  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null; subGroupName: string | null; stance: TagStanceInfo | null }>
   criteria: CompareCriterionEntry[]
 }
 
@@ -89,7 +90,7 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
   }
   // Stance (amada/evitada) por tag: preferências declaradas ∪ perfil de gosto.
   const stanceLookup = buildTagStanceLookup(
-    declaredPrefs.map((p) => ({ slug: p.slug, stance: p.stance })),
+    declaredPrefs.map((p) => ({ slug: p.slug, stance: p.stance, weight: p.weight })),
     profileRow?.profile.loved_tags ?? [],
     profileRow?.profile.avoided_tags ?? [],
   )

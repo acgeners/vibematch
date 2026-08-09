@@ -17,6 +17,7 @@ import { InputConfidenceSeal } from "@/components/generation/input-confidence-se
 import { QualityHearts } from "@/components/ui/quality-hearts"
 import { SynopsisQualityPicker } from "@/components/titles/synopsis-quality-picker"
 import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
+import { AiProvenanceSeal } from "@/components/ui/ai-provenance"
 
 export interface SynopsisQualitySuggestionProps {
   workId: string
@@ -177,6 +178,27 @@ export function SynopsisQualitySuggestion({
         <div className="flex min-w-0 flex-col gap-1 rounded-lg border border-border/50 bg-muted/30 px-3 py-2">
           <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             <Sparkles className="h-3 w-3" /> A IA sugere
+            {prediction && (
+              <AiProvenanceSeal
+                title="Interesse previsto por IA"
+                model={prediction.modelName}
+                at={prediction.predictedAt}
+                extra={[
+                  {
+                    label: "Confiança",
+                    value:
+                      prediction.confidence != null
+                        ? `${Math.round(prediction.confidence * 100)}%`
+                        : null,
+                  },
+                ]}
+                note={
+                  stale
+                    ? "Desatualizada: a sinopse ou seu perfil de gosto mudaram desde a previsão."
+                    : undefined
+                }
+              />
+            )}
           </span>
           {prediction ? (
             <>
@@ -299,15 +321,16 @@ export function SynopsisQualitySuggestion({
 
       {prediction && (
         <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-border/40 pt-2 text-[11px] text-muted-foreground">
-          {predictedOn && (
-            <span className={cn(stale && "text-amber-600 dark:text-amber-300")}>
-              Prevista em {predictedOn}
-              {stale && " — desatualizada"}
-            </span>
+          {/* ⚠️ Data e modelo subiram pro selo ✨ de "A IA sugere". O que fica aqui NÃO é
+              proveniência: "desatualizada" é ESTADO — é o que impede aplicar ao pipeline
+              de notas um número que a IA já não sustenta — e a última frase é a REGRA de
+              cálculo. Esconder qualquer um dos dois num tooltip seria enterrar o aviso. */}
+          {stale && (
+            <>
+              <span className="text-amber-600 dark:text-amber-300">Previsão desatualizada</span>
+              <span aria-hidden>·</span>
+            </>
           )}
-          {predictedOn && prediction.modelName && <span aria-hidden>·</span>}
-          {prediction.modelName && <span>{prediction.modelName}</span>}
-          {(predictedOn || prediction.modelName) && <span aria-hidden>·</span>}
           <span>Só o seu ♥ entra no cálculo das notas</span>
         </p>
       )}

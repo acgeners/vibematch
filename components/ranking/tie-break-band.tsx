@@ -1,6 +1,7 @@
 "use client"
 
 import { Scale } from "lucide-react"
+import type { ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
 import { ARCHETYPE_LABEL } from "@/lib/ranking/tier-composition"
@@ -35,6 +36,7 @@ export function TierDividerRow({
   composition,
   focusedArchetype,
   onFocusArchetype,
+  selectSlot,
 }: {
   tierNumber: number
   workIds: string[]
@@ -51,11 +53,23 @@ export function TierDividerRow({
   composition?: ArchetypeComposition
   focusedArchetype?: ForceArchetype | null
   onFocusArchetype?: (a: ForceArchetype) => void
+  /**
+   * Caixa de "marcar o tier inteiro". Mora à ESQUERDA, na mesma coluna dos
+   * checkboxes das linhas de baixo — e não junto do "Comparar / Refinar", onde
+   * já convivem os chips de composição e o botão de refino. Alinhada com a
+   * coluna de seleção ela se explica sozinha ("marca este bloco"); no canto
+   * direito seria a terceira ação disputando o mesmo espaço.
+   *
+   * Ausente = tier de 1 obra (marcar "o bloco" e marcar a linha seriam a mesma
+   * coisa) ou página que não tem seleção.
+   */
+  selectSlot?: ReactNode
 }) {
   return (
     <tr className="bg-gradient-to-r from-primary/10 via-muted/40 to-transparent">
       <td colSpan={colSpan} className="border-y border-primary/25 px-3 py-1.5">
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+          {selectSlot && <span className="flex shrink-0 items-center">{selectSlot}</span>}
           <span className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-primary">
               <span className="font-mono">≈</span>

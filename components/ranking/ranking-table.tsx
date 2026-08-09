@@ -4,7 +4,7 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Fragment, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import type { ReactNode } from "react"
-import { AlertTriangle, BookOpen, ChevronDown, ChevronUp, Compass, ImageOff, Layers, LayoutGrid, List, Sparkles, Star, X } from "lucide-react"
+import { AlertTriangle, BookOpen, ChevronDown, ChevronUp, Compass, ImageOff, Layers, LayoutGrid, List, Sparkles, Star } from "lucide-react"
 import type { RankingEntry } from "@/server/queries/ranking"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -21,7 +21,16 @@ import type { CriterionHighlight, HighlightWeight } from "@/lib/ranking/criterio
 import type { CriterionMoments } from "@/lib/ranking/criterion-unit"
 import { DEFAULT_TIER_BAND_WIDTH } from "@/lib/ranking/tier-config"
 import type { CriterionSlug } from "@/types/domain"
-import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
+import { MAX_SELECTION_WORKS } from "@/lib/compare-config"
+import { toast } from "sonner"
+import { CompareSelectionBar } from "@/components/titles/selection-bar"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { AddToGroupDialog } from "@/components/favorites/lists/add-to-group-dialog"
+import { useBatchAiActions } from "@/components/titles/use-batch-ai-actions"
+import { setFavoriteMany } from "@/server/actions/works"
+import { countSelectedWorksInFolders } from "@/server/actions/lists"
+import { useRefresh } from "@/lib/use-refresh"
+import type { ListPickerOption } from "@/server/queries/lists"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CoverImage } from "@/components/ui/cover-image"
 import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
@@ -70,6 +79,24 @@ const RANK_COL: WorkColumnDef = {
   label: "#",
   configLabel: "Posição",
   description: "Posição da obra na ordenação atual da tabela.",
+  align: "center",
+  locked: true,
+  group: "basico",
+}
+
+// Coluna de SELEÇÃO. Prependida como o RANK_COL — e não vinda da config —
+// porque no /ranking ela é estrutural: some do picker, ninguém pode escondê-la
+// e ela nunca troca de posição.
+//
+// 🔴 Até 2026-08-08 ela era FILTRADA FORA junto com "actions", e o resultado é o
+// pior tipo de bug: `toggleSelect`, o teto de seleção e a barra flutuante
+// existiam e compilavam, mas nenhum checkbox era desenhado na lista. A seleção
+// só nascia pelo "Comparar / Refinar" do divisor de tier — então o código
+// parecia pronto e a feature não existia.
+const SELECT_COL: WorkColumnDef = {
+  key: "select",
+  label: "",
+  configLabel: "Seleção",
   align: "center",
   locked: true,
   group: "basico",
@@ -253,6 +280,9 @@ interface RankingTableProps {
   criterionMoments?: CriterionMoments | null
   /** Pesos ativos dos atributos — dão o ▲/▼ dos chips. Null = chip sem marcador. */
   highlightWeights?: HighlightWeight[] | null
+  /** Grupos de favoritos disponíveis — habilitam "Adicionar a grupo" na barra de
+   *  seleção. Ausente = a página não busca os grupos e o botão não aparece. */
+  favoriteGroups?: ListPickerOption[]
 }
 
 const KEY_CRITERIA = ["romance", "fantasy_nobility", "protagonist", "drama", "tragedy"]
@@ -551,7 +581,7 @@ function renderCell(
   return null
 }
 
-export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true, tierBandWidth = DEFAULT_TIER_BAND_WIDTH, criterionPrefs, criterionMoments, highlightWeights }: RankingTableProps) {
+export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true, tierBandWidth = DEFAULT_TIER_BAND_WIDTH, criterionPrefs, criterionMoments, highlightWeights, favoriteGroups }: RankingTableProps) {
   const { widths, setWidth } = useColumnWidths()
   // Colunas do /ranking vêm do vocabulário COMPARTILHADO (work-table-config,
   // namespace "ranking"). Prependa a coluna "#" estrutural e descarta as colunas
@@ -577,12 +607,55 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   const [moodClusterIds, setMoodClusterIds] = useState<string[]>([])
   const [moodRefine, setMoodRefine] = useState<MoodRefine | null>(null)
   const selectedSet = new Set(selectedIds)
+  // 🔴 O teto é o do LOTE (100), não o do Comparar (10). Enquanto a seleção só
+  // servia pra comparar os dois eram o mesmo número; desde que ela alimenta
+  // Favoritar/Veredito/Interesse, usar o de comparar recusava a 11ª marcação e
+  // tornava as ações em lote inalcançáveis. Quem desabilita acima de 10 hoje é o
+  // botão Comparar, com a explicação no title.
   const toggleSelect = (id: string) => {
     const scrollY = window.scrollY
     setSelectedIds((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id)
-      if (prev.length >= MAX_COMPARE_WORKS) return prev
+      if (prev.length >= MAX_SELECTION_WORKS) return prev
       return [...prev, id]
+    })
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollY })
+    })
+  }
+  /**
+   * Marca/desmarca um BLOCO (a página inteira ou um tier). Preserva o que já
+   * estava marcado fora do bloco — a caixa do tier não pode limpar a seleção que
+   * a pessoa fez noutro tier.
+   *
+   * ⚠️ Trunca no teto do lote e AVISA. Recusar em silêncio a partir da 101ª
+   * deixaria a caixa do tier "não funcionando" sem nada dizer.
+   */
+  const toggleBlock = (ids: string[], select: boolean) => {
+    const scrollY = window.scrollY
+    setSelectedIds((prev) => {
+      if (!select) {
+        const drop = new Set(ids)
+        return prev.filter((x) => !drop.has(x))
+      }
+      const merged = [...prev]
+      const seen = new Set(prev)
+      let dropped = 0
+      for (const id of ids) {
+        if (seen.has(id)) continue
+        if (merged.length >= MAX_SELECTION_WORKS) {
+          dropped++
+          continue
+        }
+        merged.push(id)
+        seen.add(id)
+      }
+      if (dropped > 0) {
+        toast.warning(
+          `Seleção no limite de ${MAX_SELECTION_WORKS} obras — ${dropped} ficaram de fora.`,
+        )
+      }
+      return merged
     })
     requestAnimationFrame(() => {
       window.scrollTo({ top: scrollY })
@@ -603,6 +676,69 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
       window.scrollTo({ top: scrollY })
     })
   }
+  // ── Ações em lote sobre a seleção ──────────────────────────────────────────
+  const refresh = useRefresh()
+  const [busy, setBusy] = useState(false)
+  const [addGroupOpen, setAddGroupOpen] = useState(false)
+  const [unfavConfirm, setUnfavConfirm] = useState<{ works: number; memberships: number } | null>(null)
+  const clearAfterAction = useCallback(() => {
+    setSelectedIds([])
+    refresh()
+  }, [refresh])
+  const batchAi = useBatchAiActions({ onSettled: clearAfterAction })
+
+  // Favoritar age só sobre as que AINDA NÃO são — mandar as já favoritas de novo
+  // é escrita à toa, e o toast contaria obras que não mudaram.
+  const favoriteById = useMemo(
+    () => new Map(entries.map((e) => [e.workId, e.isFavorite])),
+    [entries],
+  )
+  const favoriteSelectedIds = selectedIds.filter((id) => favoriteById.get(id) === true)
+  const unfavoritedSelectedIds = selectedIds.filter((id) => favoriteById.get(id) !== true)
+
+  const handleBatchFavorite = useCallback(async () => {
+    if (unfavoritedSelectedIds.length === 0 || busy) return
+    setBusy(true)
+    try {
+      const result = await setFavoriteMany(unfavoritedSelectedIds, true)
+      if (result.error) {
+        toast.error(result.error)
+        return
+      }
+      const n = unfavoritedSelectedIds.length
+      toast.success(`${n} obra${n !== 1 ? "s" : ""} favoritada${n !== 1 ? "s" : ""}`)
+      clearAfterAction()
+    } finally {
+      setBusy(false)
+    }
+  }, [unfavoritedSelectedIds, busy, clearAfterAction])
+
+  // Desfavoritar SEMPRE confirma: é a única ação da barra sem volta (refavoritar
+  // não recoloca a obra nas pastas). A consulta de pastas decide o TEXTO do
+  // aviso, não se ele aparece.
+  const handleBatchUnfavorite = useCallback(async () => {
+    if (favoriteSelectedIds.length === 0 || busy) return
+    setBusy(true)
+    try {
+      const res = await countSelectedWorksInFolders(favoriteSelectedIds)
+      setUnfavConfirm("data" in res ? res.data : { works: 0, memberships: 0 })
+    } finally {
+      setBusy(false)
+    }
+  }, [favoriteSelectedIds, busy])
+
+  const runBatchUnfavorite = useCallback(async () => {
+    if (favoriteSelectedIds.length === 0) return
+    const result = await setFavoriteMany(favoriteSelectedIds, false)
+    if (result.error) {
+      toast.error(result.error)
+      return
+    }
+    const n = favoriteSelectedIds.length
+    toast.success(`${n} obra${n !== 1 ? "s" : ""} desfavoritada${n !== 1 ? "s" : ""}`)
+    clearAfterAction()
+  }, [favoriteSelectedIds, clearAfterAction])
+
   // Ação do divisor de tier: abre o popup de refino por mood. Guarda o tier
   // INTEIRO (sem cortar): o mood rankeia todas e o drawer mostra as melhores até
   // o teto (`fetchCompareWorks` corta em MAX_COMPARE_WORKS).
@@ -681,6 +817,9 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   // de cada tier (o tier só agrupa). O mood reordena depois, no drawer.
   const displayEntries = entries
 
+  /** O que a caixa do cabeçalho governa: as obras NA TELA, não o catálogo. */
+  const visibleIds = useMemo(() => displayEntries.map((e) => e.workId), [displayEntries])
+
   // "O que a separa" mede o desvio contra as empatadas DO TIER: sem tiers na tela
   // ela não tem grupo a que se referir, e sairia medindo contra um conjunto que
   // não está sendo exibido. Some da tabela — a escolha no seletor continua valendo
@@ -688,7 +827,10 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   const columns = useMemo(
     () =>
       [
+        SELECT_COL,
         RANK_COL,
+        // O "select" da config sai da lista: ele já entra prependido acima, e sem
+        // o filtro apareceria DUAS vezes (com o mesmo `key`, que o React reclama).
         ...getConfiguredWorkColumns(config).filter((c) => c.key !== "select" && c.key !== "actions"),
       ].filter((c) => c.key !== "separator" || tiers != null),
     [config, tiers],
@@ -887,7 +1029,21 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                 const forms = headerFormsFor(col)
 
                 let cellContent: ReactNode
-                if (forms) {
+                if (col.key === "select") {
+                  // Marcar TODAS as visíveis. Sem isto, uma seleção de 40 obras
+                  // custa 40 cliques — e as ações em lote existem justamente pra
+                  // esse tamanho de seleção.
+                  cellContent = (
+                    <div className="flex items-center justify-center">
+                      <BulkSelectCheckbox
+                        ids={visibleIds}
+                        selectedSet={selectedSet}
+                        onToggle={toggleBlock}
+                        label="Selecionar todas as obras visíveis"
+                      />
+                    </div>
+                  )
+                } else if (forms) {
                   // Cabeçalho responsivo (full → short → abbrev conforme a largura).
                   cellContent = (
                     <ResponsiveHeaderLabel
@@ -982,6 +1138,16 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                     composition={compositionByStart.get(index)}
                     focusedArchetype={focusedArchetype}
                     onFocusArchetype={toggleArchetype}
+                    selectSlot={
+                      tierDivider.count >= 2 ? (
+                        <BulkSelectCheckbox
+                          ids={tierDivider.workIds}
+                          selectedSet={selectedSet}
+                          onToggle={toggleBlock}
+                          label={`Selecionar as ${tierDivider.count} obras do Tier ${tierDivider.tierNumber}`}
+                        />
+                      ) : undefined
+                    }
                   />
                 )}
                 <tr
@@ -1007,9 +1173,9 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                         {col.key === "select" ? (
                           <Checkbox
                             checked={selectedSet.has(entry.workId)}
-                            disabled={!selectedSet.has(entry.workId) && selectedIds.length >= MAX_COMPARE_WORKS}
+                            disabled={!selectedSet.has(entry.workId) && selectedIds.length >= MAX_SELECTION_WORKS}
                             onCheckedChange={() => toggleSelect(entry.workId)}
-                            aria-label={`Selecionar ${entry.title} para comparar`}
+                            aria-label={`Selecionar ${entry.title}`}
                           />
                         ) : col.key === "separator" ? (
                           // Fora de renderCell porque depende do ÍNDICE (o tier a
@@ -1078,14 +1244,52 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
         ))}
       </div>
 
-      <CompareFloatingBar
+      <CompareSelectionBar
         count={selectedIds.length}
+        favoriteCount={favoriteSelectedIds.length}
         onOpen={() => {
           setMoodRefine(null) // comparação manual: sem refino por mood
           setDrawerOpen(true)
         }}
         onClear={clearSelection}
+        onFavorite={handleBatchFavorite}
+        onUnfavorite={handleBatchUnfavorite}
+        onAddToGroup={favoriteGroups ? () => setAddGroupOpen(true) : undefined}
+        onRerank={() => batchAi.rerank(selectedIds)}
+        onPredictInterest={() => void batchAi.predictInterest(selectedIds)}
+        // As duas ações de IA são do plano Pago. Desabilitar SEM motivo lê como
+        // botão quebrado — o hint vira o title.
+        aiDisabledHint={isPaid ? undefined : "Feature do plano Pago."}
+        busy={busy || batchAi.planning}
       />
+
+      <ConfirmDialog
+        open={unfavConfirm != null}
+        onOpenChange={(o) => !o && setUnfavConfirm(null)}
+        title={`Desfavoritar ${favoriteSelectedIds.length} obra${favoriteSelectedIds.length !== 1 ? "s" : ""}?`}
+        description={
+          unfavConfirm == null
+            ? undefined
+            : unfavConfirm.works > 0
+              ? `${unfavConfirm.works} dela${unfavConfirm.works !== 1 ? "s" : ""} está${unfavConfirm.works !== 1 ? "ão" : ""} em ${unfavConfirm.memberships} grupo${unfavConfirm.memberships !== 1 ? "s" : ""} e vai sair de todos. Refavoritar depois NÃO devolve a obra ao grupo.`
+              : "Elas saem dos seus favoritos. Pra voltar, é uma a uma."
+        }
+        confirmText="Desfavoritar"
+        onConfirm={async () => {
+          setUnfavConfirm(null)
+          await runBatchUnfavorite()
+        }}
+      />
+
+      {favoriteGroups && (
+        <AddToGroupDialog
+          open={addGroupOpen}
+          onOpenChange={setAddGroupOpen}
+          workIds={selectedIds}
+          groups={favoriteGroups}
+          onDone={clearAfterAction}
+        />
+      )}
 
       <MoodRefineDialog
         open={moodDialogOpen}
@@ -1124,39 +1328,33 @@ function sortIdsByVisibleOrder(ids: string[], entries: RankingEntry[]): string[]
   )
 }
 
-function CompareFloatingBar({
-  count,
-  onOpen,
-  onClear,
+/**
+ * Caixa de seleção em MASSA (cabeçalho da tabela e divisor de tier). Três
+ * estados, e o terceiro é o que impede a aposta: com parte do bloco marcada ela
+ * mostra um traço e o clique COMPLETA a seleção, nunca apaga o que já estava
+ * marcado. Só o estado cheio limpa.
+ */
+function BulkSelectCheckbox({
+  ids,
+  selectedSet,
+  onToggle,
+  label,
 }: {
-  count: number
-  onOpen: () => void
-  onClear: () => void
+  ids: string[]
+  selectedSet: Set<string>
+  onToggle: (ids: string[], select: boolean) => void
+  label: string
 }) {
-  if (count === 0) return null
+  const selectedHere = ids.filter((id) => selectedSet.has(id)).length
+  const state: boolean | "indeterminate" =
+    selectedHere === 0 ? false : selectedHere === ids.length ? true : "indeterminate"
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-3">
-      <div className="pointer-events-auto flex items-center gap-2 rounded-full border bg-card/95 px-3 py-2 shadow-lg backdrop-blur">
-        <span className="text-sm">
-          <span className="font-semibold">{count}</span>
-          <span className="ml-1 text-muted-foreground">
-            obra{count !== 1 ? "s" : ""} selecionada{count !== 1 ? "s" : ""}
-          </span>
-        </span>
-        <Button size="sm" onClick={onOpen} className="h-7 text-xs">
-          Comparar
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={onClear}
-          aria-label="Limpar seleção"
-        >
-          <X className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-    </div>
+    <Checkbox
+      checked={state}
+      // Vazio ou parcial → completa; cheio → limpa.
+      onCheckedChange={() => onToggle(ids, state !== true)}
+      aria-label={label}
+    />
   )
 }
 

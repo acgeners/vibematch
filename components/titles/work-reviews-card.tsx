@@ -17,6 +17,7 @@ import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { generateWorkReviewDigest } from "@/server/actions/review-digest"
 import { isDigestCorrupted } from "@/lib/ai-recommendation/digest-integrity"
 import { RefetchReviewsButton } from "@/components/titles/refetch-reviews-button"
+import { AiProvenanceSeal, formatProvenanceDate } from "@/components/ui/ai-provenance"
 import type { ReviewDigest } from "@/lib/ai-recommendation/types"
 import type { WorkReviewsSnapshot } from "@/server/queries/work-reviews"
 import { formatUsdApprox } from "@/lib/format/money"
@@ -24,6 +25,17 @@ import { formatUsdApprox } from "@/lib/format/money"
 interface WorkReviewsCardProps {
   snapshot: WorkReviewsSnapshot
   workId: string
+  /**
+   * Modelo de cada uma das DUAS gerações deste card. Nem `review_digest` nem
+   * `review_summary` têm coluna de modelo em `works` — vem do log central, e é
+   * `null` pra obra anterior a 03/07/2026 (ver server/queries/ai-provenance.ts).
+   * As datas, essas sim, saem do snapshot.
+   */
+  provenance?: {
+    digestModel: string | null
+    digestPromptVersion?: string | null
+    summaryModel: string | null
+  }
 }
 
 // Reviews abaixo disto não geram resumo (espelha review-summarizer.ts e settings-pending.ts).
@@ -145,7 +157,7 @@ function ratingColor(rating: number | null): string {
   return "text-rose-600 dark:text-rose-300"
 }
 
-export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
+export function WorkReviewsCard({ snapshot, workId, provenance }: WorkReviewsCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [proseOpen, setProseOpen] = useState(false)
   const refresh = useRefresh()
@@ -223,7 +235,6 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
   // Digest íntegro E com consenso: só então ele pode ser a cara do painel. Sem
   // consenso não há frase de abertura, e a prosa (se houver) serve melhor.
   const digestLeads = digest != null && !corrupted && Boolean(digest.consensus?.trim())
-  const synthesizedAt = digestLeads ? snapshot.digestAt : snapshot.summaryAt
   const totalReviews = snapshot.total + snapshot.manual.length
   // Fontes = união das raspadas com as das manuais. Contar só `bySource` sub-reporta:
   // uma review manual de uma fonte que nunca foi raspada não aparecia na contagem.
@@ -241,6 +252,41 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
             <CardTitle className="flex items-center gap-2 text-base">
               <MessageSquareText className="size-4 text-muted-foreground" />
               O que dizem as reviews
+              {/* Um selo só, com as DUAS gerações dentro. Dois selos lado a lado no
+                  mesmo cabeçalho seriam piores que a faixa de meta que estamos tirando —
+                  e ninguém saberia qual é qual. As reviews cruas não levam selo: são
+                  texto de leitor, não de modelo. */}
+              {(digest != null || snapshot.summary) && (
+                <AiProvenanceSeal
+                  title="Síntese gerada por IA"
+                  model={digest != null ? provenance?.digestModel : provenance?.summaryModel}
+                  promptVersion={digest != null ? provenance?.digestPromptVersion : null}
+                  at={digest != null ? snapshot.digestAt : snapshot.summaryAt}
+                  extra={[
+                    {
+                      label: "Entraram",
+                      value:
+                        snapshot.digestN != null
+                          ? `${snapshot.digestN} de ${totalReviews} reviews`
+                          : null,
+                    },
+                    ...(digest != null && snapshot.summary
+                      ? [
+                          {
+                            label: "Prosa",
+                            value: [
+                              provenance?.summaryModel,
+                              formatProvenanceDate(snapshot.summaryAt),
+                            ]
+                              .filter(Boolean)
+                              .join(" · ") || null,
+                          },
+                        ]
+                      : []),
+                  ]}
+                  note="A síntese estruturada e o resumo em prosa são gerações separadas."
+                />
+              )}
             </CardTitle>
             <div className="text-[11.5px] text-muted-foreground">
               <span className="tabular-nums">{totalReviews} review{totalReviews === 1 ? "" : "s"}</span>
@@ -250,7 +296,6 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
               {snapshot.manual.length > 0 && (
                 <> · <span className="tabular-nums">{snapshot.manual.length} {snapshot.manual.length === 1 ? "manual" : "manuais"}</span></>
               )}
-              {synthesizedAt && <> · sintetizado {formatRelativeDateTime(synthesizedAt)}</>}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -406,9 +451,8 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
             >
               <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", proseOpen && "rotate-180")} />
               <span className="font-medium text-foreground">Resumo em prosa</span>
-              {snapshot.summaryAt && (
-                <span className="ml-auto text-[11px] text-muted-foreground/70">{formatRelativeDateTime(snapshot.summaryAt)}</span>
-              )}
+              {/* A data do resumo saiu daqui: ela é proveniência e mora no selo ✨ do
+                  cabeçalho, junto do modelo que a gerou. */}
             </button>
             {proseOpen && (
               <p className="mx-6 mb-3 whitespace-pre-line rounded-md bg-muted/40 p-3 text-sm leading-relaxed text-foreground/90">

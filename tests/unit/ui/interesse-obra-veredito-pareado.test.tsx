@@ -26,6 +26,8 @@ import type { SynopsisQuality } from "@/types/domain"
  *  2. **Repetição** — a 2ª versão dizia "desatualizado" em três lugares (chip, faixa
  *     âmbar com a data, e a data de novo no rodapé) e tinha duas portas pra mesma
  *     ação. Nada quebra quando isso volta; a tela só fica ilegível.
+ *  3. **Proveniência solta** (2026-08-08) — data e modelo desceram pro selo ✨; o que
+ *     fica na tela é só o AVISO de desatualizada, que é estado, não procedência.
  */
 
 const JUST =
@@ -122,12 +124,26 @@ describe("Interesse na Obra: veredito pareado", () => {
     expect(portas).toHaveLength(1)
   })
 
-  it("desatualizada: a data aparece UMA vez, e 'Prever de novo' ocupa o topo", () => {
+  it("desatualizada: o AVISO fica na tela, a data e o modelo saem dela", () => {
+    // Desde 2026-08-08 data e modelo moram no selo ✨ de proveniência (que só monta
+    // no hover) — a régua da página é "nenhuma proveniência solta na tela".
+    //
+    // 🔴 O que NÃO pode acompanhá-los é o "desatualizada": isso é ESTADO, não
+    // proveniência. É o que impede aplicar ao pipeline de notas um número que a IA já
+    // não sustenta — enterrá-lo num tooltip devolveria o aplicar cego que este arquivo
+    // inteiro existe pra guardar.
     const { container } = renderBlock({ prediction: { ...PRED, stale: true } })
     const texto = container.textContent ?? ""
-    expect(texto.match(/12\/07\/2026/g) ?? []).toHaveLength(1)
     expect(texto).toMatch(/desatualizada/i)
+    expect(texto).not.toMatch(/12\/07\/2026/)
+    expect(texto).not.toMatch(/claude-sonnet-4-6/)
     expect(screen.getByRole("button", { name: /Prever de novo/ })).toBeTruthy()
+  })
+
+  it("o selo de proveniência existe e é alcançável por teclado", () => {
+    renderBlock()
+    const selo = screen.getByRole("button", { name: /Interesse previsto por IA/ })
+    expect(selo.tagName).toBe("BUTTON")
   })
 
   it("a justificativa começa FECHADA, mas está no DOM", () => {

@@ -9,6 +9,8 @@ export interface LatestAiEvaluationAttributes {
   evaluationId: string
   modelName: string
   promptVersion: string
+  /** ISO da avaliação — proveniência do selo ✨ do formulário pós-leitura. */
+  createdAt: string | null
   attributes: Record<CriterionSlug, number>
 }
 
@@ -26,7 +28,7 @@ export async function getLatestAiEvaluationAttributes(
   const supabase = admin ?? createAdminClient()
   const { data, error } = await supabase
     .from("ai_evaluations")
-    .select("id, model_name, prompt_version, ai_evaluation_scores(criterion_slug, suggested_score)")
+    .select("id, model_name, prompt_version, created_at, ai_evaluation_scores(criterion_slug, suggested_score)")
     .eq("work_id", workId)
     .eq("status", "completed")
     .order("created_at", { ascending: false })
@@ -49,6 +51,7 @@ export async function getLatestAiEvaluationAttributes(
     evaluationId: data.id as string,
     modelName: (data.model_name as string | null) ?? "unknown",
     promptVersion: (data.prompt_version as string | null) ?? "unknown",
+    createdAt: (data.created_at as string | null) ?? null,
     attributes,
   }
 }

@@ -12,6 +12,7 @@ import {
   Inbox,
   LayoutDashboard,
   Palette,
+  Plus,
   Scale,
   Settings,
   ShieldAlert,
@@ -22,6 +23,7 @@ import {
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { ACCENT_STYLES } from "@/components/console/console-registry"
+import { Button } from "@/components/ui/button"
 import { decisionCountsByHref } from "@/lib/curadoria/decision-queues"
 import type { SettingsAccent } from "@/lib/settings-accent"
 import { useChromeBadges } from "@/components/layout/chrome-badges"
@@ -209,8 +211,38 @@ export function ConsoleNav({ settingsGroups, defaultSettingsGroup }: ConsoleNavP
             ))}
           </ul>
         </nav>
+
+        <NewWorkShortcut />
       </div>
     </aside>
+  )
+}
+
+/**
+ * O atalho de criar obra — no RODAPÉ, e fora da lista de propósito.
+ *
+ * A lista responde "onde eu trabalho"; criar obra é "o que eu faço", e é o único
+ * caminho daqui que joga o curador **pra fora** da console (`/titles/new`). Virar
+ * o 7º item faria dele um destino da console — a mesma régua que já custou caro na
+ * barra superior, onde destino e sinal foram misturados.
+ *
+ * `mt-auto` e não posição fixa: enquanto a lista cabe na tela (o caso de hoje, 6
+ * itens), o botão encosta logo abaixo dela; quando não couber, o `<nav>` rola e o
+ * botão fica visível no pé em vez de sumir junto com o resto.
+ *
+ * Sem gate próprio: quem renderiza esta sidebar já passou pelo `isCurrentUserAdmin()`
+ * da `CuradoriaConsole` — o mesmo papel que `/titles/new` exige pra salvar.
+ */
+function NewWorkShortcut() {
+  return (
+    <div className="mt-auto border-t border-border/70 px-2.5 pb-3 pt-2.5">
+      <Button asChild className="w-full">
+        <Link href="/titles/new">
+          <Plus />
+          Nova obra
+        </Link>
+      </Button>
+    </div>
   )
 }
 
@@ -279,9 +311,11 @@ function EntryRow({
 /**
  * "Configurações" + os seus quatro tópicos.
  *
- * O rótulo é LINK e a seta é BOTÃO, separados de propósito: um ramo que só expande
- * transforma o item mais visitado da console num item que não vai a lugar nenhum —
- * e HTML não permite `<button>` dentro de `<a>`, então não dá pra fundir os dois.
+ * ⚠️ A LINHA INTEIRA É BOTÃO — não navega, só abre/fecha. Antes o rótulo era `<Link>`
+ * pra `/settings` e só a seta expandia, o que dava dois alvos de clique com destinos
+ * diferentes a 20px um do outro: quem mirava o texto pra ver os tópicos ia parar numa
+ * página. E o link não levava a lugar nenhum de próprio — `/settings` sem `?g=` abre o
+ * tópico default, ou seja, o MESMO destino do 1º filho. Quem navega são os tópicos.
  */
 function SettingsBranch({
   entry,
@@ -313,29 +347,26 @@ function SettingsBranch({
 
   return (
     <>
-      <div className={rowClass(entry.accent, active)}>
-        <Link
-          href={entry.href}
-          aria-current={active ? "page" : undefined}
-          className="flex min-w-0 flex-1 items-center gap-2.5"
-        >
-          <EntryRow
-            entry={entry}
-            active={active}
-            count={count}
-            subtitle={`${groups.length} tópicos`}
-          />
-        </Link>
-        <button
-          type="button"
-          onClick={() => setManual(!open)}
-          aria-expanded={open}
-          aria-label={open ? "Recolher tópicos de Configurações" : "Expandir tópicos de Configurações"}
-          className="-mr-1 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
-        >
-          <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={() => setManual(!open)}
+        aria-expanded={open}
+        className={rowClass(entry.accent, active)}
+      >
+        <EntryRow
+          entry={entry}
+          active={active}
+          count={count}
+          subtitle={`${groups.length} tópicos`}
+        />
+        <ChevronDown
+          aria-hidden
+          className={cn(
+            "-mr-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </button>
 
       {open && (
         <ul className="ml-[19px] mt-1 space-y-0.5 border-l border-border pl-2.5">
@@ -424,29 +455,38 @@ export function ConsoleMobileNav({ settingsGroups, defaultSettingsGroup }: Conso
     : (ENTRIES.find((e) => isEntryActive(e.href, pathname))?.href ?? "/curadoria")
 
   return (
-    <label className="mb-4 block md:hidden">
-      <span className="sr-only">Seção da curadoria</span>
-      <select
-        value={value}
-        onChange={(e) => router.push(e.target.value)}
-        className="w-full rounded-xl border border-border/70 bg-card/60 px-3 py-2.5 text-sm font-medium text-foreground outline-none"
-      >
-        {ENTRIES.map((e) =>
-          e.branch === "settings" ? (
-            <optgroup key={e.href} label={e.label}>
-              {settingsGroups.map((g) => (
-                <option key={g.id} value={`/settings?g=${g.id}`}>
-                  {g.label}
-                </option>
-              ))}
-            </optgroup>
-          ) : (
-            <option key={e.href} value={e.href}>
-              {e.label}
-            </option>
-          ),
-        )}
-      </select>
-    </label>
+    // O atalho fica AO LADO do seletor, nunca dentro dele: `<option>` navega, mas um
+    // seletor que às vezes cria obra e às vezes muda de seção mente sobre o que é.
+    <div className="mb-4 flex items-stretch gap-2 md:hidden">
+      <label className="min-w-0 flex-1">
+        <span className="sr-only">Seção da curadoria</span>
+        <select
+          value={value}
+          onChange={(e) => router.push(e.target.value)}
+          className="w-full rounded-xl border border-border/70 bg-card/60 px-3 py-2.5 text-sm font-medium text-foreground outline-none"
+        >
+          {ENTRIES.map((e) =>
+            e.branch === "settings" ? (
+              <optgroup key={e.href} label={e.label}>
+                {settingsGroups.map((g) => (
+                  <option key={g.id} value={`/settings?g=${g.id}`}>
+                    {g.label}
+                  </option>
+                ))}
+              </optgroup>
+            ) : (
+              <option key={e.href} value={e.href}>
+                {e.label}
+              </option>
+            ),
+          )}
+        </select>
+      </label>
+      <Button asChild className="h-auto w-11 shrink-0 rounded-xl px-0">
+        <Link href="/titles/new" aria-label="Nova obra" title="Nova obra">
+          <Plus />
+        </Link>
+      </Button>
+    </div>
   )
 }

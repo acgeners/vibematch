@@ -3,6 +3,7 @@
 import { revalidatePath, revalidateTag } from "next/cache"
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { MAX_SELECTION_WORKS } from "@/lib/compare-config"
 import { ensureAdmin, getOwnerUserId } from "@/server/queries/current-user"
 import {
   mirrorOwnerState,
@@ -32,8 +33,15 @@ import type {
 import { mapInterestOutcome } from "@/lib/orchestration/integrations/interest-ui"
 import type { WorkPredictResult, PredictWorkOpts } from "@/lib/orchestration/integrations/interest-ui"
 
-/** Teto de obras por run do lote — protege gasto e a duração da request. */
-const SYNOPSIS_BATCH_MAX = 100
+/**
+ * Teto de obras por run do lote — protege gasto e a duração da request.
+ *
+ * Mesmo número que o teto da SELEÇÃO na UI, e de propósito: aqui ele TRUNCA em
+ * silêncio (`ids.slice`), então uma seleção que passasse disso processaria menos
+ * do que mostrou sem nada acusar. Uma 2ª cópia do número é como os dois
+ * divergem.
+ */
+const SYNOPSIS_BATCH_MAX = MAX_SELECTION_WORKS
 
 export type { WorkPredictResult, PredictWorkOpts } from "@/lib/orchestration/integrations/interest-ui"
 

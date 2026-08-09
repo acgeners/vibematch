@@ -167,7 +167,7 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
             <Button asChild size="sm">
               <Link href="/titles/new">
                 <Plus className="h-4 w-4 mr-1" />
-                Novo título
+                Nova obra
               </Link>
             </Button>
           ) : undefined

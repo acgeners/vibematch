@@ -37,12 +37,40 @@ const nextConfig: NextConfig = {
       "radix-ui",
     ],
   },
+  // 🔴 Alias de rota vai AQUI, nunca num `page.tsx` que só chama `redirect()`.
+  //
+  // O `redirect()` de um server component não devolve 3xx: o layout já começou a
+  // streamar, então o Next responde **200** e manda o cliente navegar — e o
+  // Router estoura com "Rendered more hooks than during the previous render"
+  // (React #310 em produção, medido em 2026-08-08 nas duas builds). A página
+  // acaba certa, mas o erro é real e aparece pro usuário no console.
+  //
+  // É a MESMA armadilha do `notFound()` no layout da console (ver CLAUDE.md):
+  // quem decide depois do primeiro byte não decide mais o status. Aqui a decisão
+  // não depende de dado nenhum, então ela cabe antes de qualquer render — e o
+  // `redirects()` do config emite 308 de verdade.
+  //
+  // ⚠️ Isto NÃO cobre redirect que depende de dado (`/favorites/[listId]` de
+  // grupo inexistente, `/titles/[id]` que resolve pra slug): esses precisam de
+  // uma leitura no banco pra decidir e seguem no `page.tsx`.
   async redirects() {
     return [
       {
         source: "/titles",
         has: [{ type: "query", key: "fav", value: "1" }],
         destination: "/favorites",
+        permanent: true,
+      },
+      { source: "/preferences", destination: "/preferencias", permanent: true },
+      { source: "/conta/preferencias", destination: "/preferencias", permanent: true },
+      {
+        source: "/ranking/desatualizados",
+        destination: "/fila-recomendacao?tab=ia-rk",
+        permanent: true,
+      },
+      {
+        source: "/settings/calibration",
+        destination: "/settings?g=notas&open=ai-audit",
         permanent: true,
       },
     ];

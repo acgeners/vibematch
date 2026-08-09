@@ -8,13 +8,11 @@ import {
   ArrowDown,
   ArrowUp,
   Ban,
-  Bookmark,
   BookOpen,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronsUpDown,
-  Compass,
   ExternalLink,
   GripVertical,
   Heart,
@@ -40,7 +38,6 @@ import {
 import {
   Sheet,
   SheetContent,
-  SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
 import { ScoreBadge, getCriterionColorClass, criterionCellClass, type ColumnThresholds, type ScoreColorThresholds, type CriterionRange, type AttrColorMode } from "@/components/ui/score-badge"
@@ -60,7 +57,9 @@ import { CRITERIA_INFO, PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/crite
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug } from "@/types/domain"
 import { computeMoodAdjusted, isMoodActive, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
-import { segmentTags, lowercasedNameSet, type TagStance } from "@/lib/tags/segment"
+import { segmentTags, lowercasedNameSet } from "@/lib/tags/segment"
+import type { TagStance, TagStanceInfo } from "@/lib/tags/segment"
+import { TagStanceMark, tagStanceTitle } from "@/components/ui/tag-stance-mark"
 import { cn } from "@/lib/utils"
 import { ScopedTaskStrip, useScopedGuard } from "@/components/tasks/scoped-task"
 import { CoverImage } from "@/components/ui/cover-image"
@@ -73,6 +72,7 @@ import {
   type ColumnPickerColumnDef,
   type ColumnPickerConfig,
 } from "@/components/ui/column-picker"
+import { CompareToolbar } from "@/components/titles/compare-toolbar"
 
 const HIDDEN_ROWS_STORAGE_KEY = "compare_hidden_rows_v1"
 // v3 → v4: adiciona as linhas "Prioridade" (decision) e "Alinhamento"
@@ -250,9 +250,14 @@ export function WorkCompareDrawer({
   const [diffOnly, setDiffOnly] = useState(false)
   const [showBestWorst, setShowBestWorst] = useState(true)
   const [reranking, setReranking] = useState(false)
-  // Salvar o desempate como run navegável (histórico/URL). Off por padrão pra não
-  // encher o histórico de /recommendations com cada comparação avulsa.
-  const [persistRun, setPersistRun] = useState(false)
+  // Salvar o desempate como run navegável (histórico/URL). LIGADO por padrão desde 2026-08-08
+  // (era off, pra não encher o histórico de /recommendations com comparação avulsa): o desempate
+  // custa uma execução do limite diário, e perder o resultado dele por um toggle desligado que
+  // vivia escondido no topo saía mais caro do que uma linha a mais no histórico.
+  const [persistRun, setPersistRun] = useState(true)
+  // "Onde diferenciam" é disclosure: fechado por padrão, aberto por clique. Some junto com a
+  // tabela quando a Bússola está na tela (lá não há linha nem amplitude que ele explique).
+  const [differentialsOpen, setDifferentialsOpen] = useState(false)
   const router = useRouter()
   // Bump pra forçar o re-fetch das obras após o desempate por IA (repovoar a
   // linha "Veredito IA." com os alignment_score recém-computados).
@@ -298,6 +303,10 @@ export function WorkCompareDrawer({
   )
   // A Bússola precisa de ≥2 obras; abaixo disso caímos na tabela.
   const showBussola = compareView === "bussola" && works.length >= 2
+
+  // Critérios que mais separam as obras — alimenta o contador do disclosure no topo e a
+  // faixa que ele abre. Mesma função que a faixa usa, pra contador e conteúdo não divergirem.
+  const differentials = useMemo(() => getMaxAmplitudeCriteria(works), [works])
 
   const [orderedIds, setOrderedIds] = useState<string[]>([])
   const parentIdsSortedKey = useMemo(() => [...ids].sort().join(","), [ids])
@@ -481,56 +490,29 @@ export function WorkCompareDrawer({
         className="h-screen max-h-screen gap-0 overflow-hidden p-0"
         showCloseButton={false}
       >
-        <SheetHeader className="flex flex-row items-center justify-between gap-2 border-b bg-card/80 px-4 py-3">
-          <SheetTitle className="text-base">
-            Comparar {loading ? ids.length : works.length} obra
-            {(loading ? ids.length : works.length) !== 1 ? "s" : ""}
-            {!loading && works.length < ids.length && (
-              <span className="ml-2 text-xs font-normal text-muted-foreground">
-                ({ids.length - works.length} não carregada
-                {ids.length - works.length !== 1 ? "s" : ""})
-              </span>
-            )}
-          </SheetTitle>
-          {!loading && works.length >= 2 && !showBussola && (
-            <div className="hidden min-w-0 flex-1 items-center justify-center overflow-x-auto px-2 lg:flex">
-              <DifferentialsSummary works={works} compact />
-            </div>
-          )}
-          <div className="flex shrink-0 items-center gap-2">
-            {works.length >= 2 && (
-              <div className="inline-flex rounded-md border border-border bg-muted/40 p-0.5">
-                <button
-                  type="button"
-                  onClick={() => changeCompareView("table")}
-                  aria-pressed={compareView === "table"}
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors",
-                    compareView === "table"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <Rows3 className="h-3.5 w-3.5" />
-                  Tabela
-                </button>
-                <button
-                  type="button"
-                  onClick={() => changeCompareView("bussola")}
-                  aria-pressed={compareView === "bussola"}
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors",
-                    compareView === "bussola"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <Compass className="h-3.5 w-3.5" />
-                  Bússola
-                </button>
-              </div>
-            )}
-            {!showBussola && (
+        {/* Sem `SheetHeader`: ele é só um wrapper de layout (flex-col + padding) e brigava com a
+            barra de uma linha. Quem o Radix exige é o `SheetTitle`, que segue aqui dentro. */}
+        <CompareToolbar
+            title={
+              <SheetTitle className="shrink-0 text-base">
+                Comparar {loading ? ids.length : works.length} obra
+                {(loading ? ids.length : works.length) !== 1 ? "s" : ""}
+                {!loading && works.length < ids.length && (
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                    ({ids.length - works.length} não carregada
+                    {ids.length - works.length !== 1 ? "s" : ""})
+                  </span>
+                )}
+              </SheetTitle>
+            }
+            differentialsCount={loading ? 0 : differentials.length}
+            differentialsOpen={differentialsOpen}
+            onToggleDifferentials={() => setDifferentialsOpen((v) => !v)}
+            view={compareView}
+            onViewChange={changeCompareView}
+            canSwitchView={works.length >= 2}
+            showBussola={showBussola}
+            rowsPicker={
               <ColumnPicker
                 columns={COMPARE_ROW_COLUMN_DEFS}
                 groupLabels={COMPARE_ROW_GROUP_LABELS}
@@ -540,77 +522,28 @@ export function WorkCompareDrawer({
                 triggerLabel="Linhas"
                 triggerIcon={<Rows3 className="h-3.5 w-3.5" />}
               />
-            )}
-            {works.length >= 2 && !showBussola && (
-              <Button
-                variant={diffOnly ? "default" : "outline"}
-                size="sm"
-                onClick={() => setDiffOnly((v) => !v)}
-                className="h-7 text-xs"
-              >
-                Só diferenças
-              </Button>
-            )}
-            {works.length >= 2 && !showBussola && (
-              <Button
-                variant={showBestWorst ? "default" : "outline"}
-                size="sm"
-                onClick={() => setShowBestWorst((v) => !v)}
-                className="h-7 text-xs"
-                title="Mostra/oculta o destaque de melhor (verde) e pior (vermelho) por linha"
-              >
-                Melhor/pior
-              </Button>
-            )}
-            {works.length >= 2 && isPaid && (
-              <Button
-                variant={persistRun ? "default" : "outline"}
-                size="sm"
-                onClick={() => setPersistRun((v) => !v)}
-                disabled={reranking}
-                className="h-7 gap-1 text-xs"
-                aria-pressed={persistRun}
-                title="Quando ligado, o próximo desempate é salvo como uma recomendação navegável (histórico + URL). Não custa nada a mais."
-              >
-                <Bookmark className="h-3.5 w-3.5" />
-                Salvar
-              </Button>
-            )}
-            {works.length >= 2 && (
-              <Button
-                variant="default"
-                size="sm"
-                onClick={handleRerank}
-                disabled={reranking || !isPaid}
-                className="h-7 gap-1 text-xs"
-                title={
-                  isPaid
-                    ? "Roda o IA re-rank comparando estas obras entre si e desempata por veredito (Veredito IA + justificativa). Conta uma execução do limite diário."
-                    : "Desempate por IA é uma feature do plano Pago."
-                }
-              >
-                {reranking ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Sparkles className="h-3.5 w-3.5" />
-                )}
-                {reranking ? "Desempatando…" : isPaid ? "Desempatar com IA" : "Desempatar com IA · Pago"}
-              </Button>
-            )}
-            <Button variant="ghost" size="sm" onClick={onClear} className="h-7 text-xs">
-              Limpar
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => guard(() => onOpenChange(false))}
-              className="h-7 w-7"
-              aria-label="Fechar"
-            >
-              <X className="h-4 w-4" />
-            </Button>
+            }
+            diffOnly={diffOnly}
+            onDiffOnlyChange={setDiffOnly}
+            bestWorst={showBestWorst}
+            onBestWorstChange={setShowBestWorst}
+            persistRun={persistRun}
+            onPersistRunChange={setPersistRun}
+            isPaid={isPaid}
+            reranking={reranking}
+            canRerank={works.length >= 2}
+            onRerank={handleRerank}
+            onClear={onClear}
+            onClose={() => guard(() => onOpenChange(false))}
+          />
+
+        {/* O resumo é LEITURA, não controle: colapsado por padrão, e a faixa aberta traz o que
+            o chip escondia no `title` — a amplitude e o intervalo min → max de cada critério. */}
+        {differentialsOpen && !showBussola && differentials.length > 0 && (
+          <div id="compare-differentials" className="border-b px-4 py-3">
+            <DifferentialsSummary works={works} />
           </div>
-        </SheetHeader>
+        )}
 
         <ScopedTaskStrip
           running={reranking}
@@ -1410,42 +1343,19 @@ function CompareGrid({
   )
 }
 
-function DifferentialsSummary({ works, compact = false }: { works: CompareWork[]; compact?: boolean }) {
+/**
+ * A faixa que o disclosure "Onde diferenciam" abre. Sem título próprio: quem nomeia é o botão
+ * do topo — repetir ali gastaria a primeira linha da faixa dizendo o que a pessoa acabou de
+ * clicar. A variante `compact` (chips soltos no header) morreu junto com o header antigo.
+ */
+function DifferentialsSummary({ works }: { works: CompareWork[] }) {
   const diffs = getMaxAmplitudeCriteria(works)
   if (diffs.length === 0) return null
-  if (compact) {
-    return (
-      <div className="flex min-w-0 items-center gap-1.5 text-xs">
-        <span className="shrink-0 font-semibold uppercase tracking-wide text-muted-foreground">
-          Onde diferenciam:
-        </span>
-        {diffs.map((d) => {
-          const info = CRITERIA_INFO[d.slug]
-          return (
-            <span
-              key={d.slug}
-              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300/40 bg-background/60 px-1.5 py-0.5"
-              title={`${info?.name ?? d.slug}: ${d.min.toFixed(1)} → ${d.max.toFixed(1)}`}
-            >
-              <span>{info?.emoji}</span>
-              <span className="font-medium">{info?.name ?? d.slug}</span>
-              <span className="font-mono text-amber-700 dark:text-amber-300">Δ{d.amplitude.toFixed(1)}</span>
-            </span>
-          )
-        })}
-      </div>
-    )
-  }
   return (
     <div className="rounded-lg border border-amber-300/40 bg-amber-50/40 p-3 dark:bg-amber-500/5">
-      <div className="mb-2 flex items-baseline gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Onde elas se diferenciam
-        </span>
-        <span className="text-[11px] text-muted-foreground">
-          critérios com pelo menos 1.5 ponto de diferença entre maior e menor nota
-        </span>
-      </div>
+      <p className="mb-2 text-[11px] text-muted-foreground">
+        Critérios com pelo menos 1.5 ponto de diferença entre a maior e a menor nota destas obras.
+      </p>
       <div className="flex flex-wrap gap-2">
         {diffs.map((d) => {
           const info = CRITERIA_INFO[d.slug]
@@ -1616,12 +1526,40 @@ const STANCE_BADGE_CLASS: Record<TagStance, string> = {
   avoid: "border-rose-500/50 bg-rose-500/10 text-rose-700 dark:text-rose-300",
 }
 
+/**
+ * Chip de tag com stance. O ♥/⊘ marca a ênfase 2× — sem ele a prévia de 5 chips
+ * mostra a tag mais decisiva da obra com exatamente o mesmo peso de uma amada
+ * qualquer, que é o que a ordenação do `segmentTags` acabou de resolver.
+ */
+function StanceChip({
+  tag,
+  stance,
+}: {
+  tag: { slug: string; name: string }
+  stance: TagStanceInfo | null | undefined
+}) {
+  return (
+    <Badge
+      variant="outline"
+      title={stance ? tagStanceTitle(stance) : undefined}
+      className={cn(
+        "h-5 gap-1 py-0 text-[11px] font-normal",
+        stance ? STANCE_BADGE_CLASS[stance.stance] : undefined,
+        stance?.strong && "font-medium",
+      )}
+    >
+      {stance?.strong && <TagStanceMark stance={stance.stance} />}
+      {tag.name}
+    </Badge>
+  )
+}
+
 function GenresTagsCell({
   genres,
   tags,
 }: {
   genres: string[]
-  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null; subGroupName?: string | null; stance?: TagStance | null }>
+  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null; subGroupName?: string | null; stance?: TagStanceInfo | null }>
 }) {
   const total = genres.length + tags.length
   if (total === 0) {
@@ -1668,13 +1606,7 @@ function GenresTagsCell({
         </Badge>
       ))}
       {visibleTags.map((t) => (
-        <Badge
-          key={`t:${t.slug}`}
-          variant="outline"
-          className={cn("h-5 py-0 text-[11px] font-normal", t.stance ? STANCE_BADGE_CLASS[t.stance] : undefined)}
-        >
-          {t.name}
-        </Badge>
+        <StanceChip key={`t:${t.slug}`} tag={t} stance={t.stance} />
       ))}
       {remaining > 0 && (
         <Popover>
@@ -1719,9 +1651,7 @@ function GenresTagsCell({
                 </p>
                 <div className="flex flex-wrap gap-1">
                   {loved.map((t) => (
-                    <Badge key={`t:${t.slug}`} variant="outline" className={cn("h-5 py-0 text-[11px] font-normal", STANCE_BADGE_CLASS.love)}>
-                      {t.name}
-                    </Badge>
+                    <StanceChip key={`t:${t.slug}`} tag={t} stance={t.stance} />
                   ))}
                 </div>
               </div>
@@ -1734,9 +1664,7 @@ function GenresTagsCell({
                 </p>
                 <div className="flex flex-wrap gap-1">
                   {avoided.map((t) => (
-                    <Badge key={`t:${t.slug}`} variant="outline" className={cn("h-5 py-0 text-[11px] font-normal", STANCE_BADGE_CLASS.avoid)}>
-                      {t.name}
-                    </Badge>
+                    <StanceChip key={`t:${t.slug}`} tag={t} stance={t.stance} />
                   ))}
                 </div>
               </div>

@@ -9,8 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
-import { rerankWorksBatchAction } from "@/server/actions/recommendations"
-import { runTask, setTaskProgress } from "@/lib/tasks-store"
+import { useBatchAiActions, RERANK_TASK_ID } from "@/components/titles/use-batch-ai-actions"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import { skipAiEvaluation } from "@/server/actions/ai"
 import type { AlignmentQueueWork } from "@/server/queries/recommendations"
@@ -22,9 +21,8 @@ import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
 
 type SortField = "default" | "expected" | "alignment"
 
-const PER_CALL_CHUNK = 10
 /** Um id só pros dois botões: "em lote" e "selecionadas" nunca rodam juntos. */
-const BATCH_TASK_ID = "rerank-batch"
+const BATCH_TASK_ID = RERANK_TASK_ID
 
 function fmtAlignmentAt(iso: string | null | undefined): string | null {
   if (!iso) return null
@@ -56,46 +54,6 @@ export function StaleRerankPanel({
   const batchTask = tasks.find((t) => t.id === BATCH_TASK_ID)
   const batchRunning = batchTask?.status === "running"
   const progress = batchTask?.progress ?? null
-
-  const runBatch = (targetIds: string[], onSettled?: () => void) => {
-    if (targetIds.length === 0 || batchRunning) return
-    const total = targetIds.length
-    runTask({
-      id: BATCH_TASK_ID,
-      kind: "rerank-batch",
-      label: `Veredito IA: ${total} obra${total !== 1 ? "s" : ""}`,
-      run: async () => {
-        let ranked = 0
-        let failed = 0
-        setTaskProgress(BATCH_TASK_ID, 0, total)
-        for (let i = 0; i < targetIds.length; i += PER_CALL_CHUNK) {
-          const chunk = targetIds.slice(i, i + PER_CALL_CHUNK)
-          const result = await rerankWorksBatchAction(chunk)
-          // A action devolve `{ error }` em vez de lançar; sem converter, o store
-          // marcaria a falha como sucesso.
-          if (result.error || !result.data) throw new Error(result.error ?? "Erro ao re-rankear.")
-          ranked += result.data.ranked
-          failed += result.data.failed
-          setTaskProgress(BATCH_TASK_ID, Math.min(i + PER_CALL_CHUNK, total), total)
-        }
-        return { ranked, failed }
-      },
-      // Refresh nos DOIS caminhos: um lote que abortou no meio já persistiu as
-      // obras dos chunks anteriores, e a tela precisa mostrá-las.
-      onDone: () => {
-        refresh()
-        onSettled?.()
-      },
-      onError: () => {
-        refresh()
-        onSettled?.()
-      },
-      successToast: ({ ranked, failed }) => ({
-        message:
-          `${ranked} re-rankeada${ranked !== 1 ? "s" : ""}` + (failed > 0 ? ` · ${failed} falhou` : "."),
-      }),
-    })
-  }
 
   const handleSkip = async (workId: string) => {
     setSkippingId(workId)
@@ -139,11 +97,30 @@ export function StaleRerankPanel({
   const ids = useMemo(() => sortedWorks.map((w) => w.id), [sortedWorks])
   const selection = useWorkSelection(ids)
 
+  // O lote em si mora em `useBatchAiActions` — o MESMO caminho que a seleção do
+  // /ranking usa. Duas cópias divergiriam justo no detalhe que não dá erro: sem o
+  // `throw` no `{ error }` da action, o indicador anuncia "pronto" pra uma falha.
+  //
+  // Limpa a seleção nos DOIS caminhos (lote da fila e lote das selecionadas): o
+  // re-rank muda o estado das obras, então a seleção anterior já não descreve o
+  // que está na tela.
+  const batchAi = useBatchAiActions({
+    onSettled: () => {
+      refresh()
+      selection.clear()
+    },
+  })
+
+  const runBatch = (targetIds: string[]) => {
+    if (targetIds.length === 0 || batchRunning) return
+    batchAi.rerank(targetIds)
+  }
+
   // Fatia a lista VISÍVEL (sortedWorks), não a ordem crua do servidor — senão o
   // lote processa N obras fora da tela e o topo que o usuário está olhando
   // continua "Não avaliado" (a query da fila nem tem ORDER BY).
   const handleRerankQueue = () => runBatch(sortedWorks.slice(0, queueSize).map((w) => w.id))
-  const handleRerankSelected = () => runBatch(selection.selectedIds, () => selection.clear())
+  const handleRerankSelected = () => runBatch(selection.selectedIds)
 
   if (works.length === 0) {
     return (

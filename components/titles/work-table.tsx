@@ -19,7 +19,6 @@ import {
   ChevronUp,
   CircleMinus,
   ExternalLink,
-  FolderPlus,
   Heart,
   HeartOff,
   ImageOff,
@@ -31,7 +30,6 @@ import {
   Rows3,
   Settings2,
   Sparkles,
-  X,
 } from "lucide-react"
 import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
 import { LABELS } from "@/lib/constants/ui-labels"
@@ -79,8 +77,9 @@ import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
 import { useIsAdmin, useCanWriteOwnState } from "@/components/layout/admin-context"
 import { AddToGroupDialog } from "@/components/favorites/lists/add-to-group-dialog"
+import { CompareSelectionBar } from "@/components/titles/selection-bar"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import { countSelectedWorksInFolders, removeWorksFromList } from "@/server/actions/lists"
+import { addWorksToList, countSelectedWorksInFolders, removeWorksFromList } from "@/server/actions/lists"
 import type { ListPickerOption } from "@/server/queries/lists"
 import { AlignmentCell, AlignmentScoreCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { computeDecisionScore } from "@/lib/calculations/decision"
@@ -101,7 +100,6 @@ import {
   writeWorkColumnConfig,
   type WorkColumnNamespace,
 } from "@/components/titles/work-table-config"
-import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 
 type ViewMode = "list" | "cards" | "heatmap"
 
@@ -392,23 +390,21 @@ export function WorkTable({
     refresh()
   }, [favoriteSelectedIds, updateCompareIds, refresh])
 
-  /** Pergunta ao servidor se alguma das selecionadas está em pasta ANTES de desfavoritar.
-   *  Com pasta envolvida, abre o aviso; sem pasta, segue direto (o caso comum). */
+  /** Desfavoritar em LOTE sempre confirma. A versão anterior só perguntava quando alguma
+   *  selecionada estava em pasta — então fora de um grupo (em /titles, /ranking e "Todos os
+   *  favoritos") 20 favoritas sumiam num clique, sem pergunta. A consulta de pastas continua,
+   *  mas agora decide o TEXTO do aviso, não se ele aparece. */
   const handleBatchUnfavorite = useCallback(async () => {
     if (favoriteSelectedIds.length === 0 || busy) return
     setBusy(true)
     try {
       const res = await countSelectedWorksInFolders(favoriteSelectedIds)
       const inFolders = "data" in res ? res.data : { works: 0, memberships: 0 }
-      if (inFolders.works > 0) {
-        setUnfavConfirm(inFolders)
-        return
-      }
-      await runBatchUnfavorite()
+      setUnfavConfirm(inFolders)
     } finally {
       setBusy(false)
     }
-  }, [favoriteSelectedIds, busy, runBatchUnfavorite])
+  }, [favoriteSelectedIds, busy])
 
   const handleAddedToGroup = useCallback(() => {
     updateCompareIds([])
@@ -420,14 +416,34 @@ export function WorkTable({
   const handleRemoveFromGroup = useCallback(async () => {
     if (!currentGroup || compareIds.length === 0 || busy) return
     setBusy(true)
+    const group = currentGroup
+    const removedIds = [...compareIds]
     try {
-      const res = await removeWorksFromList(currentGroup.id, compareIds)
+      const res = await removeWorksFromList(group.id, removedIds)
       if ("error" in res) {
         toast.error(res.error)
         return
       }
       const n = res.data.count
-      toast.success(`${n} obra${n !== 1 ? "s" : ""} removida${n !== 1 ? "s" : ""} de “${currentGroup.name}”.`)
+      // O Desfazer é o que sustenta esta ação NÃO ser vermelha na barra: ela é reversível, e
+      // agora em um clique. `addWorksToList` é o mesmo caminho do "Adicionar a grupo".
+      toast.success(
+        `${n} obra${n !== 1 ? "s" : ""} fora de “${group.name}”. Segue${n !== 1 ? "m" : ""} nos favoritos.`,
+        {
+          action: {
+            label: "Desfazer",
+            onClick: async () => {
+              const undo = await addWorksToList(group.id, removedIds)
+              if ("error" in undo) {
+                toast.error(undo.error)
+                return
+              }
+              toast.success(`De volta em “${group.name}”.`)
+              refresh()
+            },
+          },
+        }
+      )
       updateCompareIds([])
       refresh()
     } finally {
@@ -553,9 +569,11 @@ export function WorkTable({
             onOpenChange={(o) => !o && setUnfavConfirm(null)}
             title={`Desfavoritar ${favoriteSelectedIds.length} obra${favoriteSelectedIds.length !== 1 ? "s" : ""}?`}
             description={
-              unfavConfirm
-                ? `${unfavConfirm.works} dela${unfavConfirm.works !== 1 ? "s" : ""} está${unfavConfirm.works !== 1 ? "ão" : ""} em ${unfavConfirm.memberships} grupo${unfavConfirm.memberships !== 1 ? "s" : ""} e vai sair de todos. Refavoritar depois NÃO devolve a obra ao grupo.`
-                : undefined
+              unfavConfirm == null
+                ? undefined
+                : unfavConfirm.works > 0
+                  ? `${unfavConfirm.works} dela${unfavConfirm.works !== 1 ? "s" : ""} está${unfavConfirm.works !== 1 ? "ão" : ""} em ${unfavConfirm.memberships} grupo${unfavConfirm.memberships !== 1 ? "s" : ""} e vai sair de todos. Refavoritar depois NÃO devolve a obra ao grupo.`
+                  : "Elas saem dos seus favoritos. Pra voltar, é uma a uma."
             }
             confirmText="Desfavoritar"
             onConfirm={async () => {
@@ -606,100 +624,6 @@ export function WorkTable({
           />
         </>
       )}
-    </div>
-  )
-}
-
-function CompareSelectionBar({
-  count,
-  favoriteCount,
-  onOpen,
-  onClear,
-  onUnfavorite,
-  onAddToGroup,
-  onRemoveFromGroup,
-  busy = false,
-}: {
-  count: number
-  favoriteCount: number
-  onOpen: () => void
-  onClear: () => void
-  onUnfavorite: () => void
-  onAddToGroup?: () => void
-  onRemoveFromGroup?: () => void
-  busy?: boolean
-}) {
-  // Grupo de favoritos é dado PESSOAL desde a mig 149 (`work_lists.user_id`), e a action é
-  // gateada por `own_state` — o mesmo verbo de favoritar. O gate aqui era `isAdmin`, herdado
-  // de quando os grupos não tinham dono: ele escondia da Leitora um botão que o servidor
-  // aceitaria, e que o menu de pastas da página da obra já oferecia a ela.
-  const canWriteOwnState = useCanWriteOwnState()
-  if (count === 0) return null
-  const compareDisabled = count > MAX_COMPARE_WORKS
-  return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-3">
-      <div className="pointer-events-auto flex items-center gap-2 rounded-full border bg-card/95 px-3 py-2 shadow-lg backdrop-blur">
-        <span className="text-sm">
-          <span className="font-semibold">{count}</span>
-          <span className="ml-1 text-muted-foreground">
-            obra{count !== 1 ? "s" : ""} selecionada{count !== 1 ? "s" : ""}
-          </span>
-        </span>
-        <Button
-          size="sm"
-          onClick={onOpen}
-          disabled={compareDisabled}
-          title={compareDisabled ? `Máximo de ${MAX_COMPARE_WORKS} obras para comparar` : undefined}
-          className="h-7 text-xs"
-        >
-          Comparar
-        </Button>
-        {onAddToGroup && canWriteOwnState && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onAddToGroup}
-            disabled={busy}
-            className="h-7 gap-1.5 text-xs"
-          >
-            <FolderPlus className="h-3.5 w-3.5" />
-            Adicionar a grupo
-          </Button>
-        )}
-        {favoriteCount > 0 && canWriteOwnState && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onUnfavorite}
-            disabled={busy}
-            className="h-7 gap-1.5 text-xs"
-          >
-            <HeartOff className="h-3.5 w-3.5" />
-            Desfavoritar {favoriteCount}
-          </Button>
-        )}
-        {onRemoveFromGroup && canWriteOwnState && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onRemoveFromGroup}
-            disabled={busy}
-            className="h-7 gap-1.5 border-rose-500/45 text-xs text-rose-500 hover:border-rose-500/70 hover:text-rose-500"
-          >
-            <CircleMinus className="h-3.5 w-3.5" />
-            Remover do grupo
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={onClear}
-          aria-label="Limpar seleção"
-        >
-          <X className="h-3.5 w-3.5" />
-        </Button>
-      </div>
     </div>
   )
 }
@@ -814,6 +738,11 @@ function WorkCardsView({
   onToggleSelect: (id: string) => void
   enableCompare?: boolean
 }) {
+  // Com seleção ativa a grade entra em "modo seleção": os checks saem do hover (num toque não
+  // existe hover, e numa varredura rápida a grade não dizia que dá pra selecionar) e o card
+  // inteiro passa a alternar em vez de navegar — a mira de 20px no canto da capa era o atrito.
+  const selectionActive = selectedIds.size > 0
+
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
       {works.map((work) => {
@@ -832,14 +761,25 @@ function WorkCardsView({
                   e.stopPropagation()
                   onToggleSelect(work.id)
                 }}
+                role="checkbox"
+                aria-checked={isSelected}
                 aria-label={isSelected ? "Remover da comparação" : "Adicionar à comparação"}
                 className={cn(
-                  "absolute left-1.5 top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-sm border bg-card/90 backdrop-blur transition-opacity",
-                  isSelected ? "opacity-100 border-primary bg-primary text-primary-foreground" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 border-border/80"
+                  "absolute left-1.5 top-1.5 z-10 flex size-6 items-center justify-center rounded-md border backdrop-blur transition-opacity",
+                  isSelected
+                    ? "border-primary bg-primary text-primary-foreground opacity-100"
+                    : cn(
+                        // Fica SOBRE a capa, então o contraste vem de preto/branco — token de
+                        // tema aqui sumiria na metade das capas.
+                        "border-white/40 bg-black/45 text-white/90",
+                        selectionActive
+                          ? "opacity-100"
+                          : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                      )
                 )}
               >
                 {isSelected && (
-                  <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none">
+                  <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none">
                     <path
                       d="M3.5 8.5l3 3 6-7"
                       stroke="currentColor"
@@ -854,12 +794,25 @@ function WorkCardsView({
 
             <Link
               href={`/titles/${slug}`}
+              onClick={(e) => {
+                if (!enableCompare || !selectionActive) return
+                // Cmd/Ctrl/Shift+clique continua abrindo a obra (nova aba/janela): no modo
+                // seleção o clique simples alterna, mas tirar a rota de fuga do link seria
+                // quebrar um gesto do navegador.
+                if (e.metaKey || e.ctrlKey || e.shiftKey) return
+                e.preventDefault()
+                onToggleSelect(work.id)
+              }}
               className="flex flex-col gap-2 text-left transition-transform hover:-translate-y-0.5 focus-visible:-translate-y-0.5 focus-visible:outline-none"
             >
               <div
                 className={cn(
-                  "relative aspect-[2/3] overflow-hidden rounded-lg border bg-muted/40 shadow-sm shadow-black/10 transition-shadow group-hover:border-primary/40 group-hover:shadow-md group-hover:shadow-primary/15",
-                  isSelected ? "border-primary/70 ring-2 ring-primary/30" : "border-border/65"
+                  "relative aspect-[2/3] overflow-hidden rounded-lg border bg-muted/40 shadow-sm transition-shadow",
+                  // Moldura SÓLIDA: a versão anterior (borda 70% + anel 30%) desaparecia sobre
+                  // capa clara e saturada, e era o único sinal de que a obra estava selecionada.
+                  isSelected
+                    ? "border-transparent ring-[3px] ring-primary shadow-md shadow-primary/25"
+                    : "border-border/65 shadow-black/10 group-hover:border-primary/40 group-hover:shadow-md group-hover:shadow-primary/15"
                 )}
               >
                 {coverUrl ? (
@@ -901,8 +854,14 @@ function WorkCardsView({
                   />
                 </div>
               </div>
-              <div className="px-0.5">
-                <p className="line-clamp-2 text-xs font-semibold leading-snug text-foreground group-hover:text-primary">
+              {/* Segundo sinal FORA da capa: lá dentro já disputam nota, 18+, status e a arte. */}
+              <div className={cn(isSelected ? "rounded-md bg-primary/15 px-1.5 py-1" : "px-0.5")}>
+                <p
+                  className={cn(
+                    "line-clamp-2 text-xs font-semibold leading-snug",
+                    isSelected ? "text-primary" : "text-foreground group-hover:text-primary"
+                  )}
+                >
                   {work.title}
                 </p>
                 {(work.chapters_read != null || work.total_chapters != null) && (
@@ -1271,21 +1230,37 @@ function WorkListView({
             {canRemoveFromGroup && (
               <>
                 {isAdmin && <DropdownMenuSeparator />}
+                {/* NÃO é `variant="destructive"`: sair da pasta é reversível (a obra continua
+                    favorita, e o Desfazer recoloca). Mesma régua da barra de seleção — o
+                    vermelho fica reservado ao desfavoritar, que esvazia as pastas sem volta. */}
                 <DropdownMenuItem
-                  variant="destructive"
                   onClick={async (e) => {
                     e.stopPropagation()
-                    const res = await removeWorksFromList(currentGroup!.id, [work.id])
+                    const group = currentGroup!
+                    const res = await removeWorksFromList(group.id, [work.id])
                     if ("error" in res) {
                       toast.error(res.error)
                       return
                     }
-                    toast.success(`Removida de “${currentGroup!.name}”. Continua nos favoritos.`)
+                    toast.success(`Fora de “${group.name}”. Continua nos favoritos.`, {
+                      action: {
+                        label: "Desfazer",
+                        onClick: async () => {
+                          const undo = await addWorksToList(group.id, [work.id])
+                          if ("error" in undo) {
+                            toast.error(undo.error)
+                            return
+                          }
+                          toast.success(`De volta em “${group.name}”.`)
+                          refresh()
+                        },
+                      },
+                    })
                     refresh()
                   }}
                 >
                   <CircleMinus className="h-4 w-4 mr-2" />
-                  Remover de “{currentGroup!.name}”
+                  Tirar de “{currentGroup!.name}”
                 </DropdownMenuItem>
               </>
             )}
@@ -1514,7 +1489,10 @@ function WorkListView({
                   data-selected={isSelected ? "true" : undefined}
                   className={cn(
                     "cursor-pointer border-b transition-colors odd:bg-background even:bg-muted/20 hover:bg-primary/5",
-                    isSelected && "bg-primary/10 hover:bg-primary/10"
+                    // Mesma marca da vista Cards, na linguagem da tabela: faixa sólida na borda
+                    // esquerda. Só o fundo a 10% se perde na alternância par/ímpar.
+                    isSelected &&
+                      "bg-primary/12 shadow-[inset_3px_0_0_0_var(--color-primary)] hover:bg-primary/12"
                   )}
                   onClick={() => router.push(`/titles/${titleToSlug(row.original.title)}`)}
                 >
@@ -1570,7 +1548,9 @@ function WorkListView({
               key={work.id}
               className={cn(
                 "cursor-pointer space-y-3 rounded-lg border bg-card/80 p-4 shadow-sm shadow-black/5 transition-all hover:bg-card",
-                isSelected ? "border-primary/60 bg-primary/5" : "border-border/70 hover:border-primary/30"
+                isSelected
+                  ? "border-transparent bg-primary/10 ring-2 ring-primary"
+                  : "border-border/70 hover:border-primary/30"
               )}
               onClick={() => router.push(`/titles/${titleToSlug(work.title)}`)}
             >

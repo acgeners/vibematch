@@ -710,32 +710,50 @@ export function ReadingList({
           )}
         </div>
 
-        {/* Faixa de novidades — só na lista, e só quando a checagem achou algo pendente. */}
+        {/* Faixa de novidades — só na lista, e só quando a checagem achou algo pendente.
+            Mini-CARD, não chip: a versão anterior era uma pílula com capa de 18×24px e o
+            título truncado numa linha — não identificava obra nenhuma, que é a única coisa
+            que a faixa precisa fazer. Capa de 44×64 + título em 2 linhas + "+N novo · cap. X". */}
         {view === "list" && newReleases.length > 0 && (
-          <div className="flex flex-wrap items-center gap-3 border-t border-border bg-emerald-500/[0.06] px-4 py-2.5">
-            <span className="flex shrink-0 items-center gap-1.5 text-[13px] font-semibold text-emerald-600 dark:text-emerald-400">
+          <div className="border-t border-border bg-emerald-500/[0.06] px-4 py-3">
+            <span className="flex flex-wrap items-center gap-x-1.5 text-[13px] font-semibold text-emerald-600 dark:text-emerald-400">
               <Sparkles className="size-4 shrink-0" />
               {newReleases.length} obra{newReleases.length !== 1 ? "s" : ""} com capítulo novo
+              <span className="font-medium text-muted-foreground">· clique pra ir até ela</span>
             </span>
-            <div className="flex flex-1 flex-wrap items-center gap-1.5">
-              {newReleases.map(({ work, result }) => (
-                <button
-                  key={work.id}
-                  type="button"
-                  onClick={() => jumpToWork(work)}
-                  className="inline-flex max-w-56 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-card px-2 py-1 text-xs text-foreground transition-colors hover:bg-emerald-500/10"
-                >
-                  <CoverImage
-                    url={work.coverUrl}
-                    alt=""
-                    className="h-6 w-[1.15rem] shrink-0 rounded object-cover"
-                  />
-                  <span className="truncate">{work.title}</span>
-                  <span className="shrink-0 font-semibold text-emerald-600 dark:text-emerald-400">
-                    +{newChapterCount(result)}
-                  </span>
-                </button>
-              ))}
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              {newReleases.map(({ work, result }) => {
+                const novos = newChapterCount(result)
+                return (
+                  <button
+                    key={work.id}
+                    type="button"
+                    onClick={() => jumpToWork(work)}
+                    className="flex w-68 max-w-full items-stretch gap-2.5 rounded-lg border border-emerald-500/35 bg-card p-2 text-left transition-colors hover:border-emerald-500/60 hover:bg-emerald-500/10"
+                  >
+                    <CoverImage
+                      url={work.coverUrl}
+                      alt=""
+                      className="h-16 w-11 shrink-0 rounded object-cover"
+                    />
+                    <span className="flex min-w-0 flex-1 flex-col gap-1">
+                      <span className="line-clamp-2 text-[13px] font-semibold leading-snug">
+                        {work.title}
+                      </span>
+                      <span className="mt-auto flex items-center gap-1.5 text-[11px]">
+                        <span className="rounded-full bg-emerald-500 px-1.5 py-px font-bold text-emerald-950">
+                          +{novos} novo{novos !== 1 ? "s" : ""}
+                        </span>
+                        {latestOf(work, result) != null && (
+                          <span className="tabular-nums text-muted-foreground">
+                            cap. {latestOf(work, result)}
+                          </span>
+                        )}
+                      </span>
+                    </span>
+                  </button>
+                )
+              })}
             </div>
           </div>
         )}
@@ -1007,7 +1025,13 @@ function BandedGrid<S extends string>({
                 {cfg.hint}
               </span>
             </div>
-            <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
+            {/* Altura idêntica em TODA a banda, e ela sai do conteúdo — não de um número
+                mágico. `auto-rows-fr` iguala as linhas da grade pela mais alta; sem
+                `items-start` cada card estica até a linha. Só isso não bastava: com
+                `items-start` (versão anterior) título de 1 vs 2 linhas e uma data a mais
+                davam a cada card uma altura própria — medido no catálogo: 304 e 318px na
+                mesma banda. O `min-h` do card é o piso que alinha uma banda com a outra. */}
+            <div className="grid auto-rows-fr grid-cols-1 gap-3 lg:grid-cols-2">
               {items.map((work) => (
                 <ReadingCard
                   key={work.id}
@@ -1146,22 +1170,45 @@ function ReadingCard({
     <Card
       id={`work-${work.id}`}
       className={cn(
-        "relative scroll-mt-4 overflow-hidden",
-        result?.hasNew && "ring-1 ring-emerald-400/60 dark:ring-emerald-500/50",
+        // `h-full` faz o card ocupar a linha inteira do `auto-rows-fr`; o `min-h-80` é o
+        // piso que mantém bandas diferentes com a mesma altura (320px = pior caso medido
+        // no catálogo: título de 2 linhas + 3 linhas de data). Nada é reservado DENTRO do
+        // card: o conteúdo fica colado no topo e a sobra vai toda pro rodapé, onde os
+        // botões estão ancorados por `mt-auto`.
+        "relative h-full min-h-80 scroll-mt-4 overflow-hidden",
+        result?.hasNew &&
+          "ring-2 ring-emerald-500/70 shadow-md shadow-emerald-500/15 dark:ring-emerald-400/70",
       )}
     >
-      {/* Tingimento quase imperceptível pra diferenciar (não destacar demais) quem tem
-          capítulo novo — some sozinho quando `hasNew` é limpo (marcar até o X / stepper). */}
-      {result?.hasNew && <span className="absolute inset-0 bg-emerald-500/5" aria-hidden />}
+      {/* Quem tem capítulo novo é pra DESTACAR, não só diferenciar: o anel de 1px a 60% +
+          fundo a 5% sumia no meio da grade. Degradê no topo + anel de 2px + o selo sobre a
+          capa. Some sozinho quando `hasNew` é limpo (marcar até o X / stepper). */}
+      {result?.hasNew && (
+        <span
+          className="absolute inset-0 bg-gradient-to-b from-emerald-500/12 via-emerald-500/[0.03] to-transparent"
+          aria-hidden
+        />
+      )}
       {/* Faixa de estado: `bg-*` porque `border-<cor>` é morto neste projeto
           (regra `* { border-color }` fora de @layer sobrepõe as utilities do Tailwind). */}
       <span className={cn("absolute inset-y-0 left-0 w-1", cfg.bar)} aria-hidden />
-      <CardContent className="flex gap-4 p-3 pl-3.5">
-        <CoverImage
-          url={work.coverUrl}
-          alt={work.title}
-          className="h-48 w-32 shrink-0 rounded-lg object-cover ring-1 ring-border/60"
-        />
+      <CardContent className="flex h-full gap-4 p-3 pl-3.5">
+        <div className="relative shrink-0 self-stretch">
+          <CoverImage
+            url={work.coverUrl}
+            alt={work.title}
+            className="h-full min-h-48 w-32 rounded-lg object-cover ring-1 ring-border/60"
+          />
+          {/* Selo sobre a capa: é o que se vê de longe na grade. Ele também SUBSTITUI o
+              badge "+N novo" que ficava ao lado do "Último lançado" — com o número já em
+              verde ali, eram três vezes a mesma informação no mesmo card. */}
+          {result?.hasNew && (
+            <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-emerald-500 px-2 py-0.5 text-[11px] font-bold tracking-wide text-emerald-950 shadow-md shadow-black/40">
+              <Sparkles className="size-3 shrink-0" />
+              +{newChapterCount(result)} NOVO{newChapterCount(result) !== 1 ? "S" : ""}
+            </span>
+          )}
+        </div>
         <div className="flex min-w-0 flex-1 flex-col gap-2.5">
           <div className="flex items-start justify-between gap-2">
             <WorkTitleLink
@@ -1220,13 +1267,6 @@ function ReadingCard({
             </div>
             <span className="flex h-9 items-center text-muted-foreground/50">→</span>
             <Stat label="Último lançado" value={lancado ?? "—"} highlight={result?.hasNew} />
-            {result?.hasNew && (
-              <span className="flex h-9 items-center">
-                <Badge className="gap-1 border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                  +{newChapterCount(result)} novo{newChapterCount(result) !== 1 ? "s" : ""}
-                </Badge>
-              </span>
-            )}
             {saving && (
               <span className="flex h-9 items-center">
                 <Loader2 className="size-4 animate-spin text-muted-foreground/60" />
