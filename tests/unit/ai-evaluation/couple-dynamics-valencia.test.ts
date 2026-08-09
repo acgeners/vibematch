@@ -23,6 +23,14 @@ import { PROMPT_VERSION, SYSTEM_PROMPT } from "@/lib/ai-evaluation/service"
  * é ele que vai pro modelo — um teste que checasse só a existência da constante
  * passaria verde com a regra fora do prompt.
  */
+/** A seção dedicada do critério, do cabeçalho até a linha em branco dupla seguinte. */
+function couple_dynamicsRule(): string {
+  const idx = SYSTEM_PROMPT.indexOf("REGRA PARA COUPLE_DYNAMICS")
+  expect(idx, "a seção dedicada sumiu do prompt").toBeGreaterThan(-1)
+  const end = SYSTEM_PROMPT.indexOf("\n\nREGRA OBRIGATÓRIA PARA TRAGEDY", idx)
+  return SYSTEM_PROMPT.slice(idx, end > idx ? end : undefined)
+}
+
 describe("SYSTEM_PROMPT — couple_dynamics é escala de VALÊNCIA", () => {
   it("declara as duas naturezas de escala e nomeia couple_dynamics como a exceção", () => {
     expect(SYSTEM_PROMPT).toContain("DUAS NATUREZAS DE ESCALA")
@@ -68,7 +76,7 @@ describe("SYSTEM_PROMPT — couple_dynamics é escala de VALÊNCIA", () => {
 
   it("proíbe usar opinião do leitor como valência e manda buscar a reação do personagem", () => {
     expect(SYSTEM_PROMPT).toContain("OPINIÃO DE LEITOR NÃO DEFINE A VALÊNCIA")
-    expect(SYSTEM_PROMPT).toContain("A REAÇÃO DO OUTRO PERSONAGEM É O SINAL DECISIVO")
+    expect(SYSTEM_PROMPT).toContain("A REAÇÃO DO OUTRO LADO DO VÍNCULO É O SINAL DECISIVO")
     // Sem indício de reação, a tag de posse não pode sustentar nota baixa sozinha.
     expect(SYSTEM_PROMPT).toMatch(/PERDE PESO|PERDE peso/)
   })
@@ -84,6 +92,30 @@ describe("SYSTEM_PROMPT — couple_dynamics é escala de VALÊNCIA", () => {
     for (const termo of ["reencarnação", "regressão", "transmigração", "CONTEXTO ESTABELECIDO"]) {
       expect(bloco, `(d) não menciona ${termo}`).toContain(termo)
     }
+  })
+
+  it("vale para VÍNCULOS CENTRAIS, não só para casal romântico", () => {
+    // O critério foi renomeado "Dinâmica do Casal" → "Dinâmica entre Protagonistas"
+    // em 95226f7 (2026-07-27) e as FAIXAS da rubrica foram ampliadas junto
+    // ("parceiro" → "vínculos centrais", "conduta", "quem é próximo"). Mas o slug
+    // continua `couple_dynamics` e a `description` no banco ainda diz "casal
+    // principal" — então o bloco do critério no prompt tem título amplo, descrição
+    // restrita e rubrica ampla. Sem esta contra-instrução explícita, o modelo segue
+    // a palavra "couple" e devolve 5 pra toda obra sem romance.
+    const regra = couple_dynamicsRule()
+    expect(regra).toContain("VÍNCULOS CENTRAIS")
+    expect(regra, "a regra não desarma o nome do slug").toMatch(/NOME DO SLUG ENGANA/)
+    // Os vínculos não-românticos precisam estar NOMEADOS: "vínculos centrais" sozinho
+    // é abstrato demais pra o modelo aplicar a uma obra de shounen ou de família.
+    for (const vinculo of ["irmãos", "família", "mestre", "equipe", "rivais"]) {
+      expect(regra, `vínculo não-romântico ausente: ${vinculo}`).toContain(vinculo)
+    }
+  })
+
+  it("reserva o 5 pra ausência de VÍNCULO, não pra ausência de romance", () => {
+    const regra = couple_dynamicsRule()
+    expect(regra).toMatch(/não devolva 5 só porque não há casal/)
+    expect(regra).toMatch(/vínculo central avaliável/)
   })
 
   it("mantém o arco de redenção fora da faixa 0-3", () => {
@@ -112,7 +144,7 @@ describe("SYSTEM_PROMPT — couple_dynamics é escala de VALÊNCIA", () => {
 describe("PROMPT_VERSION acompanha o texto do prompt", () => {
   /** Versão e sha256 do SYSTEM_PROMPT andam JUNTOS — atualize os dois na mesma mudança. */
   const PINNED_VERSION = "v23"
-  const PINNED_SHA256 = "82f1630df1a75492506026c90edbaf779a65fb75a7e0fb1976977d9d5f4dd27f"
+  const PINNED_SHA256 = "7e7ad88ab4b847bc0afa964616856032467d39faf7d961adb8dc3a8abe336dfa"
 
   it("está fixada na versão que este hash descreve", () => {
     expect(PROMPT_VERSION).toBe(PINNED_VERSION)

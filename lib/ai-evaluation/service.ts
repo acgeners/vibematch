@@ -253,7 +253,7 @@ REGRAS DE EVIDÊNCIA:
 TAGS POR GRUPO — GUIA DE PESO POR CRITÉRIO:
 Use o grupo das tags fornecidas como sinal principal por critério. Peso entre parênteses indica o quanto o grupo é indicativo daquele critério:
 - romance: grupo "romance" (alto), grupo "relationship_dynamics" (médio — apenas quando a tag descreve o casal).
-- couple_dynamics: grupo "relationship_dynamics" (médio — apenas quando a tag descreve o casal), grupo "characters" (baixo — apenas quando a tag descreve como o personagem se relaciona amorosamente).
+- couple_dynamics: grupo "relationship_dynamics" (médio — qualquer vínculo central, não só o casal: família, irmãos, mestre/discípulo, equipe, rivalidade), grupo "characters" (baixo — apenas quando a tag descreve como o personagem TRATA quem é próximo dele).
 - fantasy_nobility: grupo "fantasy" (alto), grupo "setting" (alto), grupo "scifi" (médio), grupo "cast" (médio).
 - action_adventure: grupo "superpowers" (médio/alto), grupo "characters" (médio — apenas quando a tag descreve habilidades dos protagonistas).
 - adult_content: grupo "content_indicator" (alto).
@@ -272,7 +272,7 @@ REGRAS DE PONTUAÇÃO:
 
 DUAS NATUREZAS DE ESCALA (leia ANTES das regras abaixo — elas não valem igual pros 9 critérios):
 - OITO critérios são de PRESENÇA/INTENSIDADE: 0 = o critério não está lá, 10 = domina a obra. São romance, fantasy_nobility, action_adventure, adult_content, protagonist, humor, drama e tragedy.
-- couple_dynamics é de VALÊNCIA: 0-3 = a relação faz MAL aos personagens, 9-10 = faz BEM. Nota baixa ali NÃO significa "não tem casal" — significa "o casal se destrói". Quando não há casal, a nota é 5 (não aplicável), NUNCA 0-3.
+- couple_dynamics é de VALÊNCIA: 0-3 = o vínculo faz MAL aos envolvidos, 9-10 = faz BEM. Nota baixa ali NÃO significa "não tem vínculo" — significa "o vínculo destrói quem está nele". Quando a obra não tem nenhum vínculo central avaliável, a nota é 5 (não aplicável), NUNCA 0-3.
 - Consequência: as três seções seguintes — "COERÊNCIA JUSTIFICATIVA × FAIXA", "INTERPRETAÇÃO DA ESCALA" e "AUSÊNCIA DE EVIDÊNCIA NÃO É EVIDÊNCIA DE AUSÊNCIA" — valem SOMENTE para os oito critérios de presença. Para couple_dynamics vale a seção "REGRA PARA COUPLE_DYNAMICS", e só ela.
 
 COERÊNCIA JUSTIFICATIVA × FAIXA (obrigatória — critérios de PRESENÇA; não vale pra couple_dynamics):
@@ -329,7 +329,7 @@ Romance presente:
 - Emoção em torno do casal: "I cried when they finally got together", "ML is everything", "FL deserves better than ML"
 - Críticas a QUALIDADE do romance ("rushed romance", "forced romance", "cringe romance") ainda confirmam que romance é elemento central — só com execução fraca.
 
-Couple dynamics — atenção: os itens abaixo dizem O QUE a relação tem. A FAIXA sai da seção "REGRA PARA COUPLE_DYNAMICS" (valência), nunca do rótulo do trope:
+Couple dynamics (= vínculos centrais, não só o casal) — atenção: os itens abaixo dizem O QUE o vínculo tem, e usam vocabulário de casal só porque é o mais comum nas reviews; leia-os valendo para irmãos, família, mestre/discípulo, equipe ou rivais. A FAIXA sai da seção "REGRA PARA COUPLE_DYNAMICS" (valência), nunca do rótulo do trope:
 - "Banter is great" / "way they tease each other" → dinâmica leve/divertida
 - "Toxic ship", "yandere", "obsessive ML/FL", "possessive ML" → comportamento intenso de UM dos lados. NÃO conclua 0-3 daqui: vá checar a REAÇÃO do outro personagem e a LINHA DO TEMPO, itens (a)–(d) da regra própria.
 - "Possessive but I love it", "toxic but I'm here for it", "eu não aguentaria isso", "sufocante demais pra mim" → o leitor está declarando PREFERÊNCIA dele. Vale como sinal de que o trope EXISTE; vale ZERO na escolha da faixa.
@@ -399,17 +399,19 @@ REGRA PARA ADULT_CONTENT (leia com atenção — a natureza do conteúdo manda, 
 
 REGRA PARA COUPLE_DYNAMICS (escala de VALÊNCIA — leia inteira antes de pontuar):
 
-O QUE A NOTA MEDE: o resultado emocional da relação PARA OS PERSONAGENS, no desenvolvimento da obra. NÃO mede a forma da dinâmica, nem se um leitor gostaria de viver aquilo. Tags como BDSM, Femdom, Dom/Sub, Master-Pet, posse, ciúme intenso, "Yandere ML/FL", "Obsessive Male Lead", "Masochistic ML", "Submissive ML/FL", "Crazy ML/FL" NÃO determinam automaticamente 0-3.
+⚠️ O NOME DO SLUG ENGANA: apesar de "couple", este critério é "Dinâmica entre Protagonistas" e avalia os VÍNCULOS CENTRAIS da obra, sejam eles quais forem — casal romântico, irmãos, família, mestre e discípulo, party/equipe, rivais, amizade central. Obra SEM romance tem vínculos centrais e é pontuável normalmente aqui; não devolva 5 só porque não há casal. Use 5 (não aplicável) apenas quando a obra não tem nenhum vínculo central avaliável — protagonista isolado, sem relação recorrente com ninguém.
 
-OPINIÃO DE LEITOR NÃO DEFINE A VALÊNCIA (regra crítica). Reviews são evidência sobre O QUE ACONTECE na relação — nunca sobre se aquilo é bom ou ruim para o casal. Gostar ou não de um trope é PREFERÊNCIA de quem leu. Da mesma review, extraia o FATO ("o ML vigia as conversas dela") e DESCARTE o julgamento ("o que é sufocante", "eu não aguentaria", "possessive but I love it"). Consenso de leitores desgostando de um comportamento NÃO é evidência de dano ao personagem, e consenso adorando não é evidência de saúde.
+O QUE A NOTA MEDE: o resultado emocional do vínculo PARA OS PERSONAGENS NELE, no desenvolvimento da obra. NÃO mede a forma da dinâmica, nem se um leitor gostaria de viver aquilo. Tags como BDSM, Femdom, Dom/Sub, Master-Pet, posse, ciúme intenso, "Yandere ML/FL", "Obsessive Male Lead", "Masochistic ML", "Submissive ML/FL", "Crazy ML/FL" NÃO determinam automaticamente 0-3.
+
+OPINIÃO DE LEITOR NÃO DEFINE A VALÊNCIA (regra crítica). Reviews são evidência sobre O QUE ACONTECE no vínculo — nunca sobre se aquilo é bom ou ruim para quem está nele. Gostar ou não de um trope é PREFERÊNCIA de quem leu. Da mesma review, extraia o FATO ("o ML vigia as conversas dela") e DESCARTE o julgamento ("o que é sufocante", "eu não aguentaria", "possessive but I love it"). Consenso de leitores desgostando de um comportamento NÃO é evidência de dano ao personagem, e consenso adorando não é evidência de saúde.
 
 Antes de pontuar, responda estas quatro:
-(a) CONSENSO — a dinâmica é retratada como mútua/aceita pelos dois, ou imposta contra a vontade de um?
-(b) SATISFAÇÃO — os dois demonstram prazer/conforto conforme a relação se desenvolve, ou um deles sofre?
+(a) CONSENSO — a dinâmica é retratada como mútua/aceita pelos envolvidos, ou imposta contra a vontade de um deles?
+(b) SATISFAÇÃO — os envolvidos demonstram conforto/prazer conforme o vínculo se desenvolve, ou algum deles sofre?
 (c) TOM — sinopse/tags/reviews indicam tom romântico, cômico, fluffy — ou angustiante, sofrido, abusivo?
 (d) LINHA DO TEMPO — em obras com reencarnação, regressão, transmigração, volta no tempo ou segunda chance: o comportamento tóxico acontece ANTES desse evento? Se sim, ele é CONTEXTO ESTABELECIDO — é a vida anterior que a obra existe pra reescrever — e NÃO conta pra nota. Pontue a relação da linha do tempo ATUAL; só o que se repete DEPOIS do evento conta. Não cite a vida anterior como argumento da nota.
 
-A REAÇÃO DO OUTRO PERSONAGEM É O SINAL DECISIVO, e procurá-la é obrigatório. Tag de posse, ciúme, vigilância ou obsessão descreve o COMPORTAMENTO de um lado — não o efeito no outro. Busque na sinopse, nas tags e nas reviews como o outro personagem REAGE:
+A REAÇÃO DO OUTRO LADO DO VÍNCULO É O SINAL DECISIVO, e procurá-la é obrigatório. Tag de posse, ciúme, vigilância, obsessão ou crueldade descreve o COMPORTAMENTO de um personagem — não o efeito em quem o recebe. Busque na sinopse, nas tags e nas reviews como o outro personagem REAGE:
 - medo, fuga, tentativa de escapar, sofrimento, perda de autonomia → dano real: faixa 0-3
 - irritação, atrito, brigas, negociação → conflito: faixa 4-6
 - aceitação, reciprocidade, divertimento, indiferença — ou a obra trata o comportamento como carinho/comédia → NÃO é dano: faixa 7-8 (9-10 se há parceria e crescimento)
@@ -417,7 +419,7 @@ Quando NÃO houver nenhum indício da reação do outro personagem, a tag de pos
 
 ARCO DE REDENÇÃO E PERDÃO: se a obra ENCENA o agressor mudando e o outro personagem aceitando/perdoando, o estado predominante do desenvolvimento é a relação reconciliada — faixa 7-8, ou 9-10 se vira parceria. Leitores dizendo que ELES não perdoariam é preferência, não evidência. Reserve 0-3 para devoção a um abusador NÃO-arrependido.
 
-Reserve 0-3 para abuso real NO DESENVOLVIMENTO: manipulação contra a vontade do outro, sofrimento ativo do parceiro, controle não-consensual, violência. Dinâmica não-tradicional + consensual + tom romântico/cômico/fluffy → 7-8 ou 9-10 (relação saudável dentro da dinâmica que ambos escolheram). Tropes "dark romance" com consenso retratado e comédia BDSM ficam em 7-8/9-10, NÃO em 0-3.
+Reserve 0-3 para abuso real NO DESENVOLVIMENTO, DENTRO dos vínculos centrais: manipulação contra a vontade do outro, sofrimento ativo de quem é próximo, controle não-consensual, violência. Crueldade dirigida a ANTAGONISTAS que a merecem não rebaixa a nota — o critério olha para dentro dos vínculos, não para o mundo. Dinâmica não-tradicional + consensual + tom romântico/cômico/fluffy → 7-8 ou 9-10 (relação saudável dentro da dinâmica que ambos escolheram). Tropes "dark romance" com consenso retratado e comédia BDSM ficam em 7-8/9-10, NÃO em 0-3.
 
 REGRA OBRIGATÓRIA PARA TRAGEDY (leia com atenção):
 Considere tragédia apenas o que ocorre NO DESENVOLVIMENTO (meio da obra), não o cenário inicial nem o background.
