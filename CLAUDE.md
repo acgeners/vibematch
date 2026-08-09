@@ -1116,7 +1116,54 @@ verdade conferida. Ao anotar pendência aqui, escreva a **data** e a **forma de 
 - `enforceNeutralCoupleDynamicsWhenNoRomance`: raises `couple_dynamics` to 5.0 when romance ≤ 3 and couple_dynamics < 5
 - `enforceAuditableReviewUsage`: **non-fatal since v20 (2026-06-27)** — generic review citation is accepted ("algumas reviews apontam…"), so it no longer requires/validates specific review IDs (`R1`, `R2`…) nor throws. It only records an informational `reviewAudit` (`required` = "havia reviews no prompt"; `usedReviewIds` = whatever IDs the model happened to cite, often empty with generic citation). `review_usage` is now an OPTIONAL tool/schema field. (Earlier behavior: threw + retried when IDs weren't cited — removed because a citation slip discarded otherwise-valid evals.)
 
-The model is `claude-sonnet-4-6`, prompt version `v21` (toggled by `CONCISE_OUTPUT` in `service.ts`: `v21` concise output / `v18` verbose — flipping it falls back to the old caches; `v21` = concise + **consensus** review citation (generic, never a single review/ID), succeeded `v20`), up to 2 attempts (4500 max tokens on **both** attempts; temperature 0.2 then 0). Opus 4.7 and Haiku 4.5 are supported as per-evaluation overrides (the A/B "Reavaliar com…" buttons); Opus 4.7 doesn't accept the `temperature` param. MAE values stored in `formula_config` reflect calibration runs against the current model+prompt; the hardcoded fallbacks in `calibration.ts` (1.27/0.92) are historical defaults from the original spreadsheet — not authoritative.
+## A rubrica tem DUAS naturezas de escala, e `couple_dynamics` é a única de valência
+
+Oito critérios medem **presença/intensidade** (0 = não está lá). `couple_dynamics` mede
+**valência**: 0-3 = a relação faz MAL aos personagens, 9-10 = faz BEM. Nota baixa ali não
+quer dizer "não tem casal" — sem casal a nota é 5 (`enforceNeutralCoupleDynamicsWhenNoRomance`).
+
+Até a **v22** as meta-regras de presença do `SYSTEM_PROMPT` valiam pros 9, e isso produzia
+três absurdos silenciosos:
+
+- *"se há QUALQUER evidência de presença, a nota deve ser ≥ 5"* proibia nota baixa sempre
+  que existisse um casal — justo o caso que a faixa 0-3 existe pra descrever;
+- a coerência justificativa×faixa manda "recorrente/constante" pra faixa ALTA. Em
+  `couple_dynamics` "atrito **recorrente**" é uma relação PIOR — a regra estava invertida;
+- a exceção que dispensa essas regras listava só `drama` e `tragedy`.
+
+🔴 **E a seção de sinais indiretos mapeava `"possessive but I love it" → 0-3`** — a leitora
+declarando que GOSTA virava dano à relação, contradizendo a regra dedicada logo abaixo, que
+manda checar consenso/satisfação/tom antes. Medido em 2.393 avaliações: justificativa citando
+posse/ciúme/yandere caía em 0-3 em **19,1%** dos casos contra **5,4%** quando não citava (3,5×),
+e `couple_dynamics` era **o critério mais instável dos 9** (amplitude média **1,52 pt** entre
+reavaliações da mesma obra; 36,7% variando ≥2 pt; pior caso 6,0).
+
+A **v23** (2026-08-09) isenta `couple_dynamics` das três meta-regras, e a regra própria passa a
+exigir quatro checagens antes da nota: (a) consenso, (b) satisfação, (c) tom e **(d) linha do
+tempo** — em regressão/reencarnação/transmigração, o tóxico da vida ANTERIOR é contexto
+estabelecido e não conta (mesma lógica que `tragedy` já aplica ao background). São **496 obras**
+com tag desse tipo, 256 delas hoje com `couple_dynamics` ≤ 6.
+
+⚠️ **O sinal decisivo é a REAÇÃO do outro personagem, não a intensidade do comportamento.**
+Tag de posse descreve um lado; sem indício de como o outro reage, ela **perde peso** em vez de
+puxar pra baixo. E opinião de leitor é evidência sobre o que ACONTECE, nunca sobre se aquilo é
+bom pro casal.
+
+🔴 **Mudar o texto do prompt sem trocar a `PROMPT_VERSION` é erro silencioso duplo:** a versão
+entra na chave de cache (`canonicalInputHash`) e é gravada em `ai_evaluations.prompt_version`,
+então o cache serve avaliação da régua antiga como se fosse da nova e o rótulo no banco mente.
+Guardado por `tests/unit/ai-evaluation/couple-dynamics-valencia.test.ts`, que **fixa o sha256 do
+`SYSTEM_PROMPT` à versão** — inclusive as rubricas interpoladas de `CRITERIA_RUBRICS`, porque
+`sync-constants` mexer numa faixa também muda a régua.
+
+⚠️ **O catálogo hoje é uma MISTURA de réguas.** As notas vigentes vêm de **9 versões de prompt**
+(medido 2026-08-09: v19=227 obras, v21=220, v20=152, v18=146, **v22=91**, v17=83, v16=47 — a versão
+corrente cobria 9,4%). Controlando por mesmo modelo + mesma versão, a amplitude entre reavaliações
+cai de 1,52 para **0,45** — ou seja **~70% da instabilidade medida vem da régua ter mudado**, não do
+modelo. Isso contamina toda comparação entre obras: ordenação do `/ranking`, os limiares
+`min_<slug>`/`max_<slug>` (em pontos), `ideal_min..ideal_max` do perfil, o Ridge e o `personal_fit`.
+
+The model is `claude-sonnet-5` (`SONNET_MODEL`), prompt version `v23` (toggled by `CONCISE_OUTPUT` in `service.ts`: `v23` concise output / `v18` verbose — flipping it falls back to the old caches; `v21` = concise + **consensus** review citation, `v22` = piso/teto de `adult_content` por procedência, `v23` = `couple_dynamics` como escala de valência), up to 2 attempts (4500 max tokens on **both** attempts; temperature 0.2 then 0). Opus 4.7 and Haiku 4.5 are supported as per-evaluation overrides (the A/B "Reavaliar com…" buttons); Opus 4.7 doesn't accept the `temperature` param. MAE values stored in `formula_config` reflect calibration runs against the current model+prompt; the hardcoded fallbacks in `calibration.ts` (1.27/0.92) are historical defaults from the original spreadsheet — not authoritative.
 
 ## Importação (`/import`)
 
