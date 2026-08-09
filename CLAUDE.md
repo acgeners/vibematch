@@ -583,6 +583,49 @@ escuro e cai pra ~3:1 no CLARO (medido). Guardado por `tests/unit/ui/ai-provenan
 que lê o ARQUIVO — a 1ª versão varria `AiProvenanceSeal.toString()` e não enxergava
 `ProvenanceRow`, que é justamente quem desenha o corpo.
 
+## No card de reviews, o organizador é o EIXO — e o texto longo mora fora do corpo
+
+`components/titles/work-reviews-card.tsx` + `lib/reviews/digest-view.ts` (2026-08-09). O card
+agrupava os traços por POLARIDADE (Elogios/Ressalvas/Críticas), que responde "a internet
+gostou?" — pergunta que `platform_avg` já responde melhor. Quem responde "ela é boa **no que me
+importa**?" é o `axis` de cada traço, e ele **existia no dado e vivia só no `title=` do chip**.
+
+Medido no clone local (841 obras com digest, 6.178 traços):
+
+| O quê | Número |
+|---|---|
+| eixos distintos por obra | **6** em 8 traços (mediana) — quase todo chip falava de outro assunto |
+| tamanho do "chip" | **64 caracteres** de média (p90 87, máx 157) — é frase, não chip |
+| vocabulário de eixos | 8 valores cobrem **99,1%**; a cauda são 55 ocorrências |
+| sínteses feitas com <10 reviews | **206 obras (24,5%)**, 26 delas com ≤3 |
+| reviews com nota | **17,9%**; só **291 de 882** obras têm ≥5 |
+
+Quatro invariantes que se pagam caro se forem esquecidas:
+
+- 🔴 **O texto do traço NÃO vai na linha da régua.** Ele mora no painel ao lado, num espaço
+  **já reservado** — é isso que mantém a altura do card estável ao trocar de eixo (medido:
+  873px → 873px). Inline, cada clique empurra a régua e o card pula.
+- ⚠️ **Eixo desconhecido não é remapeado.** `normalizeAxis` só normaliza caixa e corta no
+  primeiro segmento antes da barra; forçar "roteiro → escrita" mentiria sobre o que a review
+  disse. Os limiares do sinal (`reviewSignal`) e o mínimo do histograma
+  (`MIN_RATINGS_FOR_HISTOGRAM`) também moram lá — uma 2ª cópia é como a barrinha diz "forte"
+  e o popover explica um critério diferente.
+- ⚠️ **Intensidade ≠ contagem.** Os glifos repetidos (`▼▼`) contam o tom DOMINANTE; a pílula
+  conta todos os traços do eixo. Moralidade com 1 negativo + 1 misto é "▼ criticado" com
+  contador 2 — juntar os dois faz "▼▼" aparecer onde há uma crítica só.
+- 🔴 **`flex-1` + `height:%` = gráfico invisível.** Ao tentar esticar o histograma para ocupar
+  o vão da coluna, as barras sumiram nos dois temas: porcentagem precisa de altura
+  **resolvida** no pai, e `min-h-*` não serve de base. Altura fixa (`h-14`) é o que funciona.
+
+⚠️ **Container query mede o CARD, não a página.** A página da obra é `max-w-6xl` (1152px), mas
+o card mede **868px** ali dentro — `@4xl` (896px) nunca disparava e as duas colunas viravam
+pilha, em silêncio. Meça no app antes de escolher o breakpoint. E o rodapé é **irmão** do
+`CardContent`: sem `@container` próprio, as classes `@2xl:` dele eram letra morta.
+
+Guardado por `tests/unit/reviews/digest-view.test.ts` e `tests/unit/work-reviews-card.test.tsx`
+— este último é teste de RENDER de propósito: um teste que lesse o objeto do digest passaria
+verde com o eixo fora da tela, que era exatamente o estado anterior.
+
 ## Dinheiro tem UM dono, e a unidade muda com a escala
 
 Todo valor em USD na interface passa por **`lib/format/money.ts`** — `formatUsd`,
