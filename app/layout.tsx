@@ -6,6 +6,7 @@ import { MobileNav } from "@/components/layout/mobile-nav"
 import { AppShell } from "@/components/layout/app-shell"
 import { AdminProvider } from "@/components/layout/admin-context"
 import { ChromeBadgesProvider } from "@/components/layout/chrome-badges"
+import { DbTargetBanner } from "@/components/layout/db-target-banner"
 import { buildSearchIndex } from "@/server/queries/search-index"
 import { Toaster } from "@/components/ui/sonner"
 import { ThemeProvider } from "@/components/theme-provider"
@@ -63,8 +64,14 @@ export default async function RootLayout({
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="h-dvh overflow-hidden flex bg-background text-foreground">
+      {/* `flex-col` (era `flex`, ou seja, row) porque a faixa de ambiente é irmã do shell e
+          precisa ficar ACIMA dele, não ao lado. Com um filho só o eixo era indiferente. */}
+      <body className="h-dvh overflow-hidden flex flex-col bg-background text-foreground">
         <ThemeProvider>
+          {/* Fora do AppShell de propósito: as rotas full-bleed (/login, /sobre) retornam antes
+              da barra de navegação, e o login é onde saber o banco mais importa — as contas dos
+              dois são diferentes. Devolve null quando o alvo é a nuvem. */}
+          <DbTargetBanner />
           <CostConfirmProvider>
             <AdminProvider>
               {/* Acima do shell: a barra superior e a sidebar da console leem os

@@ -26,24 +26,73 @@ tokens**) e ~14 mil reviews raspadas de 8 fontes.
 node scripts/backup-db.mjs        # → .backups/<timestamp>/ (gitignored)
 ```
 
-Dump lógico de todas as tabelas em NDJSON gzipado (24 MB / ~120k linhas hoje). **Pagina e confere
-contra `count: "exact"`**: se faltar uma linha, ele FALHA em vez de gravar um backup truncado — que é
-a pior forma possível do bug das 1000 linhas, porque você só descobre quando precisa restaurar.
+Dump lógico de todas as tabelas em NDJSON gzipado (**34,9 MB / 173.806 linhas em 77 tabelas**,
+medido em 2026-08-09) **+ `schema.sql.gz`** (37 KB: 84 tabelas, 67 policies, 13 functions, 9
+triggers, 2 views, schemas `public` e `bkp`). **Pagina e confere contra `count: "exact"`**: se
+faltar uma linha, ele FALHA em vez de gravar um backup truncado — que é a pior forma possível do
+bug das 1000 linhas, porque você só descobre quando precisa restaurar.
 
-**Retenção:** depois de um backup bem-sucedido o script mantém os **5 mais recentes** e apaga os
-antigos (só dirs com nome de stamp ISO) — sem isto o `.backups` cresce sem limite (~30M/execução).
-Ajuste com `BACKUP_KEEP=<n>`.
+🟢 **Roda sozinho, semanalmente**: `~/Library/LaunchAgents/com.geners.animedb-backup.plist`,
+domingo 04:00, com `BACKUP_ENV_FILE=.env.supabase-cloud` (obrigatório — sem ele o agente salvaria
+o banco LOCAL reportando sucesso). Semanal e não diário por medição: o dump custa ~137 MB de
+egress, e diário daria ~4,1 GB/mês, 82% do teto de 5 GB.
 
-🔴 **A retenção NÃO cobre o que mais cresce.** Ela só apaga dirs com nome de stamp ISO — ou seja,
-os backups do `backup-db.mjs`. Todo `db:push-curation` (inclusive **cada ensaio no cloudsim**)
-grava um `.backups/push-curation-<stamp>/` com a carga de staging, e **ninguém limpa**. Medido em
-2026-08-10: `.backups` em **1,9 GB**, dos quais **1,5 GB são 23 dirs `push-curation-*`** (~65 MB
-cada) contra 210 MB dos 5 backups de verdade. Some-se `pull-*` (216 MB), que também fica.
+🔴 **O schema entrou no backup em 2026-08-10, e a lacuna era real.** Até então o NDJSON era **só
+dado**: restaurar exigia um banco que já tivesse tabelas, policies e triggers, e o único lugar
+onde isso existia era o `pg_dump` do `db:pull`, rodado à mão. Medido no dia: o backup de dado
+tinha **1 dia** e o de schema tinha **11** — e, com o local deixando de ser fonte de verdade, o
+`db:pull` para de ser rodado por hábito, então essa metade envelheceria ainda mais justamente
+quando vira a única rede. Custa 259 KB e ~3s: **0,24%** do dump completo de 108 MB.
+
+⚠️ O bloco de schema é **fail-soft**: sem `pg_dump` no PATH ou sem `SUPABASE_DB_PASSWORD` ele
+avisa e segue, porque o dado já está gravado e conferido — abortar ali jogaria fora o que deu
+certo.
+
+⚠️ **Restaurar exige criar as extensions ANTES**: `--schema public` não leva `CREATE EXTENSION`, e
+`vector`/`pg_trgm` moram dentro do `public` (o `db-pull-to-local.mjs` já faz isso no passo 4).
+
+⚠️ **As "162 functions" do `pg_proc` no `public` NÃO são do projeto** — 149 vêm dessas duas
+extensions e o `pg_dump` as omite de propósito (voltam com a extension). As do projeto são **13**.
+Esta linha já disse "162 functions, 47 policies, 11 triggers"; o real, medido na nuvem em
+2026-08-10, é **13 / 67 / 9**.
+
+**Retenção: o dono é `scripts/lib/backups-retencao.mjs`, e é ÚNICO.** Ele declara as **7
+famílias** que podem existir em `.backups/` (quem cria, o que é, quantas guardar, qual env
+ajusta) e todo escritor chama `podar("<família>")`. Ajuste por família: `BACKUP_KEEP` (5),
+`PULL_KEEP` (3), `PUSH_STAGE_KEEP` (2), `PUSH_EVALS_KEEP` (3), `COFRE_KEEP` (5),
+`SYNOPSIS_LAB_KEEP` (3).
+
+⚠️ **Esta seção já disse "o script mantém os 5 mais recentes" e induzia à conclusão errada.** A
+frase era verdadeira e cobria **6 dos 40 diretórios** — a retenção do `backup-db.mjs` só casa
+nome de stamp ISO puro. Ancorar em "existe retenção" sem perguntar *de quê* é como o `.backups`
+chegou a **1,9 GB** (1,5 GB em 23 dirs `push-curation-*`, quase todos de um dia só, a maioria
+**ensaio no cloudsim**).
+
+🔴 **A causa raiz não foi um script esquecido — foi o PADRÃO.** Cada um inventava prefixo e
+política próprios, e cada retenção era um regex que enxerga só a própria família: todas
+corretas, todas cegas entre si **por construção**. Medido em 2026-08-10: de 7 escritores,
+**3 nunca podavam nada** (`push-*`, `synopsis-lab-*`, `fingerprints`), e havia 3 entradas órfãs
+de script nenhum — uma de **33 MB**. Mesma armadilha do `LOW_BALANCE_USD` e do
+`STRONG_TAG_WEIGHT`, só que em disco, onde o sintoma demora meses porque só dói quando acaba.
+
+⚠️ **A poda é ANTES de gravar, com UMA exceção.** Staging e cofres são podados no começo,
+porque ensaio interrompido deixa lixo igual ao de uma execução completa. Só o `backup-db.mjs`
+poda no FIM: lá, chegar à linha é a prova de que o backup novo passou na conferência, e podar
+antes descartaria um backup bom por causa de um novo que falhou.
+
+🔴 **`podar()` denuncia entrada SEM DONO em toda execução** — é isso que pega o *próximo*
+prefixo, não os que já conhecemos. Guardado por
+`tests/unit/orchestration/backups-retencao-tem-dono.test.ts`, que **deriva** os escritores do
+filesystem (grava em `.backups` + cria diretório) em vez de listar nomes: lista fixa não acha o
+que ninguém apontou. Conferido criando um script novo sem família — o teste reprova.
+
+⚠️ Famílias precisam ser **mutuamente exclusivas**: `/^push-\d{4}/` não pode engolir
+`push-curation-…` (2 MB × 96 MB por execução, tetos distintos). Por isso todo regex datado
+exige o dígito do ano logo após o prefixo.
 
 ⚠️ E isso realimenta o problema do deploy: até 2026-08-10 `.backups` ia inteiro no contexto do
-Docker (ver `output: "standalone"`). Hoje está no `.dockerignore`, mas continua ocupando disco — e
-disco cheio já derrubou a VM do Docker aqui. Limpe os `push-curation-*` antigos à mão por
-enquanto: `ls -dt .backups/push-curation-* | tail -n +3 | xargs rm -rf`.
+Docker (ver `output: "standalone"`). Hoje está no `.dockerignore`, mas continua ocupando disco —
+e disco cheio já derrubou a VM do Docker aqui.
 
 Rode antes de: partição per-user (Fase 2), backfill em massa, qualquer migration que dropa coluna.
 
@@ -85,9 +134,86 @@ npm run db:cloud               # volta pra nuvem
 npm run db:push-evals -- --yes # leva avaliações de IA feitas no local pra nuvem
 ```
 
-`db:local` também redireciona **os 23 de 44 scripts do `package.json` que rodam com
-`--env-file=.env.local`** (`pilot2:*`, `baselines:ranking`, `e1:*`) — eles leem o catálogo várias vezes
-por execução, então rodá-los no local é o maior corte de egress disponível, de graça.
+🔴 **A NUVEM é a fonte de verdade; o local é réplica DESCARTÁVEL** (decidido em 2026-08-10). O
+app aponta pra nuvem — é onde a curadoria e os leitores vivem — e os **25 scripts de análise**
+apontam pro local, que é o corte de egress que justifica o stack existir. **Nada sobe do
+local**, exceto lote declarado via `db:push-evals`.
+
+⚠️ **São DOIS interruptores, e antes era um só.** Até 2026-08-10 o `db:local` movia o app **e**
+os scripts juntos, o que tornava essa configuração impossível: dava pra escolher qual dos dois
+estaria errado, não acertar os dois.
+
+| quem | arquivo | alvo |
+|---|---|---|
+| app (`npm run dev`) | `.env.local` | **NUVEM** |
+| os 25 scripts | `--env-file=.env.local --env-file=.env.analysis` | **LOCAL** |
+
+O último `--env-file` vence (conferido no Node e no tsx), então `.env.analysis` carrega **só as
+3 variáveis de alvo** e herda `ANTHROPIC_API_KEY`, `MAL_CLIENT_ID` e o resto do `.env.local` —
+uma 2ª cópia dos segredos divergiria na primeira troca de chave.
+
+```bash
+npm run db:analysis-env   # gera o .env.analysis a partir do `supabase status`
+```
+
+⚠️ **Rode isto no primeiro uso do repo e depois de qualquer `supabase stop && supabase start`.**
+O arquivo é gitignored (`.env*`), então num clone novo ele não existe e os 25 scripts morrem com
+`node: .env.analysis: not found` — que é críptico, mas é **de propósito**: a alternativa
+(`--env-file-if-exists`) faria todos rodarem contra a NUVEM em silêncio, que é o erro caro que
+essa separação existe para impedir. Falhar alto é a escolha certa aqui.
+
+⚠️ **Script que esqueça o `.env.analysis` roda contra a NUVEM e não avisa** — ele funciona,
+devolve os números certos e só queima quota (20,1 MB por varredura do catálogo; o pico medido
+foi 1,47 GB num dia com zero curadoria). Guardado por
+`tests/unit/orchestration/scripts-apontam-pro-local.test.ts`, que **deriva** a lista do
+`package.json` e checa também a ORDEM dos dois arquivos — invertida, o `.env.local` sobrescreve
+o alvo de volta e o `.env.analysis` vira decoração.
+
+⚠️ `db:local` continua existindo para o caso raro de querer o **app** no local. Ele não mexe
+mais nos scripts. E quando o app está no local, uma **faixa de listras** aparece no topo
+(`components/layout/db-target-banner.tsx`) — ela mora no layout RAIZ, acima do `AppShell`,
+porque as rotas full-bleed (`/login`, `/sobre`) retornam antes da barra de navegação, e o login
+é justo onde saber o alvo mais importa: as contas dos dois bancos são diferentes, e entrar no
+errado parece "minha senha não funciona". Listras e não cor chapada de propósito — azul e âmbar
+já significam estado de TAREFA (ver "Ação lenta tem DUAS cores"), e ambiente é outra categoria.
+
+```bash
+npm run db:health        # os 5 números dos gatilhos + "o local voltou a ser fonte de verdade?"
+```
+
+🔴 **`db:push-curation` está APOSENTADO** — exige `--eu-sei-o-que-estou-fazendo`. Ele existia
+porque o catálogo tinha DOIS escritores; sem isso, não há o que reconciliar. Para operação em
+LOTE rodada no local (reavaliar o catálogo com uma régua nova), use `db:push-evals` (5 tabelas).
+
+⚠️ **O check "local escreveu?" tem DOIS níveis, e o motivo é medido:** uma única visita à home
+com o app no local escreve **27 linhas** de `works` — é o `persistReadingDates` cacheando
+`chapters_checked_at`. Alarmar nisso faria o comando gritar sempre que alguém abrisse o app no
+local, e alarme que sempre toca não é lido. Então o ALARME é só para escrita que apenas a
+curadoria produz (`category_scores`, `ai_evaluations`, `work_tags`, e `works` pela **criação**);
+`works.updated_at` vira nota informativa.
+
+🔴 **Contagem sozinha não pega EDIÇÃO, e hoje quase toda curadoria é edição** — o catálogo já
+está construído. Por isso existe o check "obra editada?", que compara o CONTEÚDO de `works`
+coluna a coluna com a nuvem. A lista é de **EXCLUSÃO, nunca de inclusão**: coluna nova entra na
+comparação sozinha e o erro cai pro lado seguro. Cada exclusão tem motivo medido — `updated_at`
+(trigger, reescreve **981**), os três `*_chapter*`/`chapters_checked_at` (cache de navegação,
+27/24/6) e `ai_eval_status` (trigger de destino, 1). Conferido reincluindo cada uma: 981, e 1,
+respectivamente.
+
+⚠️ **`total_chapters` é o caso de fronteira e tem tratamento próprio.** É material (entra no
+recalc) mas quem o move é o agregador de capítulos, por navegação. Deixá-lo no alarme fazia o
+comando disparar por rotina; tirá-lo esconderia divergência que move nota. A comparação roda
+**duas vezes** e a diferença isola as obras que divergem só em capítulo — alarme para o resto,
+nota informativa para essas (hoje: 1 obra, 55 × 54).
+
+⚠️ **O tamanho do banco soma TODOS os bancos, não `current_database()`.** A 1ª versão media só o
+`postgres` e dava 189 MB contra os **213 MB do painel** — 11% a menos, num indicador cujo
+gatilho está em 350 MB. `template0`/`template1` somam ~15 MB e o painel ainda conta ~9 MB de
+overhead que nenhum SQL mostra. Subestimar atrasa o alarme, que é o pior lado.
+
+⚠️ **O corte é a última RECONCILIAÇÃO, não o último `db:pull`.** A 1ª versão usava só o `pull-*`
+e nasceu acusando 981 works: era a curadoria de 11 dias que o push já tinha levado. Hoje o corte
+é o mais recente entre `pull-*` e `push-*`.
 
 `[db.migrations] enabled = false` no `config.toml` é **de propósito**: as 173 migrations foram aplicadas
 via Management API, têm colisões de número e nunca rodaram do zero. Quem popula o local é o `pg_dump`.
