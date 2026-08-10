@@ -185,9 +185,9 @@ estaria errado, não acertar os dois.
 | quem | arquivo | alvo |
 |---|---|---|
 | app (`npm run dev`) | `.env.local` | **NUVEM** |
-| os 25 scripts do `package.json` | `--env-file=.env.local --env-file=.env.analysis` | **LOCAL** |
+| os 23 scripts do `package.json` que só leem | `--env-file=.env.local --env-file=.env.analysis` | **LOCAL** |
 | os 29 de `scripts/` que só LEEM | idem, declarado no cabeçalho do arquivo | **LOCAL** |
-| os 29 de `scripts/` que GRAVAM | `--env-file=.env.local` + `ALVO: NUVEM` no cabeçalho | **NUVEM** |
+| os 29 de `scripts/` que GRAVAM (2 deles no `package.json`) | `--env-file=.env.local` + `ALVO: NUVEM` no cabeçalho | **NUVEM** |
 
 ⚠️ **São 83 entradas, não 25** — a conta de "25 scripts" só enxergava o `package.json`. Ver o
 🔴 sobre os 58 arquivos logo abaixo: metade deles grava, e para essa metade o local é o alvo
@@ -241,11 +241,31 @@ caro.** `chance-recalc-run.ts` chama `recalculateAll`, `backfill-mal-reviews.ts`
 os três gravam via helper importado e passariam por "só lê". Ao classificar um script novo,
 olhe os imports, não só o corpo.
 
-🔴 **DIVERGÊNCIA ABERTA (2026-08-10):** `backfill:interest` e `e1:digest` estão no
-`package.json` com `--env-file=.env.analysis` (⇒ local) mas os dois **gravam no modo
+✅ **`backfill:interest` e `e1:digest` foram pra NUVEM (resolvido em 2026-08-10).** Os dois
+estavam no `package.json` com `--env-file=.env.analysis` (⇒ local) e **gravam no modo
 `--execute`** — herdaram o apontamento em bloco dos 25 no cutover, quando a conta de egress foi
-feita para leitura e o modo de escrita entrou de carona. Está anotado no cabeçalho dos dois
-arquivos. Decidir: ou o npm script perde o `.env.analysis`, ou o `--execute` recusa alvo local.
+feita para leitura e o modo de escrita entrou de carona.
+
+🔴 **O que estava em jogo, medido:** `backfill:interest --execute` planejava **971 previsões,
+US$10,60** (teto US$15,89), e o `e1:digest` tem 136 obras a US$0,0183 cada. Pior: o dry-run do
+primeiro **imprimia o comando errado** como passo seguinte — a instrução impressa levava a
+queimar US$10,60 num banco descartável.
+
+⚠️ **O dry-run foi junto pra nuvem, e não é descuido: plano e execução TÊM que ser no mesmo
+banco.** O executor replaneja e compara (`plan.planSignature !== deps.planSignature` ⇒
+`plan_changed`), então planejar no local e executar na nuvem **aborta**. O único par que
+"funcionava" era local+local, que é justamente o que queima dinheiro à toa. O egress do
+dry-run (poucos MB comprimidos) não paga o risco de US$10,60.
+
+⚠️ **"Ensaiar barato no local" não existe aqui** — as chamadas Claude custam o mesmo contra
+qualquer banco. Quem limita o dano é o `--max-cost-usd`, não o alvo.
+
+**Duas camadas, porque são duas portas:** o `package.json` deixou de carregar `.env.analysis`
+nesses dois, e o `--execute` chama `exigeAlvoNuvem()` (`scripts/lib/exige-alvo-nuvem.ts`), que
+aborta com a linha de comando certa **antes de qualquer chamada paga** — quem copia o comando
+do cabeçalho não passa pelo npm script. Guardado pelo mesmo
+`scripts-apontam-pro-local.test.ts`, que exige o guard em todo script pago marcado
+`ALVO: NUVEM` e **deriva a exceção do cabeçalho do arquivo**, nunca de uma allowlist.
 
 ⚠️ `db:local` continua existindo para o caso raro de querer o **app** no local. Ele não mexe
 mais nos scripts. E quando o app está no local, uma **faixa de listras** aparece no topo
@@ -1957,8 +1977,8 @@ O catálogo **não tem política**: é lido/escrito pela service role, que ignor
 
 ## Tests
 
-`npm run test` → **2.427 passando (+24 pulados) em 228 arquivos** (223 passando + 5 pulados;
-medido em 2026-08-10, 23,1s). A linha já disse "~1.780 em ~157", "~2.353 em 218", "2.386 em
+`npm run test` → **2.428 passando (+24 pulados) em 228 arquivos** (223 passando + 5 pulados;
+medido em 2026-08-10, 25,0s). A linha já disse "~1.780 em ~157", "~2.353 em 218", "2.386 em
 221" e "2.408 em 225", todas envelhecendo sem nada acusar — **re-meça antes de editar este
 número**, não incremente de cabeça. Vitest, jsdom, alias `@` → raiz. A
 descrição antiga ("só `tests/unit/calculations/`, sem teste de componente") estava desatualizada

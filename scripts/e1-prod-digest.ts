@@ -7,13 +7,10 @@
  * /settings) e o filtro canônico de `computeE1ProdScope`. PADRÃO = dry-run.
  * Execução paga exige --execute --max-cost-usd=<v>.
  *
- * 🔴 ALVO: NUVEM no modo --execute — a execução paga grava, e num local descartável esse
- * trabalho morre no próximo `db:pull`. O dry-run (padrão) só lê e pode ir pro local.
- *
- * ⚠️ DIVERGÊNCIA NÃO RESOLVIDA (2026-08-10): o npm script `e1:digest` carrega
- * `--env-file=.env.analysis` e aponta pro LOCAL nos dois modos — herdado do apontamento em
- * bloco dos 25 scripts no cutover. Decidir: ou o npm script perde o `.env.analysis`, ou o
- * `--execute` recusa alvo local.
+ * 🔴 ALVO: NUVEM (resolvido em 2026-08-10). A execução paga grava, e num local descartável
+ * esse trabalho morre no próximo `db:pull` — paga-se para jogar fora. Medido: 136 obras sem
+ * digest a US$0,0183 cada. O `--execute` recusa alvo local (`exigeAlvoNuvem`), e o npm script
+ * deixou de carregar `--env-file=.env.analysis`, que o apontava pro LOCAL nos dois modos.
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/e1-prod-digest.ts
  *   npx tsx ... scripts/e1-prod-digest.ts --execute --max-cost-usd=3 [--limit=10]
  *
@@ -31,6 +28,7 @@ import {
   REVIEW_DIGEST_MODEL,
 } from "@/lib/ai-recommendation/review-summarizer"
 import { computeCostUsd } from "@/lib/ai/pricing"
+import { exigeAlvoNuvem } from "./lib/exige-alvo-nuvem"
 
 const DIGEST_UPPER_PER_WORK = 0.05 // teto conservador p/ o gate (plano: $0,02–0,05)
 
@@ -42,6 +40,13 @@ const hasFlag = (n: string) => process.argv.includes(`--${n}`)
 
 async function main() {
   const execute = hasFlag("execute")
+  // 🔴 ANTES de qualquer chamada paga: alvo local aqui significa pagar para jogar fora.
+  if (execute) {
+    exigeAlvoNuvem(
+      "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/e1-prod-digest.ts \\\n" +
+        "       --execute --max-cost-usd=<v> [--limit=N]",
+    )
+  }
   const maxCostUsd = arg("max-cost-usd") != null ? Number(arg("max-cost-usd")) : undefined
   const limit = arg("limit") != null ? Math.max(1, Number(arg("limit"))) : undefined
   const idsFile = arg("ids-file") // lista explícita (CSV/linhas de UUID) — sobrepõe o escopo e1 filtrado

@@ -12,16 +12,16 @@
  *   npm run backfill:interest -- --execute \
  *     --plan-signature=<hash> --max-cost-usd=12 [--concurrency=3] [--retry-failed]
  *
- * 🔴 ALVO: NUVEM no modo --execute — ele enfileira jobs pagos, e o resultado gravado num
- * local descartável morre no próximo `db:pull`. O dry-run (padrão) só lê e pode ir pro local.
+ * 🔴 ALVO: NUVEM nos DOIS modos (resolvido em 2026-08-10). O `--execute` chama a IA e grava —
+ * medido: **971 previsões, US$10,60** (teto US$15,89) —, e no local descartável isso morre no
+ * próximo `db:pull`: você paga para jogar fora. O dry-run vem junto porque **plano e execução
+ * têm que ser no mesmo banco**: o executor replaneja e compara a assinatura
+ * (`plan_changed`), então planejar aqui e executar lá aborta.
  *
- * ⚠️ DIVERGÊNCIA NÃO RESOLVIDA (2026-08-10): o npm script `backfill:interest` carrega
- * `--env-file=.env.analysis`, ou seja, aponta pro LOCAL nos DOIS modos. Isso foi herdado do
- * cutover, quando os 25 scripts do `package.json` foram apontados pro local em bloco — a
- * conta de egress foi feita para leitura, e o modo de escrita entrou de carona. Decidir:
- * ou o npm script perde o `.env.analysis`, ou o `--execute` passa a recusar alvo local.
- * (resolve para: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local
- *  scripts/backfill-work-data.ts)
+ * ⚠️ Até 2026-08-10 o npm script carregava `--env-file=.env.analysis` (⇒ LOCAL) nos dois
+ * modos, herdado do apontamento em bloco dos 25 scripts no cutover — a conta de egress foi
+ * feita para leitura e o modo de escrita entrou de carona. Pior: o dry-run **imprimia esse
+ * comando** como passo seguinte, instruindo a queimar US$10,60 no banco errado.
  */
 import {
   planInterestBackfill,
@@ -29,6 +29,7 @@ import {
 } from "@/lib/orchestration/backfill/interest-backfill"
 import { parseBackfillCliArgs } from "@/lib/orchestration/backfill/cli-args"
 import { ceilUsdToCents } from "@/lib/orchestration/cost"
+import { exigeAlvoNuvem } from "./lib/exige-alvo-nuvem"
 
 // ---- Saída (sanitizada — nunca secrets/sinopse/perfil/prompt íntegros) ------
 
@@ -91,6 +92,12 @@ async function main() {
     printPlan(plan)
     return
   }
+
+  // 🔴 ANTES de qualquer chamada paga: alvo local aqui significa pagar para jogar fora.
+  exigeAlvoNuvem(
+    "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/backfill-work-data.ts \\\n" +
+      "       --execute --plan-signature=<hash> --max-cost-usd=<v>",
+  )
 
   // EXECUÇÃO — cancelamento cooperativo.
   let cancel = false
