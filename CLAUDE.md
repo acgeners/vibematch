@@ -34,6 +34,17 @@ a pior forma possível do bug das 1000 linhas, porque você só descobre quando 
 antigos (só dirs com nome de stamp ISO) — sem isto o `.backups` cresce sem limite (~30M/execução).
 Ajuste com `BACKUP_KEEP=<n>`.
 
+🔴 **A retenção NÃO cobre o que mais cresce.** Ela só apaga dirs com nome de stamp ISO — ou seja,
+os backups do `backup-db.mjs`. Todo `db:push-curation` (inclusive **cada ensaio no cloudsim**)
+grava um `.backups/push-curation-<stamp>/` com a carga de staging, e **ninguém limpa**. Medido em
+2026-08-10: `.backups` em **1,9 GB**, dos quais **1,5 GB são 23 dirs `push-curation-*`** (~65 MB
+cada) contra 210 MB dos 5 backups de verdade. Some-se `pull-*` (216 MB), que também fica.
+
+⚠️ E isso realimenta o problema do deploy: até 2026-08-10 `.backups` ia inteiro no contexto do
+Docker (ver `output: "standalone"`). Hoje está no `.dockerignore`, mas continua ocupando disco — e
+disco cheio já derrubou a VM do Docker aqui. Limpe os `push-curation-*` antigos à mão por
+enquanto: `ls -dt .backups/push-curation-* | tail -n +3 | xargs rm -rf`.
+
 Rode antes de: partição per-user (Fase 2), backfill em massa, qualquer migration que dropa coluna.
 
 **Cache de dev incha:** o `.next/dev` (cache do Turbopack) chega fácil a **dobra dígito de GB**. Não
@@ -137,13 +148,18 @@ quebrada; descobrir qual sai mais barato do que adotar a resposta conveniente. G
 `tests/unit/orchestration/db-diff-hash-null-safe.test.ts`, que lê o SOURCE (o script roda
 `main()` na importação) e **reprova a versão antiga** — conferido, não suposto.
 
-**Divergência ≠ erro.** Retrato de 2026-08-10, logo depois de um push bem-sucedido: **28
-divergentes, 39 idênticas**. As 28 se classificam em seis grupos, e só o último precisa de
-decisão:
+**Divergência ≠ erro.** Retrato de 2026-08-10, **depois** do push que ampliou o PLAN para 30
+tabelas: **24 divergentes, 43 idênticas** — e as 24 têm todas motivo escrito. Antes do push eram
+28. Reconciliaram nessa rodada: `work_genres`, `tag_subgroup_assignment`, `work_lists` e
+`work_list_items` (as quatro que entraram no PLAN), além de `work_embeddings` e
+`synopsis_quality_predictions`.
+
+As 24 caem em cinco grupos, **nenhum deles pendente** — o grupo que precisava de decisão foi
+resolvido em 2026-08-10:
 
 | grupo | n | exemplos |
 |---|---|---|
-| carimbo que cada lado escreve sozinho | 2 | `works` (1 linha) · `tags` (só `adult_score_tier_reviewed_at`) |
+| carimbo que cada lado escreve sozinho | 2 | `works` (1 linha, `ai_eval_status`) · `tags` (54 linhas, só `adult_score_tier_reviewed_at`) — **medido coluna a coluna**, não suposto |
 | linhas que **só existem na nuvem** — o push só sobe | 6 | `work_reviews` −104 · `ai_evaluation_scores` −9 · `curation_requests` |
 | per-user fora do escopo do curador — **por desenho** | 6 | `user_calculated_scores` +4838 · `user_work_state` +27 |
 | chave surrogate regenerada — **falso positivo** | 1 | `platform_ratings` (240 / 240 / **0**) |
