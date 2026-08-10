@@ -1236,11 +1236,26 @@ trama" — e só 9 abaixo de 5. ⚠️ A régua que separa os dois casos: *"Mary
 "fria" são sobre COMO ele é e não rebaixam; "passivo" e "sem agência" são sobre O QUE ELE FAZ e
 rebaixam.* Sem essa distinção nomeada, consertar a agência reabre o viés de qualidade.
 
-⚠️ **A v25 pulou o v24 de propósito:** `ai_api_calls` tem 65 chamadas de `ai_evaluation` já
-rotuladas `v24` (2026-07-29), de uma rodada cujas avaliações foram gravadas como **v22** — o log
-e a tabela discordaram. Reusar o número misturaria latência/custo/qualidade do v24 novo com as
-fantasmas, e a análise sairia inteira plausível. Guardado em
+⚠️ **A v25 pulou o v24 de propósito, e o motivo NÃO é um bug:** `ai_api_calls` tem 65 chamadas
+de `ai_evaluation` rotuladas `v24` (2026-07-29) — **todas as 65 são obras do gold set**, da
+investigação de rubrica que comparou v23/v24 contra o julgamento da curadora. `ai_evaluations`
+gravou v22 nelas porque **versão de RUBRICA ≠ versão de PROMPT**: são dois eixos, e o log carrega
+o primeiro enquanto a tabela carrega o segundo. Reusar "v24" como versão de prompt misturaria os
+dois eixos em qualquer query por `prompt_version`. Guardado em
 `tests/unit/ai-evaluation/prompt-version-pin.test.ts`, junto do pin de hash.
+
+🔴 **Antes de mexer em rubrica ou prompt de avaliação, leia `.gold/gold-FILLED.csv` e
+[[project_rubric_redesign_gold_verdict]].** São 30 obras que a curadora avaliou **às cegas** nos 9
+critérios — a única régua de ACURÁCIA que existe. Medir "a nota mudou no rumo pretendido" é
+consistência, não acurácia, e já enganou uma vez: a v23 mudava no rumo e ficava MAIS LONGE da
+curadora. Harness: `scripts/gold-mae.ts`. Baseline a bater: **catálogo 0,77 geral / 0,64
+ponderado** — v24-pesada 0,82 · v23 0,87 · v24-cirúrgica 0,89, nenhuma bateu.
+
+🔴 **ENTANGLEMENT:** as 9 notas saem de UMA leitura do modelo, então mexer na rubrica de um
+critério recalibra o modelo inteiro e move os vizinhos — e isso NÃO é controlável por tamanho de
+edição (a v24-cirúrgica quebrou couple/romance/humor tanto quanto a pesada). Um piloto de v25 em
+2026-08-09 reproduziu a assinatura: `humor` e `fantasy_nobility` caíram ~1,2 ponto no **grupo de
+controle**, sem nenhuma regra mirando neles.
 
 ## A rubrica tem DUAS naturezas de escala, e `couple_dynamics` é a única de valência
 

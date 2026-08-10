@@ -44,10 +44,11 @@ describe("PROMPT_VERSION acompanha o texto do prompt", () => {
   })
 
   it("não reusa um número de versão já gasto no log de chamadas", () => {
-    // `ai_api_calls` tem 65 chamadas de `ai_evaluation` rotuladas "v24" (2026-07-29),
-    // de uma rodada cujas avaliações foram gravadas como v22 — o log e a tabela
-    // discordaram. Reusar o número misturaria latência/custo/qualidade do v24 novo com
-    // as fantasmas, e a análise sairia inteira plausível. Por isso o v23 pulou pro v25.
+    // `ai_api_calls` tem 65 chamadas de `ai_evaluation` rotuladas "v24" (2026-07-29) —
+    // todas de obras do gold set, da investigação que comparou as rubricas v23/v24 contra
+    // o julgamento da curadora. `ai_evaluations` gravou v22 nelas porque versão de RUBRICA
+    // ≠ versão de PROMPT: dois eixos distintos, cada tabela carregando um. Reusar "v24"
+    // como versão de prompt misturaria os dois em qualquer query por `prompt_version`.
     expect(PROMPT_VERSION).not.toBe("v24")
   })
 })
