@@ -589,6 +589,46 @@ const PLAN = [
       on conflict (user_id, work_id, attribute_slug) do update set ${upsertSet("user_attribute_assessment", ["user_id", "work_id", "attribute_slug"])}`,
   },
   {
+    // Pastas de favoritos. 🔴 ÚNICA tabela do PLAN em que o local NÃO era obviamente a
+    // verdade — e a decisão de que passa a ser é da Ana, tomada em 2026-08-10, não uma
+    // dedução deste script.
+    //
+    // Medido antes de decidir: os dois lados tinham DIVERGIDO. 5 pastas só no local (91
+    // itens), 1 só na nuvem ("Protagonista Marcante", 11 itens), uma pasta RENOMEADA
+    // (local "Iniciadas" = nuvem "Lendo") e "Ideal" com mais itens na nuvem (4 × 3). Isso
+    // acontece porque pasta de favorito é ação de LEITOR, feita em produção — a premissa
+    // "curadoria roda no local, logo o local é mais novo" não cobre este caso.
+    //
+    // Decisão: **substituição completa**, o local vence. Custo aceito e medido: 16 itens e
+    // 1 pasta apagados da nuvem. Recuperáveis no backup `.backups/<stamp>/work_lists.ndjson.gz`
+    // + `work_list_items.ndjson.gz` — SEMPRE faça o backup da NUVEM antes
+    // (`BACKUP_ENV_FILE=.env.supabase-cloud node scripts/backup-db.mjs`; sem o prefixo ele
+    // salva o LOCAL, que é o banco que não corre risco).
+    //
+    // ⚠️ Vem ANTES de `recommendation_runs`: a FK `recommendation_runs.list_id → work_lists`
+    // é ON DELETE SET NULL, então apagar pasta apaga a referência do run em silêncio. Hoje
+    // são 0 runs com `list_id` preenchido na nuvem (conferido), mas a ordem não pode depender
+    // disso continuar verdade.
+    table: "work_lists",
+    where: soDoCurador(),
+    pre: `delete from public.work_lists where ${soDoCurador()};`,
+    insert: (c) => `insert into public.work_lists (${c}) select ${c} from stage_work_lists on conflict do nothing`,
+  },
+  {
+    // Itens das pastas. Sem `user_id` — escopa pelo PAI, como o fechamento de FK que
+    // `recommendation_runs` já precisou fazer.
+    //
+    // ⚠️ O `pre` aqui é cinto E suspensório: a FK `work_list_items.list_id → work_lists` é
+    // ON DELETE CASCADE, então o delete do passo anterior JÁ levou os itens. Fica explícito
+    // porque, se um dia a estratégia de `work_lists` deixar de ser destrutiva, os itens
+    // órfãos da nuvem sobreviveriam calados.
+    table: "work_list_items",
+    where: `list_id in (select id from public.work_lists where ${soDoCurador()})`,
+    pre: `delete from public.work_list_items where list_id in
+            (select id from public.work_lists where ${soDoCurador()});`,
+    insert: (c) => `insert into public.work_list_items (${c}) select ${c} from stage_work_list_items on conflict do nothing`,
+  },
+  {
     // Histórico de recomendação do curador + o fechamento da FK de `calculated_scores`.
     // Depende de `ai_api_calls` e `taste_profile`, que vêm antes na ordem.
     table: "recommendation_runs",
@@ -757,10 +797,6 @@ console.log(`  genre_proposal          contadores derivados de work_genres, reco
 // As de baixo apareciam como divergentes no `db:diff` SEM decisão registrada, o que é pior
 // que ausência: gap sem registro parece esquecimento e vira rediscussão a cada sessão.
 // Decidido em 2026-08-10, com o número medido de cada uma.
-console.log(`  work_lists /            🔴 divergem nos DOIS sentidos — a nuvem tem pasta e itens`)
-console.log(`  work_list_items            que o local não tem. Pasta de favoritos é ação de LEITOR,`)
-console.log(`                             feita em produção; aqui o local NÃO é a verdade.`)
-console.log(`                             Precisa de merge com decisão, não de push.`)
 console.log(`  user_settings           papel, plano e saldo + contas de teste locais. Empurrar cria`)
 console.log(`                             conta fantasma e mexe no que guard_role_self_escalation protege`)
 console.log(`  prediction_snapshots /  histórico de análise gerado por rodadas LOCAIS (13,5k × 6,7k).`)
