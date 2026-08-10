@@ -4,6 +4,7 @@
  * Roda o recalc e exige que `user_calculated_scores` (do dono) fique IDÊNTICO a
  * `calculated_scores`. Mesmo teste das fatias anteriores: o espelho não pode nascer torto.
  *
+ * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/verify-2b-mirror.ts
  */
 import { recalculateAll } from "@/server/actions/calculations"

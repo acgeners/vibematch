@@ -10,7 +10,7 @@
  * Esconde TUDO menos a sinopse: sem previsão, candidato, user_score, scores,
  * ranking, tags, capa, dados externos, título, work_id, estrato.
  *
- * Uso: npx tsx --env-file=.env.local scripts/synopsis-interest-export.ts
+ * Uso: npx tsx --env-file=.env.local --env-file=.env.analysis scripts/synopsis-interest-export.ts
  */
 import { readFileSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"

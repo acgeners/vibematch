@@ -3,6 +3,7 @@
  * DEFAULT = dry-run (read-only, gera CSV de revisão). --execute grava (aditivo,
  * source='ai_inferred') e exige a migration 117 aplicada.
  *
+ * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/infer-tags.ts \
  *     [--limit=N] [--max-tags=9] [--out=path.csv]
  *   ... --execute --min-confidence=alta --reversal=path.jsonl

@@ -4,7 +4,7 @@
  * rodadas é o alvo `y`. Craft vem do BACKUP pré-switch (o rótulo exato que o modelo usava);
  * gosto = média dos 7 eixos fixos (sem o Final) do pilot_taste_scores atual. Não escreve nada.
  *
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/taste-headtohead.ts
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/taste-headtohead.ts
  */
 import { createClient } from "@supabase/supabase-js"
 import { fitRidgeCV, predictRidge } from "@/lib/ml/ridge"

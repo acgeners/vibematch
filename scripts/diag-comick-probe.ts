@@ -1,7 +1,7 @@
 /**
  * Qual camada de bypass recupera o ComicK? Read-only, zero LLM, zero escrita.
  *
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/diag-comick-probe.ts
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/diag-comick-probe.ts
  *
  * Existe porque a medição agregada deu resultado CONTRADITÓRIO — o ComicK apareceu em 1 de 4
  * buscas com FlareSolverr sozinho e em 4 de 4 com as duas camadas, o que não se explica se o

@@ -7,6 +7,13 @@
  * /settings) e o filtro canônico de `computeE1ProdScope`. PADRÃO = dry-run.
  * Execução paga exige --execute --max-cost-usd=<v>.
  *
+ * 🔴 ALVO: NUVEM no modo --execute — a execução paga grava, e num local descartável esse
+ * trabalho morre no próximo `db:pull`. O dry-run (padrão) só lê e pode ir pro local.
+ *
+ * ⚠️ DIVERGÊNCIA NÃO RESOLVIDA (2026-08-10): o npm script `e1:digest` carrega
+ * `--env-file=.env.analysis` e aponta pro LOCAL nos dois modos — herdado do apontamento em
+ * bloco dos 25 scripts no cutover. Decidir: ou o npm script perde o `.env.analysis`, ou o
+ * `--execute` recusa alvo local.
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/e1-prod-digest.ts
  *   npx tsx ... scripts/e1-prod-digest.ts --execute --max-cost-usd=3 [--limit=10]
  *

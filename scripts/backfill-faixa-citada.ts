@@ -23,6 +23,7 @@
  * v22 (2026-07-24) e está ausente em todos os 149. Por isso a impressão digital numérica.
  *
  * Uso:
+ * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/backfill-faixa-citada.ts
  *   ... --execute
  *

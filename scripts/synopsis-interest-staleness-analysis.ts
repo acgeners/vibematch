@@ -6,7 +6,7 @@
  *   - assinatura CANDIDATA estreita (relevantSynopsisSignature — só tags/temas).
  * Mede quantas invalidações históricas seriam evitadas e estima a economia.
  *
- * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/synopsis-interest-staleness-analysis.ts
+ * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/synopsis-interest-staleness-analysis.ts
  */
 import { createClient } from "@supabase/supabase-js"
 import { computeProfileSignature } from "@/lib/ai-recommendation/taste-profile"

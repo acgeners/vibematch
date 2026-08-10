@@ -12,6 +12,14 @@
  *   npm run backfill:interest -- --execute \
  *     --plan-signature=<hash> --max-cost-usd=12 [--concurrency=3] [--retry-failed]
  *
+ * 🔴 ALVO: NUVEM no modo --execute — ele enfileira jobs pagos, e o resultado gravado num
+ * local descartável morre no próximo `db:pull`. O dry-run (padrão) só lê e pode ir pro local.
+ *
+ * ⚠️ DIVERGÊNCIA NÃO RESOLVIDA (2026-08-10): o npm script `backfill:interest` carrega
+ * `--env-file=.env.analysis`, ou seja, aponta pro LOCAL nos DOIS modos. Isso foi herdado do
+ * cutover, quando os 25 scripts do `package.json` foram apontados pro local em bloco — a
+ * conta de egress foi feita para leitura, e o modo de escrita entrou de carona. Decidir:
+ * ou o npm script perde o `.env.analysis`, ou o `--execute` passa a recusar alvo local.
  * (resolve para: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local
  *  scripts/backfill-work-data.ts)
  */

@@ -6,7 +6,7 @@
  * nada — só SELECT. Reusa as métricas PURAS de lib/metrics/ranking-metrics.ts.
  *
  * Uso: npm run baselines:ranking
- *   (npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/ranking-baselines.ts)
+ *   (npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/ranking-baselines.ts)
  *
  * ⚠️ LEAKAGE: a avaliação "vs user_score" roda sobre as obras ROTULADAS, que são
  * o próprio conjunto de treino do Ridge/logística → é IN-SAMPLE (otimista). Serve

@@ -2,6 +2,7 @@
  * backfill-taste-characters.ts — semeia os 3 eixos de personagem novos (mig 158) a partir do que
  * já existe. IDEMPOTENTE: só preenche coluna que está NULL; nunca sobrescreve.
  *
+ * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
  *   dry-run:  npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/backfill-taste-characters.ts --dry-run
  *   aplicar:  npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/backfill-taste-characters.ts
  *

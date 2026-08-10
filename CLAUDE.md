@@ -12,6 +12,9 @@ npm run test:watch   # vitest watch mode
 npx vitest run tests/unit/calculations/score.test.ts  # single test file
 npm run sync-constants  # regenerates constant files from Supabase DB (requires SUPABASE_SERVICE_ROLE_KEY)
 npm run lint
+
+npm run consistency  # painel de consistência das notas de atributo (US$0; --save/--baseline)
+npm run db:egress    # quanto de egress as últimas 24h custaram (mede no local, quota zero)
 ```
 
 `sync-constants` needs `SUPABASE_SERVICE_ROLE_KEY` in env. It overwrites the files listed in the **Constants generated from DB** section below — never hand-edit them.
@@ -34,8 +37,18 @@ bug das 1000 linhas, porque você só descobre quando precisa restaurar.
 
 🟢 **Roda sozinho, semanalmente**: `~/Library/LaunchAgents/com.geners.animedb-backup.plist`,
 domingo 04:00, com `BACKUP_ENV_FILE=.env.supabase-cloud` (obrigatório — sem ele o agente salvaria
-o banco LOCAL reportando sucesso). Semanal e não diário por medição: o dump custa ~137 MB de
-egress, e diário daria ~4,1 GB/mês, 82% do teto de 5 GB.
+o banco LOCAL reportando sucesso).
+
+🔴 **O motivo registrado para ser semanal ("o dump custa ~137 MB de egress, e diário daria
+~4,1 GB/mês, 82% do teto") estava em bytes SEM compressão, e o que trafega é comprimido.**
+Remedido em 2026-08-10 simulando um backup completo contra o local (76 tabelas, 238 páginas,
+187.851 linhas): **157,2 MB crus · 36,3 MB comprimido**. Logo: semanal = **0,16 GB/mês (3%
+do teto)** e **diário = 1,09 GB/mês, 22%** — não 82%. O gzip é medido, não suposto
+([[gotcha-egress-contado-sem-compressao]]).
+
+⚠️ Isso **libera** a escolha, não a decide: diário cabe folgado na quota, e a pergunta passa a
+ser quanto de dado se aceita perder entre backups (hoje, até 7 dias de curadoria). A frequência
+segue semanal até alguém decidir o contrário — o que mudou é que o custo deixou de ser o motivo.
 
 🔴 **O schema entrou no backup em 2026-08-10, e a lacuna era real.** Até então o NDJSON era **só
 dado**: restaurar exigia um banco que já tivesse tabelas, policies e triggers, e o único lugar
@@ -109,20 +122,46 @@ uma `select` inocente de 1 coluna — a primeira query a estourar leva a culpa. 
 `/auth/v1/health` (que nem toca o Postgres) também dá 402. Postgres direto na 5432 e o endpoint de SQL
 da Management API continuam funcionando mesmo restrito — é assim que se tira o dump com o app fora do ar.
 
-**Custo por operação, medido no PostgREST (sem compressão):**
+🔴 **Os números desta tabela são SEM compressão, e o que trafega é COMPRIMIDO — divida por ~4.**
+Medido em 2026-08-10 sobre 24h de `edge_logs`: **1.490,9 MB crus × 373,6 MB com gzip (fator 4,0)**.
+Os dois elos foram conferidos separadamente: o `fetch` do Node — que o `supabase-js` usa — manda
+`accept-encoding: gzip, deflate` **por padrão** (medido com um servidor local ecoando headers), e o
+gateway responde `content-encoding: gzip` (medido com `curl --compressed`). O browser também pede.
+⚠️ O que **não** está medido é o Supabase *faturar* o byte comprimido; medi o byte que SAI. É a
+leitura defensável, mas a tabela abaixo continua servindo para comparar operações entre si — não para
+prever quando a quota estoura.
+
+**Custo por operação, medido no PostgREST (bytes CRUS — ver o fator ~4 acima):**
 
 | Operação | Payload |
 |---|---|
-| 1 página de `/titles` (24 obras, `WORK_LIST_SELECT`) | **569 KB** |
-| idem, trocando `work_tags(tag_id, tags(*))` por 4 colunas | 330 KB (**−42%**) |
+| ~~1 página de `/titles` com `tags(*)`~~ | ~~569 KB~~ — **não é mais o código** |
+| 1 página de `/titles` (24 obras, `WORK_LIST_SELECT` de hoje) | **330 KB** (−42%) |
 | catálogo inteiro com o mesmo select (966) | **20,1 MB** |
-| um `recalculateAll` (só a leitura de `works`) | **5,3 MB** |
+| um `recalculateAll` (só a leitura de `works`) | **5,3 MB** (1,66 MB comprimido, medido) |
 
-Auth é 0–3% do egress; **PostgREST é 97–100%**. Há três consumidores: curadoria, navegação/dev e
-**scripts de análise** — este último é o mais fácil de esquecer e explica o pico do mês (1,47 GB num dia
-com zero escrita de curadoria). **Quebrar a tabela `works` não ajuda**: `review_digest` +
-`review_summary` + `canonical_synopsis` são 78% dela e o `WORK_LIST_SELECT` não pede nenhuma. O peso
-está nos joins embutidos.
+✅ **O corte de −42% JÁ ESTÁ APLICADO** — commit `03d8713`, 30/07/2026, no `main`:
+`work_tags(tag_id, tags(id, slug, name, tag_group_id))`. Esta seção o descrevia como opção
+disponível por 11 dias depois de aplicado, e um briefing de sessão o repetiu como pendência
+aberta. Confira o source antes de reabrir. Sobrou um `tags(*)` em `DUPLICATE_WORK_SELECT`
+(`server/actions/works.ts`), que carrega **1 obra** na detecção de duplicata.
+
+Auth é 0–3% do egress; **PostgREST é 97–100%**. **Quebrar a tabela `works` não ajuda**:
+`review_digest` + `review_summary` + `canonical_synopsis` são 78% dela e o `WORK_LIST_SELECT` não
+pede nenhuma. O peso está nos joins embutidos.
+
+**Como medir de verdade, sem gastar quota** (`scripts/egress-baseline.mjs`): o painel
+(Reports → Usage) é a única fonte do acumulado do ciclo e **não é acessível por PAT** —
+`/platform/**` devolve 401 "JWT could not be decoded" e `/v1/**` não tem rota de usage. O que dá
+para fazer sozinho é ler `edge_logs` pela Management API, agrupar por `(path, search, status)` e
+**replicar cada payload contra o LOCAL**, que é réplica. ⚠️ Não some o `content_length` dos logs:
+o PostgREST responde chunked e o campo vem NULL em quase toda resposta grande — somá-lo dava
+**1,75 MB** para o que eram 374 MB. ⚠️ Retenção de log no free é **1 dia**.
+
+⚠️ **Decomposição das 24h em torno do cutover — o app não é o gargalo:** varredura completa de
+tabela (backup/reconciliação) **326,3 MB (87%)** · `recalculateAll` 31,6 MB (19 execuções) ·
+app e consultas seletivas **15,7 MB** (545 requisições). Aquele número era o custo do TRABALHO de
+virada, não do regime — o regime novo nasceu em 10/08 às 17:43 e ainda não tem um dia medido.
 
 ## Desenvolver contra o Supabase LOCAL
 
@@ -146,7 +185,13 @@ estaria errado, não acertar os dois.
 | quem | arquivo | alvo |
 |---|---|---|
 | app (`npm run dev`) | `.env.local` | **NUVEM** |
-| os 25 scripts | `--env-file=.env.local --env-file=.env.analysis` | **LOCAL** |
+| os 25 scripts do `package.json` | `--env-file=.env.local --env-file=.env.analysis` | **LOCAL** |
+| os 29 de `scripts/` que só LEEM | idem, declarado no cabeçalho do arquivo | **LOCAL** |
+| os 29 de `scripts/` que GRAVAM | `--env-file=.env.local` + `ALVO: NUVEM` no cabeçalho | **NUVEM** |
+
+⚠️ **São 83 entradas, não 25** — a conta de "25 scripts" só enxergava o `package.json`. Ver o
+🔴 sobre os 58 arquivos logo abaixo: metade deles grava, e para essa metade o local é o alvo
+ERRADO.
 
 O último `--env-file` vence (conferido no Node e no tsx), então `.env.analysis` carrega **só as
 3 variáveis de alvo** e herda `ANTHROPIC_API_KEY`, `MAL_CLIENT_ID` e o resto do `.env.local` —
@@ -168,6 +213,39 @@ foi 1,47 GB num dia com zero curadoria). Guardado por
 `tests/unit/orchestration/scripts-apontam-pro-local.test.ts`, que **deriva** a lista do
 `package.json` e checa também a ORDEM dos dois arquivos — invertida, o `.env.local` sobrescreve
 o alvo de volta e o `.env.analysis` vira decoração.
+
+🔴 **O `package.json` cobre 25 scripts; havia 58 fora dele.** Os demais são invocados à mão
+pelo comando escrito no CABEÇALHO do arquivo, e esse comando é a interface real deles. Medido
+em 2026-08-10, logo depois do cutover: **58 arquivos** em `scripts/` traziam
+`--env-file=.env.local` sem `.env.analysis` — entre eles `coherence-audit.ts` e `gold-mae.ts`,
+justamente os instrumentos de medição.
+
+⚠️ **Nenhum deles foi editado para ficar errado.** Enquanto o `.env.local` apontava pro local,
+aquela linha era o alvo CERTO; o cutover inverteu o **significado** da mesma linha, sem tocar em
+arquivo nenhum e sem nada acusar. É a forma mais barata de uma base inteira apodrecer: não é o
+código que muda, é o que ele quer dizer.
+
+🔴 **A exigência é DECLARAR o alvo, não "usar o local"** — e a razão é medida: dos 58,
+**29 gravam** (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável
+perde o trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis`
+evita. Hoje cada arquivo declara um dos dois:
+
+| declaração | quantos | o que significa |
+|---|---|---|
+| `--env-file=.env.analysis` na linha de uso | 29 | só LÊ ⇒ vai pro local, de graça |
+| `ALVO: NUVEM` no cabeçalho | 29 | GRAVA ⇒ tem que ir pra nuvem |
+
+⚠️ **A classificação por `grep` de `.insert(`/`.update(` tem falso negativo, e ele é do lado
+caro.** `chance-recalc-run.ts` chama `recalculateAll`, `backfill-mal-reviews.ts` chama
+`saveWorkReviews` e `regen-review-digest.ts` chama `ensureReviewDigest(allowPaid, force)` —
+os três gravam via helper importado e passariam por "só lê". Ao classificar um script novo,
+olhe os imports, não só o corpo.
+
+🔴 **DIVERGÊNCIA ABERTA (2026-08-10):** `backfill:interest` e `e1:digest` estão no
+`package.json` com `--env-file=.env.analysis` (⇒ local) mas os dois **gravam no modo
+`--execute`** — herdaram o apontamento em bloco dos 25 no cutover, quando a conta de egress foi
+feita para leitura e o modo de escrita entrou de carona. Está anotado no cabeçalho dos dois
+arquivos. Decidir: ou o npm script perde o `.env.analysis`, ou o `--execute` recusa alvo local.
 
 ⚠️ `db:local` continua existindo para o caso raro de querer o **app** no local. Ele não mexe
 mais nos scripts. E quando o app está no local, uma **faixa de listras** aparece no topo
@@ -1407,14 +1485,39 @@ o erro que fez a auditoria de 2026-08-09/10 gastar US$2 em medições que não d
 |---|---|---|---|
 | **Precisão** | `scripts/gold-mae.ts` contra `.gold/gold-FILLED.csv` | 30 obras | **0,10** no MAE geral |
 | **Coerência estrutural** | `scripts/coherence-audit.ts` (checagem A) | 8.673 atributos | dezenas de casos |
+| **Consistência** | `npm run consistency` (2026-08-10) | 8.757 notas · 5.733 pares | comparação por retrato |
 | **Coerência semântica** | — **não existe** | — | — |
 
 🔴 **O piso de 0,10 é o fato mais importante desta seção.** Bootstrap do gold (4000
 reamostragens): MAE do catálogo 0,78, IC95% **[0,68 – 0,88]**. O ganho realista de uma
 reescrita de prompt é ~0,05 — **abaixo do que o instrumento enxerga**. Foi por isso que
 quatro tentativas (v23, v24-pesada, v24-cirúrgica, v25) falharam: o experimento nunca teve
-como dar certo. Antes de tentar de novo, o investimento é **ampliar o gold** (30 → 100 obras
-derruba o piso pra ~0,055), não escrever mais regra.
+como dar certo.
+
+🔴 **Mas ampliar o gold NÃO é o investimento que destrava — e esta seção já disse que era.**
+O gold mede PRECISÃO; o que a v23/v25 mudavam era CONSISTÊNCIA e COERÊNCIA. Levar o gold de
+30 para 100 obras derruba o piso pra ~0,055 e continuaria sem enxergar o efeito pretendido,
+porque a pergunta é outra. O que faltava era a terceira linha da tabela.
+
+**`npm run consistency`** (`scripts/consistency-panel.ts`) mede as quatro dimensões, tudo em
+SQL sobre o catálogo, **US$0 e sem falso positivo de regex**:
+
+| dimensão | retrato de 2026-08-10 (v26) |
+|---|---|
+| dispersão (σ e faixa dominante) | 4 críticos: `protagonist` σ 0,89 · `romance` 1,16 · `action` 1,35 (**0% em 9-10**) · `fantasy_nobility` 1,66, todos ≥69% numa faixa só |
+| réguas vivas | **11 combinações** (10 versões × 4 modelos) — e a **v26 cobre ZERO obras** |
+| reprodutibilidade | amplitude 0,99 pt → **0,32 pt** controlando versão+modelo ⇒ **68% da instabilidade é MISTURA de régua**, não modelo |
+| coerência prosa×nota | delegada ao `coherence-audit.ts` |
+
+🔴 **Só o modo `--baseline` responde "melhorou?".** Salve o retrato antes
+(`npm run consistency -- --save=.consistency/<nome>.json`) e compare depois — um número solto
+não decide nada, e foi exatamente medir sem retrato anterior que fez a empreitada v23–v25
+gastar US$2 sem concluir. ⚠️ O piso aqui é o **ruído entre duas rodadas idênticas: 0,289**
+(151 pares); movimento menor que isso não é distinguível de ruído.
+
+⚠️ **Consistência não é acurácia**: uma régua pode ficar perfeitamente consistente e estar
+consistentemente errada. Os dois instrumentos respondem perguntas diferentes e **nenhum dos
+dois sozinho autoriza trocar a régua do catálogo**.
 
 ⚠️ **Decomposição do erro (medida, n=30):** os três critérios que valem **71%** do produto —
 `protagonist` 31,8%, `fantasy_nobility` 24,4%, `couple_dynamics` 14,8% — já são os mais
@@ -1506,11 +1609,16 @@ mecanismos abaixo está no `SYSTEM_PROMPT`.
 
 ⚠️ **O que segue valendo é o DIAGNÓSTICO, não o conserto.** Os quatro mecanismos abaixo são a
 análise de por que cada critério colapsou — continuam corretos e continuam sendo o desenho a
-implementar. O que não existe é a implementação. E antes de tentar de novo, leia a seção
-**"Duas réguas para as notas de atributo"**: o ganho disponível (~0,05) está **abaixo do piso
-de detecção do gold set** (0,10 com n=30), que é exatamente por que as quatro tentativas
-anteriores não puderam ser validadas. O investimento que destrava é ampliar o gold, não
-escrever mais regra.
+implementar. O que não existe é a implementação.
+
+🔴 **E o instrumento que faltava já existe: `npm run consistency`** (2026-08-10). As quatro
+tentativas foram reprovadas pelo gold, que mede PRECISÃO, quando o que elas mudavam era
+CONSISTÊNCIA — régua errada para a pergunta. O que este bloco pede (descomprimir faixa, dar σ
+a um critério colapsado) é exatamente o que o painel enxerga sobre 8.757 notas, e o gold, com
+n=30 e piso 0,10, não enxerga. **Salve o retrato ANTES de mexer no prompt**
+(`npm run consistency -- --save=…`) — sem o retrato anterior a tentativa nasce inconclusiva,
+que foi o destino das quatro. E leia a seção **"Duas réguas para as notas de atributo"**:
+os dois instrumentos são complementares, e passar num não dispensa o outro.
 
 Os quatro mecanismos, então — a tentação é tratar como um problema só, e não é:
 
@@ -1849,10 +1957,10 @@ O catálogo **não tem política**: é lido/escrito pela service role, que ignor
 
 ## Tests
 
-`npm run test` → **2.408 passando (+24 pulados) em 225 arquivos** (220 passando + 5 pulados;
-medido em 2026-08-10 com `--maxWorkers=3`). A linha já disse "~1.780 em ~157", "~2.353 em 218"
-e "2.386 em 221", todas envelhecendo sem nada acusar — **re-meça antes de editar este número**,
-não incremente de cabeça. Vitest, jsdom, alias `@` → raiz. A
+`npm run test` → **2.427 passando (+24 pulados) em 228 arquivos** (223 passando + 5 pulados;
+medido em 2026-08-10, 23,1s). A linha já disse "~1.780 em ~157", "~2.353 em 218", "2.386 em
+221" e "2.408 em 225", todas envelhecendo sem nada acusar — **re-meça antes de editar este
+número**, não incremente de cabeça. Vitest, jsdom, alias `@` → raiz. A
 descrição antiga ("só `tests/unit/calculations/`, sem teste de componente") estava desatualizada
 havia muito: hoje `calculations` é a 4ª maior pasta, atrás de `synopsis-interest` (36),
 `external` (30) e `orchestration` (19), e há `.test.tsx` de componente.

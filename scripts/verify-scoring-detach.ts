@@ -18,6 +18,7 @@
  * treino e devolve 878 notas plausíveis — e "plausível" é indistinguível de "certo" no olho.
  * A única forma de saber é comparar número a número.
  *
+ * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/verify-scoring-detach.ts
  */
 import { recalculateAll } from "@/server/actions/calculations"

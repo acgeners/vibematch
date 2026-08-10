@@ -2,7 +2,7 @@
  * taste-label-experiment.ts — READ-ONLY. Compara qual EXPRESSÃO da nota final do usuário
  * é mais útil como alvo do Ridge, e mede a coerência dos 6 eixos de gosto com o veredito.
  *
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/taste-label-experiment.ts
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/taste-label-experiment.ts
  *
  * Rigor: OOF aninhado (alpha por CV interna no treino), padronização ajustada SÓ no treino de
  * cada fold (sem leakage). Métricas scale-free (R², Spearman) pra comparar alvos de escalas

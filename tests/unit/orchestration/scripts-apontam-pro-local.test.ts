@@ -51,6 +51,60 @@ describe("scripts de análise apontam para o banco local", () => {
     }
   })
 
+  /**
+   * ⚠️ O `package.json` cobre só os ~25 scripts registrados como npm script. Os outros são
+   * invocados à mão pelo comando escrito no CABEÇALHO do arquivo — e esse comando é a
+   * interface real deles, tanto quanto a entrada do `package.json` é a dos primeiros.
+   *
+   * 🔴 Medido em 2026-08-10, logo depois do cutover: **58 arquivos** em `scripts/` traziam
+   * `--env-file=.env.local` sem `.env.analysis`. Nenhum deles foi editado para ficar errado
+   * — enquanto o `.env.local` apontava para o local, aquela linha era o alvo CERTO. O
+   * cutover inverteu o significado da mesma linha, sem tocar em nada e sem nada acusar.
+   *
+   * Por isso a exigência é **declarar** o alvo, e não "usar o local": 29 desses scripts
+   * gravam (catálogo ou o log de custo), e mandá-los para uma réplica descartável perde o
+   * trabalho no próximo `db:pull` — falha mais cara que o egress que o `.env.analysis` evita.
+   */
+  const SCRIPTS_DIR = path.join(process.cwd(), "scripts")
+  const arquivosComEnvLocal = fs
+    .readdirSync(SCRIPTS_DIR)
+    .filter((n) => n.endsWith(".ts") || n.endsWith(".mjs"))
+    .map((n) => ({ nome: n, src: fs.readFileSync(path.join(SCRIPTS_DIR, n), "utf8") }))
+    .filter(({ src }) => src.includes("--env-file=.env.local"))
+
+  it("existem scripts invocados à mão (senão a varredura não prova nada)", () => {
+    expect(arquivosComEnvLocal.length).toBeGreaterThan(0)
+  })
+
+  it("todo script de scripts/ DECLARA o alvo: .env.analysis (lê) ou ALVO: NUVEM (grava)", () => {
+    for (const { nome, src } of arquivosComEnvLocal) {
+      const linhaComLocal = src
+        .split("\n")
+        .filter((l) => l.includes("--env-file=.env.local"))
+      const declaraLocal = linhaComLocal.every((l) => l.includes("--env-file=.env.analysis"))
+      const declaraNuvem = src.includes("ALVO: NUVEM")
+      expect(
+        declaraLocal || declaraNuvem,
+        `"${nome}" carrega .env.local sem declarar alvo. Desde o cutover de 2026-08-10 essa ` +
+          `linha aponta para a NUVEM. Se o script só LÊ, acrescente ` +
+          `"--env-file=.env.analysis" depois do .env.local; se ele GRAVA, escreva "ALVO: NUVEM" ` +
+          `no cabeçalho dizendo por quê.`,
+      ).toBe(true)
+    }
+  })
+
+  it("nos scripts de leitura, .env.analysis vem DEPOIS de .env.local", () => {
+    for (const { nome, src } of arquivosComEnvLocal) {
+      if (src.includes("ALVO: NUVEM")) continue
+      for (const linha of src.split("\n").filter((l) => l.includes("--env-file=.env.analysis"))) {
+        expect(
+          linha.indexOf("--env-file=.env.analysis"),
+          `"${nome}": invertida, o .env.local sobrescreve o alvo de volta para a nuvem`,
+        ).toBeGreaterThan(linha.indexOf("--env-file=.env.local"))
+      }
+    }
+  })
+
   it("o gerador do .env.analysis existe e se recusa a apontar para fora do local", () => {
     // Sem essa trava, um `supabase status` devolvendo alvo remoto faria TODOS os scripts
     // migrarem para a nuvem de uma vez — o oposto exato do que este arquivo protege.

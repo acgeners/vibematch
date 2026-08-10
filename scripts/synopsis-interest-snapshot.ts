@@ -4,6 +4,7 @@
  * NÃO escreve no banco. Escreve apenas artefatos LOCAIS em .local-experiments/
  * (gitignored) e imprime os agregados/hashes para o manifesto versionado.
  *
+ * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
  * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/synopsis-interest-snapshot.ts
  *
  * Idempotente/determinístico: a mesma base do banco ⇒ o mesmo snapshotBaseSignature.

@@ -4,6 +4,7 @@
  * provider. Default DRY-RUN: só conta; --apply grava.
  *
  * Uso:
+ * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
  *   npx tsx --env-file=.env.local scripts/synopsis-interest-load-sample.ts          (dry-run)
  *   npx tsx --env-file=.env.local scripts/synopsis-interest-load-sample.ts --apply  (grava)
  *

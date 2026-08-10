@@ -1,7 +1,7 @@
 /**
  * Quanto uma obra NOVA perde sem bypass de Cloudflare? Read-only, zero LLM, zero escrita.
  *
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/diag-bypass-value.ts
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/diag-bypass-value.ts
  *   COMIX_RENDER_URL= FLARESOLVERR_URL= npx tsx … scripts/diag-bypass-value.ts   # simula prod
  *
  * Por que existe: a decisão de pagar (ou não) por um bypass em produção vinha sendo tomada com o

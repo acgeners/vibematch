@@ -10,7 +10,7 @@
  *   3. Fit e Mérito são SEPARÁVEIS ou colineares? (corr entre composites +
  *      ganho incremental OOF de um sobre o outro)
  *
- * Sem migration, sem escrita, sem LLM. Uso: npx tsx --env-file=.env.local scripts/axis-gate.ts
+ * Sem migration, sem escrita, sem LLM. Uso: npx tsx --env-file=.env.local --env-file=.env.analysis scripts/axis-gate.ts
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createClient } from "@supabase/supabase-js"

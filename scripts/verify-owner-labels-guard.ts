@@ -7,7 +7,7 @@
  * o recalc ler zero notas. Sem o guarda, o Ridge não reclamaria: cairia na média do treino e
  * devolveria 878 notas plausíveis e erradas.
  *
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/verify-owner-labels-guard.ts
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/verify-owner-labels-guard.ts
  */
 import { loadOwnerLabels } from "@/server/queries/owner-labels"
 import { createAdminClient } from "@/lib/supabase/admin"

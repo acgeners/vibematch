@@ -4,7 +4,7 @@
  * da migration 132). Espelha o carregamento de `recalculateAll`, chama
  * computeRecalc com fast:true (pula a nested-CV cara) e inspeciona os rows.
  *
- * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/chance-recalc-dryrun.ts
+ * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/chance-recalc-dryrun.ts
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createAdminClient } from "@/lib/supabase/admin"

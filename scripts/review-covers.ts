@@ -1,7 +1,7 @@
 /**
  * Gera uma página de REVISÃO VISUAL das trocas de capa propostas.
  *
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/review-covers.ts
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/review-covers.ts
  *   → .local-experiments/covers-review.html   (abra no browser)
  *
  * Por que existe: o score de capa já me traiu uma vez — pedia trocar 2850×4096 por 700×950 com
@@ -208,7 +208,7 @@ ${secao("Marginais (ignoradas)", "Ganho &lt; 0,15 — diferença pequena demais 
   document.addEventListener("change", e => { if (e.target.classList.contains("aprovar")) atualiza() })
   document.getElementById("btn").onclick = () => {
     const ids = marcados()
-    const cmd = "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/audit-covers.ts --apply=" + ids.join(",")
+    const cmd = "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/audit-covers.ts --apply=" + ids.join(",")
     navigator.clipboard.writeText(cmd)
     document.getElementById("dica").textContent = "✅ copiado (" + ids.length + " obras)"
   }

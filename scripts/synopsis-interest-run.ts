@@ -5,7 +5,7 @@
  * (works.synopsis_quality — contaminado pelo "Aplicar", só sinal aproximado), e
  * estima o orçamento do piloto LLM. NÃO chama provider. READ-ONLY no banco.
  *
- * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/synopsis-interest-run.ts
+ * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/synopsis-interest-run.ts
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
