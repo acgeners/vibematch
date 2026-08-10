@@ -23,6 +23,7 @@
     "db:push-curation": "node scripts/db-push-curation.mjs",
     "db:push-new-works": "node scripts/db-push-new-works.mjs",
     "db:cloudsim": "node scripts/db-make-cloudsim.mjs",
+    "db:diff": "node scripts/db-diff.mjs",
     "db:fingerprint": "node scripts/db-table-fingerprint.mjs",
     "synopsis:lab": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/synopsis-prompt-lab.ts",
     "baselines:ranking": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/ranking-baselines.ts",
