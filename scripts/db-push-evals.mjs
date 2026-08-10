@@ -29,6 +29,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { execFileSync, spawnSync } from "node:child_process"
+import { podar } from "./lib/backups-retencao.mjs"
 
 const ROOT = path.resolve(import.meta.dirname, "..")
 
@@ -251,6 +252,13 @@ const willOverwrite = psql(
 console.log(`\nlinhas a transferir:`)
 const staged = []
 const stamp = new Date().toISOString().replace(/[:.]/g, "-")
+
+// Staging de ~2 MB por execução, inclusive em ensaio. Até 2026-08-10 esta família não tinha
+// retenção nenhuma: a do `backup-db.mjs` só casa stamp ISO puro e o prefixo `push-` escapava.
+// ⚠️ `push-` NÃO engole `push-curation-`: o regex da família exige o dígito do ano logo depois
+// do prefixo. As duas são famílias distintas, com tetos distintos (2 MB × 96 MB por execução).
+podar("push-evals")
+
 const outDir = path.join(ROOT, ".backups", `push-${stamp}`)
 fs.mkdirSync(outDir, { recursive: true })
 

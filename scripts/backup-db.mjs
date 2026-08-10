@@ -20,6 +20,7 @@ import fs from "node:fs"
 import path from "node:path"
 import zlib from "node:zlib"
 import { createRequire } from "node:module"
+import { podar } from "./lib/backups-retencao.mjs"
 
 const require = createRequire(import.meta.url)
 const { createClient } = require("@supabase/supabase-js")
@@ -131,23 +132,64 @@ console.log(`   manifest: ${path.join(outDir, "manifest.json")}`)
 console.log(`\n   Cada tabela é um NDJSON gzipado (1 linha = 1 registro JSON). Pra restaurar:`)
 console.log(`   zcat <tabela>.ndjson.gz | ... → upsert via service role (a ordem importa: FKs).`)
 
-// Retenção: mantém os KEEP backups mais recentes e apaga os antigos. Sem isto o
-// .backups cresce sem limite (~30M por execução, nunca podado). Só age DEPOIS de um
-// backup bem-sucedido — o script já teria dado throw acima se qualquer tabela truncasse,
-// então nunca podamos um backup bom por causa de um novo que falhou.
-// Só apaga dirs cujo nome casa com o stamp ISO (não toca em nada mais na pasta).
-// Ajustável por env: BACKUP_KEEP (default 5).
-const KEEP = Math.max(1, Number(process.env.BACKUP_KEEP ?? 5))
-const stampDirs = fs
-  .readdirSync(base, { withFileTypes: true })
-  .filter((e) => e.isDirectory() && /^\d{4}-\d{2}-\d{2}T[\d-]+Z$/.test(e.name))
-  .map((e) => e.name)
-  .sort()
-  .reverse() // stamp ISO é lexicograficamente ordenável → mais novo primeiro
-const toDelete = stampDirs.slice(KEEP)
-for (const name of toDelete) {
-  fs.rmSync(path.join(base, name), { recursive: true, force: true })
+// ── schema ──────────────────────────────────────────────────────────────────────────────
+/**
+ * 🔴 O NDJSON acima é SÓ DADO. Sem esta seção, restaurar exigia um banco que já tivesse as
+ * tabelas, as 67 policies, os 13 triggers/functions do projeto e as 2 views — e o único lugar
+ * onde isso existia era o `pg_dump` do `db:pull`, rodado à mão. Medido em 2026-08-10: o backup
+ * de DADO tinha 1 dia (o agente semanal do launchd) e o de SCHEMA tinha **11**. E com o local
+ * deixando de ser fonte de verdade, o `db:pull` para de ser rodado por hábito — a metade de
+ * schema envelheceria ainda mais, justamente quando vira a única rede.
+ *
+ * Custa 259 KB (37 KB gzipado) e ~3 s: 0,24% do dump completo de 108 MB. Roda toda vez.
+ *
+ * ⚠️ `--schema public` NÃO leva `CREATE EXTENSION`, e `vector`/`pg_trgm` moram dentro do
+ * public — restaurar exige criá-las antes, como o `db-pull-to-local.mjs` já faz no passo 4.
+ *
+ * ⚠️ As 162 funções que o `pg_proc` acusa no public NÃO são do projeto: 149 vêm dessas duas
+ * extensions, e o pg_dump as omite de propósito (voltam com a extension). As 13 restantes são
+ * as nossas, e são as que aparecem aqui.
+ *
+ * Fail-SOFT de propósito: sem `pg_dump` no PATH ou sem `SUPABASE_DB_PASSWORD`, o backup de
+ * dado já está gravado e conferido — abortar agora jogaria fora o que deu certo.
+ */
+{
+  const senha = process.env.SUPABASE_DB_PASSWORD
+  const ref = (URL_ ?? "").match(/https:\/\/([a-z0-9]+)\.supabase\.co/)?.[1]
+  if (!senha || !ref) {
+    console.log(`\n⚠️  schema NÃO salvo: falta ${!ref ? "um alvo de nuvem" : "SUPABASE_DB_PASSWORD"}.`)
+    console.log(`   O backup é só de DADO — restaurar vai exigir um banco com o schema já criado.`)
+  } else {
+    const arquivo = path.join(outDir, "schema.sql")
+    try {
+      const conn = `postgresql://postgres:${encodeURIComponent(senha)}@db.${ref}.supabase.co:5432/postgres?sslmode=require`
+      const { execFileSync } = require("node:child_process")
+      execFileSync(
+        "pg_dump",
+        [conn, "--no-owner", "--quote-all-identifiers", "--schema-only",
+         "--schema", "public", "--schema", "bkp", "-f", arquivo],
+        { stdio: ["ignore", "ignore", "pipe"] },
+      )
+      const sql = fs.readFileSync(arquivo)
+      fs.writeFileSync(`${arquivo}.gz`, zlib.gzipSync(sql, { level: 9 }))
+      fs.rmSync(arquivo)
+      const conta = (re) => (sql.toString().match(re) ?? []).length
+      console.log(`\n✅ schema: ${(fs.statSync(`${arquivo}.gz`).size / 1024).toFixed(0)} KB gzipado` +
+        ` · ${conta(/CREATE POLICY/g)} policies · ${conta(/CREATE FUNCTION/g)} functions` +
+        ` · ${conta(/CREATE TRIGGER/g)} triggers`)
+    } catch (e) {
+      console.log(`\n⚠️  schema NÃO salvo: ${String(e.stderr ?? e.message).trim().split("\n")[0].slice(0, 120)}`)
+      console.log(`   O backup de dado acima está íntegro. Rode \`npm run db:pull\` para um dump com schema.`)
+    }
+  }
 }
-if (toDelete.length) {
-  console.log(`\n🧹 retenção: mantidos ${Math.min(KEEP, stampDirs.length)}, apagados ${toDelete.length} antigo(s) (BACKUP_KEEP=${KEEP})`)
-}
+
+// Retenção: mantém os BACKUP_KEEP mais recentes (default 5). A política mora em
+// `lib/backups-retencao.mjs`, que é o dono ÚNICO — cada script ter a sua foi o que deixou 3
+// famílias sem poda nenhuma e o `.backups` chegar a 1,9 GB.
+//
+// 🔴 Aqui, e SÓ aqui, a poda é no FIM de propósito: o script dá throw acima se qualquer tabela
+// truncar, então chegar até esta linha é a prova de que o backup novo presta. Podar antes
+// descartaria um backup bom por causa de um novo que falhou. Nos scripts de STAGING é o
+// contrário — lá se poda no começo, porque ensaio interrompido também deixa lixo.
+podar("backup", { base })
