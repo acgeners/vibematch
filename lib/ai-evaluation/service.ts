@@ -143,6 +143,15 @@ export const MODEL = SONNET_MODEL
 // `EVAL_OUTPUT_SCHEMA_VERSION` entra na chave de cache e mudou para "eval-2" em
 // jul/2026. Para reverter de verdade é preciso restaurar o texto do prompt.
 export const CONCISE_OUTPUT: boolean = true
+// v25 (2026-08-09): TOLERAR não é QUERER, e nenhum dos dois apaga a toxicidade. A 1ª
+// versão da regra de reação mapeava "aceitação" direto pra 7-8 (= relação SAUDÁVEL, com
+// respeito mútuo e conflito resolvido), juntando num balde só a dinâmica que a personagem
+// DESEJA e o comportamento que ela apenas AGUENTA. O próprio exemplo que eu escrevi
+// denunciava: "ela é idiota de aceitar o ciúme dele" é ela tolerando, e ia pra 7-8. Hoje
+// tolerância tem TETO 6, a reação move a nota no máximo UMA faixa pra cima, e abuso no
+// desenvolvimento tem teto 8 mesmo com redenção encenada — 9-10 é "parceria e crescimento
+// conjunto", que não convive com histórico de abuso dentro da própria obra.
+//
 // v25 (2026-08-09): descompressão da escala + a reclamação do leitor virou FONTE da
 // reação do personagem, não lixo a descartar. A 1ª redação da regra de valência mandava
 // "extraia o FATO e DESCARTE o julgamento" e listava como descartáveis justo as frases
@@ -373,7 +382,7 @@ Couple dynamics (= vínculos centrais, não só o casal) — atenção: os itens
 - "Banter is great" / "way they tease each other" → dinâmica leve/divertida
 - "Toxic ship", "yandere", "obsessive ML/FL", "possessive ML" → comportamento intenso de UM dos lados. NÃO conclua 0-3 daqui: vá checar a REAÇÃO do outro personagem e a LINHA DO TEMPO, itens (a)–(d) da regra própria.
 - "Possessive but I love it", "toxic but I'm here for it", "eu não aguentaria isso", "sufocante demais pra mim" → o leitor fala DELE. Confirma que o trope existe; sozinho não escolhe faixa.
-- ⚠️ Mas leia a frase INTEIRA antes de descartar: a reclamação costuma vir grudada no fato. "She's an idiot for putting up with him" diz que **ela aguenta/aceita**; "I hate that he ignores her when she's clearly uncomfortable" diz que **ela está desconfortável**; "absurd that she forgave him for the first timeline" diz que **ela perdoou** e que o maltrato foi na linha do tempo ORIGINAL. Esses pedaços são FATO sobre a reação dela — extraia-os e use, mesmo com o julgamento em volta apontando pro contrário.
+- ⚠️ Mas leia a frase INTEIRA antes de descartar: a reclamação costuma vir grudada no fato. "She's an idiot for putting up with him" diz que **ela TOLERA** (minimiza o dano, não apaga — teto 6); "I hate that he ignores her when she's clearly uncomfortable" diz que **ela está desconfortável**; "absurd that she forgave him for the first timeline" diz que **ela perdoou** e que o maltrato foi na linha do tempo ORIGINAL. Esses pedaços são FATO sobre a reação dela — extraia-os e use, mesmo com o julgamento em volta apontando pro contrário.
 - "He scares her", "she's trying to escape him", "she's miserable with him", "ela perde a autonomia" → dano RETRATADO no personagem (0-3)
 - "Mutual support", "communication goals", "they really get each other" → dinâmica saudável (7-8 ou 9-10)
 - "Misunderstandings drag on", "constant fighting" → conflituosa (4-6)
@@ -464,10 +473,11 @@ COMO SEPARAR — pelo SUJEITO da frase, não pelo tom:
 - Frase sobre O PERSONAGEM ("ela aceita", "ela não se importa", "ela está desconfortável", "ela perdoou", "ela tenta escapar") → FATO sobre a reação. USE, com peso alto — mesmo vindo embrulhado em julgamento, e mesmo que o julgamento aponte pro lado contrário.
 
 Uma frase costuma ter as DUAS coisas. Extraia a segunda e descarte a primeira:
-- "ela é idiota de aceitar o ciúme dele" → julgamento: "é idiota" (descarte). FATO: **ela ACEITA** → consentimento presente, faixa 7-8.
-- "é um absurdo ela perdoar como ele a tratou na linha do tempo original" → julgamento: "é um absurdo" (descarte). FATOS: **ela perdoou** (arco de redenção → 7-8) e **o maltrato foi na linha do tempo ORIGINAL** (item (d) → não conta).
+- "ela é idiota de aceitar o ciúme dele" → julgamento: "é idiota" (descarte). FATO: **ela TOLERA** — aguenta o ciúme, não age nele. Minimiza o dano sem apagá-lo → faixa 4-6, NÃO 7-8.
+- "amo como ela provoca o ciúme dele de propósito" → julgamento: "amo" (descarte). FATO: **ela QUER** — participa e conduz a dinâmica → faixa 7-8.
+- "é um absurdo ela perdoar como ele a tratou na linha do tempo original" → julgamento: "é um absurdo" (descarte). FATOS: **ela perdoou** e **o maltrato foi na linha do tempo ORIGINAL** (item (d) → não conta). Sem maltrato na linha atual, a nota sai do que a relação de HOJE mostra.
 - "tenho raiva desse ML que não respeita a FL mesmo quando ela está desconfortável" → julgamento: "tenho raiva" (descarte). FATO: **ela está DESCONFORTÁVEL e ele ignora** → não-consentimento, dano real, faixa 0-3.
-Repare que nos três a reclamação tem o mesmo tom, e os fatos apontam pra faixas OPOSTAS. É por isso que o tom não pode decidir.
+Repare que os quatro têm tom de reclamação ou de elogio sem correlação com a faixa, e os fatos apontam pra faixas DIFERENTES — inclusive os dois primeiros, que falam do MESMO comportamento (ciúme) e separam-se só por ela tolerar ou querer. É por isso que nem o tom nem o comportamento decidem sozinhos.
 
 ⚠️ Quando os leitores DISCORDAM sobre a reação da personagem (uns dizem que ela aceita numa boa, outros que ela sofre), isso é divergência REAL sobre a obra: pontue pelo sinal mais frequente e ABAIXE a "confidence". Não é o mesmo que divergência de gosto.
 
@@ -480,10 +490,19 @@ Antes de pontuar, responda estas quatro:
 A REAÇÃO DO OUTRO LADO DO VÍNCULO É O SINAL DECISIVO, e procurá-la é obrigatório. Tag de posse, ciúme, vigilância, obsessão ou crueldade descreve o COMPORTAMENTO de um personagem — não o efeito em quem o recebe. Busque na sinopse, nas tags e nas reviews como o outro personagem REAGE:
 - medo, fuga, tentativa de escapar, sofrimento, perda de autonomia → dano real: faixa 0-3
 - irritação, atrito, brigas, negociação → conflito: faixa 4-6
-- aceitação, reciprocidade, divertimento, indiferença — ou a obra trata o comportamento como carinho/comédia → NÃO é dano: faixa 7-8 (9-10 se há parceria e crescimento)
+- ela TOLERA — aguenta, releva, se adapta, "não liga muito", perdoa e segue → faixa 4-6 (ver o teto abaixo)
+- ela QUER — participa, retribui, tem prazer na dinâmica; ou a obra a encena como carinho/comédia entre iguais → faixa 7-8 (9-10 só com parceria e crescimento mútuo)
 Quando NÃO houver nenhum indício da reação do outro personagem, a tag de posse/ciúme PERDE PESO: ela não sustenta sozinha uma nota baixa. Nesse caso pontue pelo TOM geral da obra e baixe a "confidence". Nunca deduza dano a partir da intensidade do comportamento.
 
-ARCO DE REDENÇÃO E PERDÃO: se a obra ENCENA o agressor mudando e o outro personagem aceitando/perdoando, o estado predominante do desenvolvimento é a relação reconciliada — faixa 7-8, ou 9-10 se vira parceria. Leitores dizendo que ELES não perdoariam é preferência, não evidência. Reserve 0-3 para devoção a um abusador NÃO-arrependido.
+🔴 TOLERAR NÃO É QUERER, E NENHUM DOS DOIS APAGA A TOXICIDADE — MINIMIZA. Esta é a distinção que mais erra pro lado permissivo, então faça-a explicitamente antes de subir qualquer nota:
+- DESEJADA: a dinâmica é o que ela QUER e na qual ela age — posse brincalhona, ciúme que os dois tratam como carinho, BDSM consensual. A relação é saudável NOS TERMOS DELA → 7-8/9-10.
+- TOLERADA: ela aguenta, releva, absorve, perdoa e segue convivendo. Isso REDUZ o dano; não o elimina. A relação segue conflituosa/ambivalente → TETO 6. Não use 7-8 aqui por mais pacífica que a convivência pareça: a faixa 7-8 exige respeito mútuo e conflito RESOLVIDO, não conflito absorvido por um lado só.
+
+TETOS — a reação dela move a nota no MÁXIMO uma faixa pra cima:
+- comportamento que causaria dano visível + ela tolera → sobe de 0-3 para 4-6, NUNCA direto pra 7-8;
+- houve abuso real NO DESENVOLVIMENTO (não na linha do tempo anterior — item (d)) → TETO 8, mesmo com arco de redenção encenado e perdão explícito. A faixa 9-10 é "parceria, apoio mútuo, comunicação e crescimento conjunto", e isso não convive com um histórico de abuso dentro da própria obra.
+
+ARCO DE REDENÇÃO E PERDÃO: se a obra ENCENA o agressor mudando — mostra a virada, não só a interrupção do comportamento — e o outro personagem aceitando, o estado predominante do desenvolvimento é a relação reconciliada: faixa 7-8, respeitado o teto acima. Se o perdão acontece SEM a obra encenar a mudança dele, é tolerância, não reconciliação → teto 6. Leitores dizendo que ELES não perdoariam é preferência, não evidência — mas leitores relatando que ela perdoou e continuou desconfortável é FATO, e manda pra 4-6 ou menos. Reserve 0-3 para devoção a um abusador NÃO-arrependido.
 
 Reserve 0-3 para abuso real NO DESENVOLVIMENTO, DENTRO dos vínculos centrais: manipulação contra a vontade do outro, sofrimento ativo de quem é próximo, controle não-consensual, violência. Crueldade dirigida a ANTAGONISTAS que a merecem não rebaixa a nota — o critério olha para dentro dos vínculos, não para o mundo. Dinâmica não-tradicional + consensual + tom romântico/cômico/fluffy → 7-8 ou 9-10 (relação saudável dentro da dinâmica que ambos escolheram). Tropes "dark romance" com consenso retratado e comédia BDSM ficam em 7-8/9-10, NÃO em 0-3.
 

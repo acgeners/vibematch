@@ -1308,14 +1308,34 @@ A separação é pelo **SUJEITO da frase**, nunca pelo tom:
 | **o leitor** | "eu não aguentaria", "achei sufocante", "tenho raiva do ML" | preferência — não escolhe faixa |
 | **a personagem** | "ela aceita", "ela está desconfortável", "ela perdoou" | **fato sobre a reação** — peso alto |
 
-Uma frase costuma ter as duas. Três casos de **mesmo tom e faixas opostas** — é isso que prova
-que o tom não pode decidir:
+Uma frase costuma ter as duas:
 
-| reclamação | fato extraído | faixa |
+| reclamação / elogio | fato extraído | faixa |
 |---|---|---|
-| "ela é **idiota de aceitar** o ciúme dele" | ela **aceita** | 7-8 |
-| "é **absurdo** ela **perdoar** como ele a tratou **na linha do tempo original**" | ela **perdoou** + item **(d)** | 7-8, e o maltrato não conta |
+| "ela é **idiota de aceitar** o ciúme dele" | ela **TOLERA** | **4-6** |
+| "**amo** como ela **provoca o ciúme dele de propósito**" | ela **QUER** | 7-8 |
+| "é **absurdo** ela **perdoar** como ele a tratou **na linha do tempo original**" | ela **perdoou** + item **(d)** | o maltrato não conta |
 | "**tenho raiva** desse ML que não respeita a FL **mesmo quando ela está desconfortável**" | ela está **desconfortável** e ele ignora | **0-3** |
+
+Os dois primeiros falam do **mesmo comportamento** e separam-se só por ela tolerar ou querer —
+é isso que prova que nem o tom da review nem o comportamento decidem sozinhos.
+
+🔴 **TOLERAR não é QUERER, e nenhum dos dois APAGA a toxicidade — minimiza.** É o erro que mais
+puxa pro lado permissivo, e a 1ª redação caiu nele: mapeava "aceitação" direto pra 7-8, a faixa
+que exige **respeito mútuo e conflito RESOLVIDO** — não conflito **absorvido por um lado só**.
+
+| | |
+|---|---|
+| **DESEJADA** — ela participa, retribui, conduz | 7-8 (9-10 só com parceria e crescimento) |
+| **TOLERADA** — aguenta, releva, perdoa e segue | **teto 6** |
+
+⚠️ **Dois tetos, porque a reação dela sobe a nota no máximo UMA faixa:** dano visível + tolerância
+→ 0-3 vira 4-6, **nunca** 7-8. E abuso real no **desenvolvimento** → **teto 8** mesmo com redenção
+encenada e perdão explícito — 9-10 é *"parceria, apoio mútuo e crescimento conjunto"*, que não
+convive com histórico de abuso dentro da própria obra.
+
+⚠️ **Perdão sem mudança ENCENADA é tolerância, não reconciliação** (teto 6): a obra precisa
+mostrar a virada dele, não só a interrupção do comportamento.
 
 ⚠️ Leitores discordando sobre a REAÇÃO dela ("ela aceita numa boa" × "ela sofre") é divergência
 **real sobre a obra** — pontue pelo sinal mais frequente e abaixe a `confidence`. Não é o mesmo

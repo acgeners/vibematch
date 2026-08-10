@@ -83,19 +83,48 @@ describe("SYSTEM_PROMPT — couple_dynamics é escala de VALÊNCIA", () => {
     expect(regra).toMatch(/COMO SEPARAR — pelo SUJEITO da frase, não pelo tom/)
   })
 
-  it("dá exemplos de mesmo TOM com faixas OPOSTAS", () => {
-    // É isso que prova que o tom não pode decidir. Um exemplo só (ou três do mesmo lado)
-    // ensinaria o modelo a mapear "reclamação → faixa X", que é o erro original com outra
-    // roupa. Os três casos vêm do uso real relatado pelo dono do catálogo.
+  it("separa TOLERAR de QUERER, com teto para a tolerância", () => {
+    // 🔴 A 1ª versão mapeava "aceitação" direto pra 7-8 — a faixa que significa relação
+    // SAUDÁVEL, com respeito mútuo e conflito RESOLVIDO. Isso juntava num balde só a
+    // dinâmica que a personagem DESEJA e o comportamento que ela apenas AGUENTA.
+    // Tolerar minimiza a toxicidade; não a elimina.
     const regra = couple_dynamicsRule()
-    // aceitação → 7-8
-    expect(regra).toMatch(/ela é idiota de aceitar[^\n]*7-8/)
-    // perdão + linha do tempo original → 7-8 e item (d)
+    expect(regra).toMatch(/TOLERAR NÃO É QUERER, E NENHUM DOS DOIS APAGA A TOXICIDADE/)
+    expect(regra).toMatch(/DESEJADA/)
+    expect(regra).toMatch(/TOLERADA/)
+    expect(regra).toMatch(/TETO 6/)
+    // O motivo tem que estar escrito, senão a regra vira arbitrária e a próxima
+    // reescrita a desfaz sem perceber.
+    expect(regra).toMatch(/não conflito absorvido por um lado só/)
+  })
+
+  it("limita o quanto a reação dela pode subir a nota", () => {
+    const regra = couple_dynamicsRule()
+    expect(regra).toMatch(/no MÁXIMO uma faixa pra cima/)
+    expect(regra).toMatch(/NUNCA direto pra 7-8/)
+    // Abuso no desenvolvimento não chega a 9-10 nem com redenção encenada: a faixa é
+    // "parceria, apoio mútuo e crescimento conjunto".
+    expect(regra).toMatch(/TETO 8, mesmo com arco de redenção encenado/)
+  })
+
+  it("dá exemplos do MESMO comportamento com faixas diferentes", () => {
+    // Dois exemplos falam do MESMO ciúme e se separam só por ela tolerar ou querer —
+    // é isso que prova que nem o tom da review nem o comportamento decidem sozinhos.
+    // Exemplos todos do mesmo lado ensinariam "reclamação → faixa X", o erro original.
+    const regra = couple_dynamicsRule()
+    expect(regra).toMatch(/ela é idiota de aceitar o ciúme dele[^\n]*4-6, NÃO 7-8/)
+    expect(regra).toMatch(/provoca o ciúme dele de propósito[^\n]*7-8/)
     expect(regra).toMatch(/perdoar[^\n]*linha do tempo/)
-    expect(regra).toMatch(/ela perdoou/)
-    // desconforto ignorado → 0-3
     expect(regra).toMatch(/desconfortável[^\n]*0-3/)
-    expect(regra).toMatch(/faixas OPOSTAS/)
+    expect(regra).toMatch(/MESMO comportamento \(ciúme\)/)
+  })
+
+  it("perdão sem mudança encenada é tolerância, não reconciliação", () => {
+    const regra = couple_dynamicsRule()
+    expect(regra).toMatch(/mostra a virada, não só a interrupção do comportamento/)
+    expect(regra).toMatch(/SEM a obra encenar a mudança dele, é tolerância[^\n]*teto 6/)
+    // E o contraponto: relato de que ela perdoou E seguiu desconfortável é FATO, e desce.
+    expect(regra).toMatch(/perdoou e continuou desconfortável é FATO/)
   })
 
   it("trata discordância sobre a REAÇÃO como divergência real, não de gosto", () => {
