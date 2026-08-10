@@ -259,6 +259,72 @@ const upsertSet = (table, keys) =>
     .map((c) => `"${c}" = excluded."${c}"`)
     .join(", ")
 
+// ── Dono do push ────────────────────────────────────────────────────────────────────────
+// 🔴 As tabelas per-usuário são recortadas ao CURADOR. Sem isto o push é escrita cruzada:
+// as tabelas com `user_id` NÃO TÊM FK (conferido em information_schema), então linha de
+// usuário que só existe no local entra na nuvem em silêncio e fica órfã pra sempre — e o
+// upsert de `user_work_state`/`user_calculated_scores` sobrescreve o dado de leitor REAL.
+//
+// Medido em 2026-08-10, antes do filtro: o local tinha 7 donos em `user_calculated_scores`
+// e 3 em `user_work_state`; a nuvem, 2 e 1. O push levaria 5 contas fantasma (incluindo
+// uma chamada "Aceite Teste") e criaria 2 linhas de estado de leitura para um leitor real
+// que tem ZERO na nuvem — ou seja, inventaria histórico de leitura de outra pessoa.
+//
+// ⚠️ O comentário de `user_work_state` dizia "entra porque a nuvem está congelada: não há
+// versão concorrente pra perder". Essa premissa EXPIROU — há leitor com login em 05/08.
+// Premissa de script envelhece e nada avisa.
+const CURADORES = psql(
+  SOURCE,
+  "select current_user_id from public.user_settings where role = 'curador'",
+)
+  .split("\n")
+  .map((l) => l.trim())
+  .filter(Boolean)
+
+if (CURADORES.length !== 1) {
+  console.error(
+    `\n✗ esperava EXATAMENTE 1 curador na origem, achei ${CURADORES.length}.` +
+      `\n  O recorte per-usuário depende disso. Resolva em user_settings.role antes de empurrar.` +
+      (CURADORES.length ? `\n  encontrados: ${CURADORES.join(", ")}` : ""),
+  )
+  process.exit(1)
+}
+const CURADOR = CURADORES[0]
+/** Recorte per-usuário. Só nas tabelas cujo insert SOBRESCREVE (upsert) ou cria linha de
+ *  dono — os logs append-only (`ai_api_calls`, `ai_cache_events`) ficam de fora de
+ *  propósito: são `on conflict do nothing`, não destroem nada, e recortá-los perderia
+ *  registro de custo legítimo. */
+const soDoCurador = (col = "user_id") => `${col} = '${CURADOR}'::uuid`
+console.log(`curador do push: ${CURADOR}`)
+
+/** Os `alignment_run` que `calculated_scores` referencia. Sem eles a transação aborta em
+ *  `calculated_scores_alignment_run_id_fkey` — foi o que fez o push NUNCA completar até
+ *  2026-08-10. O `where` das demais tabelas é incremental por TEMPO, mas o grafo de FK exige
+ *  FECHAMENTO: os 19 runs apontavam pra 6 taste_profile (1 ausente na nuvem) e 6
+ *  ai_api_calls (5 ausentes), e nenhum viajava. */
+const runsNecessarios = `(select distinct alignment_run_id from public.calculated_scores where alignment_run_id is not null)`
+
+/** Os runs que ESTE push carrega: o histórico do curador desde o último pull, MAIS os que a
+ *  FK exige (que podem ser mais antigos que o cutoff).
+ *
+ *  🔴 Fechamento e escopo têm que sair do MESMO fragmento. Se `recommendation_runs` levar o
+ *  histórico e os pais (`taste_profile`, `ai_api_calls`) continuarem fechados só sobre
+ *  `runsNecessarios`, o erro de FK volta — só que nos runs novos. Ampliar escopo aqui obriga
+ *  a ampliar o fechamento junto, e é por isso que os três consomem esta constante.
+ *
+ *  ⚠️ NÃO usa o `cutoff`, ao contrário das outras tabelas. A premissa do cutoff é "mais
+ *  antigo que o último pull já está na nuvem, porque o pull trouxe de lá" — e ela é FALSA
+ *  aqui, porque esta tabela nunca esteve no PLAN. Medido em 2026-08-10: cutoff 30/07, runs
+ *  do curador de 20/05 a 08/08, e a nuvem tinha 1 run contra 25 no local. Filtrar por tempo
+ *  deixaria 6 pra trás pra sempre.
+ *
+ *  ⚠️ `recommendation_runs.list_id` → `work_lists`, que NÃO está no PLAN. Medido em
+ *  2026-08-10: dos 25 runs do curador, ZERO tem `list_id`, então não há o que fechar hoje.
+ *  Se um dia aparecer run com lista, este push volta a abortar — e o conserto é somar
+ *  `work_lists` ao PLAN, não remover a coluna do escopo. */
+const runsDoPush = `(select id from public.recommendation_runs
+    where ${soDoCurador()} or id in ${runsNecessarios})`
+
 // Ordem = ordem de FK. `tags` antes de `work_tags`; `ai_evaluations` antes de
 // `category_scores` (que a referencia com NO ACTION).
 const PLAN = [
@@ -273,7 +339,11 @@ const PLAN = [
   },
   {
     table: "ai_api_calls",
-    where: `created_at > '${maxCall}'::timestamptz`,
+    // Log append-only: NÃO recortado por usuário de propósito (`on conflict do nothing`,
+    // não sobrescreve nada, e filtrar perderia registro de custo legítimo).
+    where: `created_at > '${maxCall}'::timestamptz
+      or id in (select ai_api_call_id from public.recommendation_runs
+                where id in ${runsDoPush} and ai_api_call_id is not null)`,
     atLeast: true,
     insert: (c) => `insert into public.ai_api_calls (${c}) select ${c} from stage_ai_api_calls on conflict do nothing`,
   },
@@ -284,7 +354,9 @@ const PLAN = [
     // despromove o atual da nuvem antes do insert (idempotente: exclui o próprio id,
     // então re-push do mesmo perfil não despromove ninguém à toa).
     table: "taste_profile",
-    where: `created_at > '${cutoff}'::timestamptz`,
+    where: `(created_at > '${cutoff}'::timestamptz
+        or id in (select taste_profile_id from public.recommendation_runs where id in ${runsDoPush}))
+      and ${soDoCurador()}`,
     atLeast: true,
     pre: `update public.taste_profile t set is_current = false
       where t.is_current and exists (
@@ -410,9 +482,16 @@ const PLAN = [
     // Dado PER-USER (status, capítulos, nota, favorito, pós-leitura). Entra porque a nuvem
     // está congelada: não há versão concorrente pra perder.
     table: "user_work_state",
-    where: `work_id = any(${idArray})`,
+    where: `work_id = any(${idArray}) and ${soDoCurador()}`,
     insert: (c) => `insert into public.user_work_state (${c}) select ${c} from stage_user_work_state
       on conflict (user_id, work_id) do update set ${upsertSet("user_work_state", ["user_id", "work_id"])}`,
+  },
+  {
+    // Histórico de recomendação do curador + o fechamento da FK de `calculated_scores`.
+    // Depende de `ai_api_calls` e `taste_profile`, que vêm antes na ordem.
+    table: "recommendation_runs",
+    where: `id in ${runsDoPush}`,
+    insert: (c) => `insert into public.recommendation_runs (${c}) select ${c} from stage_recommendation_runs on conflict do nothing`,
   },
   {
     // Saída determinística do recalc. Entra pra a nuvem não ficar com category_scores novo e
@@ -424,7 +503,7 @@ const PLAN = [
   },
   {
     table: "user_calculated_scores",
-    where: `true`,
+    where: `${soDoCurador()}`,
     insert: (c) => `insert into public.user_calculated_scores (${c}) select ${c} from stage_user_calculated_scores
       on conflict (user_id, work_id) do update set ${upsertSet("user_calculated_scores", ["user_id", "work_id"])}`,
   },
