@@ -148,7 +148,39 @@ decisão:
 | per-user fora do escopo do curador — **por desenho** | 6 | `user_calculated_scores` +4838 · `user_work_state` +27 |
 | chave surrogate regenerada — **falso positivo** | 1 | `platform_ratings` (240 / 240 / **0**) |
 | fora do PLAN, exclusão documentada | 3 | `external_source_health` · `genre_proposal` · `formula_config` |
-| **fora do PLAN, sem decisão registrada** | 10 | `work_lists` +4 e `work_list_items` +120 · `tag_subgroup_assignment` +4 · `work_genres` +6 |
+| fora do PLAN, **decidido em 2026-08-10** | 8 | ver abaixo |
+
+⚠️ **Havia 10 tabelas divergentes sem decisão registrada, e o problema era o REGISTRO.** Gap sem
+motivo escrito parece esquecimento e volta a ser rediscutido toda sessão. Duas entraram no PLAN
+(`work_genres`, `tag_subgroup_assignment` — catálogo, sem dono, escrito só pela curadoria) e as
+outras oito ficaram fora **com motivo**, impresso pelo próprio `db:push-curation` ao terminar.
+
+🔴 **A régua: "o local é a verdade" vale pra CURADORIA, não pra LEITURA.** `work_lists` e
+`work_list_items` são o contraexemplo medido — pasta de favoritos é ação de **leitor**, feita em
+produção. Os dois lados divergiram: 5 pastas só no local (91 itens), **1 só na nuvem
+("Protagonista Marcante", 11 itens)**, uma pasta **renomeada** (local "Iniciadas" = nuvem
+"Lendo") e "Ideal" com **mais itens na nuvem** (4 × 3). Um push one-way sobrescreveria o rename
+e, com estratégia de conjunto, **apagaria** o que só existe lá. Precisa de merge com decisão.
+
+⚠️ `user_settings` fica fora por **segurança**, não por baixo valor: carrega `role`, plano e
+saldo, e o local tem contas de teste. Empurrar cria conta fantasma em produção e mexe exatamente
+no que o trigger `guard_role_self_escalation` protege.
+
+⚪ `prediction_snapshots` (+6832) · `prediction_ledger` · `pilot_taste_scores` ·
+`imports`/`import_rows` — histórico gerado por rodadas locais. Refazível, e produção não fica
+errada sem ele.
+
+🔴 **Ao adicionar tabela ao PLAN, o alvo do `on conflict` é a chave NATURAL, não o surrogate.**
+`tag_subgroup_assignment` tem PK em `id` e **UNIQUE em `tag_id`**: upsert por `id` insere e viola
+o unique se a mesma tag tiver ids diferentes nos dois bancos — erro no meio do push, com metade
+do PLAN aplicada. Hoje as chaves coincidem (2831/2831, zero divergindo), mas isso é estado, não
+garantia. Mesma família do falso positivo de `platform_ratings`.
+
+⚠️ **O detalhe do `db:diff` NÃO responde "há linha só na nuvem?" em tabela de PK COMPOSTA** — ele
+chaveia pela PRIMEIRA coluna do PK, então as linhas da mesma obra colapsam. Em `work_genres` ele
+dizia "21 valor diferente" onde o conjunto real de pares `(work_id, genre_id)` diverge em **6, com
+zero só na nuvem** — que foi o que autorizou o delete+insert. Compare o conjunto à mão antes de
+escolher estratégia destrutiva.
 
 🔴 **`trg_enforce_work_ai_eval_pending_reality` recusa valor empurrado, e está CERTO.** O push
 escreveu `works.ai_eval_status = 'pending'` e o destino devolveu `review_pending`, porque a
