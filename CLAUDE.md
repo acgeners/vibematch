@@ -148,7 +148,55 @@ decisão:
 | per-user fora do escopo do curador — **por desenho** | 6 | `user_calculated_scores` +4838 · `user_work_state` +27 |
 | chave surrogate regenerada — **falso positivo** | 1 | `platform_ratings` (240 / 240 / **0**) |
 | fora do PLAN, exclusão documentada | 3 | `external_source_health` · `genre_proposal` · `formula_config` |
-| **fora do PLAN, sem decisão registrada** | 10 | `work_lists` +4 e `work_list_items` +120 · `tag_subgroup_assignment` +4 · `work_genres` +6 |
+| fora do PLAN, **decidido em 2026-08-10** | 6 | ver abaixo |
+
+⚠️ **Havia 10 tabelas divergentes sem decisão registrada, e o problema era o REGISTRO.** Gap sem
+motivo escrito parece esquecimento e volta a ser rediscutido toda sessão. **Quatro entraram no
+PLAN** e as outras seis ficaram fora **com motivo**, impresso pelo próprio `db:push-curation` ao
+terminar.
+
+🔴 **A régua: "o local é a verdade" vale pra CURADORIA, não pra LEITURA — e `work_lists` é o
+contraexemplo medido.** Pasta de favoritos é ação de **leitor**, feita em produção. Os dois lados
+tinham divergido: 5 pastas só no local (91 itens), **1 só na nuvem ("Protagonista Marcante", 11
+itens)**, uma pasta **renomeada** (local "Iniciadas" = nuvem "Lendo") e "Ideal" com **mais itens
+na nuvem** (4 × 3).
+
+⚠️ **A Ana decidiu (2026-08-10) que o local passa a ser a verdade também aqui, com substituição
+completa** — custo aceito e medido: **16 itens e 1 pasta** apagados da nuvem. Isto NÃO é dedução
+do script; é escolha registrada, e por isso está escrita no comentário da entrada do PLAN. Se a
+premissa mudar (por exemplo, um leitor de verdade passar a criar pastas em produção), a estratégia
+de conjunto vira perda de dado alheio e precisa ser revista.
+
+🔴 **`work_lists` vem ANTES de `recommendation_runs` no PLAN.** A FK
+`recommendation_runs.list_id → work_lists` é **ON DELETE SET NULL**: apagar pasta apaga a
+referência do run **em silêncio**. Hoje são 0 runs com `list_id` preenchido na nuvem (conferido),
+mas a ordem não pode depender disso continuar verdade. Já `work_list_items.list_id → work_lists`
+é ON DELETE CASCADE — o delete das pastas leva os itens junto, e o `pre` explícito em
+`work_list_items` é redundância defensiva, não necessidade.
+
+⚠️ **`work_list_items` não tem `user_id`** — escopa pelo PAI
+(`list_id in (select id from work_lists where <curador>)`), mesma forma do fechamento de FK que
+`recommendation_runs` já exigia. Vale igual pra `import_rows`, se um dia entrar.
+
+⚠️ `user_settings` fica fora por **segurança**, não por baixo valor: carrega `role`, plano e
+saldo, e o local tem contas de teste. Empurrar cria conta fantasma em produção e mexe exatamente
+no que o trigger `guard_role_self_escalation` protege.
+
+⚪ `prediction_snapshots` (+6832) · `prediction_ledger` · `pilot_taste_scores` ·
+`imports`/`import_rows` — histórico gerado por rodadas locais. Refazível, e produção não fica
+errada sem ele.
+
+🔴 **Ao adicionar tabela ao PLAN, o alvo do `on conflict` é a chave NATURAL, não o surrogate.**
+`tag_subgroup_assignment` tem PK em `id` e **UNIQUE em `tag_id`**: upsert por `id` insere e viola
+o unique se a mesma tag tiver ids diferentes nos dois bancos — erro no meio do push, com metade
+do PLAN aplicada. Hoje as chaves coincidem (2831/2831, zero divergindo), mas isso é estado, não
+garantia. Mesma família do falso positivo de `platform_ratings`.
+
+⚠️ **O detalhe do `db:diff` NÃO responde "há linha só na nuvem?" em tabela de PK COMPOSTA** — ele
+chaveia pela PRIMEIRA coluna do PK, então as linhas da mesma obra colapsam. Em `work_genres` ele
+dizia "21 valor diferente" onde o conjunto real de pares `(work_id, genre_id)` diverge em **6, com
+zero só na nuvem** — que foi o que autorizou o delete+insert. Compare o conjunto à mão antes de
+escolher estratégia destrutiva.
 
 🔴 **`trg_enforce_work_ai_eval_pending_reality` recusa valor empurrado, e está CERTO.** O push
 escreveu `works.ai_eval_status = 'pending'` e o destino devolveu `review_pending`, porque a

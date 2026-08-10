@@ -343,6 +343,27 @@ const PLAN = [
       on conflict do nothing`,
   },
   {
+    // Curadoria de tags: a que sub-grupo cada tag pertence. É CATÁLOGO (sem `user_id`,
+    // compartilhado), escrito só pela curadoria — que roda no local. Ficava fora do push sem
+    // decisão registrada; medido em 2026-08-10: 4 linhas presas no local, 0 só na nuvem.
+    //
+    // 🔴 O alvo do conflito é `tag_id`, NÃO `id`. A tabela tem PK em `id` e UNIQUE em
+    // `tag_id`: se a mesma tag receber ids diferentes nos dois bancos, o upsert por `id`
+    // insere e VIOLA o unique — erro no meio do push, com metade do PLAN aplicada. Hoje as
+    // duas chaves coincidem (2831 ids e 2831 tag_ids em comum, ZERO divergindo), mas isso é
+    // estado, não garantia: basta uma linha recriada de um lado. Mesma armadilha de chave
+    // surrogate que já deu falso positivo em `platform_ratings`.
+    //
+    // Sem recorte por tempo de propósito: `status`/`applied_at` mudam por UPDATE, sem tocar
+    // `created_at` — um `where created_at > cutoff` deixaria a revisão de tag antiga pra trás.
+    // São 2.835 linhas, o conjunto inteiro é barato.
+    table: "tag_subgroup_assignment",
+    where: "true",
+    insert: (c) => `insert into public.tag_subgroup_assignment (${c})
+      select ${c} from stage_tag_subgroup_assignment
+      on conflict (tag_id) do update set ${upsertSet("tag_subgroup_assignment", ["tag_id"])}`,
+  },
+  {
     table: "ai_api_calls",
     // Log append-only: NÃO recortado por usuário de propósito (`on conflict do nothing`,
     // não sobrescreve nada, e filtrar perderia registro de custo legítimo).
@@ -418,6 +439,26 @@ const PLAN = [
     where: `work_id = any(${idArray})`,
     pre: `delete from public.work_tags where work_id = any(${idArray});`,
     insert: (c) => `insert into public.work_tags (${c}) select ${c} from stage_work_tags on conflict do nothing`,
+  },
+  {
+    // Gêneros da obra. Legado do `works.genres` (o `sync-constants` faz o backfill pra
+    // `work_tags`), mas VIVO: `server/queries/ranking.ts`, `similar-works.ts`, `works.ts`,
+    // `onboarding-deck.ts` e `adult-audit.ts` leem daqui. Ficava fora do push sem decisão
+    // registrada — medido em 2026-08-10: 6 pares presos no local, e produção ordenava e
+    // recomendava sem eles.
+    //
+    // CONJUNTO, pela mesma razão de `work_tags`: o local é a verdade sobre quais gêneros a
+    // obra tem, e um insert-if-missing deixaria pra trás gênero REMOVIDO na curadoria. Folha
+    // nas FKs (conferido: ninguém a referencia), então delete+insert não cascateia.
+    //
+    // ⚠️ Conferido antes de escolher delete+insert: **0 pares só na nuvem** (comparando o
+    // conjunto de `work_id/genre_id`, não o hash). O detalhe do `db:diff` NÃO responde isso
+    // sozinho — ele chaveia pela PRIMEIRA coluna do PK, e com PK composta as linhas da mesma
+    // obra colapsam: ele reportava "21 valor diferente" onde o conjunto real diverge em 6.
+    table: "work_genres",
+    where: `work_id = any(${idArray})`,
+    pre: `delete from public.work_genres where work_id = any(${idArray});`,
+    insert: (c) => `insert into public.work_genres (${c}) select ${c} from stage_work_genres on conflict do nothing`,
   },
   {
     // Idem: `is_primary`/`position` mudam na curadoria, então tem de ser conjunto, não união.
@@ -546,6 +587,46 @@ const PLAN = [
     where: `${soDoCurador()}`,
     insert: (c) => `insert into public.user_attribute_assessment (${c}) select ${c} from stage_user_attribute_assessment
       on conflict (user_id, work_id, attribute_slug) do update set ${upsertSet("user_attribute_assessment", ["user_id", "work_id", "attribute_slug"])}`,
+  },
+  {
+    // Pastas de favoritos. 🔴 ÚNICA tabela do PLAN em que o local NÃO era obviamente a
+    // verdade — e a decisão de que passa a ser é da Ana, tomada em 2026-08-10, não uma
+    // dedução deste script.
+    //
+    // Medido antes de decidir: os dois lados tinham DIVERGIDO. 5 pastas só no local (91
+    // itens), 1 só na nuvem ("Protagonista Marcante", 11 itens), uma pasta RENOMEADA
+    // (local "Iniciadas" = nuvem "Lendo") e "Ideal" com mais itens na nuvem (4 × 3). Isso
+    // acontece porque pasta de favorito é ação de LEITOR, feita em produção — a premissa
+    // "curadoria roda no local, logo o local é mais novo" não cobre este caso.
+    //
+    // Decisão: **substituição completa**, o local vence. Custo aceito e medido: 16 itens e
+    // 1 pasta apagados da nuvem. Recuperáveis no backup `.backups/<stamp>/work_lists.ndjson.gz`
+    // + `work_list_items.ndjson.gz` — SEMPRE faça o backup da NUVEM antes
+    // (`BACKUP_ENV_FILE=.env.supabase-cloud node scripts/backup-db.mjs`; sem o prefixo ele
+    // salva o LOCAL, que é o banco que não corre risco).
+    //
+    // ⚠️ Vem ANTES de `recommendation_runs`: a FK `recommendation_runs.list_id → work_lists`
+    // é ON DELETE SET NULL, então apagar pasta apaga a referência do run em silêncio. Hoje
+    // são 0 runs com `list_id` preenchido na nuvem (conferido), mas a ordem não pode depender
+    // disso continuar verdade.
+    table: "work_lists",
+    where: soDoCurador(),
+    pre: `delete from public.work_lists where ${soDoCurador()};`,
+    insert: (c) => `insert into public.work_lists (${c}) select ${c} from stage_work_lists on conflict do nothing`,
+  },
+  {
+    // Itens das pastas. Sem `user_id` — escopa pelo PAI, como o fechamento de FK que
+    // `recommendation_runs` já precisou fazer.
+    //
+    // ⚠️ O `pre` aqui é cinto E suspensório: a FK `work_list_items.list_id → work_lists` é
+    // ON DELETE CASCADE, então o delete do passo anterior JÁ levou os itens. Fica explícito
+    // porque, se um dia a estratégia de `work_lists` deixar de ser destrutiva, os itens
+    // órfãos da nuvem sobreviveriam calados.
+    table: "work_list_items",
+    where: `list_id in (select id from public.work_lists where ${soDoCurador()})`,
+    pre: `delete from public.work_list_items where list_id in
+            (select id from public.work_lists where ${soDoCurador()});`,
+    insert: (c) => `insert into public.work_list_items (${c}) select ${c} from stage_work_list_items on conflict do nothing`,
   },
   {
     // Histórico de recomendação do curador + o fechamento da FK de `calculated_scores`.
@@ -713,3 +794,13 @@ console.log(`  formula_config          mistura saída do modelo com CONFIGURAÇ�
 console.log(`                          atalhos de nota) — empurrar sobrescreveria seus ajustes`)
 console.log(`  external_source_health  operacional, se refaz na primeira busca`)
 console.log(`  genre_proposal          contadores derivados de work_genres, recontam sozinhos`)
+// As de baixo apareciam como divergentes no `db:diff` SEM decisão registrada, o que é pior
+// que ausência: gap sem registro parece esquecimento e vira rediscussão a cada sessão.
+// Decidido em 2026-08-10, com o número medido de cada uma.
+console.log(`  user_settings           papel, plano e saldo + contas de teste locais. Empurrar cria`)
+console.log(`                             conta fantasma e mexe no que guard_role_self_escalation protege`)
+console.log(`  prediction_snapshots /  histórico de análise gerado por rodadas LOCAIS (13,5k × 6,7k).`)
+console.log(`  prediction_ledger /        Refazível, e produção não fica errada sem ele`)
+console.log(`  pilot_taste_scores`)
+console.log(`  imports / import_rows   histórico do EVENTO de importação. As obras que ele criou já`)
+console.log(`                             viajam como catálogo; o registro em si é local`)
