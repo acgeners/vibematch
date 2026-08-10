@@ -1,4 +1,15 @@
+# ⚠️ O Docker NÃO lê o .gitignore. Tudo que está aqui já está lá também — e mesmo assim
+# subia pro builder a cada `flyctl deploy`, porque são arquivos DIFERENTES com sintaxe
+# parecida. Medido em 2026-08-10: contexto de 1,7 GB / 4.267 arquivos, ~228s só no passo
+# `load build context`, em toda build. Nenhum destes diretórios é lido pelo `npm run build`
+# nem copiado pro estágio `runner` (confira o Dockerfile: ele leva só `public/`,
+# `.next/standalone` e `.next/static`).
+
 node_modules
+# ⚠️ `node_modules` sozinho casa só a raiz. O sidecar comix-render tem os próprios 28 MB, e
+# ele nem é deployado por este Dockerfile — é serviço à parte (services/comix-render/).
+**/node_modules
+
 .next
 .git
 .env*
@@ -6,3 +17,13 @@ npm-debug.log
 .DS_Store
 Dockerfile
 docker-compose.yml
+
+# Dumps do banco (scripts/backup-db.mjs + db:pull). Cresce sem teto útil: 1,4 GB hoje.
+.backups/
+# Chrome do Playwright usado pelo sidecar. Já excluído do file tracing do Next
+# (outputFileTracingExcludes em next.config.ts) pelo mesmo motivo: 96 MB que ninguém executa.
+.cache/
+# Screenshots e material de apoio (59 MB).
+Imagens/
+# Saídas de experimento local (9,3 MB).
+.local-experiments/
