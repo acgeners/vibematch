@@ -116,6 +116,51 @@ npm run db:push-curation -- --target='postgresql://postgres:postgres@127.0.0.1:5
 Foi esse ensaio que pegou o `trg_works_updated_at` (BEFORE UPDATE, `NEW.updated_at = now()`):
 o destino reescreve a coluna, então ela **nunca** bate e não serve de invariante.
 
+## `db:diff`: o que ele enxerga, e o que ele NÃO enxerga
+
+```bash
+npm run db:diff                    # todas as tabelas, por hash de conteúdo
+node scripts/db-diff.mjs works     # detalhe por linha
+```
+
+🔴 **Ele nasceu CEGO e ninguém percebeu por seis dias** (PR #354 → corrigido na #356). A
+expressão de linha concatenava as colunas com `||` e embrulhava num `coalesce(…, '')`. Em SQL
+`NULL || qualquer_coisa = NULL`, então **uma** coluna nula anulava a linha inteira, que virava
+`md5('')` — o mesmo valor pra qualquer conteúdo. Como quase toda linha larga tem algum NULL, o
+hash da TABELA passava a depender só da **contagem**. Medido: `works` com apenas 5 colunas dava
+**981 linhas → 223 hashes distintos**. Três tabelas estavam sob falso "✓ idêntico": `works`,
+`tags`, `formula_config`.
+
+⚠️ **Quem denunciou foi a CONTRADIÇÃO entre duas ferramentas** — o `db:push-curation` acusou
+`works` divergente e o `db:diff` desmentiu. Quando duas discordam sobre o mesmo fato, uma está
+quebrada; descobrir qual sai mais barato do que adotar a resposta conveniente. Guardado por
+`tests/unit/orchestration/db-diff-hash-null-safe.test.ts`, que lê o SOURCE (o script roda
+`main()` na importação) e **reprova a versão antiga** — conferido, não suposto.
+
+**Divergência ≠ erro.** Retrato de 2026-08-10, logo depois de um push bem-sucedido: **28
+divergentes, 39 idênticas**. As 28 se classificam em seis grupos, e só o último precisa de
+decisão:
+
+| grupo | n | exemplos |
+|---|---|---|
+| carimbo que cada lado escreve sozinho | 2 | `works` (1 linha) · `tags` (só `adult_score_tier_reviewed_at`) |
+| linhas que **só existem na nuvem** — o push só sobe | 6 | `work_reviews` −104 · `ai_evaluation_scores` −9 · `curation_requests` |
+| per-user fora do escopo do curador — **por desenho** | 6 | `user_calculated_scores` +4838 · `user_work_state` +27 |
+| chave surrogate regenerada — **falso positivo** | 1 | `platform_ratings` (240 / 240 / **0**) |
+| fora do PLAN, exclusão documentada | 3 | `external_source_health` · `genre_proposal` · `formula_config` |
+| **fora do PLAN, sem decisão registrada** | 10 | `work_lists` +4 e `work_list_items` +120 · `tag_subgroup_assignment` +4 · `work_genres` +6 |
+
+🔴 **`trg_enforce_work_ai_eval_pending_reality` recusa valor empurrado, e está CERTO.** O push
+escreveu `works.ai_eval_status = 'pending'` e o destino devolveu `review_pending`, porque a
+nuvem tem uma avaliação concluída que o local não tem. É a mesma família do
+`trg_works_updated_at` — trigger de destino reescrevendo coluna empurrada —, mas aqui **a nuvem
+é a mais correta das duas**: se o push tivesse vencido, teria escondido uma revisão pendente
+real em produção. Não "conserte" empurrando mais forte.
+
+⚠️ **`adult_score_tier` bate exatamente nos dois lados** (28 explicit · 25 label · 2922 null) —
+a migration 182 está íntegra. Conferido em 2026-08-10, porque `tags` aparecer na lista de
+divergentes assusta: é catálogo e governa os pisos 18+.
+
 🔴 **Login no local não funciona de cara:** os usuários são Google-only (`encrypted_password`
 NULL) e o `config.toml` vem com todo provider externo `enabled = false` — dá
 `Unsupported provider`. O `/login` tem formulário de e-mail+senha, então crie uma senha só no
@@ -897,6 +942,26 @@ Corolário do file tracing: ele erra pro lado de **incluir demais**. Já puxou `
 `outputFileTracingExcludes: { "**/*": [".cache/**"] }` corta. Ao adicionar dependência pesada que só um
 sidecar usa, confira se ela vazou pro standalone (`du -sh .next/standalone`).
 
+🔴 **O `.dockerignore` NÃO herda o `.gitignore`, e o sintoma disso é um 401.** São arquivos
+separados com sintaxe parecida, e o Docker só lê o primeiro. Em 2026-08-10 o contexto do
+`flyctl deploy` era **1,7 GB / 4.267 arquivos** — `.backups/` (1,4 GB), `.cache/`, `Imagens/`,
+`.local-experiments/`, **todos já no `.gitignore`**:
+
+```
+load build context   471,5s     (74% dos 638,5s da build)
+```
+
+O deploy falhou com `ensure depot builder failed (status 401)` **depois de a build passar
+inteira** (19/19 etapas, 12 camadas enviadas): o arrendamento do builder do Depot venceu antes
+do fim e a retomada não autenticou. Parece credencial (`flyctl auth whoami` estava válido) e é
+tamanho. Depois de excluir: **1618 MB → 19 MB (87×)**, build de 638,5s → **108,1s**.
+
+⚠️ **`node_modules` sozinho casa só a RAIZ** — `services/comix-render/node_modules` (28 MB, de
+um sidecar que este Dockerfile nem deploya) passava batido. Precisa de `**/node_modules`.
+
+⚠️ Regra de leitura: se a saída mostra camadas sendo exportadas/enviadas, o problema **não** é
+credencial. Leia o `WARN Build context is …` no topo antes de mexer em auth.
+
 ## Preferência de UI que o servidor renderiza vai em COOKIE, nunca em localStorage
 
 O servidor **não enxerga** `localStorage`. Se o estado inicial de um componente é lido dele, o HTML
@@ -1241,8 +1306,23 @@ Medido em 2.393 avaliações (2026-08-09), share por faixa da rubrica:
 | `fantasy_nobility` | 3,4% | 7,4% | 76,2% | 13,0% | 1,42 |
 
 Isso custa duas vezes: **feature quase-constante não contribui nada pro Ridge** da Nota Prevista
-e não discrimina em filtro nem em ordenação do `/ranking`. Corrigido na **v25**, com quatro
-mecanismos distintos — a tentação é tratar como um problema só, e não é:
+e não discrimina em filtro nem em ordenação do `/ranking`.
+
+🔴 **NÃO ESTÁ CORRIGIDO. Esta seção dizia "Corrigido na v25" e era falso** — a v25 foi
+**revertida** no commit `0ab2ae7` e o prompt vigente é a **v26** (texto da v22 + a description
+da migration 181). Conferido em 2026-08-10 no source: a regra antiga do piso segue intacta em
+`service.ts` (*"Se há QUALQUER evidência … a nota deve ser ≥ 5"*) e nenhum dos quatro
+mecanismos abaixo está no `SYSTEM_PROMPT`.
+
+⚠️ **O que segue valendo é o DIAGNÓSTICO, não o conserto.** Os quatro mecanismos abaixo são a
+análise de por que cada critério colapsou — continuam corretos e continuam sendo o desenho a
+implementar. O que não existe é a implementação. E antes de tentar de novo, leia a seção
+**"Duas réguas para as notas de atributo"**: o ganho disponível (~0,05) está **abaixo do piso
+de detecção do gold set** (0,10 com n=30), que é exatamente por que as quatro tentativas
+anteriores não puderam ser validadas. O investimento que destrava é ampliar o gold, não
+escrever mais regra.
+
+Os quatro mecanismos, então — a tentação é tratar como um problema só, e não é:
 
 🔴 **1. O piso de 5 se sobrepunha à RUBRICA.** Ele existe contra dois vieses reais (baixar por
 execução fraca, baixar por silêncio das fontes) — mas estava vencendo até evidência POSITIVA de
@@ -1275,13 +1355,48 @@ trama" — e só 9 abaixo de 5. ⚠️ A régua que separa os dois casos: *"Mary
 "fria" são sobre COMO ele é e não rebaixam; "passivo" e "sem agência" são sobre O QUE ELE FAZ e
 rebaixam.* Sem essa distinção nomeada, consertar a agência reabre o viés de qualidade.
 
-⚠️ **A v25 pulou o v24 de propósito, e o motivo NÃO é um bug:** `ai_api_calls` tem 65 chamadas
+### Qual versão de prompt está VIVA (confira antes de acreditar em qualquer seção acima)
+
+`PROMPT_VERSION` em `service.ts` é a fonte; este bloco é resumo e **envelhece**. Estado em
+2026-08-10:
+
+| versão | o que trouxe | está no prompt? |
+|---|---|---|
+| v18 | saída verbosa (o outro lado do `CONCISE_OUTPUT`) | sim, no toggle |
+| v21 | citação de review por **consenso**, sem exigir IDs | sim |
+| v22 | piso/teto de `adult_content` por **procedência** | sim |
+| v23 | `couple_dynamics` como escala de **valência** (4 checagens, TOLERAR×QUERER) | ❌ **revertida** |
+| v24 | *(nunca foi versão de prompt — ver abaixo)* | — |
+| v25 | descompressão dos 4 critérios colapsados | ❌ **revertida** |
+| **v26** | **texto da v22 + a `description` da migration 181** | ✅ **VIVA** |
+
+🔴 **v26 não é "v25 + 1": é a v22 de volta.** A única diferença real em relação à v22 é que a
+`description` do `couple_dynamics` vem ampliada do banco (migration 181), e isso entra no prompt
+porque `buildCriteriaPromptSection()` cola a description acima das faixas. O número subiu em vez
+de voltar pra "v22" porque a versão entra na chave de cache (`canonicalInputHash`) e é gravada em
+`ai_evaluations.prompt_version` — reusar "v22" faria o cache servir avaliação da régua antiga
+como se fosse da nova, **e o rótulo no banco mentiria**. Guardado em
+`tests/unit/ai-evaluation/prompt-version-pin.test.ts`, que fixa o **sha256 do `SYSTEM_PROMPT`**
+à versão (inclusive as rubricas interpoladas, porque `sync-constants` mexer numa faixa também
+muda a régua).
+
+⚠️ **A v24 nunca foi versão de prompt, e isso NÃO é um bug:** `ai_api_calls` tem 65 chamadas
 de `ai_evaluation` rotuladas `v24` (2026-07-29) — **todas as 65 são obras do gold set**, da
 investigação de rubrica que comparou v23/v24 contra o julgamento da curadora. `ai_evaluations`
 gravou v22 nelas porque **versão de RUBRICA ≠ versão de PROMPT**: são dois eixos, e o log carrega
 o primeiro enquanto a tabela carrega o segundo. Reusar "v24" como versão de prompt misturaria os
-dois eixos em qualquer query por `prompt_version`. Guardado em
-`tests/unit/ai-evaluation/prompt-version-pin.test.ts`, junto do pin de hash.
+dois eixos em qualquer query por `prompt_version`.
+
+⚠️ **O que SOBREVIVEU da empreitada v23–v25** (não foi tudo revertido — só o prompt):
+
+| entregue | onde vive |
+|---|---|
+| `couple_dynamics` com description ampliada | **migration 181**, aplicada local + nuvem |
+| 18 tags de circunstância deixam de valer piso 9,0 | **migration 182**, aplicada local + nuvem |
+| legenda de faixas nos prompts de ranking e deep dive | `lib/ai-recommendation/prompts.ts` |
+| `realinharFaixaCitada` + backfill (149 → 23 incoerências) | `service.ts` + `scripts/backfill-faixa-citada.ts` |
+| remoção do clamp `enforceNeutralCoupleDynamicsWhenNoRomance` | `service.ts` |
+| harness de acurácia contra o gold | `scripts/gold-mae.ts` |
 
 🔴 **Antes de mexer em rubrica ou prompt de avaliação, leia `.gold/gold-FILLED.csv` e
 [[project_rubric_redesign_gold_verdict]].** São 30 obras que a curadora avaliou **às cegas** nos 9
@@ -1340,11 +1455,24 @@ posse/ciúme/yandere caía em 0-3 em **19,1%** dos casos contra **5,4%** quando 
 e `couple_dynamics` era **o critério mais instável dos 9** (amplitude média **1,52 pt** entre
 reavaliações da mesma obra; 36,7% variando ≥2 pt; pior caso 6,0).
 
-A **v23** (2026-08-09) isenta `couple_dynamics` das três meta-regras, e a regra própria passa a
+🔴 **O que vem abaixo foi ESCRITO, medido e depois REVERTIDO — não está no prompt.** A v23
+existiu, foi ao ar por horas e voltou no commit `0ab2ae7` junto com a v24/v25; o prompt vigente
+é a **v26**. Conferido no source em 2026-08-10: nenhuma das isenções, nem o TOLERAR×QUERER, nem
+a linha do tempo estão no `SYSTEM_PROMPT`. **O desenho abaixo permanece como a especificação a
+implementar** — foi discutido em detalhe com a curadora e as regras foram refinadas em duas
+rodadas de feedback dela; jogar fora custaria refazer isso. O que não existe é o código.
+
+A **v23** isentava `couple_dynamics` das três meta-regras, e a regra própria passava a
 exigir quatro checagens antes da nota: (a) consenso, (b) satisfação, (c) tom e **(d) linha do
 tempo** — em regressão/reencarnação/transmigração, o tóxico da vida ANTERIOR é contexto
 estabelecido e não conta (mesma lógica que `tragedy` já aplica ao background). São **496 obras**
 com tag desse tipo, 256 delas hoje com `couple_dynamics` ≤ 6.
+
+⚠️ **Por que reverteu, já que o diagnóstico estava certo:** o problema nunca foi a qualidade da
+regra — foi não existir instrumento capaz de dizer se ela melhorou alguma coisa. Ver
+**"Duas réguas para as notas de atributo"**: o piso de detecção do gold set é 0,10 e o ganho
+disponível é ~0,05. Sem isso resolvido, escrever regra nova só troca um viés conhecido por um
+desconhecido, ao custo de reavaliar o catálogo.
 
 ⚠️ **O sinal decisivo é a REAÇÃO do outro personagem, não a intensidade do comportamento.**
 Tag de posse descreve um lado; sem indício de como o outro reage, ela **perde peso** em vez de
@@ -1409,7 +1537,7 @@ cai de 1,52 para **0,45** — ou seja **~70% da instabilidade medida vem da rég
 modelo. Isso contamina toda comparação entre obras: ordenação do `/ranking`, os limiares
 `min_<slug>`/`max_<slug>` (em pontos), `ideal_min..ideal_max` do perfil, o Ridge e o `personal_fit`.
 
-The model is `claude-sonnet-5` (`SONNET_MODEL`), prompt version `v23` (toggled by `CONCISE_OUTPUT` in `service.ts`: `v23` concise output / `v18` verbose — flipping it falls back to the old caches; `v21` = concise + **consensus** review citation, `v22` = piso/teto de `adult_content` por procedência, `v23` = `couple_dynamics` como escala de valência), up to 2 attempts (4500 max tokens on **both** attempts; temperature 0.2 then 0). Opus 4.7 and Haiku 4.5 are supported as per-evaluation overrides (the A/B "Reavaliar com…" buttons); Opus 4.7 doesn't accept the `temperature` param. MAE values stored in `formula_config` reflect calibration runs against the current model+prompt; the hardcoded fallbacks in `calibration.ts` (1.27/0.92) are historical defaults from the original spreadsheet — not authoritative.
+The model is `claude-sonnet-5` (`SONNET_MODEL`), prompt version **`v26`** (toggled by `CONCISE_OUTPUT` in `service.ts`: `v26` concise output / `v18` verbose — flipping it falls back to the old caches; `v21` = concise + **consensus** review citation, `v22` = piso/teto de `adult_content` por procedência), up to 2 attempts (4500 max tokens on **both** attempts; temperature 0.2 then 0). Opus 4.7 and Haiku 4.5 are supported as per-evaluation overrides (the A/B "Reavaliar com…" buttons); Opus 4.7 doesn't accept the `temperature` param. MAE values stored in `formula_config` reflect calibration runs against the current model+prompt; the hardcoded fallbacks in `calibration.ts` (1.27/0.92) are historical defaults from the original spreadsheet — not authoritative.
 
 ## Importação (`/import`)
 
@@ -1531,9 +1659,10 @@ O catálogo **não tem política**: é lido/escrito pela service role, que ignor
 
 ## Tests
 
-`npm run test` → **2.386 passando (+24 pulados) em 221 arquivos** (medido em 2026-08-09; a
-linha já dizia "~1.780 em ~157" e depois "~2.353 em 218", as duas envelhecendo sem nada
-acusar — **re-meça antes de editar este número**). Vitest, jsdom, alias `@` → raiz. A
+`npm run test` → **2.408 passando (+24 pulados) em 225 arquivos** (220 passando + 5 pulados;
+medido em 2026-08-10 com `--maxWorkers=3`). A linha já disse "~1.780 em ~157", "~2.353 em 218"
+e "2.386 em 221", todas envelhecendo sem nada acusar — **re-meça antes de editar este número**,
+não incremente de cabeça. Vitest, jsdom, alias `@` → raiz. A
 descrição antiga ("só `tests/unit/calculations/`, sem teste de componente") estava desatualizada
 havia muito: hoje `calculations` é a 4ª maior pasta, atrás de `synopsis-interest` (36),
 `external` (30) e `orchestration` (19), e há `.test.tsx` de componente.

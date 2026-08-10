@@ -88,10 +88,30 @@ async function colunasComuns(tabela) {
   return [...aqui].filter((c) => la.has(c) && !VOLATEIS.has(c))
 }
 
+/**
+ * Expressão de linha, NULL-SAFE.
+ *
+ * 🔴 A 1ª versão era `col1::text || '|' || col2::text || …` embrulhada num `coalesce(…, '')`,
+ * e isso tornava o script INÚTIL sem nada acusar. Em SQL, `NULL || qualquer_coisa = NULL`:
+ * UMA coluna nula anula a concatenação da linha INTEIRA, o `coalesce` a transforma em `''` e
+ * a linha vira `md5('')` — o mesmo valor pra qualquer conteúdo. Como quase toda linha larga
+ * tem algum NULL, o hash da tabela passava a depender só da CONTAGEM.
+ *
+ * Medido em 2026-08-10, `works` com apenas 5 colunas: 981 linhas → **223 hashes distintos**
+ * (758 colapsaram). Com as 36 colunas reais o script dizia "✓ idêntico" enquanto `works`
+ * divergia de verdade — o push acusou a divergência e o diff a desmentiu.
+ *
+ * É a pior classe de bug do projeto: **um erro que produz resultado**. O `coalesce` por
+ * COLUNA é o que conserta; a sentinela e o separador são caracteres de controle porque
+ * `'\N'` e `'|'` podem aparecer no dado e provocariam colisão posicional.
+ */
+function rowExpr(cols) {
+  return cols.map((c) => `coalesce(t."${c}"::text, chr(1))`).join(" || chr(2) || ")
+}
+
 /** Hash do conteúdo inteiro da tabela, estável entre bancos (ordem explícita por chave). */
 function sqlHash(tabela, cols, chave) {
-  const lista = cols.map((c) => `t."${c}"::text`).join(" || '|' || ")
-  return `select count(*) as n, coalesce(md5(string_agg(md5(coalesce(${lista}, '')), '' order by ${chave})), '-') as h
+  return `select count(*) as n, coalesce(md5(string_agg(md5(${rowExpr(cols)}), '' order by ${chave})), '-') as h
           from public.${tabela} t`
 }
 
@@ -155,14 +175,22 @@ async function main() {
     // é caro e raramente é o que se quer numa varredura geral.
     if (!ALVOS.includes(d.t)) { console.log(`  (rode \`node scripts/db-diff.mjs ${d.t}\` pro detalhe por linha)`); continue }
 
-    const lista = d.cols.map((c) => `t."${c}"::text`).join(" || '|' || ")
-    const q = `select ${d.chave.split(", ")[0]} as k, md5(coalesce(${lista}, '')) as h from public.${d.t} t`
+    const q = `select ${d.chave.split(", ")[0]} as k, md5(${rowExpr(d.cols)}) as h from public.${d.t} t`
     const A = new Map(local(q).split("\n").filter(Boolean).map((l) => l.split("|")))
     const B = new Map((await nuvem(q)).map((r) => [String(r.k), r.h]))
     const soLocal = [...A.keys()].filter((k) => !B.has(k))
     const soNuvem = [...B.keys()].filter((k) => !A.has(k))
     const difValor = [...A.keys()].filter((k) => B.has(k) && B.get(k) !== A.get(k))
     console.log(`  só no local: ${soLocal.length} · só na nuvem: ${soNuvem.length} · valor diferente: ${difValor.length}`)
+
+    // 🔴 Sentinela contra o bug de COLAPSO que este script já teve (ver `rowExpr`): se muitas
+    // linhas distintas compartilham o mesmo hash, a comparação está cega e o "✓ idêntico" das
+    // outras tabelas não vale nada. É barato — os hashes já estão em memória.
+    const distintos = new Set(A.values()).size
+    if (A.size >= 20 && distintos <= A.size / 2) {
+      console.log(`  🔴 ${A.size} linhas → apenas ${distintos} hashes distintos. A expressão de`)
+      console.log(`     linha está COLAPSANDO e o resultado deste script não é confiável.`)
+    }
 
     // 🔴 Assinatura de CHAVE REGENERADA, não de dado divergente: N só de um lado, N só do
     // outro, ZERO com valor diferente. Acontece em tabela delete-e-reinsere, onde a linha
