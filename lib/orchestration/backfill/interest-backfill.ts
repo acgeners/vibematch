@@ -26,7 +26,7 @@ import { MODEL as PREDICT_MODEL } from "@/lib/ai-evaluation/synopsis-quality-pre
 import { resolveInterestPromptVersion } from "@/lib/ai-evaluation/compiled-preferences"
 import { estimateStep } from "../cost"
 import { makeUsdScale } from "@/lib/format/money"
-import { getJobStore, type JobStore } from "../jobs"
+import { getJobStore, ABANDONED_JOB_THRESHOLD_MS, type JobStore } from "../jobs"
 import { isProductionBuildPhase } from "../integrations/build-phase"
 import {
   SYNOPSIS_INTEREST_SCHEMA_VERSION,
@@ -78,8 +78,10 @@ export type BackfillScope =
 export const PENDING_PROFILE_REGEN = "PENDING_PROFILE_REGEN"
 
 /** Idade (ms) acima da qual um job queued/running é SINALIZADO como possivelmente
- *  abandonado (apenas aviso — NÃO muda status; sem reaper nesta etapa). */
-export const ABANDONED_JOB_THRESHOLD_MS = 30 * 60 * 1000
+ *  abandonado. O dono do número é `../jobs` — é lá que ele também DECIDE a retomada,
+ *  e um limite só para o aviso faria o dry-run e o executor discordarem sobre o que
+ *  é abandono. Reexportado porque a CLI e os testes já o importam daqui. */
+export { ABANDONED_JOB_THRESHOLD_MS }
 
 export interface InterestBackfillPlanItem {
   workId: string
@@ -395,7 +397,14 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
     }
   }
   if (abandonedJobs.length > 0) {
-    warnings.push(`${abandonedJobs.length} job(s) queued/running há ≥${Math.round(ABANDONED_JOB_THRESHOLD_MS / 60000)}min — possivelmente abandonados (NÃO recuperados automaticamente; ver procedimento no PLANO).`)
+    // ⚠️ `running` velho passou a ser RETOMADO pelo `claim()` (mesmo limite). `queued` velho
+    // não: ninguém o pegou para executar, e requeue não conserta isso. Por isso o aviso
+    // continua — mudou o que ele significa, não o fato de haver algo torto.
+    const presos = abandonedJobs.filter((j) => j.status === "queued").length
+    warnings.push(
+      `${abandonedJobs.length} job(s) queued/running há ≥${Math.round(ABANDONED_JOB_THRESHOLD_MS / 60000)}min — possivelmente abandonados. ` +
+        `Os em 'running' são retomados na próxima tentativa; ${presos} em 'queued' NÃO (ver procedimento no PLANO).`,
+    )
   }
 
   // ---- Classificação por obra + itens a prever (somente no escopo) ----

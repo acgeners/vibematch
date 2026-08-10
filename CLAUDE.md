@@ -1998,10 +1998,10 @@ O catálogo **não tem política**: é lido/escrito pela service role, que ignor
 
 ## Tests
 
-`npm run test` → **2.428 passando (+24 pulados) em 228 arquivos** (223 passando + 5 pulados;
-medido em 2026-08-10, 25,0s). A linha já disse "~1.780 em ~157", "~2.353 em 218", "2.386 em
-221" e "2.408 em 225", todas envelhecendo sem nada acusar — **re-meça antes de editar este
-número**, não incremente de cabeça. Vitest, jsdom, alias `@` → raiz. A
+`npm run test` → **2.433 passando (+24 pulados) em 228 arquivos** (223 passando + 5 pulados;
+medido em 2026-08-10). A linha já disse "~1.780 em ~157", "~2.353 em 218", "2.386 em
+221", "2.408 em 225" e "2.428 em 228", todas envelhecendo sem nada acusar — **re-meça antes de
+editar este número**, não incremente de cabeça. Vitest, jsdom, alias `@` → raiz. A
 descrição antiga ("só `tests/unit/calculations/`, sem teste de componente") estava desatualizada
 havia muito: hoje `calculations` é a 4ª maior pasta, atrás de `synopsis-interest` (36),
 `external` (30) e `orchestration` (19), e há `.test.tsx` de componente.

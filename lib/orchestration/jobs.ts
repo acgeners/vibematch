@@ -59,6 +59,62 @@ export type ClaimResult =
   | { kind: "claimed"; job: JobRecord; resumed: boolean }
   | { kind: "active"; job: JobRecord }
 
+/**
+ * Idade acima da qual um job `running` é dado como ABANDONADO e volta a ser
+ * reivindicável.
+ *
+ * 🔴 Sem isto, `running` não tem saída: `claim()` responde `active` e a chave de dedup
+ * bloqueia a obra PARA SEMPRE. Medido em 2026-08-10 na nuvem: 3 digests presos desde
+ * 15–20/07, 2 obras sem digest até hoje, e toda nova tentativa (UI ou script) voltando
+ * sem erro. A assinatura de sempre neste projeto — funciona, não avisa, e não faz nada.
+ *
+ * ⚠️ 30 min é o mesmo número que o dry-run do backfill já usava para SINALIZAR job
+ * abandonado; ele mora aqui, e não lá, porque quem decide o ciclo de vida é o store.
+ * Uma 2ª cópia é como o aviso e a retomada passam a discordar sobre o que é abandono
+ * (mesma armadilha do `LOW_BALANCE_USD` e do `STRONG_TAG_WEIGHT`).
+ *
+ * ⚠️ A folga é medida, não chutada: a ação mais lenta do projeto é o perfil de gosto,
+ * p50 33,4s (ranking p90 47,9s). 30 min é ~37× isso. O preço de errar para baixo é
+ * rodar uma chamada paga 2×; para cima, é a obra ficar travada mais tempo.
+ */
+export const ABANDONED_JOB_THRESHOLD_MS = 30 * 60 * 1000
+
+/** `running` sem sinal de vida há ≥ `ABANDONED_JOB_THRESHOLD_MS`. */
+export function isAbandonedRunning(
+  job: Pick<JobRecord, "status" | "startedAt" | "createdAt">,
+  nowMs = Date.now(),
+): boolean {
+  if (job.status !== "running") return false
+  // `started_at` é o carimbo certo (quem transiciona é `markRunning`); `created_at` é a
+  // rede — é `not null` no schema, então o `true` final é inalcançável na prática e
+  // existe só para não devolver "vivo" a uma linha sem prova nenhuma de vida.
+  const marco = job.startedAt ?? job.createdAt
+  if (!marco) return true
+  const t = Date.parse(marco)
+  return Number.isFinite(t) ? nowMs - t >= ABANDONED_JOB_THRESHOLD_MS : true
+}
+
+/** Job em voo de verdade — `queued`, ou `running` que ainda dá sinal de vida. */
+function estaAtivo(job: JobRecord): boolean {
+  return job.status === "queued" || (job.status === "running" && !isAbandonedRunning(job))
+}
+
+/** Reivindicável reusando a MESMA linha: falhou, ou ficou preso em `running`. */
+function podeRetomar(job: JobRecord): boolean {
+  return job.status === "failed" || (job.status === "running" && isAbandonedRunning(job))
+}
+
+/**
+ * Retomar `running` em silêncio troca um bug calado por outro. Este log é a ÚNICA
+ * medição de com que frequência job morre no meio: `grep '\[jobs] retomando'`.
+ */
+function avisaRetomada(job: JobRecord): void {
+  console.warn(
+    `[jobs] retomando ${job.action} (${job.id}) preso em 'running' desde ` +
+      `${job.startedAt ?? job.createdAt} — sem sinal de vida há ≥${Math.round(ABANDONED_JOB_THRESHOLD_MS / 60000)}min.`,
+  )
+}
+
 export interface JobStore {
   /** Reivindica a execução. `active` = já há um job em voo com o mesmo dedup_key. */
   claim(input: ClaimInput): Promise<ClaimResult>
@@ -99,11 +155,12 @@ export class InMemoryJobStore implements JobStore {
 
   async claim(input: ClaimInput): Promise<ClaimResult> {
     const existing = this.latest(input.dedupKey)
-    if (existing && (existing.status === "queued" || existing.status === "running")) {
+    if (existing && estaAtivo(existing)) {
       return { kind: "active", job: existing }
     }
-    if (existing && existing.status === "failed") {
+    if (existing && podeRetomar(existing)) {
       // Retomada: reusa a MESMA linha e incrementa attempts.
+      if (existing.status === "running") avisaRetomada(existing)
       existing.status = "queued"
       existing.attempts += 1
       existing.lastError = null
@@ -200,6 +257,12 @@ export class SupabaseJobStore implements JobStore {
     return data ? mapRow(data as Record<string, unknown>) : null
   }
 
+  /**
+   * ⚠️ De propósito NÃO filtra por idade, ao contrário de `estaAtivo`. Isto só é chamado
+   * quando o insert bateu no índice único parcial: ali, dizer "já há um job em voo" é
+   * melhor que estourar — e a chamada seguinte, que passa por `latest()`, retoma o
+   * abandonado do jeito certo.
+   */
   private async activeFor(dedupKey: string): Promise<JobRecord | null> {
     const { data } = await this.supabase
       .from(TABLE)
@@ -215,13 +278,18 @@ export class SupabaseJobStore implements JobStore {
   async claim(input: ClaimInput): Promise<ClaimResult> {
     const existing = await this.latest(input.dedupKey)
 
-    if (existing && (existing.status === "queued" || existing.status === "running")) {
+    if (existing && estaAtivo(existing)) {
       return { kind: "active", job: existing }
     }
 
-    // Retomada de um job FALHO: reusa a linha, incrementa attempts, requeue.
-    // O índice único parcial garante que só uma transição failed→queued vence.
-    if (existing && existing.status === "failed") {
+    // Retomada de um job FALHO — ou de um `running` ABANDONADO (deploy, crash, timeout
+    // de LLM deixaram a linha em voo). Reusa a linha, incrementa attempts, requeue.
+    // ⚠️ O `.eq("status", existing.status)` é o compare-and-swap que segura a corrida:
+    // dois processos veem o mesmo status, mas o 2º UPDATE espera o lock e reavalia o
+    // WHERE contra a versão já commitada — casa 0 linhas e cai no `activeFor` abaixo.
+    // Trocá-lo por um update sem guarda é como dois executores retomam o mesmo job.
+    if (existing && podeRetomar(existing)) {
+      if (existing.status === "running") avisaRetomada(existing)
       const { data: reclaimed } = await this.supabase
         .from(TABLE)
         .update({
@@ -235,7 +303,7 @@ export class SupabaseJobStore implements JobStore {
           payload: input.payload ?? existing.payload ?? null,
         })
         .eq("id", existing.id)
-        .eq("status", "failed")
+        .eq("status", existing.status)
         .select("*")
         .maybeSingle()
       if (reclaimed) return { kind: "claimed", job: mapRow(reclaimed as Record<string, unknown>), resumed: true }
