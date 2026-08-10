@@ -163,6 +163,18 @@ async function main() {
     const soNuvem = [...B.keys()].filter((k) => !A.has(k))
     const difValor = [...A.keys()].filter((k) => B.has(k) && B.get(k) !== A.get(k))
     console.log(`  só no local: ${soLocal.length} · só na nuvem: ${soNuvem.length} · valor diferente: ${difValor.length}`)
+
+    // 🔴 Assinatura de CHAVE REGENERADA, não de dado divergente: N só de um lado, N só do
+    // outro, ZERO com valor diferente. Acontece em tabela delete-e-reinsere, onde a linha
+    // volta com `id` novo — `platform_ratings` é assim (ver CLAUDE.md). Medido em
+    // 2026-08-10: 240/240/0 nela, e o conteúdo batia 100% pela chave natural. Sem este
+    // aviso o script acusa divergência eterna numa tabela perfeitamente sincronizada.
+    if (soLocal.length > 0 && soLocal.length === soNuvem.length && difValor.length === 0) {
+      console.log(`  ⚠️ mesma quantidade dos dois lados e ZERO valor diferente — assinatura de`)
+      console.log(`     CHAVE SURROGATE REGENERADA (delete-e-reinsere), não de dado divergente.`)
+      console.log(`     Compare pela chave NATURAL antes de concluir que há deriva.`)
+    }
+
     for (const k of soNuvem.slice(0, 5)) console.log(`    só na nuvem: ${k}`)
     for (const k of difValor.slice(0, 5)) console.log(`    valor difere: ${k}`)
   }

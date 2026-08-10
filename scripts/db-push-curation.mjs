@@ -267,8 +267,13 @@ const upsertSet = (table, keys) =>
 //
 // Medido em 2026-08-10, antes do filtro: o local tinha 7 donos em `user_calculated_scores`
 // e 3 em `user_work_state`; a nuvem, 2 e 1. O push levaria 5 contas fantasma (incluindo
-// uma chamada "Aceite Teste") e criaria 2 linhas de estado de leitura para um leitor real
-// que tem ZERO na nuvem — ou seja, inventaria histórico de leitura de outra pessoa.
+// uma chamada "Aceite Teste") pra dentro da nuvem, órfãs pra sempre.
+//
+// ⚠️ CORREÇÃO do que este comentário dizia antes: eu havia escrito que o push sobrescreveria
+// "o dado do leitor REAL". Não há terceiro — as DUAS contas da nuvem são da dona do projeto
+// (a segunda tem papel `leitor` e serve pra conferir a experiência de leitor). Foi inferência
+// a partir do papel no banco, não medição. O recorte continua certo, mas como PREPARAÇÃO
+// pra quando houver usuário de verdade, não como remediação de dano ativo.
 //
 // ⚠️ O comentário de `user_work_state` dizia "entra porque a nuvem está congelada: não há
 // versão concorrente pra perder". Essa premissa EXPIROU — há leitor com login em 05/08.
@@ -380,10 +385,24 @@ const PLAN = [
     insert: (c) => `insert into public.ai_evaluations (${c}) select ${c} from stage_ai_evaluations on conflict do nothing`,
   },
   {
+    // 🔴 UPSERT por `id`, não `do nothing`. Com `do nothing`, EDIÇÃO IN-PLACE de linha
+    // preexistente nunca propaga: o id já existe no destino (veio do mesmo `db:pull`), então
+    // o insert é pulado em silêncio. Medido em 2026-08-10: o backfill de realinhamento de
+    // faixa reescreveu 126 justificativas aqui e a nuvem continuou com as dela — 126 × 45,
+    // dois textos diferentes pra mesma avaliação.
+    //
+    // O efeito era uma assimetria feia: `category_scores` (o NÚMERO) é upsert e propagava,
+    // `ai_evaluation_scores` (o TEXTO ao lado) não. Dava pra ficar com nota certa e
+    // justificativa velha na mesma ficha.
+    //
+    // ⚠️ Local vence, como no resto do PLAN. É seguro porque esta tabela é escrita pelo
+    // pipeline de avaliação, não por leitor — e o recorte de `where` já limita às obras
+    // curadas nesta rodada.
     table: "ai_evaluation_scores",
     where: `ai_evaluation_id in (select id from public.ai_evaluations where work_id = any(${idArray}))`,
     insert: (c) =>
-      `insert into public.ai_evaluation_scores (${c}) select ${c} from stage_ai_evaluation_scores on conflict do nothing`,
+      `insert into public.ai_evaluation_scores (${c}) select ${c} from stage_ai_evaluation_scores
+       on conflict (id) do update set ${upsertSet("ai_evaluation_scores", ["id"])}`,
   },
   {
     table: "category_scores",
@@ -466,6 +485,17 @@ const PLAN = [
       `insert into public.work_external_reviews_manual (${c}) select ${c} from stage_work_external_reviews_manual on conflict do nothing`,
   },
   {
+    // Embedding da obra. NÃO é per-usuário (não tem user_id) — é catálogo, recortado por obra.
+    // Entra porque é DERIVADO de entrada que só existe no local: medido em 2026-08-10, 183 das
+    // 978 obras tinham `input_hash` diferente entre os bancos, 183 de 183 por sinopse/tags
+    // editadas aqui. Deixar fora significa "Obras parecidas" e busca vetorial rodando em
+    // produção sobre o vetor de um texto que já mudou.
+    table: "work_embeddings",
+    where: `work_id = any(${idArray})`,
+    insert: (c) => `insert into public.work_embeddings (${c}) select ${c} from stage_work_embeddings
+      on conflict (work_id) do update set ${upsertSet("work_embeddings", ["work_id"])}`,
+  },
+  {
     // Ledger de custo por job — é o que o /ai-usage soma. Sem ele a nuvem não mostra o que
     // esta curadoria gastou.
     table: "work_processing_jobs",
@@ -485,6 +515,37 @@ const PLAN = [
     where: `work_id = any(${idArray}) and ${soDoCurador()}`,
     insert: (c) => `insert into public.user_work_state (${c}) select ${c} from stage_user_work_state
       on conflict (user_id, work_id) do update set ${upsertSet("user_work_state", ["user_id", "work_id"])}`,
+  },
+  {
+    // ── As três abaixo são ENTRADA do recalc, não saída ─────────────────────────────────
+    // O recalc lê `attribute_bias` e `user_tag_preferences` do DONO (ver CLAUDE.md). Fora do
+    // push, elas derivam — e um recalc rodado na nuvem produz notas DIFERENTES das daqui, sem
+    // erro e sem log. Entram por isso, não porque estejam quebradas hoje.
+    //
+    // ⚠️ Medido em 2026-08-10, RECORTADO ao curador: `attribute_bias` 9=9 e
+    // `user_tag_preferences` 158=158 com hash IDÊNTICO — já estavam em dia. Só
+    // `user_attribute_assessment` tinha deriva real (1377 local × 1314 nuvem, 63 linhas).
+    // A divergência bruta que motivou a investigação (18×9, 164×158) era quase toda linha de
+    // OUTROS usuários no local, não drift do curador. Contagem bruta engana; compare o
+    // conteúdo já recortado.
+    table: "attribute_bias",
+    where: `${soDoCurador()}`,
+    insert: (c) => `insert into public.attribute_bias (${c}) select ${c} from stage_attribute_bias
+      on conflict (user_id, attribute_slug) do update set ${upsertSet("attribute_bias", ["user_id", "attribute_slug"])}`,
+  },
+  {
+    table: "user_tag_preferences",
+    where: `${soDoCurador()}`,
+    // CONJUNTO: o local é a verdade sobre o que o curador declarou. Insert-if-missing deixaria
+    // pra trás preferência REMOVIDA — mesma razão do delete+insert de `work_tags`.
+    pre: `delete from public.user_tag_preferences where ${soDoCurador()};`,
+    insert: (c) => `insert into public.user_tag_preferences (${c}) select ${c} from stage_user_tag_preferences on conflict do nothing`,
+  },
+  {
+    table: "user_attribute_assessment",
+    where: `${soDoCurador()}`,
+    insert: (c) => `insert into public.user_attribute_assessment (${c}) select ${c} from stage_user_attribute_assessment
+      on conflict (user_id, work_id, attribute_slug) do update set ${upsertSet("user_attribute_assessment", ["user_id", "work_id", "attribute_slug"])}`,
   },
   {
     // Histórico de recomendação do curador + o fechamento da FK de `calculated_scores`.
