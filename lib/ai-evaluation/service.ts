@@ -4,6 +4,7 @@ import type Anthropic from "@anthropic-ai/sdk"
 import { z } from "zod"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { CRITERIA_INFO, CRITERIA_RUBRICS } from "@/lib/constants/criteria"
+import { bandForScore } from "@/lib/criteria/justification"
 import { normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { SONNET_MODEL } from "@/lib/ai/models"
@@ -143,15 +144,32 @@ export const MODEL = SONNET_MODEL
 // `EVAL_OUTPUT_SCHEMA_VERSION` entra na chave de cache e mudou para "eval-2" em
 // jul/2026. Para reverter de verdade é preciso restaurar o texto do prompt.
 export const CONCISE_OUTPUT: boolean = true
-// v22 (2026-07-24): adult_content passou a ter piso E TETO por PROCEDÊNCIA do
-// sinal (ver lib/ai-evaluation/adult-content-rules.ts). Marcador de EDIÇÃO
-// ("[R19 disponível]" vindo de boilerplate da fonte) deixou de gerar piso — era a
-// origem de 48% dos pisos aplicados, e produzia notas que contradiziam a própria
-// justificativa. Cena explícita, em qualquer quantidade, agora exige 9-10; a tag
-// "R15 but Based on a R19 Novel" virou TETO.
-// (v21 2026-07-07: consenso das reviews, proibido citar review individual ou ID.)
-// (v20 2026-06-27: citação genérica de reviews, sem exigir IDs nem auditoria.)
-export const PROMPT_VERSION = CONCISE_OUTPUT ? "v22" : "v18"
+// v26 (2026-08-10): REVERSÃO do texto de prompt das v23/v24/v25 — volta ao SYSTEM_PROMPT
+// da v22. Não porque o gold provou que a v25 era pior (aquele harness estava furado: faltava
+// `mergeFreshWithPersistedReviews`, e o sidecar estava saturado, então o modelo rodou com
+// evidência de menos), mas porque MEDIMOS que mudança de prompt não é validável aqui:
+// bootstrap do gold (n=30) dá IC95% [0,68 – 0,88] no MAE, ou seja piso de detecção ~0,10,
+// e o ganho realista de uma reescrita de prompt é ~0,05. Manter no caminho de notas algo
+// que ninguém consegue medir é exatamente como o catálogo virou 9 réguas conviventes.
+//
+// Quatro tentativas de melhorar acurácia pelo prompt COMPARTILHADO, quatro derrotas:
+// v23 0,87 · v24-pesada 0,82 · v24-cirúrgica 0,89 · v25 (medição inválida) — contra 0,77
+// do catálogo. A causa é ENTANGLEMENT: as 9 notas saem de UMA leitura, então mexer num
+// critério recalibra o modelo inteiro. Ver [[project_rubric_redesign_gold_verdict]].
+//
+// ⚠️ NÃO é v22: o texto do prompt é o da v22, mas a seção de critérios é interpolada de
+// `CRITERIA_INFO`/`CRITERIA_RUBRICS`, e a migration 181 mudou a `description` de
+// couple_dynamics. Combinação inédita ⇒ versão nova. Rotular de "v22" reusaria caches de
+// uma régua diferente e faria `ai_evaluations.prompt_version` mentir.
+//
+// ⚠️ O que NÃO voltou, de propósito: `enforceNeutralCoupleDynamicsWhenNoRomance`. Ele
+// forçava couple_dynamics = 5,0 quando romance ≤ 3, e isso contradiz a rubrica ampliada
+// (95226f7, julho) E a description da 181 — que mandam avaliar o vínculo central mesmo sem
+// casal. Restaurá-lo seria mandar o modelo avaliar família/equipe e depois sobrescrever a
+// resposta dele com 5,0: incoerência por construção, a classe de defeito que estamos
+// removendo. Afeta 18 obras (romance ≤ 3).
+//
+export const PROMPT_VERSION = CONCISE_OUTPUT ? "v26" : "v18"
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
@@ -215,7 +233,10 @@ function buildCriteriaPromptSection(): string {
   }).join("\n\n")
 }
 
-const SYSTEM_PROMPT = `Você é um especialista em mangá, manhwa e manhua. Sua tarefa é avaliar UMA obra específica com base em rubricas rigorosas.
+/** Exportado só para teste: as invariantes são verificadas contra o texto FINAL (já com
+ *  `buildCriteriaPromptSection()` interpolada), e a versão fica atrelada ao hash dele —
+ *  ver `tests/unit/ai-evaluation/prompt-version-pin.test.ts`. */
+export const SYSTEM_PROMPT = `Você é um especialista em mangá, manhwa e manhua. Sua tarefa é avaliar UMA obra específica com base em rubricas rigorosas.
 
 REGRAS DE FIDELIDADE AO TÍTULO (críticas):
 - A obra a ser avaliada é EXATAMENTE a fornecida em "Título" e "Sinopse" pelo usuário. Trate-as como verdade absoluta.
@@ -881,6 +902,45 @@ function adultBoundsForContext(req: AiEvaluationRequest) {
   }
 }
 
+/**
+ * Realinha a faixa citada na prosa com a nota que o clamp deixou.
+ *
+ * 🔴 O piso/teto de adult_content muda o NÚMERO e não reescrevia o TEXTO, então a
+ * justificativa seguia abrindo com "Faixa 4-6 (Suggestive)" enquanto a nota já era 7,0.
+ * Quem lê a ficha vê texto e número discordando — foi o caso que abriu a auditoria de
+ * 2026-08-09. Medido no catálogo: **103 das 149** incoerências "faixa citada ≠ faixa da
+ * nota" estão em adult_content, praticamente todas com essa origem.
+ *
+ * ⚠️ NÃO reescreve o argumento do modelo, só o rótulo da faixa — e deixa explícito que o
+ * número veio do limite obrigatório, não da análise. Apagar a conclusão original seria
+ * pior: ela é a evidência de que o piso e a evidência textual discordam, e é isso que faz
+ * a curadora olhar o caso.
+ */
+export function realinharFaixaCitada(
+  justificativa: string,
+  nota: number,
+  /** Causa do desalinhamento. Só passe `"limite"` quando estiver PROVADO que o piso/teto
+   *  moveu a nota — no backfill isso é a impressão digital "nota exata num piso, prosa
+   *  abaixo". Quando a causa é desconhecida (o modelo se contradisse sozinho), o rótulo
+   *  neutro é o honesto: afirmar um motivo não verificado é o defeito que estamos tirando
+   *  da tela, com outra roupa. */
+  causa: "limite" | "desconhecida" = "limite",
+): string {
+  // ⚠️ Consome também o RÓTULO da faixa antiga — "Faixa 4-6 (Suggestive)". Trocar só o
+  // número deixaria "Faixa 7-8 (…) (Suggestive)", e "Suggestive" é o rótulo de 4-6: a
+  // correção criaria uma incoerência nova. Pego no dry-run do backfill.
+  const m = justificativa.match(/Faixa\s+(\d+-\d+)(\s*\([^)]*\))?/i)
+  if (!m) return justificativa
+  const nova = bandForScore(nota)
+  if (m[1] === nova) return justificativa
+  const prefixo = causa === "limite" ? "definida pelo limite obrigatório; " : ""
+  const rotuloAntigo = m[2] ? ` ${m[2].trim()}` : ""
+  return justificativa.replace(
+    m[0],
+    `Faixa ${nova} (${prefixo}a análise abaixo conclui faixa ${m[1]}${rotuloAntigo})`,
+  )
+}
+
 function enforceAdultContentBounds(
   response: AiEvaluationResponse,
   req: AiEvaluationRequest
@@ -908,13 +968,13 @@ function enforceAdultContentBounds(
     if (clamped === score.suggestedScore) return score
     applied = true
     const reason = bounds.reasons.join(" ")
+    const comRazao = score.justification.includes(reason)
+      ? score.justification
+      : `${score.justification} ${reason}`
     return {
       ...score,
       suggestedScore: clamped,
-      // Não duplica o texto quando o modelo já explicou o mesmo limite.
-      justification: score.justification.includes(reason)
-        ? score.justification
-        : `${score.justification} ${reason}`,
+      justification: realinharFaixaCitada(comRazao, clamped),
     }
   })
 
@@ -937,40 +997,25 @@ function enforceAdultContentBounds(
 }
 
 /**
- * Quando romance é baixo (≤ 3), couple_dynamics é forçado a 5.0 — tanto pra
- * cima (modelo deu nota baixa por "ausência de casal") quanto pra baixo (modelo
- * alucinou dinâmica saudável sem evidência de casal). 5.0 sinaliza "não aplicável".
+ * `enforceNeutralCoupleDynamicsWhenNoRomance` foi REMOVIDO em 2026-08-09 (v23).
+ *
+ * Ele forçava `couple_dynamics = 5.0` sempre que `romance ≤ 3`, com a justificativa
+ * "critério não é aplicável". A premissa — "sem romance, não há dinâmica a avaliar" —
+ * morreu quando o critério foi renomeado "Dinâmica do Casal" → "Dinâmica entre
+ * Protagonistas" (95226f7, 2026-07-27) e a rubrica passou a falar de VÍNCULOS
+ * CENTRAIS: numa obra sem romance os vínculos continuam existindo (família, irmãos,
+ * mestre/discípulo, equipe, rivais) e a rubrica sabe pontuá-los.
+ *
+ * Medido antes da remoção: das 18 obras com `romance ≤ 3`, **17 (94,4%)** estavam
+ * travadas em 5,0 — o clamp apagava o critério justamente no público que a ampliação
+ * queria atender.
+ *
+ * ⚠️ O guard-rail não sumiu, MUDOU DE LUGAR: quem decide "não aplicável" agora é o
+ * prompt (`REGRA PARA COUPLE_DYNAMICS`), que reserva o 5 pra ausência de VÍNCULO
+ * CENTRAL avaliável — não pra ausência de romance. Se o modelo voltar a devolver
+ * 0-3 alegando "não há casal", o conserto é a instrução, não um clamp derivado de
+ * outro critério.
  */
-function enforceNeutralCoupleDynamicsWhenNoRomance(
-  response: AiEvaluationResponse
-): AiEvaluationResponse {
-  const romance = response.scores.find((score) => score.criterionSlug === "romance")
-  const couple = response.scores.find((score) => score.criterionSlug === "couple_dynamics")
-
-  if (!romance || !couple || romance.suggestedScore > 3 || couple.suggestedScore === 5) {
-    return response
-  }
-
-  const direction = couple.suggestedScore < 5 ? "elevada" : "rebaixada"
-
-  return {
-    ...response,
-    scores: response.scores.map((score) => {
-      if (score.criterionSlug !== "couple_dynamics") return score
-      return {
-        ...score,
-        suggestedScore: 5,
-        justification: score.justification.includes("critério não é aplicável")
-          ? score.justification
-          : `${score.justification} Como a avaliação de romance indica ausência/irrelevância de casal, couple_dynamics foi ${direction} para 5.0 (não aplicável).`,
-      }
-    }),
-    rawResponse: {
-      ...rawObject(response.rawResponse),
-      neutralCoupleDynamicsRuleApplied: true,
-    },
-  }
-}
 
 const SYNOPSIS_MIN_CHARS = 50
 const LOW_EVIDENCE_CONFIDENCE_CAP = 0.55
@@ -1126,9 +1171,7 @@ function postProcessEvaluation(
   return attachEvaluationContext(
     enforceAuditableReviewUsage(
       enforceConfidenceCapWhenLowEvidence(
-        enforceNeutralCoupleDynamicsWhenNoRomance(
-          enforceAdultContentBounds(response, req)
-        ),
+        enforceAdultContentBounds(response, req),
         req
       ),
       prepared

@@ -1088,6 +1088,33 @@ Post-processing applied to every evaluation (in `service.ts`):
   **174**, 2026-08-02): antes eram três `Set`s hardcoded em `lib/ai-evaluation/adult-content-rules.ts`,
   enquanto o FLAG `works.is_adult` já lia `tags.adult_indicator[_strong]` do banco — as duas fontes
   divergiam, e tag nova classificada pelo enricher afetava o flag mas nunca o piso da nota.
+
+🔴 **`explicit` afirma que a CENA é mostrada — não que haja sexo no enredo.** A lista migrada
+na 174 misturou atos gráficos (Cunnilingus, Anal Sex) com tags de **circunstância**: que vez
+(`First-Time Intercourse`, 83 obras), em que estado (`Drunken Intercourse`), onde
+(`Outdoor/Public/School/Office/Toilet`), posição (`Doggy Style`, `Missionary Position`) e até
+`Clothed Intercourse` — sexo **vestido** valendo piso 9,0 = "há cena de sexo explícito".
+Corrigido pela **migration 182** (2026-08-09): as 18 viraram `label` (piso 7,0, a faixa "sexo
+mostrado PARCIALMENTE"), que é o que elas de fato sustentam. `explicit` foi de 46 → 28.
+
+Medido antes: **64 obras** tinham como única evidência de "explicit" uma tag de circunstância,
+**todas** em 9,0–9,5, e em **24 delas a prosa da própria avaliação argumentava faixa 0-3 ou 4-6**
+— ex.: *"Faixa 4-6 (Suggestive): … os leitores afirmam que a obra NÃO é smut/explícita"*, obra
+persistida em 9,0 por causa de `Drunken Intercourse`.
+
+🔴 **Baixar um piso NÃO desfaz o que ele subiu.** `clampAdultContentScore` é one-way — só empurra
+pra dentro da faixa. Sem `scripts/adult-content-retroactive-bounds.ts --heal`, as 64 ficariam
+congeladas em 9,0 e o script diria "nada a gravar". O `--heal` só age sob um fingerprint estreito:
+nota persistida ACIMA da que a avaliação entregou **E** valendo exatamente um piso (9/7/5) **E**
+não sustentada pelos limites de hoje. ⚠️ A 1ª versão usava a nota da avaliação como baseline
+direto e o dry-run deu **219** diffs contra as 51 reais — ela reescrevia toda divergência entre
+`category_scores` e `ai_evaluation_scores`, inclusive ajuste manual posterior. Ampliar esse
+critério é apagar curadoria em silêncio.
+
+⚠️ **O embed do PostgREST traz os NOVE critérios.** `ai_evaluations(ai_evaluation_scores(...))`
+sem `.eq("ai_evaluations.ai_evaluation_scores.criterion_slug", "adult_content")` devolve todos, e
+pegar `[0]` dá o baseline de outro critério — mediu 8,0 numa obra cuja avaliação dizia 7,0, e o
+relatório saiu inteiro plausível. Erro que produz resultado.
 ✅ **A 174 está aplicada na nuvem** (confirmado 2026-08-07). Esta seção afirmou o contrário
 por dias — ver o aviso logo abaixo.
 
@@ -1113,10 +1140,276 @@ verdade conferida. Ao anotar pendência aqui, escreva a **data** e a **forma de 
 ([[project-conferir-migration-na-nuvem]]) — e apague o aviso no mesmo PR que aplica.
 - `enforceR19AdultContentRule`: raises `adult_content` to ≥ 7.0 if R19 marker detected anywhere in input
 - `enforceExternalContentRatingRule`: raises `adult_content` to a floor from the accepted external sources' content rating (MangaDex `contentRating` / ComicK `content_rating`) — `suggestive`→5, `erotica`→7, `pornographic`→8. Chained with the R19 rule; both are monotonic so the effective floor is the max of whichever triggered.
-- `enforceNeutralCoupleDynamicsWhenNoRomance`: raises `couple_dynamics` to 5.0 when romance ≤ 3 and couple_dynamics < 5
+- ~~`enforceNeutralCoupleDynamicsWhenNoRomance`~~: **removido na v23** (2026-08-09). Forçava `couple_dynamics = 5.0` quando `romance ≤ 3`, partindo de "sem romance, não há dinâmica" — premissa que morreu com a ampliação do critério pra vínculos centrais. Travava **17 das 18** obras sem romance. Quem decide "não aplicável" agora é o prompt, por ausência de VÍNCULO — não de romance. ⚠️ As ~31 justificativas que ele reescreveu seguem no banco (ver `lib/criteria/justification.ts`)
 - `enforceAuditableReviewUsage`: **non-fatal since v20 (2026-06-27)** — generic review citation is accepted ("algumas reviews apontam…"), so it no longer requires/validates specific review IDs (`R1`, `R2`…) nor throws. It only records an informational `reviewAudit` (`required` = "havia reviews no prompt"; `usedReviewIds` = whatever IDs the model happened to cite, often empty with generic citation). `review_usage` is now an OPTIONAL tool/schema field. (Earlier behavior: threw + retried when IDs weren't cited — removed because a citation slip discarded otherwise-valid evals.)
 
-The model is `claude-sonnet-4-6`, prompt version `v21` (toggled by `CONCISE_OUTPUT` in `service.ts`: `v21` concise output / `v18` verbose — flipping it falls back to the old caches; `v21` = concise + **consensus** review citation (generic, never a single review/ID), succeeded `v20`), up to 2 attempts (4500 max tokens on **both** attempts; temperature 0.2 then 0). Opus 4.7 and Haiku 4.5 are supported as per-evaluation overrides (the A/B "Reavaliar com…" buttons); Opus 4.7 doesn't accept the `temperature` param. MAE values stored in `formula_config` reflect calibration runs against the current model+prompt; the hardcoded fallbacks in `calibration.ts` (1.27/0.92) are historical defaults from the original spreadsheet — not authoritative.
+## Duas réguas para as notas de atributo, e o que cada uma consegue ver
+
+Objetivo é **precisão E coerência**, e são medidas diferentes — colapsar as duas em MAE foi
+o erro que fez a auditoria de 2026-08-09/10 gastar US$2 em medições que não decidiram nada.
+
+| | instrumento | n | piso de detecção |
+|---|---|---|---|
+| **Precisão** | `scripts/gold-mae.ts` contra `.gold/gold-FILLED.csv` | 30 obras | **0,10** no MAE geral |
+| **Coerência estrutural** | `scripts/coherence-audit.ts` (checagem A) | 8.673 atributos | dezenas de casos |
+| **Coerência semântica** | — **não existe** | — | — |
+
+🔴 **O piso de 0,10 é o fato mais importante desta seção.** Bootstrap do gold (4000
+reamostragens): MAE do catálogo 0,78, IC95% **[0,68 – 0,88]**. O ganho realista de uma
+reescrita de prompt é ~0,05 — **abaixo do que o instrumento enxerga**. Foi por isso que
+quatro tentativas (v23, v24-pesada, v24-cirúrgica, v25) falharam: o experimento nunca teve
+como dar certo. Antes de tentar de novo, o investimento é **ampliar o gold** (30 → 100 obras
+derruba o piso pra ~0,055), não escrever mais regra.
+
+⚠️ **Decomposição do erro (medida, n=30):** os três critérios que valem **71%** do produto —
+`protagonist` 31,8%, `fantasy_nobility` 24,4%, `couple_dynamics` 14,8% — já são os mais
+precisos (0,47 · 0,47 · 0,65) e o erro deles **não é viés, é discordância genuína**. Todo o
+viés corrigível está em `drama`, `tragedy`, `action` e `romance`, que somam 19,6% do peso.
+A precisão está perto do teto prático desta arquitetura.
+
+🔴 **Correção de viés determinística: REPROVADA por leave-one-out.** In-sample parecia ótima
+(0,776 → 0,646 geral / 0,637 → 0,579 ponderado); em LOO-CV dá **0,730 geral e 0,708
+ponderado — o ponderado PIORA**. Os deslocamentos dos critérios pesados são ajustados em
+ruído, e aplicar deslocamento a erro não-sistemático adiciona erro. Não aplicar. E não
+repetir o teste in-sample achando que mede alguma coisa.
+
+🔴 **Regex sobre prosa de modelo NÃO mede semântica.** Três checagens de coerência semântica
+foram construídas e removidas no mesmo dia após validação manual: "prosa nega, nota ≥5"
+(6/6 falso positivo), "intensidade fraca no topo da faixa" (5/5), "valência por leitor"
+(~6/8, e marcava 51% do catálogo). O vocabulário aparece negado, comparado ou como nome de
+gênero — *"ritmo mais agitado que slice of life"* casa com o padrão de ausência e afirma o
+oposto. Só sobrevive a checagem **estrutural**: extrair `Faixa X-Y` da prosa e comparar com
+`bandForScore`. ⚠️ **Sempre rode `--sample` e conte falso positivo antes de usar qualquer
+número deste script numa decisão.**
+
+## Quem escreve prosa sobre uma obra precisa saber o que os números dela QUEREM DIZER
+
+Ranking e Deep Dive recebem `category_scores: tragedy=6.0, couple_dynamics=8.0, …` como números
+**crus** — sem a rubrica e sem as justificativas que os produziram — ao lado das tags em texto e
+do digest inteiro. Sem saber que 6,0 em `tragedy` é *"perdas isoladas ou reversíveis"*, o
+consultor escreve a prosa a partir do digest e os números viram enfeite.
+
+Medido em 2026-08-09 sobre **281 itens de ranking** persistidos: **21 descrevem abuso,
+toxicidade ou violência numa obra cujo `couple_dynamics` ≥ 7** — a faixa que significa relação
+**saudável**. Caso real (`tragedy=6.0`, `couple_dynamics=8.0`): *"o tom é predominantemente 'dark
+ambience' com abuso físico extremo e tragédia como pano de fundo constante"* — vocabulário da
+faixa 9-10 sobre um 6,0, com a lista de atributos ao lado na mesma tela.
+
+A correção é uma constante só, em `lib/ai-recommendation/prompts.ts`:
+
+| | |
+|---|---|
+| `CRITERIA_SCALE_LEGEND` | os rótulos das 4 faixas dos 9 critérios, **derivados de `CRITERIA_RUBRICS`** |
+| `CRITERIA_COHERENCE_RULE` | proíbe prosa que contradiz o número; manda **declarar** a divergência |
+
+🔴 **A legenda é DERIVADA, nunca escrita à mão.** `sync-constants` reescreve as faixas a partir
+do banco; uma cópia literal aqui é a 2ª régua pro mesmo número — mesma armadilha do
+`LOW_BALANCE_USD` e do `STRONG_TAG_WEIGHT`. Só os **rótulos** entram (o texto antes dos
+dois-pontos): a rubrica inteira são ~5k caracteres e o que falta ali é vocabulário de
+intensidade, não a casuística.
+
+⚠️ **A legenda precisa avisar que `couple_dynamics` é valência** — senão ela ENSINA o erro:
+"0-3 Destrutiva" lido na chave de presença vira "quase não tem dinâmica", que é o oposto.
+
+⚠️ **Quando o digest contradiz os atributos, isso é INFORMAÇÃO — não um empate a resolver em
+silêncio.** A regra manda registrar a divergência em `risks` nomeando os dois lados e abaixar o
+`confidence`. Escolher um lado sem dizer que havia outro é o que faz a mesma obra ser descrita de
+dois jeitos em duas telas. E a regra diz explicitamente que **não** é permissão pra ignorar as
+reviews — senão conserta um viés e abre o oposto.
+
+⚠️ **São DOIS consumidores, e o Deep Dive tem uma cópia PRÓPRIA de `formatCategoryScores`** — é
+fácil corrigir só o ranking e achar que acabou. Guardado por
+`tests/unit/ai-recommendation/legenda-de-faixas.test.ts`, que verifica os dois prompts.
+
+✅ **O que NÃO era problema, medido:** a suspeita de que avaliação e digest liam amostras
+diferentes das mesmas reviews. Os tetos de fato divergem (avaliação 30 total/12 por fonte,
+estratificada por **nota do reviewer**; digest 40 total/8 por fonte, as mais **longas**) e 358
+obras passam do teto — mas replicando os dois seletores sobre as reviews persistidas, o **Jaccard
+mediano é 78,9%** (p10 64,3%, p90 100%, **nenhuma obra abaixo de 50%**). As duas leem
+essencialmente a mesma evidência; a discordância entre os artefatos vem da TAREFA, não da
+amostra. Unificar os seletores não vale o custo de re-rodar tudo.
+
+## Quatro critérios tinham colapsado numa faixa só — e cada um por um motivo diferente
+
+Medido em 2.393 avaliações (2026-08-09), share por faixa da rubrica:
+
+| critério | 0-3 | 4-6 | 7-8 | 9-10 | σ |
+|---|---|---|---|---|---|
+| `action_adventure` | 19,9% | **73,5%** | 6,6% | **0,0%** | 1,31 |
+| `protagonist` | 0,1% | 18,8% | **77,4%** | 3,7% | **0,87** |
+| `romance` | 1,5% | 16,3% | **73,7%** | 8,4% | 1,16 |
+| `fantasy_nobility` | 3,4% | 7,4% | 76,2% | 13,0% | 1,42 |
+
+Isso custa duas vezes: **feature quase-constante não contribui nada pro Ridge** da Nota Prevista
+e não discrimina em filtro nem em ordenação do `/ranking`. Corrigido na **v25**, com quatro
+mecanismos distintos — a tentação é tratar como um problema só, e não é:
+
+🔴 **1. O piso de 5 se sobrepunha à RUBRICA.** Ele existe contra dois vieses reais (baixar por
+execução fraca, baixar por silêncio das fontes) — mas estava vencendo até evidência POSITIVA de
+ausência. Medido: das 1.027 justificativas de `action_adventure` que afirmam ausência ("slice of
+life", "uneventful", "nada acontece"), **316 (30,8%) ficaram ≥5** — enquanto a faixa 0-3 do
+critério diz literalmente *"cotidiano, sem conflito externo relevante (slice of life)"*. A prosa
+citava a definição da faixa e a nota não ia pra lá. ⚠️ Ao mexer nisto, mantenha explícito o que o
+piso ainda protege: corrigir um viés reabre o outro.
+
+🔴 **2. A posição DENTRO da faixa era surda à intensidade que a própria prosa declarava.** Entre
+notas 4–6,9, a justificativa com "pontual/esporádico/não domina" distribuía **31/32/35%** (em
+4–4,9 / 5 / >5) contra **33/35/31%** da prosa neutra — idênticas. A palavra "pontual" não mudava
+o número. Caso real: *"eventos pontuais, sem dominar o tom geral"* → **6,0**, o topo da faixa. A
+regra nova tem PRECEDÊNCIA explícita sobre "prefira o valor central" e sobre "use o valor mais
+alto da faixa inferior" — sem isso ela nasce letra morta.
+
+🔴 **3. A "REGRA OBRIGATÓRIA" de `fantasy_nobility` virou piso.** Justificativa citando o gatilho
+(reencarnação/regressão/transmigração/isekai) → **97,9% ≥7**, média 8,11; sem citar → 81,1% e
+7,14. Como **48%** das avaliações citam o gatilho num catálogo majoritariamente isekai/vilã, a
+regra deixou de distinguir qualquer coisa. Hoje esses tropos são **dispositivo narrativo**, não
+estrutura: uma regressão para um escritório contemporâneo não é `fantasy_nobility` 7-8. ⚠️ O
+antídoto ficou escrito no prompt — *"se a sua justificativa poderia ser copiada para metade das
+obras do catálogo, ela não é evidência de 7-8"*.
+
+🔴 **4. `protagonist` perdeu a AGÊNCIA do gate.** A faixa 0-3 abre com *"sem agência, decisões
+irrelevantes"*, mas o prompt só autorizava faixa baixa pra "ESQUECÍVEL / GENÉRICO / SEM
+PERSONALIDADE / SUBSTITUÍVEL". Medido: das **151** justificativas que chamam o protagonista de
+passivo ou sem agência, **51% ficaram ≥7** — a faixa que exige "agência clara, decisões movem a
+trama" — e só 9 abaixo de 5. ⚠️ A régua que separa os dois casos: *"Mary Sue", "irritante",
+"fria" são sobre COMO ele é e não rebaixam; "passivo" e "sem agência" são sobre O QUE ELE FAZ e
+rebaixam.* Sem essa distinção nomeada, consertar a agência reabre o viés de qualidade.
+
+⚠️ **A v25 pulou o v24 de propósito, e o motivo NÃO é um bug:** `ai_api_calls` tem 65 chamadas
+de `ai_evaluation` rotuladas `v24` (2026-07-29) — **todas as 65 são obras do gold set**, da
+investigação de rubrica que comparou v23/v24 contra o julgamento da curadora. `ai_evaluations`
+gravou v22 nelas porque **versão de RUBRICA ≠ versão de PROMPT**: são dois eixos, e o log carrega
+o primeiro enquanto a tabela carrega o segundo. Reusar "v24" como versão de prompt misturaria os
+dois eixos em qualquer query por `prompt_version`. Guardado em
+`tests/unit/ai-evaluation/prompt-version-pin.test.ts`, junto do pin de hash.
+
+🔴 **Antes de mexer em rubrica ou prompt de avaliação, leia `.gold/gold-FILLED.csv` e
+[[project_rubric_redesign_gold_verdict]].** São 30 obras que a curadora avaliou **às cegas** nos 9
+critérios — a única régua de ACURÁCIA que existe. Medir "a nota mudou no rumo pretendido" é
+consistência, não acurácia, e já enganou uma vez: a v23 mudava no rumo e ficava MAIS LONGE da
+curadora. Harness: `scripts/gold-mae.ts`. Baseline a bater: **catálogo 0,77 geral / 0,64
+ponderado** — v24-pesada 0,82 · v23 0,87 · v24-cirúrgica 0,89, nenhuma bateu.
+
+🔴 **ENTANGLEMENT:** as 9 notas saem de UMA leitura do modelo, então mexer na rubrica de um
+critério recalibra o modelo inteiro e move os vizinhos — e isso NÃO é controlável por tamanho de
+edição (a v24-cirúrgica quebrou couple/romance/humor tanto quanto a pesada). Um piloto de v25 em
+2026-08-09 reproduziu a assinatura: `humor` e `fantasy_nobility` caíram ~1,2 ponto no **grupo de
+controle**, sem nenhuma regra mirando neles.
+
+## A rubrica tem DUAS naturezas de escala, e `couple_dynamics` é a única de valência
+
+Oito critérios medem **presença/intensidade** (0 = não está lá). `couple_dynamics` mede
+**valência**: 0-3 = o vínculo faz MAL a quem está nele, 9-10 = faz BEM. Nota baixa ali não
+quer dizer "não tem vínculo".
+
+🔴 **E o slug MENTE: `couple_dynamics` não é sobre casal.** O critério virou "Dinâmica entre
+Protagonistas" em `95226f7` (2026-07-27) e as faixas passaram a falar de **vínculos centrais**
+— mas a ampliação ficou **pela metade por 13 dias, e nada acusava**: a `description` no banco
+continuou "a relação entre o **casal principal**", o guia de tags dizia "apenas quando a tag
+descreve o casal", e o clamp de romance seguia vivo. Como `buildCriteriaPromptSection()` cola a
+description ACIMA das faixas, o modelo lia título amplo + descrição restrita + rubrica ampla no
+mesmo bloco. Fechado pela **migration 181** + v23.
+
+✅ **A 181 está aplicada na nuvem** (2026-08-09, projeto `obwlwu…pizd`). Conferir com
+`select md5(description) from criteria where slug='couple_dynamics'` via Management API e
+comparar com o local — bateram em `f3b2adbd15b1f4e1d42f1c85373d17b6`. ⚠️ O
+`scripts/apply-migration.mjs` deriva o ref do `NEXT_PUBLIC_SUPABASE_URL` do `.env.local`: com o
+env apontando pro LOCAL ele não acha ref nenhum e sai. O ref da nuvem mora em
+`.env.supabase-cloud` ([[project-conferir-migration-na-nuvem]]).
+
+⚠️ **O vínculo a avaliar tem ORDEM, não é uma lista solta:** casal principal → família (pais,
+irmãos, filhos) → demais recorrentes (mestre/discípulo, equipe, rivalidade, amizade). Pegue o
+PRIMEIRO que a obra tiver, e diga na justificativa qual foi. Sem a ordem, obra com casal E
+família fica ambígua e as notas deixam de ser comparáveis entre si — mesma classe das réguas
+misturadas. O **5 significa "sem vínculo central recorrente"** (protagonista isolado), nunca
+"sem romance".
+
+Até a **v22** as meta-regras de presença do `SYSTEM_PROMPT` valiam pros 9, e isso produzia
+três absurdos silenciosos:
+
+- *"se há QUALQUER evidência de presença, a nota deve ser ≥ 5"* proibia nota baixa sempre
+  que existisse um casal — justo o caso que a faixa 0-3 existe pra descrever;
+- a coerência justificativa×faixa manda "recorrente/constante" pra faixa ALTA. Em
+  `couple_dynamics` "atrito **recorrente**" é uma relação PIOR — a regra estava invertida;
+- a exceção que dispensa essas regras listava só `drama` e `tragedy`.
+
+🔴 **E a seção de sinais indiretos mapeava `"possessive but I love it" → 0-3`** — a leitora
+declarando que GOSTA virava dano à relação, contradizendo a regra dedicada logo abaixo, que
+manda checar consenso/satisfação/tom antes. Medido em 2.393 avaliações: justificativa citando
+posse/ciúme/yandere caía em 0-3 em **19,1%** dos casos contra **5,4%** quando não citava (3,5×),
+e `couple_dynamics` era **o critério mais instável dos 9** (amplitude média **1,52 pt** entre
+reavaliações da mesma obra; 36,7% variando ≥2 pt; pior caso 6,0).
+
+A **v23** (2026-08-09) isenta `couple_dynamics` das três meta-regras, e a regra própria passa a
+exigir quatro checagens antes da nota: (a) consenso, (b) satisfação, (c) tom e **(d) linha do
+tempo** — em regressão/reencarnação/transmigração, o tóxico da vida ANTERIOR é contexto
+estabelecido e não conta (mesma lógica que `tragedy` já aplica ao background). São **496 obras**
+com tag desse tipo, 256 delas hoje com `couple_dynamics` ≤ 6.
+
+⚠️ **O sinal decisivo é a REAÇÃO do outro personagem, não a intensidade do comportamento.**
+Tag de posse descreve um lado; sem indício de como o outro reage, ela **perde peso** em vez de
+puxar pra baixo.
+
+🔴 **Opinião de leitor não escolhe faixa — mas a RECLAMAÇÃO é a melhor fonte da reação do
+personagem, e descartá-la joga a evidência fora junto.** A 1ª redação da regra mandava "extraia o
+FATO e DESCARTE o julgamento" listando como descartáveis justo as frases que **carregam** o fato:
+leitores comentam o que os incomodou, e pra isso descrevem o que a personagem fez ou sentiu.
+
+A separação é pelo **SUJEITO da frase**, nunca pelo tom:
+
+| frase fala de… | exemplo | uso |
+|---|---|---|
+| **o leitor** | "eu não aguentaria", "achei sufocante", "tenho raiva do ML" | preferência — não escolhe faixa |
+| **a personagem** | "ela aceita", "ela está desconfortável", "ela perdoou" | **fato sobre a reação** — peso alto |
+
+Uma frase costuma ter as duas:
+
+| reclamação / elogio | fato extraído | faixa |
+|---|---|---|
+| "ela é **idiota de aceitar** o ciúme dele" | ela **TOLERA** | **4-6** |
+| "**amo** como ela **provoca o ciúme dele de propósito**" | ela **QUER** | 7-8 |
+| "é **absurdo** ela **perdoar** como ele a tratou **na linha do tempo original**" | ela **perdoou** + item **(d)** | o maltrato não conta |
+| "**tenho raiva** desse ML que não respeita a FL **mesmo quando ela está desconfortável**" | ela está **desconfortável** e ele ignora | **0-3** |
+
+Os dois primeiros falam do **mesmo comportamento** e separam-se só por ela tolerar ou querer —
+é isso que prova que nem o tom da review nem o comportamento decidem sozinhos.
+
+🔴 **TOLERAR não é QUERER, e nenhum dos dois APAGA a toxicidade — minimiza.** É o erro que mais
+puxa pro lado permissivo, e a 1ª redação caiu nele: mapeava "aceitação" direto pra 7-8, a faixa
+que exige **respeito mútuo e conflito RESOLVIDO** — não conflito **absorvido por um lado só**.
+
+| | |
+|---|---|
+| **DESEJADA** — ela participa, retribui, conduz | 7-8 (9-10 só com parceria e crescimento) |
+| **TOLERADA** — aguenta, releva, perdoa e segue | **teto 6** |
+
+⚠️ **Dois tetos, porque a reação dela sobe a nota no máximo UMA faixa:** dano visível + tolerância
+→ 0-3 vira 4-6, **nunca** 7-8. E abuso real no **desenvolvimento** → **teto 8** mesmo com redenção
+encenada e perdão explícito — 9-10 é *"parceria, apoio mútuo e crescimento conjunto"*, que não
+convive com histórico de abuso dentro da própria obra.
+
+⚠️ **Perdão sem mudança ENCENADA é tolerância, não reconciliação** (teto 6): a obra precisa
+mostrar a virada dele, não só a interrupção do comportamento.
+
+⚠️ Leitores discordando sobre a REAÇÃO dela ("ela aceita numa boa" × "ela sofre") é divergência
+**real sobre a obra** — pontue pelo sinal mais frequente e abaixe a `confidence`. Não é o mesmo
+que divergência de gosto.
+
+🔴 **Mudar o texto do prompt sem trocar a `PROMPT_VERSION` é erro silencioso duplo:** a versão
+entra na chave de cache (`canonicalInputHash`) e é gravada em `ai_evaluations.prompt_version`,
+então o cache serve avaliação da régua antiga como se fosse da nova e o rótulo no banco mente.
+Guardado por `tests/unit/ai-evaluation/couple-dynamics-valencia.test.ts`, que **fixa o sha256 do
+`SYSTEM_PROMPT` à versão** — inclusive as rubricas interpoladas de `CRITERIA_RUBRICS`, porque
+`sync-constants` mexer numa faixa também muda a régua.
+
+⚠️ **O catálogo hoje é uma MISTURA de réguas.** As notas vigentes vêm de **9 versões de prompt**
+(medido 2026-08-09: v19=227 obras, v21=220, v20=152, v18=146, **v22=91**, v17=83, v16=47 — a versão
+corrente cobria 9,4%). Controlando por mesmo modelo + mesma versão, a amplitude entre reavaliações
+cai de 1,52 para **0,45** — ou seja **~70% da instabilidade medida vem da régua ter mudado**, não do
+modelo. Isso contamina toda comparação entre obras: ordenação do `/ranking`, os limiares
+`min_<slug>`/`max_<slug>` (em pontos), `ideal_min..ideal_max` do perfil, o Ridge e o `personal_fit`.
+
+The model is `claude-sonnet-5` (`SONNET_MODEL`), prompt version `v23` (toggled by `CONCISE_OUTPUT` in `service.ts`: `v23` concise output / `v18` verbose — flipping it falls back to the old caches; `v21` = concise + **consensus** review citation, `v22` = piso/teto de `adult_content` por procedência, `v23` = `couple_dynamics` como escala de valência), up to 2 attempts (4500 max tokens on **both** attempts; temperature 0.2 then 0). Opus 4.7 and Haiku 4.5 are supported as per-evaluation overrides (the A/B "Reavaliar com…" buttons); Opus 4.7 doesn't accept the `temperature` param. MAE values stored in `formula_config` reflect calibration runs against the current model+prompt; the hardcoded fallbacks in `calibration.ts` (1.27/0.92) are historical defaults from the original spreadsheet — not authoritative.
 
 ## Importação (`/import`)
 

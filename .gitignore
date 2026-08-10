@@ -85,3 +85,6 @@ Imagens/
 # Config local do editor (VSCode) — não versionar (entrou por engano num git add -A).
 .vscode/
 .gold/
+
+# saída do piloto de prompt (scripts/pilot-prompt-v25.ts)
+.pilot/

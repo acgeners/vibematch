@@ -54,8 +54,9 @@ const RUBRIC_BANDS = ["0-3", "4-6", "7-8", "9-10"] as const
  *
  * Não use a faixa que a IA citou na prosa. Ela apodrece de três jeitos, todos silenciosos:
  *  - a nota é editada depois e a prosa fica falando da faixa antiga (82 casos no catálogo);
- *  - uma regra de pós-processamento sobe a nota (`enforceR19AdultContentRule`,
+ *  - uma regra de pós-processamento sobe a nota (`enforceR19AdultContentRule`, e até a v22 o
  *    `enforceNeutralCoupleDynamicsWhenNoRomance`) sem reescrever a justificativa (~31 casos);
+ *    o clamp de couple_dynamics saiu na v23, mas as ~31 linhas que ele produziu seguem no banco;
  *  - o modelo simplesmente foge do formato `Faixa X-Y:` e o regex não casa — 5,1% dos atributos
  *    no v21 · Sonnet 5, contra 0,2% no Sonnet 4.6 com o MESMO prompt.
  *

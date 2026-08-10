@@ -1,4 +1,4 @@
-import { CRITERIA_INFO } from "@/lib/constants/criteria"
+import { CRITERIA_INFO, CRITERIA_RUBRICS } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { POST_READING_WEIGHT_LABELS, type PostReadingScoreField } from "@/lib/constants/post-reading-criteria"
 import type { CandidateWorkInput, RatedWorkInput, RecommendationMode, ReviewDigest, ReviewDigestTrait, TasteProfilePayload } from "./types"
@@ -6,6 +6,47 @@ import type { CandidateWorkInput, RatedWorkInput, RecommendationMode, ReviewDige
 const CRITERIA_LIST_TEXT = CRITERION_SLUGS
   .map((slug) => `- ${slug} (${CRITERIA_INFO[slug]?.name ?? slug})`)
   .join("\n")
+
+/**
+ * Legenda COMPACTA das faixas dos 9 critérios — o que `tragedy=6.0` de fato quer dizer.
+ *
+ * Ranking e Deep Dive recebiam os `category_scores` como números CRUS, sem rubrica e sem as
+ * justificativas que os produziram, ao lado das tags em texto e do digest inteiro. Sem saber
+ * que 6,0 em tragedy é "perdas isoladas ou reversíveis", o consultor escrevia a prosa a partir
+ * do digest e os números viravam enfeite. Medido em 2026-08-09 sobre 281 itens de ranking
+ * persistidos: **21 descrevem abuso/toxicidade/violência numa obra cujo `couple_dynamics` ≥ 7**
+ * — a faixa que significa "relação SAUDÁVEL". Caso real, com `tragedy=6.0` e
+ * `couple_dynamics=8.0`: *"o tom é predominantemente 'dark ambience' com abuso físico extremo e
+ * tragédia como pano de fundo constante"* — linguagem da faixa 9-10 sobre um 6,0.
+ *
+ * 🔴 DERIVADA de `CRITERIA_RUBRICS`, nunca escrita à mão: é o mesmo dado que a avaliação usa, e
+ * `sync-constants` pode reescrever as faixas a qualquer momento. Uma cópia literal aqui seria a
+ * 2ª régua pro mesmo número — a mesma armadilha do `LOW_BALANCE_USD` e do `STRONG_TAG_WEIGHT`.
+ * Só os RÓTULOS entram (o texto antes dos dois-pontos); a rubrica inteira são ~5k caracteres e
+ * o que falta aqui é vocabulário de intensidade, não a casuística toda.
+ */
+export const CRITERIA_SCALE_LEGEND: string = [
+  "COMO LER `category_scores` (0–10 — são as notas da avaliação de IA, na rubrica abaixo):",
+  ...CRITERION_SLUGS.map((slug) => {
+    const faixas = (CRITERIA_RUBRICS[slug]?.ranges ?? [])
+      .map((r) => {
+        const [banda, resto = ""] = r.split("|")
+        const rotulo = resto.split(":")[0].trim()
+        return `${banda.trim()} ${rotulo}`
+      })
+      .join(" · ")
+    return `- ${slug}: ${faixas}`
+  }),
+  "⚠️ couple_dynamics é escala de VALÊNCIA, não de presença: 0-3 = o vínculo faz MAL aos personagens, 9-10 = faz BEM. Nota baixa ali NÃO significa 'pouca dinâmica'.",
+].join("\n")
+
+/**
+ * Exige que a prosa concorde com os números que o próprio prompt entregou. Compartilhado por
+ * ranking e Deep Dive — os dois recebem `category_scores` e os dois escreviam por cima deles.
+ */
+export const CRITERIA_COHERENCE_RULE = `🔴 COERÊNCIA COM OS ATRIBUTOS (obrigatória): a sua justificativa, os \`risks\` e os chips NÃO podem descrever a obra em termos que os \`category_scores\` dela contradizem. Exemplos do que é proibido: escrever "tragédia constante/dominante/o tempo todo" sobre uma obra com \`tragedy\` 4-6 (que significa "perdas isoladas ou reversíveis"); escrever "abuso", "tóxico" ou "relação destrutiva" sobre uma obra com \`couple_dynamics\` ≥ 7 (que significa relação SAUDÁVEL); chamar de "cheia de ação" uma obra com \`action_adventure\` 0-3.
+Quando o digest das reviews CONTRADIZ os atributos, isso é informação e não um empate a resolver em silêncio: registre em \`risks\` que há divergência, nomeando os dois lados ("os atributos indicam X, mas o consenso das reviews descreve Y"), e ABAIXE o \`confidence\`. Escolher um lado sem dizer que havia outro é o que faz a mesma obra ser descrita de dois jeitos em duas telas.
+⚠️ Isto NÃO é permissão pra ignorar as reviews — é obrigação de não inventar intensidade que o número não sustenta.`
 
 export const TASTE_PROFILE_SYSTEM_PROMPT = `Você é um analista do gosto pessoal de um usuário que cataloga obras (manhwa, anime, manga). Sua tarefa é gerar um PERFIL DE GOSTO estruturado a partir do histórico de obras que o usuário avaliou pessoalmente.
 
@@ -43,6 +84,11 @@ export const RANKING_SYSTEM_PROMPT = `Você é um curador que rankeia uma lista 
 PRINCÍPIOS:
 1. Use o PERFIL DE GOSTO como verdade base. As preferências de critério (\`criterion_preferences\`), tags amadas/evitadas, padrões narrativos e summary são o que define o gosto.
 2. Compare cada candidato contra esse perfil: tags em comum com loved_tags pesam positivamente; presença de avoided_tags pesa negativamente; \`category_scores\` dentro da faixa \`ideal_min..ideal_max\` aumenta o alinhamento.
+
+${CRITERIA_SCALE_LEGEND}
+
+${CRITERIA_COHERENCE_RULE}
+
 3. Quando o usuário fornecer CONTEXTO ADICIONAL (mood, exclusões), trate como viés momentâneo: ajusta a ordem sem substituir o perfil. Ex.: "quero algo leve" reduz drama/tragedy; o perfil ainda dita o resto.
 
 PREFERÊNCIAS E REGRAS DO USUÁRIO (quando o bloco "PREFERÊNCIAS E REGRAS DO USUÁRIO" estiver presente):
