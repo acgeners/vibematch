@@ -7,10 +7,21 @@
  * /settings) e o filtro canônico de `computeE1ProdScope`. PADRÃO = dry-run.
  * Execução paga exige --execute --max-cost-usd=<v>.
  *
+ * 🔴 QUEBRADO desde a Fase F (`329a446`, 14/07/2026) — conferido em 2026-08-10 rodando:
+ * `FATAL: works: column works.personal_status_id does not exist`. A Fase F tirou as 19
+ * colunas pessoais de `works` e o espelho (`user_work_state`) virou a única fonte, mas
+ * `computeE1ProdScope` (em `e1-prod-scope.ts`, que tem o mesmo defeito) continuou lendo a
+ * coluna antiga. Ninguém percebeu por ~4 semanas, porque nada roda estes dois.
+ *
+ * ⚠️ Ao consertar, note que o trabalho é MENOR do que "obras sem digest" sugere: são 136 sem
+ * digest, mas o escopo exige >3 reviews e ≥20 tags, e dessas 136 **86 têm ZERO reviews** e 27
+ * têm 1–2 — sobram ~23 obras (~US$0,42). O botão de digest da página da obra não depende
+ * daqui e funciona, uma a uma.
+ *
  * 🔴 ALVO: NUVEM (resolvido em 2026-08-10). A execução paga grava, e num local descartável
- * esse trabalho morre no próximo `db:pull` — paga-se para jogar fora. Medido: 136 obras sem
- * digest a US$0,0183 cada. O `--execute` recusa alvo local (`exigeAlvoNuvem`), e o npm script
- * deixou de carregar `--env-file=.env.analysis`, que o apontava pro LOCAL nos dois modos.
+ * esse trabalho morre no próximo `db:pull` — paga-se para jogar fora. O `--execute` recusa
+ * alvo local (`exigeAlvoNuvem`), e o npm script deixou de carregar `--env-file=.env.analysis`,
+ * que o apontava pro LOCAL nos dois modos. A trava vale para quando o script voltar a rodar.
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/e1-prod-digest.ts
  *   npx tsx ... scripts/e1-prod-digest.ts --execute --max-cost-usd=3 [--limit=10]
  *
