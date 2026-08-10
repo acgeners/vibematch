@@ -9,6 +9,7 @@
  * Este script simula exatamente isso: insere um perfil corrente para a Leitora e exige que o
  * do dono continue de pé. Limpa depois.
  *
+ * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/verify-taste-profile-owner.ts
  */
 import { createAdminClient } from "@/lib/supabase/admin"

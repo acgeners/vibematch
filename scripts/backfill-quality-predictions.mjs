@@ -7,6 +7,7 @@
 // expected_score do Pago antes do usuário ler.
 //
 // Uso:
+// 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
 //   node --env-file=.env.local scripts/backfill-quality-predictions.mjs           (dry-run: só conta)
 //   node --env-file=.env.local scripts/backfill-quality-predictions.mjs --apply   (chama LLM + grava)
 //

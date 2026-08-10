@@ -11,7 +11,7 @@
  *
  * Decide: distância→erro monotônico ⇒ confiança per-obra defensável (Opção B′).
  *
- * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/diag-distance-confidence.ts
+ * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/diag-distance-confidence.ts
  */
 import { createAdminClient } from "@/lib/supabase/admin"
 import { computeRecalc, buildWork, type RawWork } from "@/server/actions/calculations"

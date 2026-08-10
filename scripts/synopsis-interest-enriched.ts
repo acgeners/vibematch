@@ -4,6 +4,7 @@
  * digest, NÃO cria job, NÃO escreve no banco. Escreve só em .local-experiments/
  * (gitignored). Deriva ESTRITAMENTE de base-1 + os digests já gerados (sanitizados).
  *
+ * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
  * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/synopsis-interest-enriched.ts
  */
 import { readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs"

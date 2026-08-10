@@ -7,6 +7,7 @@
  * qualquer um dos 9 invasores não bater exatamente, FALHA sem gravar — nunca
  * escreve uma linha meio-limpa.
  *
+ * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/fix-milady-invader-aliases.ts            # dry-run
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/fix-milady-invader-aliases.ts --apply    # grava
  */

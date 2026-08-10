@@ -14,7 +14,7 @@
  * Fase 2 — SENSIBILIDADE: na biblioteca atual, quanto cada edição acumulada move
  *          o driftPct (leave-k-out + re-rating). Dá o knob humano ("N obras até θ").
  *
- * Rodar: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local \
+ * Rodar: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis \
  *        scripts/calibrate-profile-drift-threshold.ts
  */
 import { createAdminClient } from "@/lib/supabase/admin"

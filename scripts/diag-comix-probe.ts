@@ -1,7 +1,7 @@
 /**
  * A Comix responde? Read-only, zero LLM, zero escrita.
  *
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/diag-comix-probe.ts
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/diag-comix-probe.ts
  *   COMIX_RENDER_URL= FLARESOLVERR_URL= npx tsx … scripts/diag-comix-probe.ts   # simula prod
  *
  * Existe porque a Comix falha de um jeito que some do relatório: `searchComix` devolve `[]`

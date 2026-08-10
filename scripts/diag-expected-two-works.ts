@@ -5,7 +5,7 @@
  * decompõe a predição das duas obras FEATURE-A-FEATURE (coef × x escalado),
  * mais o blend com Nota.Calc. Auto-verifica contra o expected_score real.
  *
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/diag-expected-two-works.ts
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/diag-expected-two-works.ts
  */
 import { createAdminClient } from "@/lib/supabase/admin"
 import { computeRecalc, buildWork, type RawWork } from "@/server/actions/calculations"

@@ -8,6 +8,7 @@
  * candidatos que recorrem (≥ limiar). Reporta o custo real de IA.
  *
  *   # dry-run (seguro):
+ * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local \
  *     scripts/backfill-external-tags-apply.ts --from=.backups/backfill-tags/map-<stamp>.json
  *   # valendo (RODE `node scripts/backup-db.mjs` ANTES — banco sem backup cloud):

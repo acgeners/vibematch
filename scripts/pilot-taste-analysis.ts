@@ -1,6 +1,6 @@
 /* Fase 4 — análise do piloto de gosto. Read-only. Divergência (gosto×craft),
  * pontes Tier A (gosto×IA), aspectos→overall. Bootstrap CI, pré-registrado.
- * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/pilot-taste-analysis.ts
+ * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/pilot-taste-analysis.ts
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createClient } from "@supabase/supabase-js"

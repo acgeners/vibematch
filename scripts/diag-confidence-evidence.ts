@@ -6,7 +6,7 @@
  * a confiança (n=91, Δ+0,049, 58↑/11↓). O que despenca o número é a troca de
  * modelo. Ver `REGISTRO-2026-07-24-CONFIANCA-IA.md`.
  *
- * Rode com: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local \
+ * Rode com: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis \
  *             scripts/diag-confidence-evidence.ts
  */
 import { createAdminClient } from "@/lib/supabase/admin"

@@ -3,8 +3,8 @@
  * temos de cada. Read-only, zero LLM, zero escrita.
  *
  * Uso:
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/inspect-sources.ts "parte do título"
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/inspect-sources.ts   # (sem arg) resumo global
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/inspect-sources.ts "parte do título"
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/inspect-sources.ts   # (sem arg) resumo global
  *
  * Para cada obra que casa o título mostra:
  *   - external_ids: fonte → id  [aceito | REJEITADO]

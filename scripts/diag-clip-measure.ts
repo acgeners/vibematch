@@ -5,7 +5,7 @@
  * com um passo de CLIP opcional no bloco numérico escalado, e cruza o baseline
  * sem-clip contra a função OFICIAL pra provar que a reimplementação é fiel.
  *
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/diag-clip-measure.ts
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/diag-clip-measure.ts
  */
 import { createAdminClient } from "@/lib/supabase/admin"
 import { computeRecalc, buildWork, type RawWork } from "@/server/actions/calculations"

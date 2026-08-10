@@ -7,7 +7,7 @@
  * zero e as outras features refitam (equivale a remover a coluna), reusando a
  * função REAL `expectedOutOfFoldPredictions`.
  *
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/diag-ablate-runlength.ts
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/diag-ablate-runlength.ts
  */
 import { createAdminClient } from "@/lib/supabase/admin"
 import { computeRecalc, buildWork, type RawWork } from "@/server/actions/calculations"

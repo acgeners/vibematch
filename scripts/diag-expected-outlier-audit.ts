@@ -5,7 +5,7 @@
  * domina o Ridge linear). Generaliza o caso do RunLength negativo pra QUALQUER
  * feature. Também imprime a decomposição de obras nomeadas via argv.
  *
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/diag-expected-outlier-audit.ts "The Maiden Trials"
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/diag-expected-outlier-audit.ts "The Maiden Trials"
  */
 import { createAdminClient } from "@/lib/supabase/admin"
 import { computeRecalc, buildWork, type RawWork } from "@/server/actions/calculations"

@@ -6,7 +6,7 @@
  *  - Brier + curva de confiabilidade (qualidade da CALIBRAÇÃO — o "%" é honesto?)
  *  - amostra de Chances calibradas reais (topo/base)
  *
- * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/chance-validate.ts
+ * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/chance-validate.ts
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createClient } from "@supabase/supabase-js"

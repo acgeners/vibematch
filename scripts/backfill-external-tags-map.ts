@@ -7,7 +7,7 @@
  * "tag nova" vs "candidato a gênero". NÃO escreve nada no catálogo — só grava um
  * arquivo de staging que a ETAPA B consome (pra não re-buscar).
  *
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local \
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis \
  *     scripts/backfill-external-tags-map.ts [--limit=N] [--concurrency=3]
  *
  * Saída: .backups/backfill-tags/map-<stamp>.json  + resumo no stdout.

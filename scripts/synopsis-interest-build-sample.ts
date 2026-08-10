@@ -5,7 +5,7 @@
  * provider). A amostra é FIXA: rodar de novo com os mesmos dados dá a mesma
  * fixture (determinístico). Estratifica pelo label atual só p/ cobrir os 4 níveis.
  *
- * Uso: npx tsx --env-file=.env.local scripts/synopsis-interest-build-sample.ts
+ * Uso: npx tsx --env-file=.env.local --env-file=.env.analysis scripts/synopsis-interest-build-sample.ts
  * Saída: lib/synopsis-interest/golden-sample.pilot-1.json
  */
 import { writeFileSync } from "node:fs"

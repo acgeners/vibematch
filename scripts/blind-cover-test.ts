@@ -2,7 +2,7 @@
  * TESTE CEGO do avaliador de capas.
  *
  *   # 1) gera a página (amostra aleatória, semente fixa → reproduzível)
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/blind-cover-test.ts
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/blind-cover-test.ts
  *   → .local-experiments/blind-cover-test.html
  *
  *   # 2) você vota, baixa o JSON, e eu apuro

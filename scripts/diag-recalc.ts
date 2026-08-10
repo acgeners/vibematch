@@ -9,7 +9,7 @@
  *      obras (nota + ranking). Por classe de edição: rótulo / atributo IA / capítulos.
  *
  * NÃO escreve nada. NÃO chama LLM. Uso:
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/diag-recalc.ts
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/diag-recalc.ts
  */
 import { createAdminClient } from "@/lib/supabase/admin"
 import { computeRecalc, buildWork, type RawWork } from "@/server/actions/calculations"

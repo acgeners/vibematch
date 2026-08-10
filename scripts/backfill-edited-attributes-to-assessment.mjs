@@ -14,6 +14,7 @@
 // Só linhas com source IA + suggested_score registrado.
 //
 // Uso:
+// 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
 //   node --env-file=.env.local scripts/backfill-edited-attributes-to-assessment.mjs          (dry-run)
 //   node --env-file=.env.local scripts/backfill-edited-attributes-to-assessment.mjs --apply  (grava)
 //

@@ -11,7 +11,7 @@
  * precisão. Uma nota pode estar perto do gold E contradizer o próprio texto.
  *
  * Uso:
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/coherence-audit.ts
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/coherence-audit.ts
  *   ... --source=.pilot/piloto-v25-....json      # mede uma saída já paga
  *   ... --sample=30                              # imprime casos marcados, pra validar à mão
  *   ... --check=D --sample=20                    # só uma checagem

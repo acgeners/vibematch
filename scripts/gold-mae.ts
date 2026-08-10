@@ -16,6 +16,7 @@
  * `protagonist` (31.8%) move muito.
  *
  * Uso:
+ * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/gold-mae.ts --list
  *   ... scripts/gold-mae.ts --execute
  *

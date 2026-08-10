@@ -1,6 +1,7 @@
 /**
  * Smoke test do Plano 2 — cache real (ai_cache_events) + single-flight.
  *
+ * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
  * Uso: npx tsx --env-file=.env.local scripts/smoke-plan2.ts
  *
  * Cuidados (conforme aprovação):

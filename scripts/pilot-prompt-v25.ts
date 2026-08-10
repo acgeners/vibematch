@@ -7,6 +7,7 @@
  * uma medição antes é repetir o processo que produziu os vieses originais.
  *
  * Uso:
+ * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local \
  *     scripts/pilot-prompt-v25.ts --list           # só imprime a amostra ($0)
  *   ... scripts/pilot-prompt-v25.ts --execute      # roda de verdade

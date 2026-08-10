@@ -3,7 +3,7 @@
  *  (1) Interesse contínuo (banda × confidence) vs ordinal — ajuda o modelo da Chance?
  *  (2) Rating agregado de work_reviews.user_rating — agrega além do platform_avg?
  *
- * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/chance-refine-measure.ts
+ * Uso: npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/chance-refine-measure.ts
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createClient } from "@supabase/supabase-js"
