@@ -26,17 +26,33 @@ const PKG = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"),
 
 const comEnvLocal = Object.entries(PKG.scripts).filter(([, cmd]) => cmd.includes("--env-file=.env.local"))
 
+/**
+ * A exceção é DECLARADA no arquivo, não numa lista aqui: um script marcado `ALVO: NUVEM`
+ * grava, e para ele o local é o alvo errado. Ler o cabeçalho em vez de manter uma allowlist
+ * mantém **uma régua só** para as duas portas (npm script e comando copiado à mão) — e é a
+ * mesma escolha de derivar do filesystem que o resto deste arquivo faz.
+ */
+function declaraAlvoNuvem(cmd: string): boolean {
+  const arquivo = cmd.match(/scripts\/[\w.-]+\.(?:ts|mjs)/)?.[0]
+  if (!arquivo) return false
+  const p = path.join(process.cwd(), arquivo)
+  return fs.existsSync(p) && fs.readFileSync(p, "utf8").includes("ALVO: NUVEM")
+}
+
+const devemApontarPraLocal = comEnvLocal.filter(([, cmd]) => !declaraAlvoNuvem(cmd))
+
 describe("scripts de análise apontam para o banco local", () => {
   it("existem scripts com --env-file (senão a varredura não prova nada)", () => {
     expect(comEnvLocal.length).toBeGreaterThan(0)
   })
 
   it("todo script que carrega .env.local também carrega .env.analysis", () => {
-    for (const [nome, cmd] of comEnvLocal) {
+    for (const [nome, cmd] of devemApontarPraLocal) {
       expect(
         cmd,
         `"${nome}" carrega .env.local sem .env.analysis — vai rodar contra a NUVEM e queimar ` +
-          `egress em silêncio. Acrescente: --env-file=.env.local --env-file=.env.analysis`,
+          `egress em silêncio. Acrescente: --env-file=.env.local --env-file=.env.analysis` +
+          ` (ou, se o script GRAVA, declare "ALVO: NUVEM" no cabeçalho dele)`,
       ).toContain("--env-file=.env.analysis")
     }
   })
@@ -44,10 +60,31 @@ describe("scripts de análise apontam para o banco local", () => {
   it(".env.analysis vem DEPOIS de .env.local — a ordem é o mecanismo", () => {
     // O último `--env-file` vence (verificado no Node e no tsx). Invertida, a ordem faz o
     // .env.local sobrescrever o alvo de volta para a nuvem, e o arquivo vira decoração.
-    for (const [nome, cmd] of comEnvLocal) {
+    for (const [nome, cmd] of devemApontarPraLocal) {
       const iLocal = cmd.indexOf("--env-file=.env.local")
       const iAnalysis = cmd.indexOf("--env-file=.env.analysis")
       expect(iAnalysis, `"${nome}": .env.analysis precisa vir depois de .env.local`).toBeGreaterThan(iLocal)
+    }
+  })
+
+  /**
+   * 🔴 Script pago que aponta pra nuvem não pode depender só do `package.json`: quem copia o
+   * comando do cabeçalho não passa por ele. Medido em 2026-08-10, o que estava em jogo era
+   * `backfill:interest --execute` = **US$10,60** gravados num banco descartável.
+   */
+  it("script marcado ALVO: NUVEM e pago barra o --execute contra o local", () => {
+    const pagos = comEnvLocal.filter(([, cmd]) => declaraAlvoNuvem(cmd))
+    expect(pagos.length, "nenhum script pago no package.json — a varredura não prova nada").toBeGreaterThan(0)
+    for (const [nome, cmd] of pagos) {
+      const arquivo = cmd.match(/scripts\/[\w.-]+\.(?:ts|mjs)/)![0]
+      const src = fs.readFileSync(path.join(process.cwd(), arquivo), "utf8")
+      if (!src.includes("--execute") && !src.includes('hasFlag("execute")')) continue
+      expect(
+        src,
+        `"${nome}" tem modo --execute e aponta pra nuvem, mas não chama exigeAlvoNuvem(): ` +
+          `rodado à mão com o .env.analysis, ele paga as chamadas de IA e grava no banco ` +
+          `descartável — o resultado morre no próximo db:pull.`,
+      ).toContain("exigeAlvoNuvem(")
     }
   })
 

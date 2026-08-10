@@ -14,6 +14,20 @@
  *
  * Execução direta (npm run e1:scope): imprime contagens e escreve os IDs em
  * disco (scratchpad) para alimentar o --work-id do backfill.
+ *
+ * 🔴 QUEBRADO desde a Fase F (`329a446`, 14/07/2026) — conferido em 2026-08-10 rodando
+ * `npm run e1:scope`: `FATAL: works: column works.personal_status_id does not exist`. O
+ * critério de `personal_status` acima lê uma coluna que `works` não tem mais: a Fase F moveu
+ * as 19 colunas pessoais para o espelho `user_work_state`, que virou a única fonte.
+ *
+ * ⚠️ Ao consertar, o filtro pessoal precisa decidir DE QUEM é o status — em `works` ele era
+ * global por acidente; no espelho ele tem dono. Para uma operação de catálogo, o dono é o
+ * curador, e isso passa a ser uma escolha explícita, não uma leitura de coluna.
+ *
+ * ⚠️ Este defeito derrubou os DOIS consumidores em silêncio, e nada acusou por ~4 semanas:
+ * nenhum deles roda em CI nem por hábito. É a mesma família do
+ * [[gotcha-scripts-fora-do-package-json-batem-na-nuvem]] — script fora de qualquer rede
+ * envelhece sem sintoma.
  */
 import { writeFileSync } from "node:fs"
 import { createAdminClient } from "@/lib/supabase/admin"
