@@ -247,9 +247,15 @@ estavam no `package.json` com `--env-file=.env.analysis` (⇒ local) e **gravam 
 feita para leitura e o modo de escrita entrou de carona.
 
 🔴 **O que estava em jogo, medido:** `backfill:interest --execute` planejava **971 previsões,
-US$10,60** (teto US$15,89), e o `e1:digest` tem 136 obras a US$0,0183 cada. Pior: o dry-run do
-primeiro **imprimia o comando errado** como passo seguinte — a instrução impressa levava a
-queimar US$10,60 num banco descartável.
+US$10,60** (teto US$15,89) — o perfil está stale, e nesse caso ele não prevê parcialmente
+(70 frescas · 610 contra perfil antigo · 291 ausentes). Pior: o dry-run **imprimia o comando
+errado** como passo seguinte, então a instrução impressa levava a queimar US$10,60 num banco
+descartável.
+
+⚠️ **Do `e1:digest` esta seção já afirmou "136 obras a US$0,0183 cada", e era INFERÊNCIA.**
+Aquele número saiu de contar obras sem digest no banco, sem rodar a ferramenta. Rodado:
+`FATAL: works: column works.personal_status_id does not exist`. Ver o 🔴 logo abaixo — o
+script não gastaria nada porque não roda.
 
 ⚠️ **O dry-run foi junto pra nuvem, e não é descuido: plano e execução TÊM que ser no mesmo
 banco.** O executor replaneja e compara (`plan.planSignature !== deps.planSignature` ⇒
@@ -266,6 +272,21 @@ aborta com a linha de comando certa **antes de qualquer chamada paga** — quem 
 do cabeçalho não passa pelo npm script. Guardado pelo mesmo
 `scripts-apontam-pro-local.test.ts`, que exige o guard em todo script pago marcado
 `ALVO: NUVEM` e **deriva a exceção do cabeçalho do arquivo**, nunca de uma allowlist.
+
+🔴 **PENDENTE: `e1:scope` e `e1:digest` estão QUEBRADOS desde a Fase F** (`329a446`,
+14/07/2026), e ninguém percebeu por ~4 semanas. Os dois morrem na primeira query com
+`FATAL: works: column works.personal_status_id does not exist` — a Fase F tirou as 19 colunas
+pessoais de `works` e o espelho (`user_work_state`) passou a ser a única fonte, mas
+`computeE1ProdScope` continuou lendo a coluna antiga. Conferido em 2026-08-10 rodando os dois.
+
+⚠️ **O trabalho que eles fariam é MENOR do que "as obras sem digest" sugere.** São 136 sem
+digest, mas o escopo exige **>3 reviews e ≥20 tags**, e dessas 136 **86 têm ZERO reviews** e
+27 têm 1–2 — sobram ~23 obras (~US$0,42). E o caminho normal do app (o botão de digest na
+página da obra) não depende desse script: ele faz uma a uma e funciona.
+
+⚠️ **A trava de alvo neles continua correta** — script quebrado é consertado, e no dia em que
+for, o `--execute` já estará apontando pro lugar certo. Mas a urgência era só do
+`backfill:interest`, que funciona.
 
 ⚠️ `db:local` continua existindo para o caso raro de querer o **app** no local. Ele não mexe
 mais nos scripts. E quando o app está no local, uma **faixa de listras** aparece no topo
