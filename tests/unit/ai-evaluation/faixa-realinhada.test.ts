@@ -47,3 +47,33 @@ describe("realinharFaixaCitada", () => {
     expect(realinharFaixaCitada(uma, 7.0)).toBe(uma)
   })
 })
+
+describe("realinharFaixaCitada — causa", () => {
+  it("só afirma 'limite obrigatório' quando a causa foi provada", () => {
+    // No backfill, 41 das 126 divergências NÃO têm impressão digital de clamp (a nota não
+    // cai num valor de piso). Escrever 'limite obrigatório' nelas seria inventar um motivo
+    // — o mesmo defeito que este realinhamento existe pra remover, com outra roupa.
+    const j = "Faixa 4-6 (Suggestive): evidência moderada."
+    expect(realinharFaixaCitada(j, 7.0, "limite")).toContain("limite obrigatório")
+    const neutro = realinharFaixaCitada(j, 7.0, "desconhecida")
+    expect(neutro).toContain("Faixa 7-8")
+    expect(neutro).toContain("conclui faixa 4-6")
+    expect(neutro).not.toContain("limite obrigatório")
+  })
+})
+
+describe("realinharFaixaCitada — rótulo da faixa antiga", () => {
+  it("não deixa o rótulo antigo órfão depois do novo número", () => {
+    // "Faixa 4-6 (Suggestive)" → trocar só o número produziria
+    // "Faixa 7-8 (…) (Suggestive)", e Suggestive é o rótulo de 4-6. A correção criaria
+    // a incoerência que ela existe pra remover. Pego no dry-run do backfill.
+    const r = realinharFaixaCitada("Faixa 4-6 (Suggestive): não é smut.", 7.0)
+    expect(r).not.toMatch(/\)\s*\(Suggestive\)/)
+    expect(r).toContain("conclui faixa 4-6 (Suggestive)")
+    expect(r.match(/Suggestive/g)).toHaveLength(1)
+  })
+
+  it("funciona sem rótulo", () => {
+    expect(realinharFaixaCitada("Faixa 4-6: evidência moderada.", 7.0)).toContain("conclui faixa 4-6)")
+  })
+})

@@ -916,14 +916,28 @@ function adultBoundsForContext(req: AiEvaluationRequest) {
  * pior: ela é a evidência de que o piso e a evidência textual discordam, e é isso que faz
  * a curadora olhar o caso.
  */
-export function realinharFaixaCitada(justificativa: string, nota: number): string {
-  const m = justificativa.match(/Faixa\s+(\d+-\d+)/i)
+export function realinharFaixaCitada(
+  justificativa: string,
+  nota: number,
+  /** Causa do desalinhamento. Só passe `"limite"` quando estiver PROVADO que o piso/teto
+   *  moveu a nota — no backfill isso é a impressão digital "nota exata num piso, prosa
+   *  abaixo". Quando a causa é desconhecida (o modelo se contradisse sozinho), o rótulo
+   *  neutro é o honesto: afirmar um motivo não verificado é o defeito que estamos tirando
+   *  da tela, com outra roupa. */
+  causa: "limite" | "desconhecida" = "limite",
+): string {
+  // ⚠️ Consome também o RÓTULO da faixa antiga — "Faixa 4-6 (Suggestive)". Trocar só o
+  // número deixaria "Faixa 7-8 (…) (Suggestive)", e "Suggestive" é o rótulo de 4-6: a
+  // correção criaria uma incoerência nova. Pego no dry-run do backfill.
+  const m = justificativa.match(/Faixa\s+(\d+-\d+)(\s*\([^)]*\))?/i)
   if (!m) return justificativa
   const nova = bandForScore(nota)
   if (m[1] === nova) return justificativa
+  const prefixo = causa === "limite" ? "definida pelo limite obrigatório; " : ""
+  const rotuloAntigo = m[2] ? ` ${m[2].trim()}` : ""
   return justificativa.replace(
     m[0],
-    `Faixa ${nova} (definida pelo limite obrigatório; a análise abaixo conclui faixa ${m[1]})`,
+    `Faixa ${nova} (${prefixo}a análise abaixo conclui faixa ${m[1]}${rotuloAntigo})`,
   )
 }
 
