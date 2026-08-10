@@ -1,5 +1,25 @@
 #!/usr/bin/env node
 /**
+ * 🔴 APOSENTADO em 2026-08-10. Exige `--eu-sei-o-que-estou-fazendo` para rodar.
+ *
+ * Este script existe porque o catálogo tinha DOIS escritores: era editado no local e servido
+ * pela nuvem. Essa era a causa raiz de tudo o que ele precisou aprender a fazer — PLAN de 30
+ * tabelas, ordem topológica de FK, chave natural contra surrogate, e decisões humanas de
+ * conflito (o caso `work_lists` custou 16 itens e 1 pasta apagados da nuvem).
+ *
+ * Hoje a NUVEM é a fonte de verdade e o local é réplica descartável: schema sobe, dado desce,
+ * e nada mais volta. Sem dois escritores, não há o que reconciliar.
+ *
+ * **Use `db-push-evals.mjs`** (5 tabelas) para o caso legítimo que sobrou: operação em LOTE
+ * rodada no local para não queimar egress — por exemplo, reavaliar o catálogo inteiro com uma
+ * régua nova. Esse recorte é estreito, previsível e não tem conflito a resolver.
+ *
+ * ⚠️ Não foi apagado porque a mecânica é cara de reconstruir e o inventário de 30 tabelas foi
+ * MEDIDO num piloto real, não deduzido — é documentação de qual é a superfície da curadoria.
+ * Mas rodá-lo hoje reintroduz o segundo escritor e desfaz a decisão inteira.
+ *
+ * ── o que ele fazia ───────────────────────────────────────────────────────────────────────
+ *
  * Empurra a CURADORIA feita no banco local para a nuvem — "Atualizar dados" + avaliação IA
  * + estado de leitura + as saídas do recalc.
  *
@@ -31,9 +51,34 @@
 import fs from "node:fs"
 import path from "node:path"
 import { execFileSync, spawnSync } from "node:child_process"
+import { podar } from "./lib/backups-retencao.mjs"
 
 const ROOT = path.resolve(import.meta.dirname, "..")
 const args = process.argv.slice(2)
+
+// 🔴 Trava de aposentadoria. A nuvem é a fonte de verdade desde 2026-08-10; rodar isto
+// devolve o catálogo a DOIS escritores, que é a causa raiz que a decisão eliminou. A trava
+// é um argumento e não uma pergunta interativa de propósito: quem chega aqui por hábito
+// muscular (`npm run db:push-curation -- --yes`) precisa parar e ler.
+if (!args.includes("--eu-sei-o-que-estou-fazendo")) {
+  console.error(`
+✗ db:push-curation está APOSENTADO.
+
+  A nuvem é a fonte de verdade desde 2026-08-10 — o catálogo é editado LÁ, e o banco local é
+  réplica descartável. Este script empurra o local por cima da nuvem, o que reintroduz o
+  segundo escritor e a classe inteira de conflitos que vinha com ele.
+
+  O que você provavelmente quer:
+
+    operação em LOTE feita no local     →  npm run db:push-evals -- --yes
+    trazer a nuvem para o local          →  npm run db:pull
+    conferir se os dois divergiram       →  npm run db:diff
+
+  Se ainda assim for isto mesmo, acrescente --eu-sei-o-que-estou-fazendo.
+`)
+  process.exit(1)
+}
+
 const DRY = args.includes("--dry-run")
 const YES = args.includes("--yes")
 // `--synopses` só LÊ os dois lados e imprime a comparação — não exige --yes.
@@ -677,6 +722,14 @@ const synopsisChanged = lines(
 console.log(`\nlinhas a transferir:`)
 const staged = []
 const stamp = new Date().toISOString().replace(/[:.]/g, "-")
+
+// 🔴 Poda ANTES de gravar: cada execução deixa ~95 MB de staging, e um ENSAIO no cloudsim
+// deixa igual — foi por isso que 23 dirs viraram 1,5 GB num dia só. Podar no fim deixaria de
+// fora as execuções interrompidas, que são as mais frequentes enquanto se ajusta o PLAN.
+// ⚠️ Isto é STAGING, não backup: são os TSV do que foi lido da origem para carregar no
+// destino. O backup de verdade é o `.backups/<stamp>/` do `backup-db.mjs`.
+podar("push-curation")
+
 const outDir = path.join(ROOT, ".backups", `push-curation-${stamp}`)
 fs.mkdirSync(outDir, { recursive: true })
 

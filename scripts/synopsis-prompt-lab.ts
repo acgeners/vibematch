@@ -22,6 +22,7 @@ import { createClient } from "@supabase/supabase-js"
 import { config } from "dotenv"
 import fs from "node:fs"
 import path from "node:path"
+import { podar } from "./lib/backups-retencao.mjs"
 import { splitSynopsesFromText } from "../lib/work-derived"
 import { SYSTEM_PROMPT } from "../lib/ai-recommendation/synopsis-consolidator"
 
@@ -261,6 +262,11 @@ async function main() {
   if (DRY) return
 
   const stamp = new Date().toISOString().replace(/[:.]/g, "-")
+
+  // Saída pequena (~44 KB), mas família declarada como as outras: o que enche o `.backups` não
+  // é o tamanho de uma execução, é não haver teto nenhum. Ver `lib/backups-retencao.mjs`.
+  podar("synopsis-lab")
+
   const outDir = path.join(process.cwd(), ".backups", `synopsis-lab-${stamp}`)
   fs.mkdirSync(outDir, { recursive: true })
 

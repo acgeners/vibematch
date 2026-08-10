@@ -1,0 +1,178 @@
+/**
+ * Dono ÚNICO da política de retenção de `.backups/`.
+ *
+ * ## Por que existe
+ *
+ * Em 2026-08-10 o `.backups` estava em **1,9 GB**, dos quais 1,5 GB eram 23 diretórios
+ * `push-curation-*` — quase todos de um único dia, a maioria ENSAIO no cloudsim. Disco cheio
+ * já derrubou a VM do Docker aqui, e é o Docker que segura o Supabase local.
+ *
+ * 🔴 A causa não foi "faltou retenção no push-curation". Foi que **cada script inventava seu
+ * próprio prefixo e sua própria política**, e cada retenção era escrita como um regex que só
+ * enxerga a própria família:
+ *
+ *     backup-db.mjs          /^\d{4}-\d{2}-\d{2}T[\d-]+Z$/
+ *     db-pull-to-local.mjs   /^pull-\d{4}-...T/
+ *     db-push-new-works.mjs  /^new-works-\d{4}-...T/
+ *
+ * Nenhuma delas erra — todas são corretas e todas são cegas para as outras **por construção**.
+ * Um prefixo novo nasce sem dono e ninguém percebe. Medido: de 7 scripts que gravavam ali, 3
+ * nunca podavam nada, e havia 3 entradas órfãs de script nenhum (uma delas de **33 MB**).
+ *
+ * É a mesma armadilha que esta base já documenta em `LOW_BALANCE_USD` (2 cópias),
+ * `STRONG_TAG_WEIGHT` (2 cópias) e dinheiro (6 arquivos, 8 funções). Aqui ela aparece em
+ * disco em vez de em tela — e o sintoma demora meses, porque disco só dói quando acaba.
+ *
+ * ⚠️ **A âncora do CLAUDE.md enganava.** Ele dizia "depois de um backup bem-sucedido o script
+ * mantém os 5 mais recentes", o que é verdade e leva à conclusão falsa de que `.backups` está
+ * sob controle. Essa frase cobria 6 dos 40 diretórios.
+ *
+ * ## Como usar
+ *
+ *     import { podar } from "./lib/backups-retencao.mjs"
+ *     podar("push-curation")   // poda a própria família e denuncia entradas sem dono
+ *
+ * Ao criar um script que grave em `.backups`, **declare a família aqui**. Não é burocracia: é
+ * o que faz `entradasSemDono()` parar de gritar, e é o que o teste de arquitetura
+ * (`tests/unit/orchestration/backups-retencao-tem-dono.test.ts`) exige.
+ */
+import fs from "node:fs"
+import path from "node:path"
+
+const ROOT = path.resolve(import.meta.dirname, "..", "..")
+export const BASE = path.join(ROOT, ".backups")
+
+/**
+ * Toda família que pode existir em `.backups`, com quem a cria e quantas se guarda.
+ *
+ * 🔴 `casa` tem que ser MUTUAMENTE EXCLUSIVO. A armadilha concreta: um teste ingênuo de
+ * prefixo para `push-` engoliria `push-curation-` e o staging de 96 MB seria podado pela
+ * política de 3 do outro (ou, pior, contado como "os 3 mais recentes" do vizinho e mantido
+ * para sempre). Por isso todo regex datado exige o dígito do ano LOGO depois do prefixo:
+ * `push-curation-…` não casa com `/^push-\d{4}/`. Guardado por teste.
+ *
+ * `keep: null` = diretório fixo, não acumula versões — tem dono, mas não se poda.
+ */
+export const FAMILIAS = [
+  {
+    id: "backup",
+    dono: "backup-db.mjs",
+    oQueE: "dump lógico NDJSON de todas as tabelas — o backup de DADO (sem schema/policies)",
+    casa: (n) => /^\d{4}-\d{2}-\d{2}T[\d-]+Z$/.test(n),
+    keepPadrao: 5,
+    env: "BACKUP_KEEP",
+  },
+  {
+    id: "pull",
+    dono: "db-pull-to-local.mjs",
+    // Guardamos mais destes do que o tamanho sugere: é o ÚNICO backup do projeto que inclui
+    // schema, policies e functions — o NDJSON do backup-db.mjs não os tem.
+    oQueE: "pg_dump da nuvem — único backup COM schema, policies e functions",
+    casa: (n) => /^pull-\d{4}-\d{2}-\d{2}T/.test(n),
+    keepPadrao: 3,
+    env: "PULL_KEEP",
+  },
+  {
+    id: "push-curation",
+    dono: "db-push-curation.mjs",
+    oQueE: "STAGING do push de curadoria (~95 MB) — TSV do que foi lido, não é backup",
+    casa: (n) => /^push-curation-\d{4}-\d{2}-\d{2}T/.test(n),
+    keepPadrao: 2,
+    env: "PUSH_STAGE_KEEP",
+  },
+  {
+    id: "push-evals",
+    dono: "db-push-evals.mjs",
+    oQueE: "staging do push de avaliações de IA (~2 MB)",
+    casa: (n) => /^push-\d{4}-\d{2}-\d{2}T/.test(n),
+    keepPadrao: 3,
+    env: "PUSH_EVALS_KEEP",
+  },
+  {
+    id: "new-works",
+    dono: "db-push-new-works.mjs",
+    oQueE: "cofre auto-contido das obras novas (~1,3 MB) — grava inclusive em --dry-run",
+    casa: (n) => /^new-works-\d{4}-\d{2}-\d{2}T/.test(n),
+    keepPadrao: 5,
+    env: "COFRE_KEEP",
+  },
+  {
+    id: "synopsis-lab",
+    dono: "synopsis-prompt-lab.ts",
+    oQueE: "saídas do laboratório de prompt de sinopse (~44 KB)",
+    casa: (n) => /^synopsis-lab-\d{4}-\d{2}-\d{2}T/.test(n),
+    keepPadrao: 3,
+    env: "SYNOPSIS_LAB_KEEP",
+  },
+  {
+    id: "fingerprints",
+    dono: "db-table-fingerprint.mjs",
+    oQueE: "snapshots de fingerprint por tabela — diretório FIXO, não versionado",
+    casa: (n) => n === "fingerprints",
+    keepPadrao: null,
+    env: null,
+  },
+]
+
+/** Quantas guardar nesta família, respeitando a env que o script dela sempre aceitou. */
+export function keepDe(familia) {
+  if (familia.keepPadrao == null) return null
+  const bruto = familia.env ? process.env[familia.env] : undefined
+  const n = Number(bruto ?? familia.keepPadrao)
+  // Um `keep` de 0 apagaria o que acabou de ser gravado; NaN viraria "apague tudo" no slice.
+  return Number.isFinite(n) ? Math.max(1, n) : familia.keepPadrao
+}
+
+function listar(base) {
+  if (!fs.existsSync(base)) return []
+  return fs.readdirSync(base)
+}
+
+/**
+ * Entradas de `.backups` que não pertencem a nenhuma família declarada.
+ *
+ * 🔴 Esta é a defesa que pega o PRÓXIMO script, e não o que já conhecemos. Sem ela, corrigir o
+ * `push-curation` teria sido só o conserto de um caso. Medido em 2026-08-10, ela já acusaria
+ * três órfãos de comando ad-hoc que nunca tiveram dono: `2026-07-31-pre-mig169` (**33 MB**, que
+ * escapa do regex do backup-db pelo sufixo), `orphan-fix-….json` e
+ * `prediction-snapshots-locais-….tsv`.
+ */
+export function entradasSemDono(base = BASE) {
+  return listar(base).filter((nome) => !FAMILIAS.some((f) => f.casa(nome)))
+}
+
+/**
+ * Poda uma família e denuncia o que não tem dono.
+ *
+ * ⚠️ Chame ANTES de gravar o diretório novo, não depois. Cada execução deixa staging, e um
+ * ensaio interrompido deixa igual — podar só no caminho de sucesso deixa de fora justamente as
+ * execuções que mais acontecem enquanto se ajusta o script. (Exceção: `backup-db.mjs` poda no
+ * FIM de propósito, porque lá o novo backup precisa ter passado na conferência antes de a gente
+ * descartar um antigo que estava bom.)
+ */
+export function podar(familiaId, { base = BASE, log = console.log } = {}) {
+  const familia = FAMILIAS.find((f) => f.id === familiaId)
+  if (!familia) throw new Error(`família desconhecida em .backups: "${familiaId}" — declare em FAMILIAS`)
+
+  const keep = keepDe(familia)
+  let apagados = []
+  if (keep != null) {
+    // Stamp ISO é lexicograficamente ordenável, então `sort()` já é ordem cronológica.
+    const todos = listar(base).filter((n) => familia.casa(n)).sort().reverse()
+    apagados = todos.slice(keep)
+    for (const nome of apagados) fs.rmSync(path.join(base, nome), { recursive: true, force: true })
+    if (apagados.length) {
+      log(`🧹 retenção (${familia.id}): apagados ${apagados.length}, mantidos ${keep}` +
+        (familia.env ? ` — ajuste com ${familia.env}=<n>` : ""))
+    }
+  }
+
+  const orfaos = entradasSemDono(base)
+  if (orfaos.length) {
+    log(`⚠️  ${orfaos.length} entrada(s) em .backups sem dono — nenhuma retenção as cobre:`)
+    for (const o of orfaos.slice(0, 5)) log(`     ${o}`)
+    if (orfaos.length > 5) log(`     … e mais ${orfaos.length - 5}`)
+    log(`     Declare a família em scripts/lib/backups-retencao.mjs ou apague à mão.`)
+  }
+  return { apagados, orfaos }
+}

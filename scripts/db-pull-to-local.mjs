@@ -21,6 +21,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { execFileSync, spawnSync } from "node:child_process"
+import { podar } from "./lib/backups-retencao.mjs"
 
 const ROOT = path.resolve(import.meta.dirname, "..")
 const SCHEMAS = ["public", "bkp"]
@@ -338,20 +339,12 @@ if (problems.length) {
   process.exit(1)
 }
 
-// Cada pull deixa ~113 MB. A retenção do backup-db.mjs não pega estes (ela só poda diretórios com
-// nome de stamp ISO puro), então a poda é aqui. Guardamos 3: além de servirem pro dev local, estes
-// dumps são hoje o ÚNICO backup do projeto que inclui schema, policies e functions — o NDJSON não
-// inclui. Ajuste com PULL_KEEP=<n>.
-const keep = Number(process.env.PULL_KEEP ?? 3)
-const pulls = fs
-  .readdirSync(path.join(ROOT, ".backups"))
-  .filter((d) => /^pull-\d{4}-\d{2}-\d{2}T/.test(d))
-  .sort()
-  .reverse()
-for (const old of pulls.slice(keep)) {
-  fs.rmSync(path.join(ROOT, ".backups", old), { recursive: true, force: true })
-  console.log(`  (podado dump antigo: ${old})`)
-}
+// Cada pull deixa ~113 MB. Guardamos 3 (PULL_KEEP): além de servirem pro dev local, estes dumps
+// são hoje o ÚNICO backup do projeto que inclui schema, policies e functions — o NDJSON do
+// `backup-db.mjs` não inclui. A política mora em `lib/backups-retencao.mjs`; até 2026-08-10 cada
+// script tinha a sua, e cada regex enxergava só a própria família — foi assim que 3 famílias
+// ficaram sem poda nenhuma.
+podar("pull")
 
 console.log(`\n✓ cópia fiel: ${srcRows.size} tabelas, ${srcTotal.toLocaleString("pt-BR")} linhas e todos os`)
 console.log(`  objetos de schema (functions, policies, triggers, views, FKs, índices) conferem.`)

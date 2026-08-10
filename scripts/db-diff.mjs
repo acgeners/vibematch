@@ -109,6 +109,31 @@ function rowExpr(cols) {
   return cols.map((c) => `coalesce(t."${c}"::text, chr(1))`).join(" || chr(2) || ")
 }
 
+/**
+ * Chave de linha do DETALHE, com o PK INTEIRO.
+ *
+ * 🔴 A 1ª versão fazia `chave.split(", ")[0]` — só a PRIMEIRA coluna do PK. Em tabela de chave
+ * COMPOSTA isso funde todas as linhas que compartilham essa coluna numa entrada só, e o `Map`
+ * fica com a ÚLTIMA: o detalhe passa a comparar uma linha arbitrária por grupo e chama o
+ * resto de "valor diferente".
+ *
+ * Medido em 2026-08-10 em `work_genres` (PK `work_id, genre_id`): o detalhe dizia "21 valor
+ * diferente" onde o conjunto real de pares divergia em **6, com zero só na nuvem** — e foi
+ * esse 6 que autorizou um delete+insert. Errar para MAIS aqui é o lado caro, porque a
+ * resposta convida a uma estratégia destrutiva maior do que o problema.
+ *
+ * ⚠️ Afeta 8 tabelas hoje: `ai_eval_read_acks` (3 colunas), `attribute_bias`,
+ * `pilot_taste_scores`, `user_calculated_scores`, `user_work_state`, `work_genres`,
+ * `work_list_items` e `work_tags`. O hash da TABELA sempre esteve certo — ele já ordenava
+ * pelo PK inteiro. Só o detalhe mentia, que é justamente o número que se lê antes de decidir.
+ *
+ * Usa a mesma sentinela e o mesmo separador do `rowExpr`: `'|'` aparece em texto livre e
+ * juntar `('a|b', null)` com `('a', 'b')` seria colisão posicional silenciosa.
+ */
+function keyExpr(chave) {
+  return chave.split(", ").map((c) => `coalesce(${c}::text, chr(1))`).join(" || chr(2) || ")
+}
+
 /** Hash do conteúdo inteiro da tabela, estável entre bancos (ordem explícita por chave). */
 function sqlHash(tabela, cols, chave) {
   return `select count(*) as n, coalesce(md5(string_agg(md5(${rowExpr(cols)}), '' order by ${chave})), '-') as h
@@ -175,7 +200,7 @@ async function main() {
     // é caro e raramente é o que se quer numa varredura geral.
     if (!ALVOS.includes(d.t)) { console.log(`  (rode \`node scripts/db-diff.mjs ${d.t}\` pro detalhe por linha)`); continue }
 
-    const q = `select ${d.chave.split(", ")[0]} as k, md5(${rowExpr(d.cols)}) as h from public.${d.t} t`
+    const q = `select ${keyExpr(d.chave)} as k, md5(${rowExpr(d.cols)}) as h from public.${d.t} t`
     const A = new Map(local(q).split("\n").filter(Boolean).map((l) => l.split("|")))
     const B = new Map((await nuvem(q)).map((r) => [String(r.k), r.h]))
     const soLocal = [...A.keys()].filter((k) => !B.has(k))

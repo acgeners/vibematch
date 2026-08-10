@@ -21,9 +21,15 @@
 import fs from "node:fs"
 import path from "node:path"
 import { execFileSync } from "node:child_process"
+import { podar } from "./lib/backups-retencao.mjs"
 
 const ROOT = path.resolve(import.meta.dirname, "..")
 const OUT_DIR = path.join(ROOT, ".backups", "fingerprints")
+
+// Família de diretório FIXO: não acumula versões, então não há o que podar. A chamada existe
+// para que este script participe da checagem de órfãos — é ela que denuncia o PRÓXIMO prefixo
+// que alguém criar sem dono. Ver `lib/backups-retencao.mjs`.
+podar("fingerprints")
 
 const die = (msg) => {
   console.error(`\n✗ ${msg}`)
