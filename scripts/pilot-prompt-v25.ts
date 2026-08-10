@@ -25,11 +25,14 @@
  * versões do prompt sobre o MESMO contexto na mesma execução (~2× o custo).
  */
 import { createClient } from "@supabase/supabase-js"
-import { requestAiEvaluation, MODEL, PROMPT_VERSION } from "@/lib/ai-evaluation/service"
-import { fetchExternalEvaluationContextForWork } from "@/lib/external/index"
+import { requestAiEvaluation, MODEL, PROMPT_VERSION, AI_EVAL_REVIEW_CAPS } from "@/lib/ai-evaluation/service"
+import { fetchExternalEvaluationContextForWork, selectReviewsForEvaluation } from "@/lib/external/index"
+import { mergeFreshWithPersistedReviews } from "@/lib/external/review-merge"
+import { loadWorkReviewsAsSourced } from "@/lib/external/persist-reviews"
 import { splitSynopsesForEvaluation, pickPrimaryCover } from "@/lib/work-derived"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { CRITERION_SLUGS } from "@/types/domain"
+import type { SourcedReview } from "@/lib/external/types"
 import { bandForScore } from "@/lib/criteria/justification"
 import fs from "node:fs"
 import path from "node:path"
@@ -98,6 +101,21 @@ if (!SUPABASE_URL || !SUPABASE_KEY) throw new Error("faltam NEXT_PUBLIC_SUPABASE
 if (EXECUTE && !process.env.ANTHROPIC_API_KEY) throw new Error("falta ANTHROPIC_API_KEY")
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
+
+/**
+ * 🔴 A UNIÃO fresco + persistido, igual à `triggerAiEvaluation`. Sem isto o harness
+ * MEDE OUTRA COISA: quando o sidecar está saturado (503 busy) ou o Cloudflare bloqueia,
+ * a busca fresca volta com 1–2 reviews, e o prompt sai faminto — enquanto a nota do
+ * catálogo, com que estamos comparando, foi produzida com o pool cheio. O erro é
+ * ASSIMÉTRICO: penaliza só a coluna nova. Medido nas 30 obras do gold: 61,7 reviews
+ * persistidas em média (mín. 20, máx. 162).
+ */
+async function reviewsComoEmProducao(workId: string, ctx: { sourcedReviews: SourcedReview[]; allReviews?: SourcedReview[] }) {
+  const persistidas = await loadWorkReviewsAsSourced(workId)
+  const { merged, recovered } = mergeFreshWithPersistedReviews(ctx.allReviews ?? [], persistidas, [])
+  if (recovered <= 0) return { reviews: ctx.sourcedReviews, recovered: 0 }
+  return { reviews: selectReviewsForEvaluation(merged, AI_EVAL_REVIEW_CAPS), recovered }
+}
 
 // ── Carga da obra ──────────────────────────────────────────────────────────────
 
@@ -314,6 +332,8 @@ async function main() {
     }
 
     console.log(`  contexto: ${work.ctx.sourcedReviews.length} reviews · ${work.tags.length} tags · ${work.genres.length} gêneros`)
+    const { reviews, recovered } = await reviewsComoEmProducao(work.id, work.ctx)
+    if (recovered > 0) console.log(`  ↻ ${recovered} review(s) recuperadas do pool persistido (fresco trouxe ${work.ctx.sourcedReviews.length}, prompt usa ${reviews.length})`)
     const t0 = Date.now()
     try {
       const resp = await requestAiEvaluation({
@@ -324,7 +344,7 @@ async function main() {
         additionalSynopses: work.additionalSynopses,
         genres: work.genres,
         tags: work.tags,
-        sourcedReviews: work.ctx.sourcedReviews,
+        sourcedReviews: reviews,
         externalContext: work.ctx.externalContext,
         platformRatings: work.ctx.platformRatings,
         similarWorks: work.ctx.similarWorks,

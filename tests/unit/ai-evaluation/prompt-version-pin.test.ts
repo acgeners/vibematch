@@ -28,8 +28,8 @@ import { PROMPT_VERSION, SYSTEM_PROMPT } from "@/lib/ai-evaluation/service"
  */
 describe("PROMPT_VERSION acompanha o texto do prompt", () => {
   /** Versão e sha256 do SYSTEM_PROMPT andam JUNTOS — atualize os dois na mesma mudança. */
-  const PINNED_VERSION = "v25"
-  const PINNED_SHA256 = "d8242201ea45345ffa8e73287b1a6e0d3c4e5866db12f4397df9a04a14c547b2"
+  const PINNED_VERSION = "v26"
+  const PINNED_SHA256 = "da87caed2b5fad34af94d61b65b2994019e55b871e6d5d1f19a2669e04e8a4b5"
 
   it("está fixada na versão que este hash descreve", () => {
     expect(PROMPT_VERSION).toBe(PINNED_VERSION)
@@ -50,5 +50,8 @@ describe("PROMPT_VERSION acompanha o texto do prompt", () => {
     // ≠ versão de PROMPT: dois eixos distintos, cada tabela carregando um. Reusar "v24"
     // como versão de prompt misturaria os dois em qualquer query por `prompt_version`.
     expect(PROMPT_VERSION).not.toBe("v24")
+    // v26 é o texto da v22 + a description da migration 181. Rotular de "v22" reusaria
+    // caches de uma régua diferente e faria `ai_evaluations.prompt_version` mentir.
+    expect(PROMPT_VERSION).not.toBe("v22")
   })
 })

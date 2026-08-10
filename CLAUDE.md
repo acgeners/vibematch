@@ -1143,6 +1143,45 @@ verdade conferida. Ao anotar pendência aqui, escreva a **data** e a **forma de 
 - ~~`enforceNeutralCoupleDynamicsWhenNoRomance`~~: **removido na v23** (2026-08-09). Forçava `couple_dynamics = 5.0` quando `romance ≤ 3`, partindo de "sem romance, não há dinâmica" — premissa que morreu com a ampliação do critério pra vínculos centrais. Travava **17 das 18** obras sem romance. Quem decide "não aplicável" agora é o prompt, por ausência de VÍNCULO — não de romance. ⚠️ As ~31 justificativas que ele reescreveu seguem no banco (ver `lib/criteria/justification.ts`)
 - `enforceAuditableReviewUsage`: **non-fatal since v20 (2026-06-27)** — generic review citation is accepted ("algumas reviews apontam…"), so it no longer requires/validates specific review IDs (`R1`, `R2`…) nor throws. It only records an informational `reviewAudit` (`required` = "havia reviews no prompt"; `usedReviewIds` = whatever IDs the model happened to cite, often empty with generic citation). `review_usage` is now an OPTIONAL tool/schema field. (Earlier behavior: threw + retried when IDs weren't cited — removed because a citation slip discarded otherwise-valid evals.)
 
+## Duas réguas para as notas de atributo, e o que cada uma consegue ver
+
+Objetivo é **precisão E coerência**, e são medidas diferentes — colapsar as duas em MAE foi
+o erro que fez a auditoria de 2026-08-09/10 gastar US$2 em medições que não decidiram nada.
+
+| | instrumento | n | piso de detecção |
+|---|---|---|---|
+| **Precisão** | `scripts/gold-mae.ts` contra `.gold/gold-FILLED.csv` | 30 obras | **0,10** no MAE geral |
+| **Coerência estrutural** | `scripts/coherence-audit.ts` (checagem A) | 8.673 atributos | dezenas de casos |
+| **Coerência semântica** | — **não existe** | — | — |
+
+🔴 **O piso de 0,10 é o fato mais importante desta seção.** Bootstrap do gold (4000
+reamostragens): MAE do catálogo 0,78, IC95% **[0,68 – 0,88]**. O ganho realista de uma
+reescrita de prompt é ~0,05 — **abaixo do que o instrumento enxerga**. Foi por isso que
+quatro tentativas (v23, v24-pesada, v24-cirúrgica, v25) falharam: o experimento nunca teve
+como dar certo. Antes de tentar de novo, o investimento é **ampliar o gold** (30 → 100 obras
+derruba o piso pra ~0,055), não escrever mais regra.
+
+⚠️ **Decomposição do erro (medida, n=30):** os três critérios que valem **71%** do produto —
+`protagonist` 31,8%, `fantasy_nobility` 24,4%, `couple_dynamics` 14,8% — já são os mais
+precisos (0,47 · 0,47 · 0,65) e o erro deles **não é viés, é discordância genuína**. Todo o
+viés corrigível está em `drama`, `tragedy`, `action` e `romance`, que somam 19,6% do peso.
+A precisão está perto do teto prático desta arquitetura.
+
+🔴 **Correção de viés determinística: REPROVADA por leave-one-out.** In-sample parecia ótima
+(0,776 → 0,646 geral / 0,637 → 0,579 ponderado); em LOO-CV dá **0,730 geral e 0,708
+ponderado — o ponderado PIORA**. Os deslocamentos dos critérios pesados são ajustados em
+ruído, e aplicar deslocamento a erro não-sistemático adiciona erro. Não aplicar. E não
+repetir o teste in-sample achando que mede alguma coisa.
+
+🔴 **Regex sobre prosa de modelo NÃO mede semântica.** Três checagens de coerência semântica
+foram construídas e removidas no mesmo dia após validação manual: "prosa nega, nota ≥5"
+(6/6 falso positivo), "intensidade fraca no topo da faixa" (5/5), "valência por leitor"
+(~6/8, e marcava 51% do catálogo). O vocabulário aparece negado, comparado ou como nome de
+gênero — *"ritmo mais agitado que slice of life"* casa com o padrão de ausência e afirma o
+oposto. Só sobrevive a checagem **estrutural**: extrair `Faixa X-Y` da prosa e comparar com
+`bandForScore`. ⚠️ **Sempre rode `--sample` e conte falso positivo antes de usar qualquer
+número deste script numa decisão.**
+
 ## Quem escreve prosa sobre uma obra precisa saber o que os números dela QUEREM DIZER
 
 Ranking e Deep Dive recebem `category_scores: tragedy=6.0, couple_dynamics=8.0, …` como números

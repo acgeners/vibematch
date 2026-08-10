@@ -22,11 +22,14 @@
  * 🔴 Não grava em `category_scores` nem em `ai_evaluations`. Só o log de custo.
  */
 import { createClient } from "@supabase/supabase-js"
-import { requestAiEvaluation, MODEL, PROMPT_VERSION } from "@/lib/ai-evaluation/service"
-import { fetchExternalEvaluationContextForWork } from "@/lib/external/index"
+import { requestAiEvaluation, MODEL, PROMPT_VERSION, AI_EVAL_REVIEW_CAPS } from "@/lib/ai-evaluation/service"
+import { fetchExternalEvaluationContextForWork, selectReviewsForEvaluation } from "@/lib/external/index"
+import { mergeFreshWithPersistedReviews } from "@/lib/external/review-merge"
+import { loadWorkReviewsAsSourced } from "@/lib/external/persist-reviews"
 import { splitSynopsesForEvaluation, pickPrimaryCover } from "@/lib/work-derived"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { CRITERION_SLUGS } from "@/types/domain"
+import type { SourcedReview } from "@/lib/external/types"
 import fs from "node:fs"
 import path from "node:path"
 
@@ -91,6 +94,21 @@ function lerGold(): GoldRow[] {
     }
     return { workId: rec.work_id, titulo: rec.titulo, gold }
   })
+}
+
+/**
+ * 🔴 A UNIÃO fresco + persistido, igual à `triggerAiEvaluation`. Sem isto o harness
+ * MEDE OUTRA COISA: quando o sidecar está saturado (503 busy) ou o Cloudflare bloqueia,
+ * a busca fresca volta com 1–2 reviews, e o prompt sai faminto — enquanto a nota do
+ * catálogo, com que estamos comparando, foi produzida com o pool cheio. O erro é
+ * ASSIMÉTRICO: penaliza só a coluna nova. Medido nas 30 obras do gold: 61,7 reviews
+ * persistidas em média (mín. 20, máx. 162).
+ */
+async function reviewsComoEmProducao(workId: string, ctx: { sourcedReviews: SourcedReview[]; allReviews?: SourcedReview[] }) {
+  const persistidas = await loadWorkReviewsAsSourced(workId)
+  const { merged, recovered } = mergeFreshWithPersistedReviews(ctx.allReviews ?? [], persistidas, [])
+  if (recovered <= 0) return { reviews: ctx.sourcedReviews, recovered: 0 }
+  return { reviews: selectReviewsForEvaluation(merged, AI_EVAL_REVIEW_CAPS), recovered }
 }
 
 // ── Carga (mesma do piloto) ────────────────────────────────────────────────────
@@ -223,13 +241,15 @@ async function main() {
     console.log(`\n[${i + 1}/${gold.length}] ${g.titulo}`)
     const work = await carregar(g.workId)
     if (!work) { console.error("  ✗ obra não encontrada no catálogo local"); continue }
+    const { reviews, recovered } = await reviewsComoEmProducao(work.id, work.ctx)
+    if (recovered > 0) console.log(`  ↻ ${recovered} review(s) recuperadas do pool persistido (fresco trouxe ${work.ctx.sourcedReviews.length}, prompt usa ${reviews.length})`)
     try {
       const resp = await requestAiEvaluation({
         workId: work.id, title: work.title,
         synopsis: work.synopsis, synopsisIsManual: work.synopsisIsManual,
         additionalSynopses: work.additionalSynopses,
         genres: work.genres, tags: work.tags,
-        sourcedReviews: work.ctx.sourcedReviews, externalContext: work.ctx.externalContext,
+        sourcedReviews: reviews, externalContext: work.ctx.externalContext,
         platformRatings: work.ctx.platformRatings, similarWorks: work.ctx.similarWorks,
         contentRatings: work.ctx.contentRatings, coverUrl: work.coverUrl,
       })

@@ -4,6 +4,7 @@ import type Anthropic from "@anthropic-ai/sdk"
 import { z } from "zod"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { CRITERIA_INFO, CRITERIA_RUBRICS } from "@/lib/constants/criteria"
+import { bandForScore } from "@/lib/criteria/justification"
 import { normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { SONNET_MODEL } from "@/lib/ai/models"
@@ -143,71 +144,32 @@ export const MODEL = SONNET_MODEL
 // `EVAL_OUTPUT_SCHEMA_VERSION` entra na chave de cache e mudou para "eval-2" em
 // jul/2026. Para reverter de verdade é preciso restaurar o texto do prompt.
 export const CONCISE_OUTPUT: boolean = true
-// v25 (2026-08-09): TOLERAR não é QUERER, e nenhum dos dois apaga a toxicidade. A 1ª
-// versão da regra de reação mapeava "aceitação" direto pra 7-8 (= relação SAUDÁVEL, com
-// respeito mútuo e conflito resolvido), juntando num balde só a dinâmica que a personagem
-// DESEJA e o comportamento que ela apenas AGUENTA. O próprio exemplo que eu escrevi
-// denunciava: "ela é idiota de aceitar o ciúme dele" é ela tolerando, e ia pra 7-8. Hoje
-// tolerância tem TETO 6, a reação move a nota no máximo UMA faixa pra cima, e abuso no
-// desenvolvimento tem teto 8 mesmo com redenção encenada — 9-10 é "parceria e crescimento
-// conjunto", que não convive com histórico de abuso dentro da própria obra.
+// v26 (2026-08-10): REVERSÃO do texto de prompt das v23/v24/v25 — volta ao SYSTEM_PROMPT
+// da v22. Não porque o gold provou que a v25 era pior (aquele harness estava furado: faltava
+// `mergeFreshWithPersistedReviews`, e o sidecar estava saturado, então o modelo rodou com
+// evidência de menos), mas porque MEDIMOS que mudança de prompt não é validável aqui:
+// bootstrap do gold (n=30) dá IC95% [0,68 – 0,88] no MAE, ou seja piso de detecção ~0,10,
+// e o ganho realista de uma reescrita de prompt é ~0,05. Manter no caminho de notas algo
+// que ninguém consegue medir é exatamente como o catálogo virou 9 réguas conviventes.
 //
-// v25 (2026-08-09): descompressão da escala + a reclamação do leitor virou FONTE da
-// reação do personagem, não lixo a descartar. A 1ª redação da regra de valência mandava
-// "extraia o FATO e DESCARTE o julgamento" e listava como descartáveis justo as frases
-// que CARREGAM o fato: leitor comenta o que o incomodou, e pra isso descreve o que a
-// personagem fez ou sentiu. "Ela é idiota de aceitar o ciúme dele" é a evidência mais
-// direta de consentimento que existe — e ia pro lixo. Hoje a separação é pelo SUJEITO
-// da frase (fala do leitor = preferência; fala da personagem = fato), com três exemplos
-// de mesmo TOM e faixas OPOSTAS, que é o que prova que o tom não pode decidir.
+// Quatro tentativas de melhorar acurácia pelo prompt COMPARTILHADO, quatro derrotas:
+// v23 0,87 · v24-pesada 0,82 · v24-cirúrgica 0,89 · v25 (medição inválida) — contra 0,77
+// do catálogo. A causa é ENTANGLEMENT: as 9 notas saem de UMA leitura, então mexer num
+// critério recalibra o modelo inteiro. Ver [[project_rubric_redesign_gold_verdict]].
 //
-// v25 (2026-08-09): descompressão da escala. Quatro critérios tinham colapsado numa
-// faixa só — medido em 2.393 avaliações: action_adventure 73,5% em 4-6 e ZERO em 9-10;
-// protagonist 77,4% em 7-8 (σ 0,87, o menos informativo dos 9); romance 73,7% em 7-8;
-// fantasy_nobility 89% ≥7. Feature quase-constante não contribui nada pro Ridge da Nota
-// Prevista nem discrimina no /ranking. Quatro mecanismos distintos, todos medidos:
-//   · o PISO de 5 se sobrepunha à rubrica: das 1.027 justificativas de action_adventure
-//     que afirmam ausência ("slice of life", "uneventful", "nada acontece"), 316 (30,8%)
-//     ficaram ≥5 — a prosa citava a definição da faixa 0-3 e a nota não ia pra lá;
-//   · a POSIÇÃO dentro da faixa era surda à intensidade declarada: entre notas 4–6,9, a
-//     prosa com "pontual/esporádico/não domina" distribuía 31/32/35% (em 4–4,9 / 5 / >5)
-//     contra 33/35/31% da prosa neutra — a palavra "pontual" não mudava o número;
-//   · a REGRA OBRIGATÓRIA de fantasy_nobility virou piso: justificativa citando o gatilho
-//     (reencarnação/regressão/isekai) → 97,9% ≥7 e média 8,11, contra 81,1% e 7,14 sem
-//     citar. Como 48% das avaliações citam o gatilho num catálogo majoritariamente isekai,
-//     a regra deixou de distinguir. Agora esses tropos são DISPOSITIVO, não estrutura;
-//   · protagonist perdeu a AGÊNCIA do gate: a rubrica 0-3 abre com "sem agência", mas o
-//     prompt só autorizava faixa baixa pra "esquecível/genérico/sem personalidade". Das
-//     151 justificativas que chamam o protagonista de passivo, 51% ficaram ≥7 ("agência
-//     clara, decisões movem a trama") e só 9 abaixo de 5.
-// ⚠️ Pulou o v24 de propósito: `ai_api_calls` tem 65 chamadas de `ai_evaluation` já
-// rotuladas "v24" (2026-07-29), de uma rodada cujas avaliações foram gravadas como v22.
-// Reusar o número misturaria latência/custo do v24 novo com as fantasmas — erro que
-// produz resultado. `ai_evaluations` nunca teve v23-v25.
+// ⚠️ NÃO é v22: o texto do prompt é o da v22, mas a seção de critérios é interpolada de
+// `CRITERIA_INFO`/`CRITERIA_RUBRICS`, e a migration 181 mudou a `description` de
+// couple_dynamics. Combinação inédita ⇒ versão nova. Rotular de "v22" reusaria caches de
+// uma régua diferente e faria `ai_evaluations.prompt_version` mentir.
 //
-// v23 (2026-08-09): couple_dynamics deixou de ser tratado como critério de
-// PRESENÇA. Ele é o único dos 9 com escala de VALÊNCIA (0-3 = a relação faz mal,
-// 9-10 = faz bem), e as meta-regras de presença — piso de 5, "ausência de
-// evidência", coerência justificativa×faixa — estavam sendo aplicadas a ele.
-// Além disso a seção C mapeava `"possessive but I love it" → 0-3`, ou seja, a
-// PREFERÊNCIA da leitora virava a valência da relação, contradizendo a regra
-// dedicada logo abaixo. Agora: opinião de leitor não define valência, a REAÇÃO
-// do outro personagem é o sinal decisivo, tag de posse sem indício de reação
-// PERDE peso, e comportamento tóxico anterior a regressão/reencarnação/
-// transmigração é contexto estabelecido (item (d)) — não conta.
-// Medido antes da mudança: couple_dynamics era o critério mais instável dos 9
-// (amplitude média 1,52 pt entre reavaliações da mesma obra, 36,7% variando ≥2 pt),
-// e justificativa que citava posse/ciúme/yandere caía em 0-3 em 19,1% dos casos
-// contra 5,4% quando não citava.
-// (v22 2026-07-24): adult_content passou a ter piso E TETO por PROCEDÊNCIA do
-// sinal (ver lib/ai-evaluation/adult-content-rules.ts). Marcador de EDIÇÃO
-// ("[R19 disponível]" vindo de boilerplate da fonte) deixou de gerar piso — era a
-// origem de 48% dos pisos aplicados, e produzia notas que contradiziam a própria
-// justificativa. Cena explícita, em qualquer quantidade, agora exige 9-10; a tag
-// "R15 but Based on a R19 Novel" virou TETO.
-// (v21 2026-07-07: consenso das reviews, proibido citar review individual ou ID.)
-// (v20 2026-06-27: citação genérica de reviews, sem exigir IDs nem auditoria.)
-export const PROMPT_VERSION = CONCISE_OUTPUT ? "v25" : "v18"
+// ⚠️ O que NÃO voltou, de propósito: `enforceNeutralCoupleDynamicsWhenNoRomance`. Ele
+// forçava couple_dynamics = 5,0 quando romance ≤ 3, e isso contradiz a rubrica ampliada
+// (95226f7, julho) E a description da 181 — que mandam avaliar o vínculo central mesmo sem
+// casal. Restaurá-lo seria mandar o modelo avaliar família/equipe e depois sobrescrever a
+// resposta dele com 5,0: incoerência por construção, a classe de defeito que estamos
+// removendo. Afeta 18 obras (romance ≤ 3).
+//
+export const PROMPT_VERSION = CONCISE_OUTPUT ? "v26" : "v18"
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
@@ -271,9 +233,9 @@ function buildCriteriaPromptSection(): string {
   }).join("\n\n")
 }
 
-/** Exportado só para teste: as invariantes da rubrica são verificadas contra o
- *  texto FINAL (já com `buildCriteriaPromptSection()` interpolada), e a versão do
- *  prompt é fixada ao hash dele — ver `tests/unit/ai-evaluation/couple-dynamics-valencia.test.ts`. */
+/** Exportado só para teste: as invariantes são verificadas contra o texto FINAL (já com
+ *  `buildCriteriaPromptSection()` interpolada), e a versão fica atrelada ao hash dele —
+ *  ver `tests/unit/ai-evaluation/prompt-version-pin.test.ts`. */
 export const SYSTEM_PROMPT = `Você é um especialista em mangá, manhwa e manhua. Sua tarefa é avaliar UMA obra específica com base em rubricas rigorosas.
 
 REGRAS DE FIDELIDADE AO TÍTULO (críticas):
@@ -295,7 +257,7 @@ REGRAS DE EVIDÊNCIA:
 TAGS POR GRUPO — GUIA DE PESO POR CRITÉRIO:
 Use o grupo das tags fornecidas como sinal principal por critério. Peso entre parênteses indica o quanto o grupo é indicativo daquele critério:
 - romance: grupo "romance" (alto), grupo "relationship_dynamics" (médio — apenas quando a tag descreve o casal).
-- couple_dynamics: grupo "relationship_dynamics" (médio — qualquer vínculo central, não só o casal: família, irmãos, mestre/discípulo, equipe, rivalidade), grupo "characters" (baixo — apenas quando a tag descreve como o personagem TRATA quem é próximo dele).
+- couple_dynamics: grupo "relationship_dynamics" (médio — apenas quando a tag descreve o casal), grupo "characters" (baixo — apenas quando a tag descreve como o personagem se relaciona amorosamente).
 - fantasy_nobility: grupo "fantasy" (alto), grupo "setting" (alto), grupo "scifi" (médio), grupo "cast" (médio).
 - action_adventure: grupo "superpowers" (médio/alto), grupo "characters" (médio — apenas quando a tag descreve habilidades dos protagonistas).
 - adult_content: grupo "content_indicator" (alto).
@@ -312,29 +274,17 @@ REGRAS DE PONTUAÇÃO:
 - Se a evidência for ambígua ENTRE DUAS FAIXAS adjacentes, escolha a faixa inferior MAS use o valor MAIS ALTO dela (ex.: incerteza entre 4-6 e 7-8 → 6, não 4). Essa regra só vale ENTRE FAIXAS, nunca dentro de uma faixa escolhida.
 - Em cada justificativa, cite EXPLICITAMENTE qual faixa foi escolhida (ex: "Faixa 4-6 (Subplot): ..." ou "Faixa 7-8 (Core Romance): ...") e o motivo baseado em evidência.
 
-DUAS NATUREZAS DE ESCALA (leia ANTES das regras abaixo — elas não valem igual pros 9 critérios):
-- OITO critérios são de PRESENÇA/INTENSIDADE: 0 = o critério não está lá, 10 = domina a obra. São romance, fantasy_nobility, action_adventure, adult_content, protagonist, humor, drama e tragedy.
-- couple_dynamics é de VALÊNCIA: 0-3 = o vínculo faz MAL aos envolvidos, 9-10 = faz BEM. Nota baixa ali NÃO significa "não tem vínculo" — significa "o vínculo destrói quem está nele". Quando a obra não tem nenhum vínculo central avaliável, a nota é 5 (não aplicável), NUNCA 0-3.
-- Consequência: as três seções seguintes — "COERÊNCIA JUSTIFICATIVA × FAIXA", "INTERPRETAÇÃO DA ESCALA" e "AUSÊNCIA DE EVIDÊNCIA NÃO É EVIDÊNCIA DE AUSÊNCIA" — valem SOMENTE para os oito critérios de presença. Para couple_dynamics vale a seção "REGRA PARA COUPLE_DYNAMICS", e só ela.
-
-COERÊNCIA JUSTIFICATIVA × FAIXA (obrigatória — critérios de PRESENÇA; não vale pra couple_dynamics):
+COERÊNCIA JUSTIFICATIVA × FAIXA (obrigatória):
 - A justificativa deve ser semanticamente consistente com a faixa escolhida. Se a justificativa contém expressões como "presença constante", "frequente", "recorrente", "um dos pilares", "elemento central", "abundante", a nota NÃO pode terminar em faixa 4-6 (pontual/subplot) — deve ser 7-8 ou 9-10. Se diz "pontual", "esporádico", "leve", "sutil", "subliminar", NÃO pode terminar em 7-8.
-- Em couple_dynamics essas palavras descrevem a FREQUÊNCIA do conflito, não a qualidade da relação ("atrito recorrente" é uma relação PIOR, não melhor) — por isso a regra não se aplica lá.
 - A regra de incerteza entre faixas adjacentes (acima) NÃO autoriza ancorar a nota em 5 quando a própria justificativa lista evidências claras de presença. Ela só vale pra borderline real — quando duas faixas adjacentes são ambas plausíveis a partir do mesmo conjunto de evidências. Não use essa regra como "atalho" pro neutro.
 
-INTERPRETAÇÃO DA ESCALA (critérios de PRESENÇA; não vale pra couple_dynamics — regra crítica para evitar viés sistemático):
+INTERPRETAÇÃO DA ESCALA (regra crítica para evitar viés sistemático):
 - 5 é o ponto NEUTRO: significa "o critério está presente de forma reconhecível, mas não define a obra".
-- Notas 0-4 são RESERVADAS pra casos onde o critério é claramente ausente, irrelevante ou atua negativamente.
-- O piso de 5 existe pra impedir DOIS erros específicos: baixar a nota por EXECUÇÃO FRACA e baixar por SILÊNCIO das fontes. Ele não faz mais do que isso.
-- 🔴 O piso NÃO se sobrepõe à rubrica. Se a evidência casa com o que a faixa 0-3 daquele critério DESCREVE, a resposta é 0-3 — mesmo havendo menções isoladas do critério. Ex.: a faixa 0-3 de action_adventure é "cotidiano, sem conflito externo relevante (slice of life)"; se o consenso diz que a obra é slice of life e nada acontece, duas cenas de perigo citadas de passagem não a tiram de 0-3. Evidência positiva de ausência VENCE o piso; o piso só vale contra ausência de evidência.
+- Notas 0-4 são RESERVADAS pra casos onde o critério é claramente ausente, irrelevante ou atua negativamente. Se há QUALQUER evidência (mesmo parcial, mesmo com ressalvas) de que o critério está presente, a nota deve ser ≥ 5.
 - Críticas, tropos clichês ou execução fraca NÃO justificam baixar abaixo de 5 quando o critério genuinamente existe. Use ressalvas pra escolher entre 5 e 6 (ou 7 e 8), NUNCA pra ancorar no piso da faixa.
-- POSIÇÃO DENTRO DA FAIXA — escolha pela INTENSIDADE que a SUA PRÓPRIA justificativa descreve, não pelo meio da faixa:
-  · texto diz "pontual", "esporádico", "raro", "de fundo", "não domina o tom", "secundário" → valor MAIS BAIXO da faixa (numa faixa 4-6, isso é 4);
-  · texto diz "frequente", "constante", "recorrente", "central", "permeia" → valor MAIS ALTO;
-  · texto não puxa pra nenhum lado → valor central.
-  ⚠️ Esta regra tem PRECEDÊNCIA sobre "prefira o valor central" e sobre "use o valor mais alto da faixa inferior". Aquelas duas valem só pra empate REAL — quando o texto não declara intensidade nenhuma. Escrever "eventos pontuais, sem dominar o tom geral" e pontuar 6 (o topo da faixa) é contradizer a própria justificativa.
+- Dentro de uma faixa, prefira o valor CENTRAL salvo quando a evidência puxa claramente pra um extremo.
 
-PRINCÍPIO "AUSÊNCIA DE EVIDÊNCIA NÃO É EVIDÊNCIA DE AUSÊNCIA" (critérios de PRESENÇA; não vale pra couple_dynamics):
+PRINCÍPIO "AUSÊNCIA DE EVIDÊNCIA NÃO É EVIDÊNCIA DE AUSÊNCIA":
 - Reviews que não mencionam um critério NÃO comprovam que ele está ausente — só não comentaram. Gêneros/tags que não incluem um critério não são evidência negativa pra ele.
 - Pra justificar nota < 5 num critério (positivo), é preciso evidência POSITIVA de ausência ou negatividade, como:
   · review afirmando explicitamente ("a obra não tem nenhum humor", "sem nenhum momento engraçado", "personagem genérico sem personalidade")
@@ -347,7 +297,7 @@ SANITY CHECK CRUZADO (não-vinculante):
 - Combinações extremas em critérios opostos (humor 9-10 + tragedy 9-10; protagonist 9-10 + drama 0-3; romance 9-10 + couple_dynamics 0-3) são RARAS mas POSSÍVEIS. Antes de finalizar, releia a evidência e baixe a "confidence" se a combinação não estiver bem suportada por sinais explícitos.
 - NÃO force ajuste de score. Critérios continuam INDEPENDENTES — esta regra só pede mais cautela e confidence menor em combinações incomuns, nunca alteração do valor.
 
-EXCEÇÃO PRA CRITÉRIOS NEGATIVOS (drama, tragedy — couple_dynamics já está fora por ser escala de valência):
+EXCEÇÃO PRA CRITÉRIOS NEGATIVOS (drama, tragedy):
 - As regras "5 como piso" e "ausência de evidência" NÃO se aplicam. Pra esses, notas baixas (0-3) significam ausência saudável, não defeito. Drama 2 = "obra leve sem conflito intenso", o que é positivo. Silêncio sobre tragédia é razoavelmente interpretado como ausência (a maioria das obras não é trágica). Score esses pela rubrica normal sem viés de piso.
 
 INTERPRETAÇÃO DE REVIEWS DE USUÁRIOS:
@@ -365,8 +315,7 @@ B) Texto informa ASPECTOS, nota informa QUALIDADE:
 - O TEXTO da review é evidência sobre QUAIS ASPECTOS a obra tem (romance, drama, ação, etc).
 - A NOTA é evidência sobre QUALIDADE percebida desses aspectos.
 - Crítica negativa NÃO derruba o critério. Exemplo: "Romance cliches 101 for dummies" CONFIRMA que romance é elemento central da obra (sobe romance), mesmo que o reviewer ache ruim. A nota baixa só sinaliza qualidade fraca, não ausência.
-- PROTAGONISTA MARCANTE mede presença e agência, NÃO qualidade percebida. Reviews chamando a FL/ML de "Mary Sue", "OP", "broken", "insensível", "inconsistente", "plana", "irritante", "fria", "blasé" ou descrevendo poderes excessivos/cabeça-dura/atitudes polêmicas CONFIRMAM presença forte (sobe protagonist), mesmo que o reviewer critique a execução. Tags como "Confident Female Lead", "Strong-Willed Female Lead", "Determined Female Lead", "Smart Female Lead", "Delusional Female Lead", "Yandere ML" são evidência DIRETA de protagonista marcante. 🔴 PRESENÇA e AGÊNCIA são as DUAS metades deste critério, e personalidade forte NÃO compensa agência ausente. A faixa 7-8 exige "agência clara, decisões movem a trama": se o consenso diz que o protagonista é PASSIVO, REATIVO, conduzido pelos eventos ou por outros personagens, ou que suas decisões não mudam o rumo, ele NÃO chega em 7-8 por mais marcante que seja — fica em 4-6 ("conduz a história e tem personalidade reconhecível, mas não domina") ou em 0-3 quando não há agência nenhuma. Regra prática: as ressalvas da lista acima ("Mary Sue", "irritante", "fria") são sobre COMO ele é, e não rebaixam; "passivo" e "sem agência" são sobre O QUE ELE FAZ, e rebaixam.
-Vá para 0-3 quando reviews ou sinopse descrevem o protagonista como ESQUECÍVEL, GENÉRICO, SEM PERSONALIDADE RECONHECÍVEL, SUBSTITUÍVEL por outro qualquer — ou SEM AGÊNCIA, com decisões irrelevantes pra trama. "Personagem desagradável de acompanhar" continua sendo 7-8.
+- PROTAGONISTA MARCANTE mede presença e agência, NÃO qualidade percebida. Reviews chamando a FL/ML de "Mary Sue", "OP", "broken", "insensível", "inconsistente", "plana", "irritante", "fria", "blasé" ou descrevendo poderes excessivos/cabeça-dura/atitudes polêmicas CONFIRMAM presença forte (sobe protagonist), mesmo que o reviewer critique a execução. Tags como "Confident Female Lead", "Strong-Willed Female Lead", "Determined Female Lead", "Smart Female Lead", "Delusional Female Lead", "Yandere ML" são evidência DIRETA de protagonista marcante. Só vá para 0-3 quando reviews ou sinopse descrevem o protagonista como ESQUECÍVEL, GENÉRICO, SEM PERSONALIDADE RECONHECÍVEL ou SUBSTITUÍVEL por outro qualquer. "Personagem desagradável de acompanhar" continua sendo 7-8.
 
 C) Sinais INDIRETOS de presença — especialmente romance e couple_dynamics:
 Reviewers raramente dizem "esta obra tem romance forte". Sinalizam de forma indireta. Trate como evidência POSITIVA de presença (sobe o critério, mesmo que sem comentar qualidade):
@@ -378,12 +327,9 @@ Romance presente:
 - Emoção em torno do casal: "I cried when they finally got together", "ML is everything", "FL deserves better than ML"
 - Críticas a QUALIDADE do romance ("rushed romance", "forced romance", "cringe romance") ainda confirmam que romance é elemento central — só com execução fraca.
 
-Couple dynamics (= vínculos centrais, não só o casal) — atenção: os itens abaixo dizem O QUE o vínculo tem, e usam vocabulário de casal só porque é o mais comum nas reviews; leia-os valendo para irmãos, família, mestre/discípulo, equipe ou rivais. A FAIXA sai da seção "REGRA PARA COUPLE_DYNAMICS" (valência), nunca do rótulo do trope:
+Couple dynamics:
 - "Banter is great" / "way they tease each other" → dinâmica leve/divertida
-- "Toxic ship", "yandere", "obsessive ML/FL", "possessive ML" → comportamento intenso de UM dos lados. NÃO conclua 0-3 daqui: vá checar a REAÇÃO do outro personagem e a LINHA DO TEMPO, itens (a)–(d) da regra própria.
-- "Possessive but I love it", "toxic but I'm here for it", "eu não aguentaria isso", "sufocante demais pra mim" → o leitor fala DELE. Confirma que o trope existe; sozinho não escolhe faixa.
-- ⚠️ Mas leia a frase INTEIRA antes de descartar: a reclamação costuma vir grudada no fato. "She's an idiot for putting up with him" diz que **ela TOLERA** (minimiza o dano, não apaga — teto 6); "I hate that he ignores her when she's clearly uncomfortable" diz que **ela está desconfortável**; "absurd that she forgave him for the first timeline" diz que **ela perdoou** e que o maltrato foi na linha do tempo ORIGINAL. Esses pedaços são FATO sobre a reação dela — extraia-os e use, mesmo com o julgamento em volta apontando pro contrário.
-- "He scares her", "she's trying to escape him", "she's miserable with him", "ela perde a autonomia" → dano RETRATADO no personagem (0-3)
+- "Toxic ship", "yandere", "obsessive ML/FL", "possessive but I love it" → dinâmica tóxica/intensa (0-3)
 - "Mutual support", "communication goals", "they really get each other" → dinâmica saudável (7-8 ou 9-10)
 - "Misunderstandings drag on", "constant fighting" → conflituosa (4-6)
 - "Healing each other", "soft moments together" → carinhosa
@@ -436,10 +382,8 @@ CRITÉRIOS, DESCRIÇÕES E RUBRICAS (use a descrição para entender o que cada 
 
 ${buildCriteriaPromptSection()}
 
-REGRA PARA FANTASY_NOBILITY:
-Obras ambientadas majoritariamente em corte, aristocracia, realeza, império, ducado, nobreza ou famílias nobres devem receber nota alta quando esse ambiente ORGANIZA a premissa e os conflitos — quando política de corte, herança, hierarquia, magia ou regras do mundo DECIDEM o que acontece. Não deixe em 4-6 quando a ambientação de nobreza/realeza for central.
-🔴 Reencarnação, transmigração, isekai, regressão, segunda chance e viagem no tempo são DISPOSITIVOS NARRATIVOS, não estrutura de fantasia/nobreza. Sozinhos, NÃO elevam a nota: uma regressão para um escritório contemporâneo não é fantasy_nobility 7-8. Eles contam apenas quando o mundo PARA O QUAL se regride/transmigra é o que organiza os conflitos — e nesse caso quem sustenta a nota é o mundo, não o dispositivo. Avalie o mundo; ignore o mecanismo de chegada.
-⚠️ Este catálogo é majoritariamente isekai/vilã/regressão. Uma regra que dispare em quase toda obra não distingue nada: se a sua justificativa poderia ser copiada para metade das obras do catálogo, ela não é evidência de 7-8.
+REGRA OBRIGATÓRIA PARA FANTASY_NOBILITY:
+Obras ambientadas majoritariamente em corte, aristocracia, realeza, império, ducado, nobreza ou famílias nobres devem receber nota alta quando esse ambiente organiza a premissa e os conflitos. Se a obra combina nobreza/realeza com reencarnação, transmigração, isekai, regressão, segunda chance ou viagem no tempo, trate isso como evidência estrutural forte: em geral use 7-8, ou 9-10 se política nobre, magia, regras do mundo ou hierarquia social definirem a história. Não deixe em 4-6 quando a ambientação de nobreza/realeza for central.
 
 REGRA PARA ADULT_CONTENT (leia com atenção — a natureza do conteúdo manda, não a frequência):
 - Pontue adult_content com base em sinopse, tags (especialmente do grupo "content_indicator"), gêneros e reviews compatíveis.
@@ -449,62 +393,13 @@ REGRA PARA ADULT_CONTENT (leia com atenção — a natureza do conteúdo manda, 
 - A marcação "R15 but Based on a R19 Novel" diz o contrário de conteúdo explícito: a obra avaliada é R15, o R19 é do novel de origem. Nesse caso adult_content tem TETO, não piso.
 - Quando houver piso ou teto obrigatório para esta obra, ele vem informado no prompt do usuário. Sem essa informação, não invente piso a partir de marcador.
 
-REGRA PARA COUPLE_DYNAMICS (escala de VALÊNCIA — leia inteira antes de pontuar):
-
-⚠️ O NOME DO SLUG ENGANA: apesar de "couple", este critério é "Dinâmica entre Protagonistas" e avalia o VÍNCULO MAIS CENTRAL da obra, seja ele qual for. Obra SEM romance tem vínculo central e é pontuável normalmente aqui; não devolva 5 só porque não há casal.
-
-QUAL VÍNCULO AVALIAR (ordem de prioridade — pegue o PRIMEIRO que a obra tiver, não some os outros):
-1. o CASAL principal, quando há um par romântico central;
-2. a FAMÍLIA do protagonista (pais, irmãos, filhos) quando não há casal central, ou quando a obra é declaradamente um drama familiar;
-3. o restante dos vínculos recorrentes: mestre e discípulo, party/equipe, rivalidade, amizade central.
-Então: obra de romance → o casal; drama familiar → protagonista e família; shounen de equipe → o grupo; obra de vingança sem par nem família → a relação recorrente com o alvo ou com o aliado.
-Diga na justificativa QUAL vínculo você avaliou. Use 5 (não aplicável) apenas quando a obra não tem nenhum vínculo central recorrente — protagonista isolado.
-
-O QUE A NOTA MEDE: o resultado emocional do vínculo PARA OS PERSONAGENS NELE, no desenvolvimento da obra. NÃO mede a forma da dinâmica, nem se um leitor gostaria de viver aquilo. Tags como BDSM, Femdom, Dom/Sub, Master-Pet, posse, ciúme intenso, "Yandere ML/FL", "Obsessive Male Lead", "Masochistic ML", "Submissive ML/FL", "Crazy ML/FL" NÃO determinam automaticamente 0-3.
-
-OPINIÃO DE LEITOR NÃO DEFINE A VALÊNCIA — MAS É A MELHOR FONTE SOBRE A REAÇÃO DO PERSONAGEM (regra crítica, leia inteira).
-
-Gostar ou não de um trope é PREFERÊNCIA de quem leu, e não escolhe faixa. Consenso desgostando de um comportamento não é evidência de dano ao personagem; consenso adorando não é evidência de saúde.
-
-🔴 MAS NÃO DESCARTE A RECLAMAÇÃO — ela quase sempre CARREGA o fato que você precisa. Leitores comentam justamente o que os incomodou, e pra isso descrevem o que a personagem FEZ ou SENTIU. Jogar a frase fora joga fora a evidência junto.
-
-COMO SEPARAR — pelo SUJEITO da frase, não pelo tom:
-- Frase sobre O LEITOR ("eu não aguentaria", "achei sufocante", "possessive but I love it", "tenho raiva do ML") → PREFERÊNCIA. Não escolhe faixa.
-- Frase sobre O PERSONAGEM ("ela aceita", "ela não se importa", "ela está desconfortável", "ela perdoou", "ela tenta escapar") → FATO sobre a reação. USE, com peso alto — mesmo vindo embrulhado em julgamento, e mesmo que o julgamento aponte pro lado contrário.
-
-Uma frase costuma ter as DUAS coisas. Extraia a segunda e descarte a primeira:
-- "ela é idiota de aceitar o ciúme dele" → julgamento: "é idiota" (descarte). FATO: **ela TOLERA** — aguenta o ciúme, não age nele. Minimiza o dano sem apagá-lo → faixa 4-6, NÃO 7-8.
-- "amo como ela provoca o ciúme dele de propósito" → julgamento: "amo" (descarte). FATO: **ela QUER** — participa e conduz a dinâmica → faixa 7-8.
-- "é um absurdo ela perdoar como ele a tratou na linha do tempo original" → julgamento: "é um absurdo" (descarte). FATOS: **ela perdoou** e **o maltrato foi na linha do tempo ORIGINAL** (item (d) → não conta). Sem maltrato na linha atual, a nota sai do que a relação de HOJE mostra.
-- "tenho raiva desse ML que não respeita a FL mesmo quando ela está desconfortável" → julgamento: "tenho raiva" (descarte). FATO: **ela está DESCONFORTÁVEL e ele ignora** → não-consentimento, dano real, faixa 0-3.
-Repare que os quatro têm tom de reclamação ou de elogio sem correlação com a faixa, e os fatos apontam pra faixas DIFERENTES — inclusive os dois primeiros, que falam do MESMO comportamento (ciúme) e separam-se só por ela tolerar ou querer. É por isso que nem o tom nem o comportamento decidem sozinhos.
-
-⚠️ Quando os leitores DISCORDAM sobre a reação da personagem (uns dizem que ela aceita numa boa, outros que ela sofre), isso é divergência REAL sobre a obra: pontue pelo sinal mais frequente e ABAIXE a "confidence". Não é o mesmo que divergência de gosto.
-
-Antes de pontuar, responda estas quatro:
-(a) CONSENSO — a dinâmica é retratada como mútua/aceita pelos envolvidos, ou imposta contra a vontade de um deles?
-(b) SATISFAÇÃO — os envolvidos demonstram conforto/prazer conforme o vínculo se desenvolve, ou algum deles sofre?
-(c) TOM — sinopse/tags/reviews indicam tom romântico, cômico, fluffy — ou angustiante, sofrido, abusivo?
-(d) LINHA DO TEMPO — em obras com reencarnação, regressão, transmigração, volta no tempo ou segunda chance: o comportamento tóxico acontece ANTES desse evento? Se sim, ele é CONTEXTO ESTABELECIDO — é a vida anterior que a obra existe pra reescrever — e NÃO conta pra nota. Pontue a relação da linha do tempo ATUAL; só o que se repete DEPOIS do evento conta. Não cite a vida anterior como argumento da nota.
-
-A REAÇÃO DO OUTRO LADO DO VÍNCULO É O SINAL DECISIVO, e procurá-la é obrigatório. Tag de posse, ciúme, vigilância, obsessão ou crueldade descreve o COMPORTAMENTO de um personagem — não o efeito em quem o recebe. Busque na sinopse, nas tags e nas reviews como o outro personagem REAGE:
-- medo, fuga, tentativa de escapar, sofrimento, perda de autonomia → dano real: faixa 0-3
-- irritação, atrito, brigas, negociação → conflito: faixa 4-6
-- ela TOLERA — aguenta, releva, se adapta, "não liga muito", perdoa e segue → faixa 4-6 (ver o teto abaixo)
-- ela QUER — participa, retribui, tem prazer na dinâmica; ou a obra a encena como carinho/comédia entre iguais → faixa 7-8 (9-10 só com parceria e crescimento mútuo)
-Quando NÃO houver nenhum indício da reação do outro personagem, a tag de posse/ciúme PERDE PESO: ela não sustenta sozinha uma nota baixa. Nesse caso pontue pelo TOM geral da obra e baixe a "confidence". Nunca deduza dano a partir da intensidade do comportamento.
-
-🔴 TOLERAR NÃO É QUERER, E NENHUM DOS DOIS APAGA A TOXICIDADE — MINIMIZA. Esta é a distinção que mais erra pro lado permissivo, então faça-a explicitamente antes de subir qualquer nota:
-- DESEJADA: a dinâmica é o que ela QUER e na qual ela age — posse brincalhona, ciúme que os dois tratam como carinho, BDSM consensual. A relação é saudável NOS TERMOS DELA → 7-8/9-10.
-- TOLERADA: ela aguenta, releva, absorve, perdoa e segue convivendo. Isso REDUZ o dano; não o elimina. A relação segue conflituosa/ambivalente → TETO 6. Não use 7-8 aqui por mais pacífica que a convivência pareça: a faixa 7-8 exige respeito mútuo e conflito RESOLVIDO, não conflito absorvido por um lado só.
-
-TETOS — a reação dela move a nota no MÁXIMO uma faixa pra cima:
-- comportamento que causaria dano visível + ela tolera → sobe de 0-3 para 4-6, NUNCA direto pra 7-8;
-- houve abuso real NO DESENVOLVIMENTO (não na linha do tempo anterior — item (d)) → TETO 8, mesmo com arco de redenção encenado e perdão explícito. A faixa 9-10 é "parceria, apoio mútuo, comunicação e crescimento conjunto", e isso não convive com um histórico de abuso dentro da própria obra.
-
-ARCO DE REDENÇÃO E PERDÃO: se a obra ENCENA o agressor mudando — mostra a virada, não só a interrupção do comportamento — e o outro personagem aceitando, o estado predominante do desenvolvimento é a relação reconciliada: faixa 7-8, respeitado o teto acima. Se o perdão acontece SEM a obra encenar a mudança dele, é tolerância, não reconciliação → teto 6. Leitores dizendo que ELES não perdoariam é preferência, não evidência — mas leitores relatando que ela perdoou e continuou desconfortável é FATO, e manda pra 4-6 ou menos. Reserve 0-3 para devoção a um abusador NÃO-arrependido.
-
-Reserve 0-3 para abuso real NO DESENVOLVIMENTO, DENTRO dos vínculos centrais: manipulação contra a vontade do outro, sofrimento ativo de quem é próximo, controle não-consensual, violência. Crueldade dirigida a ANTAGONISTAS que a merecem não rebaixa a nota — o critério olha para dentro dos vínculos, não para o mundo. Dinâmica não-tradicional + consensual + tom romântico/cômico/fluffy → 7-8 ou 9-10 (relação saudável dentro da dinâmica que ambos escolheram). Tropes "dark romance" com consenso retratado e comédia BDSM ficam em 7-8/9-10, NÃO em 0-3.
+REGRA PARA COUPLE_DYNAMICS (leia com atenção):
+Couple_dynamics é avaliada pelo RESULTADO EMOCIONAL do casal na obra, NÃO pela forma da dinâmica. Tags como BDSM, Femdom, Dom/Sub, Master-Pet, posse, ciúme intenso, "Yandere ML/FL", "Masochistic ML", "Submissive ML/FL", "Crazy ML/FL" NÃO determinam automaticamente 0-3. Antes de pontuar, avalie:
+(a) há CONSENSO mútuo entre os parceiros na dinâmica retratada?
+(b) ambos demonstram SATISFAÇÃO/prazer na dinâmica conforme o desenvolvimento?
+(c) o TOM geral indicado por sinopse/tags/reviews é romântico, cômico, fluffy — ou angustiante, sofrido, abusivo?
+Dinâmica não-tradicional + consensual + tom romântico/cômico/fluffy → faixa 7-8 ou 9-10 (relação saudável dentro da dinâmica que ambos escolheram).
+Reserve 0-3 para abuso real (manipulação contra a vontade do outro, sofrimento ativo do parceiro abusado, controle não-consensual) presente NO DESENVOLVIMENTO. Tropes "dark romance" com consenso retratado ou comédia BDSM ficam em 7-8/9-10, NÃO em 0-3.
 
 REGRA OBRIGATÓRIA PARA TRAGEDY (leia com atenção):
 Considere tragédia apenas o que ocorre NO DESENVOLVIMENTO (meio da obra), não o cenário inicial nem o background.
@@ -514,7 +409,7 @@ Nota alta (7-10) só quando há perdas, separações, mortes, conflitos prolonga
 Não infira tragédia ativa a partir de premissas tristes ou tropes de revenge/segunda chance.
 
 AVALIE O DESENVOLVIMENTO, NÃO O PONTO DE PARTIDA (generaliza pra couple_dynamics e romance):
-- COUPLE_DYNAMICS: se a premissa coloca FL e ML como inimigos, rivais, contratantes hostis, transmigrada/regressora com ressentimento, casamento arranjado tenso — ou qualquer dinâmica negativa INICIAL que evolui ao longo da obra para parceria/romance — avalie pelo ESTADO PREDOMINANTE do desenvolvimento, não pela cena inicial. "Enemies to lovers" não é couple_dynamics 0-3; é 7-8/9-10 quando o arco é eles se entendendo e amadurecendo a relação. O caso da vida ANTERIOR (regressão/reencarnação/transmigração) é o item (d) da regra própria: aquilo é contexto estabelecido e não conta.
+- COUPLE_DYNAMICS: se a premissa coloca FL e ML como inimigos, rivais, contratantes hostis, transmigrada/regressora com ressentimento, casamento arranjado tenso — ou qualquer dinâmica negativa INICIAL que evolui ao longo da obra para parceria/romance — avalie pelo ESTADO PREDOMINANTE do desenvolvimento, não pela cena inicial. "Enemies to lovers" não é couple_dynamics 0-3; é 7-8/9-10 quando o arco é eles se entendendo e amadurecendo a relação.
 - ROMANCE: "slow burn" é um TROPO POSITIVO indicando romance core com desenvolvimento gradual. NÃO rebaixe romance para subplot só por ser slow burn. Se a obra tem foco romântico claro (mesmo que desenvolvimento gradual), está em 7-8 (Core romance). Subplot (4-6) é sobre QUANTO FOCO recebe na narrativa, não sobre velocidade do desenvolvimento romântico.`
 
 // ============================================================================
@@ -1007,6 +902,31 @@ function adultBoundsForContext(req: AiEvaluationRequest) {
   }
 }
 
+/**
+ * Realinha a faixa citada na prosa com a nota que o clamp deixou.
+ *
+ * 🔴 O piso/teto de adult_content muda o NÚMERO e não reescrevia o TEXTO, então a
+ * justificativa seguia abrindo com "Faixa 4-6 (Suggestive)" enquanto a nota já era 7,0.
+ * Quem lê a ficha vê texto e número discordando — foi o caso que abriu a auditoria de
+ * 2026-08-09. Medido no catálogo: **103 das 149** incoerências "faixa citada ≠ faixa da
+ * nota" estão em adult_content, praticamente todas com essa origem.
+ *
+ * ⚠️ NÃO reescreve o argumento do modelo, só o rótulo da faixa — e deixa explícito que o
+ * número veio do limite obrigatório, não da análise. Apagar a conclusão original seria
+ * pior: ela é a evidência de que o piso e a evidência textual discordam, e é isso que faz
+ * a curadora olhar o caso.
+ */
+export function realinharFaixaCitada(justificativa: string, nota: number): string {
+  const m = justificativa.match(/Faixa\s+(\d+-\d+)/i)
+  if (!m) return justificativa
+  const nova = bandForScore(nota)
+  if (m[1] === nova) return justificativa
+  return justificativa.replace(
+    m[0],
+    `Faixa ${nova} (definida pelo limite obrigatório; a análise abaixo conclui faixa ${m[1]})`,
+  )
+}
+
 function enforceAdultContentBounds(
   response: AiEvaluationResponse,
   req: AiEvaluationRequest
@@ -1034,13 +954,13 @@ function enforceAdultContentBounds(
     if (clamped === score.suggestedScore) return score
     applied = true
     const reason = bounds.reasons.join(" ")
+    const comRazao = score.justification.includes(reason)
+      ? score.justification
+      : `${score.justification} ${reason}`
     return {
       ...score,
       suggestedScore: clamped,
-      // Não duplica o texto quando o modelo já explicou o mesmo limite.
-      justification: score.justification.includes(reason)
-        ? score.justification
-        : `${score.justification} ${reason}`,
+      justification: realinharFaixaCitada(comRazao, clamped),
     }
   })
 
