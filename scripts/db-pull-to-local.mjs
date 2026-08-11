@@ -156,25 +156,49 @@ console.log(`         ${fmtObjects(srcObjects)}`)
 // Separado de propósito: constraints e índices ficam em `post-data`, o que abre uma janela
 // entre carregar o dado e validar as FKs. É nessa janela que dá pra consertar as órfãs (ver
 // passo 6) — num dump único o ADD CONSTRAINT falha e a constraint simplesmente não nasce.
+// `--reuse-dump`: retoma do dump mais recente em vez de baixar de novo. O passo destrutivo
+// (drop do `public`) vem DEPOIS do dump, então uma falha entre os dois deixa o local vazio
+// com um dump de 120 MB intacto no disco — repetir o download só para refazer os passos
+// seguintes é ~30 MB de egress e vários minutos por nada. Foi o que aconteceu em
+// 2026-08-11, quando o COPY do auth abortou o pull no meio.
+// ⚠️ O dump reusado é uma FOTO: reusar um antigo restaura o estado DAQUELE momento, e é
+// por isso que a idade dele é impressa em vez de suposta.
+const REUSE = process.argv.includes("--reuse-dump")
 const stamp = new Date().toISOString().replace(/[:.]/g, "-")
-const outDir = path.join(ROOT, ".backups", `pull-${stamp}`)
-fs.mkdirSync(outDir, { recursive: true })
+let outDir = path.join(ROOT, ".backups", `pull-${stamp}`)
+if (REUSE) {
+  const anteriores = fs
+    .readdirSync(path.join(ROOT, ".backups"))
+    .filter((d) => /^pull-\d{4}/.test(d))
+    .filter((d) => fs.existsSync(path.join(ROOT, ".backups", d, "cloud-data.sql")))
+    .sort()
+  if (!anteriores.length) die("--reuse-dump: nenhum pull-* com cloud-data.sql em .backups/")
+  outDir = path.join(ROOT, ".backups", anteriores[anteriores.length - 1])
+} else {
+  fs.mkdirSync(outDir, { recursive: true })
+}
 const dataFile = path.join(outDir, "cloud-data.sql")
 const postFile = path.join(outDir, "cloud-post.sql")
 
 const dumpArgs = ["--no-owner", "--quote-all-identifiers", ...SCHEMAS.flatMap((s) => ["--schema", s])]
 // Sem --no-privileges: policy sem GRANT não filtra nada — o papel `authenticated` precisa do
 // grant de tabela pra RLS ter o que aplicar.
-console.log(`\n→ pg_dump seção pre-data + data`)
-execFileSync("pg_dump", [CLOUD, ...dumpArgs, "--section", "pre-data", "--section", "data", "-f", dataFile], {
-  stdio: ["ignore", "inherit", "inherit"],
-})
-console.log(`  ${(fs.statSync(dataFile).size / 1e6).toFixed(1)} MB`)
-console.log(`→ pg_dump seção post-data (constraints, índices, policies)`)
-execFileSync("pg_dump", [CLOUD, ...dumpArgs, "--section", "post-data", "-f", postFile], {
-  stdio: ["ignore", "inherit", "inherit"],
-})
-console.log(`  ${(fs.statSync(postFile).size / 1e6).toFixed(2)} MB`)
+if (REUSE) {
+  const idadeMin = Math.round((Date.now() - fs.statSync(dataFile).mtimeMs) / 60000)
+  console.log(`\n→ REUSANDO o dump de ${path.basename(outDir)} (${idadeMin} min atrás) — sem baixar de novo`)
+  console.log(`  ${(fs.statSync(dataFile).size / 1e6).toFixed(1)} MB + ${(fs.statSync(postFile).size / 1e6).toFixed(2)} MB`)
+} else {
+  console.log(`\n→ pg_dump seção pre-data + data`)
+  execFileSync("pg_dump", [CLOUD, ...dumpArgs, "--section", "pre-data", "--section", "data", "-f", dataFile], {
+    stdio: ["ignore", "inherit", "inherit"],
+  })
+  console.log(`  ${(fs.statSync(dataFile).size / 1e6).toFixed(1)} MB`)
+  console.log(`→ pg_dump seção post-data (constraints, índices, policies)`)
+  execFileSync("pg_dump", [CLOUD, ...dumpArgs, "--section", "post-data", "-f", postFile], {
+    stdio: ["ignore", "inherit", "inherit"],
+  })
+  console.log(`  ${(fs.statSync(postFile).size / 1e6).toFixed(2)} MB`)
+}
 
 // ── 4. prepara o LOCAL ──────────────────────────────────────────────────────────────────
 // pg_dump com --schema NÃO leva as extensions de que o schema depende (documentado: ele não
@@ -206,6 +230,17 @@ psql(
 // inteiro quebraria o container de auth. Os hashes de senha vêm junto: o login local usa a
 // mesma senha da nuvem.
 console.log(`\n→ auth: copiando usuários (mantendo os UUIDs)`)
+
+// 🔴 LIMPAR ANTES DE COPIAR — sem isto o pull funciona UMA vez e falha em todos os
+// seguintes. O `drop schema public cascade` acima NÃO toca em `auth`, então os usuários
+// do pull anterior continuam lá e o `COPY ... FROM STDIN` viola a PK:
+//   ERROR: duplicate key value violates unique constraint "users_pkey"
+// Pior que o erro é ONDE ele acontece: depois do drop e ANTES da carga, deixando o local
+// com o `public` VAZIO — o app e os ~25 scripts de análise passam a responder
+// `PGRST205 Could not find the table 'public.works'`, que não se parece nem um pouco com
+// "o pull morreu no meio". Medido em 2026-08-11, no 2º pull da máquina.
+// `identities` primeiro: ela referencia `users`.
+psql(LOCAL, `delete from auth.identities; delete from auth.users;`)
 const authCols = (url, table) =>
   psql(
     url,
