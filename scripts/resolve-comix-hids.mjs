@@ -160,6 +160,18 @@ async function ensureSearchPage() {
   await sleep(5000) // deixa o Cloudflare resolver + a SPA montar o nav
   return searchPage
 }
+/**
+ * 🔴 O RETORNO TEM TRÊS SIGNIFICADOS, e confundir dois deles foi um bug real:
+ *   - `[…]` / `[]` → a busca RODOU. Vazio quer dizer "a Comix não tem essa obra".
+ *   - `null`       → a busca NÃO RODOU (Cloudflare barrou, a SPA não montou). Não
+ *                    sabemos nada sobre a obra.
+ *
+ * Até 2026-08-11 os dois casos devolviam `[]`, então uma execução inteiramente CEGA
+ * imprimia `matched=0 noMatch=N error=0` e saía com código 0 — indistinguível de "essas
+ * obras não estão na Comix", que é plausível para título japonês romanizado. Foi o que
+ * aconteceu: a Comix passou a barrar o browser e o resolvedor rodou 3× naquela
+ * madrugada relatando sucesso.
+ */
 async function comixSearch(query) {
   const page = await ensureSearchPage()
   // (re)marca o input de busca por placeholder — sobrevive a re-renders da SPA
@@ -168,9 +180,10 @@ async function comixSearch(query) {
     if (i) { i.setAttribute("data-comix-search", "1"); return true }
     return false
   })
-  if (!tagged) { if (process.env.COMIX_DEBUG) console.log(`    [debug] input de busca não encontrado`); return [] }
+  // Sem o campo de busca a SPA não montou — quase sempre o Cloudflare barrando.
+  if (!tagged) { if (process.env.COMIX_DEBUG) console.log(`    [debug] input de busca não encontrado`); return null }
   const handle = await page.$(SEARCH_INPUT)
-  if (!handle) return []
+  if (!handle) return null
   await handle.click({ clickCount: 3 }).catch(() => {}) // seleciona o texto atual p/ sobrescrever
   const respP = page
     .waitForResponse((r) => {
@@ -182,7 +195,8 @@ async function comixSearch(query) {
     .catch(() => null)
   await page.type(SEARCH_INPUT, query, { delay: 25 }).catch(() => {})
   const resp = await respP
-  if (!resp) { if (process.env.COMIX_DEBUG) console.log(`    [debug] "${query}": sem resposta (CF/timeout?)`); return [] }
+  // Digitou mas nenhuma requisição de busca saiu → também é cegueira, não ausência.
+  if (!resp) { if (process.env.COMIX_DEBUG) console.log(`    [debug] "${query}": sem resposta (CF/timeout?)`); return null }
   const json = await resp.json().catch(() => null)
   const items = json?.result?.items
   if (process.env.COMIX_DEBUG) {
@@ -223,7 +237,7 @@ async function main() {
   })
   await ensureSearchPage() // abre a home, resolve o Cloudflare e monta o nav antes do loop
 
-  const stats = { matched: 0, noMatch: 0, error: 0 }
+  const stats = { matched: 0, noMatch: 0, blind: 0, error: 0 }
   for (let i = 0; i < targets.length; i++) {
     const w = targets[i]
     const tag = `[${i + 1}/${targets.length}] "${w.title}"`
@@ -231,8 +245,11 @@ async function main() {
     try {
       let best = null // { hid, title, score }
       let bestAny = null // melhor candidato mesmo abaixo do threshold (p/ debug)
+      let searched = 0 // variantes cuja busca REALMENTE rodou (ver comixSearch)
       for (const q of variants) {
         const items = await comixSearch(q)
+        if (items === null) continue // cega: não conta como "procurei e não achei"
+        searched++
         for (const it of items) {
           if (!it?.hid) continue
           // Casa a QUERY buscada contra os títulos do candidato (mirror do app:
@@ -254,6 +271,10 @@ async function main() {
             .upsert({ work_id: w.id, source: "comix", external_id: best.hid, is_rejected: false }, { onConflict: "work_id,source", ignoreDuplicates: true })
           if (error) console.log(`${tag}   ⚠ erro ao salvar: ${error.message}`)
         }
+      } else if (searched === 0) {
+        // Nenhuma variante chegou a ser buscada: não afirmamos nada sobre esta obra.
+        stats.blind++
+        console.log(`${tag} → ⚠ CEGO (a busca não rodou — Cloudflare?)`)
       } else {
         stats.noMatch++
         console.log(`${tag} → — sem match`)
@@ -265,7 +286,24 @@ async function main() {
     await sleep(500) // polidez
   }
 
-  console.log(`\nFim. matched=${stats.matched} noMatch=${stats.noMatch} error=${stats.error}${DRY ? " (nada gravado — DRY)" : ""}`)
+  console.log(
+    `\nFim. matched=${stats.matched} noMatch=${stats.noMatch} blind=${stats.blind} error=${stats.error}` +
+      (DRY ? " (nada gravado — DRY)" : ""),
+  )
+
+  // Cegueira NÃO é "não achei": sair 0 aqui faria o chamador tratar uma execução
+  // inútil como conclusiva. `resolveComixHidForWork` já checa `code !== 0` e desiste,
+  // e quem roda à mão vê a linha abaixo em vez de deduzir ausência de um relatório
+  // que nunca olhou a Comix.
+  if (stats.blind > 0) {
+    console.error(
+      `\n🔴 ${stats.blind} de ${targets.length} obra(s) NÃO FORAM BUSCADAS — a página de busca da ` +
+        `Comix não montou (Cloudflare). Isto NÃO quer dizer que elas não estão na Comix.\n` +
+        `   O hid pode ser vinculado à mão (setComixHidManually). Reviews e detalhe de quem JÁ tem ` +
+        `hid seguem funcionando: são token-free e passam pelo FlareSolverr.`,
+    )
+    process.exitCode = 3
+  }
 }
 
 main()

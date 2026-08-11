@@ -58,6 +58,19 @@ const hostOf = (url: string) => {
   }
 }
 
+/**
+ * O sidecar está comprovadamente barrado neste host agora? PASSIVO — só lê o estado
+ * que o tráfego real já produziu, sem tocar na rede.
+ *
+ * Existe para dar VISIBILIDADE a uma degradação que não vira erro: com o host
+ * bloqueado o FlareSolverr assume e a fonte continua respondendo, então nada falha —
+ * some apenas a camada primária. Foi assim que o bloqueio da Comix durou 13 dias sem
+ * ninguém saber (ver `getComixStatus`).
+ */
+export function isSidecarBlockedFor(host: string): boolean {
+  return Date.now() < (blockedHostUntil.get(host) ?? 0)
+}
+
 const num = (env: string | undefined, fallback: number) => {
   const n = Number(env)
   return Number.isFinite(n) && n > 0 ? n : fallback

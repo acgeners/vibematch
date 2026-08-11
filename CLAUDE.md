@@ -1457,6 +1457,31 @@ foram pra **`/fila-recomendacao`** (qualquer logado). O badge da barra também s
 🔴 **Duas falhas latentes se somaram, e cada uma escondia a outra.** O sidecar quebrou em 29/07 e ninguém soube, porque o plain fetch ainda funcionava; quando o plain fetch caiu, o sidecar quebrado virou o caminho. **Camada de fallback que ninguém exercita apodrece em silêncio** — o log do sidecar tinha a resposta há 13 dias.
 
 ⚠️ **O pior caso está coberto, medido:** 1ª obra de cada janela de 15min paga a sonda (13,2s) + solve frio do FlareSolverr (12,4s) = 25,8s ⇒ estoura a 1ª passada, e a **2ª passada dirigida recupera em 4,2s** (`acquire-reviews.ts`). Não vale encurtar a sonda — a complexidade não paga um caso que o mecanismo existente já resolve.
+
+🔴 **A DESCOBERTA DE HID está morta nos TRÊS caminhos — e só o acervo atual salva.** Medido em
+2026-08-11: `searchComix` (API) gateada por token · `/resolve` do sidecar `no_xhr` (a SPA não
+monta) · `scripts/resolve-comix-hids.mjs`, que é **Chrome REAL com perfil persistente**, cego em
+headful E headless ("input de busca não encontrado"). Impacto hoje é **zero — 981/981 obras já
+têm hid** —, então isso só morde obra NOVA, e a saída é `setComixHidManually`. Reviews e detalhe
+de quem já tem hid seguem funcionando: são token-free e passam pelo FlareSolverr.
+
+⚠️ **O que foi corrigido não foi a descoberta, foi a MENTIRA.** O resolvedor imprimia
+`matched=0 noMatch=N error=0` e saía com código 0 — indistinguível de "essas obras não estão na
+Comix", que é plausível para título japonês romanizado. Hoje `comixSearch` devolve `null` para
+"não consegui buscar" (≠ `[]`, "busquei e não achei"), o resumo tem uma coluna `blind=` e o script
+**sai com código 3**, que `resolveComixHidForWork` já trata como não-conclusivo. Ressuscitar a
+busca exigiria stealth (o FlareSolverr passa e o Playwright não, e não se sabe por quê) — não
+compensa enquanto o impacto for zero.
+
+🔴 **O gate de saúde media UM TERÇO do que a Comix precisa, e o terço podia mentir.** Só
+`lib/external/comix.ts` o alimentava: os 1.168 bloqueios do sidecar e a busca cega nunca moveram
+indicador nenhum. Pior, `withTimeout` só para de ESPERAR — a promise segue viva e suas chamadas
+chamam `recordComixOk()` lá na frente, então a coleta que o app **jogou fora** voltava e pintava o
+painel de verde. Hoje: `delivery_timeout` (reportado pelo orquestrador) desqualifica um `ok` que
+chegue nos 2min seguintes; `search_blind` sai do resolvedor; e `sidecarBlocked` entra em
+`ComixStatus` **sem** rebaixar o estado — o FlareSolverr cobre, e alarmar viraria o alarme que
+sempre toca. A Visão geral (`/curadoria`) troca só o texto do cartão. Guardado por
+`tests/unit/external/comix-gate-honestidade.test.ts`.
 - Reviews go through `selectReviewsForEvaluation()` before the prompt — stratified per-source sampling with an **adaptive** quota: `perSource = min(maxPerSource, ceil(total / sourcesWithReviews))`, capped by `AI_EVAL_REVIEW_CAPS = { total: 30, maxPerSource: 12 }` (service.ts), then global round-robin in `REVIEW_SOURCE_PRIORITY` order (MangaUpdates first). So few-source works fill the budget (2 sources → up to 24, not 16) instead of being stuck at a fixed 8/source. All sources are always fetched in parallel; the cap is applied at selection time only (no fetch short-circuit). The full pool persists to `work_reviews`. **The prompt selects from the UNION of fresh fetch + persisted `work_reviews` pool** (`mergeFreshWithPersistedReviews`, dedup by source+text, rejected sources filtered): CF-gated sources dropping out (sidecar 503 busy / Cloudflare block) can no longer shrink the evidence to 1–2 reviews when dozens are already persisted. Only the fresh pool is re-persisted (persistence semantics unchanged); when nothing is recovered the input is byte-identical to fresh-only, preserving the eval cache `input_hash`.
 - Passes `sourcedReviews: SourcedReview[]` (rich format with source, matchScore, sourceTitle)
 - Also passes `externalContext` (synopsis strings from external sources)

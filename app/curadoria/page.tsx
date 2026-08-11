@@ -50,7 +50,8 @@ export default async function CuradoriaPage() {
     getAnthropicBalanceStatus().catch(() => null),
     getRecalcPendingState().catch(() => ({ pending: false, lastEditAt: null })),
   ])
-  const comix = getComixStatus().state
+  const comixStatus = getComixStatus()
+  const comix = comixStatus.state
 
   const settingsTotal = Object.values(unread).reduce((sum, n) => sum + n, 0)
   const decisions = buildDecisions({ curadoria, requests }, unread)
@@ -142,7 +143,15 @@ export default async function CuradoriaPage() {
           <HealthCard
             tone={comix === "down" ? "bad" : comix === "degraded" ? "warn" : "ok"}
             title={COMIX_TITLE[comix]}
-            detail={COMIX_DETAIL[comix]}
+            // Sidecar barrado NÃO vira "warn": o FlareSolverr assume e as reviews
+            // entram normalmente — alarmar aqui seria o alarme que sempre toca. Mas
+            // some uma camada, e foi essa degradação muda que durou 13 dias sem
+            // ninguém saber. Diferenciar, não destacar.
+            detail={
+              comix === "ok" && comixStatus.sidecarBlocked
+                ? "reviews entrando pelo FlareSolverr — o sidecar está bloqueado na Comix"
+                : COMIX_DETAIL[comix]
+            }
             href="/settings?g=fontes"
           />
           <HealthCard
