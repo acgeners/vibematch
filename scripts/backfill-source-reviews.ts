@@ -32,9 +32,9 @@
  * Uso:
  * 🔴 ALVO: NUVEM — este script GRAVA. Rodá-lo contra o local, que é réplica descartável,
  *    joga o trabalho fora no próximo `db:pull`.
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/backfill-source-reviews.ts --fonte=mangago
- *   ...                                                          --fonte=comix --escopo=nunca --limit=20
- *   ...                                                          --fonte=mangago --apply
+ *   npm run reviews:backfill -- --fonte=mangago                      # dry-run
+ *   npm run reviews:backfill -- --fonte=comix --escopo=nunca --limit=20
+ *   npm run reviews:backfill -- --fonte=mangago --apply
  */
 import { createClient } from "@supabase/supabase-js"
 import { fetchComixReviews } from "../lib/external/comix"
@@ -42,6 +42,7 @@ import { fetchMangagoReviews } from "../lib/external/mangago"
 import { extractUserRating } from "../lib/external/index"
 import { saveWorkReviews } from "../lib/external/persist-reviews"
 import type { SourcedReview } from "../lib/external/types"
+import { exigeAlvoNuvem } from "./lib/exige-alvo-nuvem"
 
 const APPLY = process.argv.includes("--apply")
 const arg = (n: string) => process.argv.find((a) => a.startsWith(`--${n}=`))?.split("=")[1] ?? null
@@ -85,6 +86,8 @@ async function main() {
     return
   }
   const fonte = FONTES[FONTE]
+  // Ver o gêmeo em resolve-mangago-slugs.ts: o que se perde aqui é a coleta inteira.
+  if (APPLY) exigeAlvoNuvem(`npm run reviews:backfill -- --fonte=${FONTE} --apply`)
 
   const works = (await paginar<{ id: string; title: string; is_archived: boolean | null }>(
     "works",

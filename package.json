@@ -28,6 +28,8 @@
     "db:fingerprint": "node scripts/db-table-fingerprint.mjs",
     "consistency": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/consistency-panel.ts",
     "fontes": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/inspect-sources.ts",
+    "mangago:slugs": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/resolve-mangago-slugs.ts",
+    "reviews:backfill": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/backfill-source-reviews.ts",
     "synopsis:lab": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/synopsis-prompt-lab.ts",
     "baselines:ranking": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/ranking-baselines.ts",
     "baselines:rec-hit": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/recommendation-hit-baseline.ts",
