@@ -1,16 +1,25 @@
 /**
- * Piloto medido do prompt de avaliação (v25) — roda a avaliação de IA numa amostra
+ * Piloto medido do prompt de avaliação (versão VIVA) — roda a avaliação de IA numa amostra
  * ESTRATIFICADA e compara nota-a-nota com a que está persistida em `category_scores`.
  *
- * Por quê: as mudanças da v23→v25 são todas de TEXTO. A suíte prova que o prompt está
- * coerente; não prova que o modelo pontua melhor. Rodar o catálogo inteiro (~US$33) sem
- * uma medição antes é repetir o processo que produziu os vieses originais.
+ * Por quê: mudança de prompt é toda de TEXTO. A suíte prova que o prompt está coerente; não
+ * prova que o modelo pontua melhor. Rodar o catálogo inteiro (~US$38) sem uma medição antes é
+ * repetir o processo que produziu os vieses originais.
+ *
+ * ⚠️ Sem versão no NOME, de propósito: ele lê `PROMPT_VERSION` do `service.ts` e nomeia a
+ * saída com ela (`piloto-v27-<ts>.json`). Chamava-se `pilot-prompt-v25.ts` e teria rodado a
+ * v27 sob um nome que diz v25 — a mesma rotulagem mentirosa que a trava de `PROMPT_VERSION`
+ * existe pra impedir dentro do banco.
+ *
+ * 🔴 O resultado se JULGA com `npm run consistency -- --piloto=<o json>` (seção 5, pareada).
+ * O `--baseline` NÃO enxerga este piloto: ele não grava em `category_scores` nem em
+ * `ai_evaluation_scores`, que é o que as dimensões 1–3 leem.
  *
  * Uso:
  * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local \
- *     scripts/pilot-prompt-v25.ts --list           # só imprime a amostra ($0)
- *   ... scripts/pilot-prompt-v25.ts --execute      # roda de verdade
+ *     scripts/pilot-prompt.ts --list           # só imprime a amostra ($0)
+ *   ... scripts/pilot-prompt.ts --execute      # roda de verdade
  *   ... --execute --only=A,B                       # roda só alguns estratos
  *
  * 🔴 NÃO grava nada em `category_scores` nem em `ai_evaluations`. A única escrita é o

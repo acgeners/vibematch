@@ -28,8 +28,8 @@ import { PROMPT_VERSION, SYSTEM_PROMPT } from "@/lib/ai-evaluation/service"
  */
 describe("PROMPT_VERSION acompanha o texto do prompt", () => {
   /** Versão e sha256 do SYSTEM_PROMPT andam JUNTOS — atualize os dois na mesma mudança. */
-  const PINNED_VERSION = "v26"
-  const PINNED_SHA256 = "da87caed2b5fad34af94d61b65b2994019e55b871e6d5d1f19a2669e04e8a4b5"
+  const PINNED_VERSION = "v27"
+  const PINNED_SHA256 = "356af0d6906ecc939844650c7ab6bbb73912174ed3e2e5e493a0137115e8ce90"
 
   it("está fixada na versão que este hash descreve", () => {
     expect(PROMPT_VERSION).toBe(PINNED_VERSION)
@@ -53,5 +53,11 @@ describe("PROMPT_VERSION acompanha o texto do prompt", () => {
     // v26 é o texto da v22 + a description da migration 181. Rotular de "v22" reusaria
     // caches de uma régua diferente e faria `ai_evaluations.prompt_version` mentir.
     expect(PROMPT_VERSION).not.toBe("v22")
+    // A v27 é o PORTE do texto da v23 por cima da main — e não pode se chamar "v23": aquele
+    // rótulo já foi gasto no banco (a v23 rodou por horas antes de ser revertida no `0ab2ae7`),
+    // e o texto difere, porque a `description` de couple_dynamics vem da migration 181, que
+    // não existia em 25/07. Mesmo número com régua diferente é a mentira que este teste existe
+    // para impedir.
+    expect(PROMPT_VERSION).not.toBe("v23")
   })
 })
