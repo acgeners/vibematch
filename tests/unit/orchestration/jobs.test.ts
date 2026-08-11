@@ -1,5 +1,12 @@
-import { describe, it, expect, afterEach } from "vitest"
-import { InMemoryJobStore, runOrchestratedJob, sanitizeErrorMessage } from "@/lib/orchestration/jobs"
+import { describe, it, expect, afterEach, vi } from "vitest"
+import {
+  ABANDONED_JOB_THRESHOLD_MS,
+  InMemoryJobStore,
+  SupabaseJobStore,
+  isAbandonedRunning,
+  runOrchestratedJob,
+  sanitizeErrorMessage,
+} from "@/lib/orchestration/jobs"
 import { __resetSingleFlight } from "@/lib/ai-cache/single-flight"
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
@@ -131,6 +138,163 @@ describe("runOrchestratedJob + InMemoryJobStore", () => {
     )
     expect(res.status).toBe("processing")
     expect(calls).toBe(0)
+  })
+})
+
+/**
+ * Regressão de 2026-08-10: `claim()` tratava `running` como ativo sem olhar idade e não
+ * havia reaper, então job morto no meio (deploy/crash/timeout) travava a chave de dedup
+ * PARA SEMPRE. Medido na nuvem: 3 digests presos desde 15–20/07 e 2 obras sem digest até
+ * hoje, com toda nova tentativa voltando "já existe job ativo" — sem erro.
+ *
+ * ⚠️ Os dois lados precisam de teste: reivindicar cedo demais roda chamada PAGA 2×.
+ */
+describe("job preso em 'running' volta a ser reivindicável", () => {
+  const envelhece = (store: InMemoryJobStore, ms: number) => {
+    store.records[0].startedAt = new Date(Date.now() - ms).toISOString()
+  }
+
+  it("running RECENTE continua ativo — não reivindica job vivo", async () => {
+    const store = new InMemoryJobStore()
+    const c1 = await store.claim({ action: "generate_review_digest", workId: "w1", dedupKey: "kr" })
+    await store.markRunning(c1.kind === "claimed" ? c1.job.id : "")
+    envelhece(store, ABANDONED_JOB_THRESHOLD_MS - 60_000)
+
+    const c2 = await store.claim({ action: "generate_review_digest", workId: "w1", dedupKey: "kr" })
+    expect(c2.kind).toBe("active")
+    expect(store.records.length).toBe(1)
+  })
+
+  it("running ABANDONADO é retomado na MESMA linha, com attempts+1", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const store = new InMemoryJobStore()
+    const c1 = await store.claim({ action: "generate_review_digest", workId: "w1", dedupKey: "kr" })
+    const id = c1.kind === "claimed" ? c1.job.id : ""
+    await store.markRunning(id)
+    envelhece(store, ABANDONED_JOB_THRESHOLD_MS + 60_000)
+
+    const c2 = await store.claim({ action: "generate_review_digest", workId: "w1", dedupKey: "kr" })
+    expect(c2.kind).toBe("claimed")
+    if (c2.kind === "claimed") {
+      expect(c2.resumed).toBe(true)
+      expect(c2.job.id).toBe(id)
+      expect(c2.job.attempts).toBe(2)
+      expect(c2.job.status).toBe("queued")
+    }
+    expect(store.records.length).toBe(1)
+    // Retomar em silêncio troca um bug calado por outro — o log é a única medição.
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0][0])).toContain("[jobs] retomando")
+    warn.mockRestore()
+  })
+
+  it("o executor volta a RODAR a obra travada (era o sintoma: sem erro e sem nada feito)", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const store = new InMemoryJobStore()
+    const c1 = await store.claim({ action: "generate_review_digest", workId: "w1", dedupKey: "kx" })
+    await store.markRunning(c1.kind === "claimed" ? c1.job.id : "")
+    envelhece(store, ABANDONED_JOB_THRESHOLD_MS + 60_000)
+
+    let calls = 0
+    const res = await runOrchestratedJob(
+      store,
+      { action: "generate_review_digest", workId: "w1", dedupKey: "kx" },
+      async () => {
+        calls += 1
+      },
+    )
+    expect(calls).toBe(1)
+    expect(res.status).not.toBe("processing")
+    vi.restoreAllMocks()
+  })
+
+  it("isAbandonedRunning: só olha 'running', e cai pra createdAt sem startedAt", () => {
+    const velho = new Date(Date.now() - ABANDONED_JOB_THRESHOLD_MS - 1000).toISOString()
+    expect(isAbandonedRunning({ status: "running", startedAt: velho, createdAt: null })).toBe(true)
+    expect(isAbandonedRunning({ status: "running", startedAt: null, createdAt: velho })).toBe(true)
+    expect(isAbandonedRunning({ status: "queued", startedAt: velho, createdAt: velho })).toBe(false)
+    expect(isAbandonedRunning({ status: "failed", startedAt: velho, createdAt: velho })).toBe(false)
+    const novo = new Date().toISOString()
+    expect(isAbandonedRunning({ status: "running", startedAt: novo, createdAt: novo })).toBe(false)
+  })
+})
+
+/**
+ * O store DURÁVEL é o que roda em produção, e o `.eq("status", …)` do update é o
+ * compare-and-swap que segura a corrida. A 1ª versão tinha o literal `"failed"` ali —
+ * com ele, a retomada de um `running` abandonado casaria 0 linhas e a obra seguiria
+ * travada, agora em silêncio DUPLO (o claim diria "ativo" pelo caminho de fallback).
+ */
+describe("SupabaseJobStore — retomada de running abandonado", () => {
+  function fakeClient(row: Record<string, unknown>) {
+    const updates: Array<{ patch: Record<string, unknown>; guards: Array<[string, unknown]> }> = []
+    const client = {
+      from() {
+        return {
+          select: () => builderLeitura(),
+          update(patch: Record<string, unknown>) {
+            const guards: Array<[string, unknown]> = []
+            const b = {
+              eq(col: string, val: unknown) {
+                guards.push([col, val])
+                return b
+              },
+              select: () => b,
+              maybeSingle: async () => {
+                updates.push({ patch, guards })
+                // Emula o WHERE: só devolve linha se todos os guards baterem.
+                const bate = guards.every(([c, v]) => (c === "id" ? row.id === v : row[c] === v))
+                if (!bate) return { data: null }
+                Object.assign(row, patch)
+                return { data: { ...row } }
+              },
+            }
+            return b
+          },
+        }
+      },
+    }
+    function builderLeitura() {
+      const b = {
+        eq: () => b,
+        in: () => b,
+        order: () => b,
+        limit: () => b,
+        maybeSingle: async () => ({ data: { ...row } }),
+      }
+      return b
+    }
+    return { client, updates }
+  }
+
+  it("reivindica a linha em running e não usa o literal 'failed' como guarda", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const row = {
+      id: "j1",
+      action: "generate_review_digest",
+      work_id: "w1",
+      dedup_key: "kd",
+      status: "running",
+      attempts: 1,
+      created_at: new Date(Date.now() - ABANDONED_JOB_THRESHOLD_MS * 2).toISOString(),
+      started_at: new Date(Date.now() - ABANDONED_JOB_THRESHOLD_MS * 2).toISOString(),
+      finished_at: null,
+    }
+    const { client, updates } = fakeClient(row)
+    const store = new SupabaseJobStore(client as never)
+
+    const res = await store.claim({ action: "generate_review_digest", workId: "w1", dedupKey: "kd" })
+
+    expect(res.kind).toBe("claimed")
+    if (res.kind === "claimed") {
+      expect(res.resumed).toBe(true)
+      expect(res.job.id).toBe("j1")
+      expect(res.job.attempts).toBe(2)
+    }
+    expect(updates).toHaveLength(1)
+    expect(updates[0].patch.status).toBe("queued")
+    expect(updates[0].guards).toContainEqual(["status", "running"])
+    vi.restoreAllMocks()
   })
 })
 
