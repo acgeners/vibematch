@@ -14,6 +14,7 @@ npm run sync-constants  # regenerates constant files from Supabase DB (requires 
 npm run lint
 
 npm run consistency  # painel de consistência das notas de atributo (US$0; --save/--baseline)
+npm run fontes       # cobertura por fonte externa (US$0). --falta=<fonte>[:reviews] LISTA as lacunas
 npm run db:egress    # quanto de egress as últimas 24h custaram (mede no local, quota zero)
 ```
 
