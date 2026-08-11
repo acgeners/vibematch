@@ -1,11 +1,15 @@
 /**
- * Backfill das REVIEWS da Comix em `work_reviews`.
+ * Backfill das REVIEWS de uma fonte Cloudflare-gated (`--fonte=comix|mangago`) em
+ * `work_reviews`, para obras que TÊM o vínculo e ZERO reviews dela.
  *
- * POR QUÊ: 366 obras (37,7% das ativas) têm a Comix VINCULADA e ZERO reviews dela —
- * enquanto a Comix é a 2ª maior fonte do acervo (7.886 reviews). Parte disso é coleta
- * que rodou antes da fonte existir no pipeline, parte é coleta que falhou em silêncio
- * (ver o histórico de 2026-08-11: o sidecar bloqueado comia o teto de 25s e a Comix
- * vinha vazia em toda obra, sem erro). Agora que ela voltou, o passivo é recuperável.
+ * POR QUÊ: as duas fontes acumulam o mesmo passivo por motivos diferentes — coleta que
+ * rodou antes da fonte existir no pipeline, e coleta que falhou em SILÊNCIO (2026-08-11:
+ * o sidecar bloqueado comia o teto de 25s e a Comix vinha vazia em toda obra, sem erro).
+ *
+ * ⚠️ UM script para as duas, e não dois: a única diferença real é qual `fetch*Reviews`
+ * chamar. Baldes, dry-run, custo zero, paginação e a detecção de "bypass fora" são
+ * idênticos — um gêmeo seria a segunda cópia da mesma verdade, que este projeto já
+ * pagou caro várias vezes (ver `LOW_BALANCE_USD`, `STRONG_TAG_WEIGHT`).
  *
  * ESCOPO — os dois baldes rendem, e isso foi MEDIDO, não suposto (amostra de 8+8):
  *   `vazias` (273) obras que já colheram de OUTRAS fontes e não têm nada da Comix
@@ -16,23 +20,25 @@
  * rendesse. Falso: a maioria rende. Não pule esse balde por dedução.
  *
  * CUSTO DE IA: ZERO. `skipPaidEnrichment: true` — grava as linhas sem gerar
- * digest/resumo (Sonnet, ~US$0,02-0,05/obra; nas 366 seriam US$7-18). O caminho normal
+ * digest/resumo (Sonnet, ~US$0,02-0,05/obra; nas 369 da Comix seriam US$7-18). O caminho normal
  * do app ("Buscar reviews") gera o digest; aqui NÃO, porque o ganho dele só aparece na
  * re-avaliação e isso é outra decisão, com outro orçamento.
  *
- * ⚠️ EXIGE o FlareSolverr de pé (`docker start flaresolverr`): desde 2026-08-11 a Comix
- * desafia todo fetch e o sidecar não a atravessa — o FlareSolverr é a ÚNICA via. Sem ele
- * o script roda inteiro e grava ZERO, que é o modo de falha caro. O dry-run avisa.
+ * ⚠️ EXIGE o FlareSolverr de pé (`docker start flaresolverr`). As DUAS fontes são
+ * Cloudflare-gated e nenhuma é atravessada pelo sidecar hoje (o Mangago nunca teve
+ * sidecar; a Comix deixou de passar em 29/07) — o FlareSolverr é a ÚNICA via. Sem ele o
+ * script roda inteiro e grava ZERO, que é o modo de falha caro. O resumo denuncia.
  *
  * Uso:
  * 🔴 ALVO: NUVEM — este script GRAVA. Rodá-lo contra o local, que é réplica descartável,
  *    joga o trabalho fora no próximo `db:pull`.
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/backfill-comix-reviews.ts
- *   ...                                                          --escopo=nunca --limit=20
- *   ...                                                          --apply
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/backfill-source-reviews.ts --fonte=mangago
+ *   ...                                                          --fonte=comix --escopo=nunca --limit=20
+ *   ...                                                          --fonte=mangago --apply
  */
 import { createClient } from "@supabase/supabase-js"
 import { fetchComixReviews } from "../lib/external/comix"
+import { fetchMangagoReviews } from "../lib/external/mangago"
 import { extractUserRating } from "../lib/external/index"
 import { saveWorkReviews } from "../lib/external/persist-reviews"
 import type { SourcedReview } from "../lib/external/types"
@@ -40,6 +46,12 @@ import type { SourcedReview } from "../lib/external/types"
 const APPLY = process.argv.includes("--apply")
 const arg = (n: string) => process.argv.find((a) => a.startsWith(`--${n}=`))?.split("=")[1] ?? null
 const ESCOPO = (arg("escopo") ?? "todas") as "vazias" | "nunca" | "todas"
+/** Fontes suportadas: as gateadas por Cloudflare cujo id basta para buscar reviews. */
+const FONTES = {
+  comix: { fetch: (id: string) => fetchComixReviews(id), rotulo: "Comix" },
+  mangago: { fetch: (id: string) => fetchMangagoReviews(id), rotulo: "Mangago" },
+} as const
+const FONTE = arg("fonte") as keyof typeof FONTES | null
 const LIMITE = Number(arg("limit")) || Infinity
 // A cadeia da Comix já leva ~2,5s por obra (4 chamadas via FlareSolverr). A pausa é
 // polidez com o origin, não throttle nosso.
@@ -62,11 +74,17 @@ async function paginar<T>(tabela: string, cols: string): Promise<T[]> {
 }
 
 async function main() {
+  if (!FONTE || !(FONTE in FONTES)) {
+    console.error(`--fonte é obrigatório. Use: ${Object.keys(FONTES).join(" | ")}`)
+    process.exitCode = 1
+    return
+  }
   if (!["vazias", "nunca", "todas"].includes(ESCOPO)) {
     console.error(`--escopo inválido: "${ESCOPO}". Use vazias | nunca | todas.`)
     process.exitCode = 1
     return
   }
+  const fonte = FONTES[FONTE]
 
   const works = (await paginar<{ id: string; title: string; is_archived: boolean | null }>(
     "works",
@@ -78,23 +96,25 @@ async function main() {
   )
   const revs = await paginar<{ work_id: string; source: string }>("work_reviews", "work_id, source")
 
-  const hidDe = new Map<string, string>()
+  const idDe = new Map<string, string>()
   for (const r of ids) {
-    if (r.source === "comix" && r.external_id && r.is_rejected !== true) hidDe.set(r.work_id, r.external_id)
+    if (r.source === FONTE && r.external_id && r.is_rejected !== true) idDe.set(r.work_id, r.external_id)
   }
-  const temComix = new Set(revs.filter((r) => r.source === "comix").map((r) => r.work_id))
-  const temOutra = new Set(revs.filter((r) => r.source !== "comix").map((r) => r.work_id))
+  const temDaFonte = new Set(revs.filter((r) => r.source === FONTE).map((r) => r.work_id))
+  // "outra" exclui a PRÓPRIA fonte de propósito: é isso que separa "a coleta já rodou
+  // nesta obra e esta fonte não trouxe nada" de "nunca colhemos nada dela".
+  const temOutra = new Set(revs.filter((r) => r.source !== FONTE).map((r) => r.work_id))
 
   // Sem review da Comix, mas COM o vínculo. O balde separa "a coleta já rodou nesta obra"
   // de "nunca colhemos nada dela" — ver o cabeçalho: os dois rendem.
   const candidatos = works
-    .filter((w) => hidDe.has(w.id) && !temComix.has(w.id))
-    .map((w) => ({ workId: w.id, title: w.title, hid: hidDe.get(w.id)!, balde: temOutra.has(w.id) ? "vazias" : "nunca" }))
+    .filter((w) => idDe.has(w.id) && !temDaFonte.has(w.id))
+    .map((w) => ({ workId: w.id, title: w.title, externalId: idDe.get(w.id)!, balde: temOutra.has(w.id) ? "vazias" : "nunca" }))
   const alvos = candidatos.filter((c) => ESCOPO === "todas" || c.balde === ESCOPO).slice(0, LIMITE)
 
   const nVazias = alvos.filter((a) => a.balde === "vazias").length
   console.log(
-    `obras com Comix vinculada e ZERO reviews: ${candidatos.length}` +
+    `obras com ${fonte.rotulo} vinculada e ZERO reviews: ${candidatos.length}` +
       `  (escopo="${ESCOPO}" ⇒ ${alvos.length}: ${nVazias} já colheram de outra fonte, ${alvos.length - nVazias} nunca)`,
   )
   console.log(APPLY ? "  (APPLY — vai gravar na NUVEM)\n" : "  (DRY-RUN — nada será gravado)\n")
@@ -105,7 +125,7 @@ async function main() {
   let semReview = 0
 
   for (const alvo of alvos) {
-    const textos = await fetchComixReviews(alvo.hid).catch(() => [] as string[])
+    const textos = await fonte.fetch(alvo.externalId).catch(() => [] as string[])
     if (textos.length === 0) {
       semReview += 1
       console.log(`  ${"0".padStart(3)}  "${alvo.title.slice(0, 46)}"`)
@@ -116,9 +136,9 @@ async function main() {
     const reviews: SourcedReview[] = textos.map((texto): SourcedReview => {
       const { rating, cleanText } = extractUserRating(texto)
       return {
-        source: "comix",
+        source: FONTE,
         sourceTitle: alvo.title,
-        // O vínculo com a Comix já foi ACEITO (está em work_external_ids, não rejeitado),
+        // O vínculo já foi ACEITO (está em work_external_ids, não rejeitado),
         // então não há match a pontuar: é 1 por construção.
         matchScore: 1,
         text: cleanText,
@@ -140,7 +160,7 @@ async function main() {
   }
 
   console.log(`\n  obras que trouxeram reviews: ${comReview}`)
-  console.log(`  obras sem nada na Comix:     ${semReview}`)
+  console.log(`  obras sem review em ${fonte.rotulo}:    ${semReview}`)
   console.log(`  reviews ${APPLY ? "GRAVADAS" : "que seriam gravadas"}: ${totalReviews}`)
   console.log(`  custo de IA: US$ 0,00  (digest não foi gerado — ver o cabeçalho)`)
 
@@ -148,7 +168,7 @@ async function main() {
   // não tem nada" — foi exatamente assim que a fonte sumiu por dias sem ninguém notar.
   if (comReview === 0 && alvos.length >= 5) {
     console.error(
-      `\n🔴 NENHUMA das ${alvos.length} obras trouxe review. Isso quase nunca é a Comix estar vazia:` +
+      `\n🔴 NENHUMA das ${alvos.length} obras trouxe review. Isso quase nunca é ${fonte.rotulo} estar vazio:` +
         `\n   confira se o FlareSolverr está de pé (docker start flaresolverr) antes de concluir` +
         `\n   qualquer coisa deste resultado.`,
     )
