@@ -7,16 +7,16 @@
  * /settings) e o filtro canônico de `computeE1ProdScope`. PADRÃO = dry-run.
  * Execução paga exige --execute --max-cost-usd=<v>.
  *
- * 🔴 QUEBRADO desde a Fase F (`329a446`, 14/07/2026) — conferido em 2026-08-10 rodando:
- * `FATAL: works: column works.personal_status_id does not exist`. A Fase F tirou as 19
- * colunas pessoais de `works` e o espelho (`user_work_state`) virou a única fonte, mas
- * `computeE1ProdScope` (em `e1-prod-scope.ts`, que tem o mesmo defeito) continuou lendo a
- * coluna antiga. Ninguém percebeu por ~4 semanas, porque nada roda estes dois.
+ * ✅ Consertado em 2026-08-10, junto com `e1-prod-scope.ts` — o defeito era de lá: a Fase F
+ * (`329a446`, 14/07/2026) tirou as 19 colunas pessoais de `works` e `computeE1ProdScope`
+ * continuou lendo `personal_status_id` da tabela antiga. Este script só herdava o erro. Ficou
+ * assim ~4 semanas porque nada roda os dois.
  *
- * ⚠️ Ao consertar, note que o trabalho é MENOR do que "obras sem digest" sugere: são 136 sem
- * digest, mas o escopo exige >3 reviews e ≥20 tags, e dessas 136 **86 têm ZERO reviews** e 27
- * têm 1–2 — sobram ~23 obras (~US$0,42). O botão de digest da página da obra não depende
- * daqui e funciona, uma a uma.
+ * ⚠️ O trabalho é MENOR do que "obras sem digest" sugere: são 136 sem digest, mas o escopo
+ * exige >3 reviews e ≥20 tags, e dessas 136 **86 têm ZERO reviews** e 27 têm 1–2 — sobram ~23
+ * obras (~US$0,42). O botão de digest da página da obra não depende daqui e funciona, uma a
+ * uma. **Confira com o dry-run antes de acreditar neste número** — foi estimá-lo sem rodar a
+ * ferramenta que produziu o "US$2,49 de trabalho pendente" sobre um script que nem executava.
  *
  * 🔴 ALVO: NUVEM (resolvido em 2026-08-10). A execução paga grava, e num local descartável
  * esse trabalho morre no próximo `db:pull` — paga-se para jogar fora. O `--execute` recusa

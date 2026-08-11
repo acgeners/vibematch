@@ -15,22 +15,28 @@
  * Execução direta (npm run e1:scope): imprime contagens e escreve os IDs em
  * disco (scratchpad) para alimentar o --work-id do backfill.
  *
- * 🔴 QUEBRADO desde a Fase F (`329a446`, 14/07/2026) — conferido em 2026-08-10 rodando
- * `npm run e1:scope`: `FATAL: works: column works.personal_status_id does not exist`. O
- * critério de `personal_status` acima lê uma coluna que `works` não tem mais: a Fase F moveu
- * as 19 colunas pessoais para o espelho `user_work_state`, que virou a única fonte.
+ * ✅ Consertado em 2026-08-10. Ficou QUEBRADO por ~4 semanas desde a Fase F (`329a446`,
+ * 14/07/2026): `FATAL: works: column works.personal_status_id does not exist`. A Fase F moveu
+ * as 19 colunas pessoais para o espelho `user_work_state` e este filtro continuou lendo a
+ * coluna antiga. Nada acusou — nenhum dos dois consumidores roda em CI nem por hábito. Mesma
+ * família do [[gotcha-scripts-fora-do-package-json-batem-na-nuvem]]: script fora de qualquer
+ * rede envelhece sem sintoma.
  *
- * ⚠️ Ao consertar, o filtro pessoal precisa decidir DE QUEM é o status — em `works` ele era
- * global por acidente; no espelho ele tem dono. Para uma operação de catálogo, o dono é o
- * curador, e isso passa a ser uma escolha explícita, não uma leitura de coluna.
+ * 🔴 **O status pessoal agora tem DONO, e escolher errado é silencioso.** Em `works` ele era
+ * global por acidente — havia uma linha só, então "o status" e "o status do dono" eram a mesma
+ * coisa. No espelho existe uma linha POR PESSOA: ler sem `user_id` devolveria a leitura de
+ * outra pessoa, e ler com o usuário "corrente" cairia no singleton por fallback. Esta é uma
+ * operação de CATÁLOGO, e o rótulo que ela filtra é o do dono — logo, `loadOwnerLabels()`,
+ * que é o dono único dessa leitura (service role + `user_id` explícito + paginação + guarda
+ * barulhento). Montar o `select` aqui reabriria os três buracos de uma vez.
  *
- * ⚠️ Este defeito derrubou os DOIS consumidores em silêncio, e nada acusou por ~4 semanas:
- * nenhum deles roda em CI nem por hábito. É a mesma família do
- * [[gotcha-scripts-fora-do-package-json-batem-na-nuvem]] — script fora de qualquer rede
- * envelhece sem sintoma.
+ * ⚠️ Obra sem linha no espelho passa no filtro, igual a `personal_status_id` NULL antes — o
+ * critério exclui status específicos, não "quem não tem status".
  */
-import { writeFileSync } from "node:fs"
+import { mkdirSync, writeFileSync } from "node:fs"
+import path from "node:path"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { loadOwnerLabels } from "@/server/queries/owner-labels"
 
 export const EXCLUDED_PUBLICATION_STATUS_IDS = new Set([4]) // Cancelled
 export const EXCLUDED_PERSONAL_STATUS_IDS = new Set([1, 9, 4]) // Completed, Dropped, Stalled
@@ -70,9 +76,10 @@ export interface E1ProdScope {
 }
 
 export async function computeE1ProdScope(sb: Sb = createAdminClient()): Promise<E1ProdScope> {
-  const [reviewCounts, tagCounts] = await Promise.all([
+  const [reviewCounts, tagCounts, ownerLabels] = await Promise.all([
     countByWorkId(sb, "work_reviews"),
     countByWorkId(sb, "work_tags"),
+    loadOwnerLabels(),
   ])
 
   const works: Array<{ id: string; pub: number | null; pers: number | null; hasDigest: boolean }> = []
@@ -80,7 +87,7 @@ export async function computeE1ProdScope(sb: Sb = createAdminClient()): Promise<
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await sb
       .from("works")
-      .select("id, publication_status_id, personal_status_id, review_digest")
+      .select("id, publication_status_id, review_digest")
       .eq("is_archived", false)
       .range(from, from + PAGE - 1)
     if (error) throw new Error(`works: ${error.message}`)
@@ -88,13 +95,13 @@ export async function computeE1ProdScope(sb: Sb = createAdminClient()): Promise<
       const row = r as {
         id: string
         publication_status_id: number | null
-        personal_status_id: number | null
         review_digest: unknown
       }
       works.push({
         id: row.id,
         pub: row.publication_status_id,
-        pers: row.personal_status_id,
+        // Sem linha no espelho ⇒ null ⇒ passa, exatamente como a coluna NULA de antes.
+        pers: ownerLabels.byWorkId.get(row.id)?.personal_status_id ?? null,
         hasDigest: row.review_digest != null,
       })
     }
@@ -146,13 +153,17 @@ async function main() {
   console.log(`>>> FILTRADAS (4 critérios): ${scope.filtered.length}`)
   console.log(`    com digest: ${d.filteredWithDigest}  |  SEM digest: ${scope.filteredNoDigest.length}`)
 
-  const SCRATCH =
-    "/private/tmp/claude-501/-Users-geners-Code-VibeMatch-animedb/d67f0f62-4516-4427-84a4-5c589331f37b/scratchpad"
-  writeFileSync(`${SCRATCH}/e1-filtered-ids.txt`, scope.filtered.join(",") + "\n")
-  writeFileSync(`${SCRATCH}/e1-nodigest-ids.txt`, scope.filteredNoDigest.join(",") + "\n")
+  // ⚠️ O destino era um scratchpad de SESSÃO (`/private/tmp/claude-501/…/<uuid>/`), que já não
+  // existe — o `writeFileSync` estouraria com ENOENT logo depois de a consulta inteira ter
+  // rodado. Segundo defeito latente do mesmo arquivo, escondido atrás do primeiro: o script
+  // morria na 1ª query e nunca chegava aqui. Saída relativa ao REPO, que não evapora.
+  const OUT = path.resolve(import.meta.dirname, "..", ".e1")
+  mkdirSync(OUT, { recursive: true })
+  writeFileSync(path.join(OUT, "e1-filtered-ids.txt"), scope.filtered.join(",") + "\n")
+  writeFileSync(path.join(OUT, "e1-nodigest-ids.txt"), scope.filteredNoDigest.join(",") + "\n")
   console.log(`\nIDs gravados em:`)
-  console.log(`  ${SCRATCH}/e1-filtered-ids.txt   (${scope.filtered.length} — p/ --work-id do backfill)`)
-  console.log(`  ${SCRATCH}/e1-nodigest-ids.txt   (${scope.filteredNoDigest.length} — p/ o digest)`)
+  console.log(`  ${OUT}/e1-filtered-ids.txt   (${scope.filtered.length} — p/ --work-id do backfill)`)
+  console.log(`  ${OUT}/e1-nodigest-ids.txt   (${scope.filteredNoDigest.length} — p/ o digest)`)
 }
 
 if (process.argv[1] && process.argv[1].endsWith("e1-prod-scope.ts")) {
