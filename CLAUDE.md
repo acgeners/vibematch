@@ -1565,6 +1565,40 @@ não decide nada, e foi exatamente medir sem retrato anterior que fez a empreita
 gastar US$2 sem concluir. ⚠️ O piso aqui é o **ruído entre duas rodadas idênticas: 0,289**
 (151 pares); movimento menor que isso não é distinguível de ruído.
 
+🔴 **Mas `--baseline` NÃO enxerga um PILOTO — use `--piloto=` (seção 5).** O
+`pilot-prompt-*.ts` não grava em `category_scores` nem em `ai_evaluation_scores`, de propósito,
+e as dimensões 1–3 leem exatamente essas duas tabelas: rodar o piloto e depois o painel compara
+o catálogo com ele mesmo, e os dois retratos vêm idênticos. Foi a lacuna que quase produziu a
+**quinta** rodada inconclusiva.
+
+```bash
+npm run consistency -- --piloto=.pilot/piloto-v27-<ts>.json
+```
+
+⚠️ **E comparar as obras do piloto CONTRA o retrato do catálogo é pior que não medir**: os
+estratos são deliberadamente não representativos (foram escolhidos para concentrar os
+mecanismos), então a diferença mediria a AMOSTRA, com sinal plausível. A seção 5 é **pareada** —
+as mesmas obras, antes × depois.
+
+🔴 **O piso de 0,289 é de AMPLITUDE por nota e NÃO se aplica a faixa** (0,3 pt não cruza no meio
+da faixa e cruza na borda). O piso na grandeza certa é a **troca de faixa entre rodadas
+idênticas: 12,2%** (165/1352 pares, medido 2026-08-10), e a dimensão 3 passou a imprimi-lo. Usar
+um pelo outro é a mesma troca de régua que reprovou a v23–v25 pelo gold.
+
+⚠️ **O veredito é `z`, nunca múltiplo do piso.** A 1ª versão comparava `flipPct > piso * 2`, com
+o "2" inventado — e ele deu falso negativo de beira de faca no primeiro uso real (24,4% contra
+piso 12,2%, reprovado por um `>` estrito). Porcentagem não tem noção de tamanho de amostra: 3 de
+12 e 60 de 240 são o mesmo múltiplo e evidências opostas (1,3σ × 5,9σ). Guardado por
+`tests/unit/orchestration/piloto-piso-de-faixa.test.ts`.
+
+✅ **Rejulgado o piloto v25 que já estava em disco (US$0):** 57/234 notas trocaram de faixa =
+24,4% contra piso 12,2% ⇒ **z = 5,7, distinguível**. `fantasy_nobility` −1,13 com **50% de troca
+de faixa, 13 pra baixo e 0 pra cima** (o mecanismo nº 3, a "REGRA OBRIGATÓRIA" virada piso, é o
+que de fato cedeu); `action_adventure` −0,56, 4↓/0↑; `protagonist` −0,29, 4↓/2↑ — fraco. O
+**controle não se moveu de forma distinguível** (z=1,3). ⚠️ Isso é CONSISTÊNCIA: a v25 mexeu no
+que mirava, e mesmo assim ficou **mais longe** da curadora no gold (0,87 × 0,77). Os dois
+resultados não se contradizem — respondem perguntas diferentes.
+
 ⚠️ **Consistência não é acurácia**: uma régua pode ficar perfeitamente consistente e estar
 consistentemente errada. Os dois instrumentos respondem perguntas diferentes e **nenhum dos
 dois sozinho autoriza trocar a régua do catálogo**.
@@ -2007,10 +2041,10 @@ O catálogo **não tem política**: é lido/escrito pela service role, que ignor
 
 ## Tests
 
-`npm run test` → **2.433 passando (+24 pulados) em 228 arquivos** (223 passando + 5 pulados;
+`npm run test` → **2.440 passando (+24 pulados) em 229 arquivos** (224 passando + 5 pulados;
 medido em 2026-08-10). A linha já disse "~1.780 em ~157", "~2.353 em 218", "2.386 em
-221", "2.408 em 225" e "2.428 em 228", todas envelhecendo sem nada acusar — **re-meça antes de
-editar este número**, não incremente de cabeça. Vitest, jsdom, alias `@` → raiz. A
+221", "2.408 em 225", "2.428 em 228" e "2.433 em 228", todas envelhecendo sem nada acusar —
+**re-meça antes de editar este número**, não incremente de cabeça. Vitest, jsdom, alias `@` → raiz. A
 descrição antiga ("só `tests/unit/calculations/`, sem teste de componente") estava desatualizada
 havia muito: hoje `calculations` é a 4ª maior pasta, atrás de `synopsis-interest` (36),
 `external` (30) e `orchestration` (19), e há `.test.tsx` de componente.
