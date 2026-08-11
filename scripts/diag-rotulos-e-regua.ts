@@ -239,6 +239,82 @@ async function main() {
     console.log(`      e reavaliar não conserta obra que simplesmente tem pouca review.`)
   }
 
+  // ── 3. UNIFORMIDADE — "uma régua só bate onze"? ───────────────────────────
+  //
+  // 🔴 Esta é a PREMISSA por trás de reavaliar o catálogo (~US$37), e ela nunca foi testada.
+  // O §2 mostra que réguas diferentes têm erros diferentes; isso NÃO implica que homogeneizar
+  // ajude — pode ser só que umas réguas sejam melhores que outras, e nesse caso o ganho vem
+  // de trocar de régua, não de todo mundo usar a MESMA.
+  //
+  // Desenho: teste FIXO de obras de UMA régua. Dois braços com o MESMO tamanho de treino:
+  //   PURO  — treina só em obras daquela régua (mundo homogêneo)
+  //   MISTO — treina em obras sorteadas do catálogo como ele é hoje (status quo)
+  //
+  // ⚠️ O tamanho de treino tem que ser IGUAL nos dois. Sem isso o braço puro nasce
+  // handicapado pela amostra menor e o teste mediria a curva do §1 de novo, não uniformidade.
+  const porRegua2 = new Map<string, number[]>()
+  rotuladas.forEach((w, i) => {
+    const k = reguaDe(w)
+    if (!porRegua2.has(k)) porRegua2.set(k, [])
+    porRegua2.get(k)!.push(i)
+  })
+  // ⚠️ Repete em TODA régua com dado suficiente, não só na maior: um efeito que só aparece
+  // na v19 seria peculiaridade daquela régua, não uniformidade — e a conclusão é o oposto.
+  const alvos = [...porRegua2.entries()]
+    .filter(([k, v]) => /^v\d+$/.test(k) && v.length >= 50)
+    .sort((a, b) => b[1].length - a[1].length)
+
+  console.log(`\n3. UNIFORMIDADE — treinar em UMA régua bate treinar na mistura?`)
+  if (alvos.length === 0) console.log(`   (nenhuma régua com obras rotuladas suficientes)`)
+  for (const [reguaAlvo, idxAlvo] of alvos) {
+    const nTesteU = Math.min(30, Math.floor(idxAlvo.length / 3))
+    const nTreinoU = idxAlvo.length - nTesteU
+    const REPS_U = 24
+    console.log(`   régua ${reguaAlvo}: ${idxAlvo.length} rotuladas · teste ${nTesteU} · treino ${nTreinoU} nos DOIS braços · ${REPS_U} partições`)
+
+    const maePuro: number[] = []
+    const maeMisto: number[] = []
+    for (let rep = 0; rep < REPS_U; rep++) {
+      const r = rng(7000 + rep)
+      const emb = embaralhar(idxAlvo, r)
+      const teste = emb.slice(0, nTesteU)
+      const treinoPuro = emb.slice(nTesteU, nTesteU + nTreinoU)
+      const setTeste = new Set(teste)
+      // Status quo: sorteia do catálogo rotulado inteiro, menos o teste.
+      const poolMisto = embaralhar([...inputs.keys()].filter((i) => !setTeste.has(i)), rng(9000 + rep))
+      const treinoMisto = poolMisto.slice(0, nTreinoU)
+
+      const fit = (idx: number[]) => trainExpectedPredictor(idx.map((i) => inputs[i]), idx.map((i) => targets[i]), false)
+      const pP = fit(treinoPuro)
+      const pM = fit(treinoMisto)
+      if (pP.isStub || pM.isStub) continue
+      const y = teste.map((i) => targets[i])
+      maePuro.push(mae(pP.predict(teste.map((i) => inputs[i])).map((x) => x.expected), y))
+      maeMisto.push(mae(pM.predict(teste.map((i) => inputs[i])).map((x) => x.expected), y))
+    }
+
+    const mP = media(maePuro)
+    const mM = media(maeMisto)
+    // Pareado por partição — as duas medidas dividem o mesmo teste, então o desvio da
+    // DIFERENÇA é o que decide, não o desvio de cada média.
+    const difs = maePuro.map((v, i) => v - maeMisto[i])
+    const mD = media(difs)
+    const sd = Math.sqrt(media(difs.map((d) => (d - mD) ** 2)) * (difs.length / Math.max(1, difs.length - 1)))
+    const se = sd / Math.sqrt(difs.length)
+    console.log(`   ${"PURO  (só " + reguaAlvo + ")"}`.padEnd(24) + `MAE ${f3(mP)}`)
+    console.log(`   ${"MISTO (status quo)"}`.padEnd(24) + `MAE ${f3(mM)}`)
+    console.log(`   diferença pareada: ${mD >= 0 ? "+" : ""}${f3(mD)} ± ${f3(se)} (1 e.p.)  ⇒  t = ${f3(se > 0 ? mD / se : 0)}`)
+    console.log(
+      se > 0 && mD / se <= -2
+        ? `   ⇒ PURO vence: a uniformidade ajuda por si só. A premissa dos ~US$37 se sustenta.`
+        : se > 0 && mD / se >= 2
+          ? `   ⇒ MISTO vence: homogeneizar PIORA — o §2 é diferença entre réguas, não mistura.`
+          : `   ⇒ EMPATE: a uniformidade não paga por si. O ganho do §2, se existir, vem de TROCAR\n      de régua (uma ser melhor), não de todas serem iguais — e isso é outra aposta.`,
+    )
+    console.log(`   ⚠️ ${REPS_U} partições dos mesmos ${idxAlvo.length} dados: isso reduz ruído de partição,`)
+    console.log(`      NÃO multiplica evidência. O n efetivo continua sendo ${idxAlvo.length}.`)
+  }
+
   console.log("\n(read-only — 0 escrita)\n")
 }
 
