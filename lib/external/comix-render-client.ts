@@ -32,6 +32,32 @@ const RENDER_PATH = "/render"
 const RENDER_CIRCUIT_TTL_MS = 60_000
 let renderCircuitOpenUntil = 0
 
+// 🔴 SEGUNDO circuito, POR HOST — e ele responde a um problema DIFERENTE do de cima.
+// O global é "o sidecar está fora"; este é "o sidecar está VIVO e não atravessa AQUELE
+// host" (`upstream_blocked`). Sem ele, o sidecar respondendo `ok:false` não abria nada:
+// cada chamada repagava a tentativa inteira, e como ele é a camada PRIMÁRIA, o
+// FlareSolverr — que passaria — só era alcançado depois.
+//
+// Medido em 2026-08-11: o sidecar não atravessa a Comix desde 29/07 (1.168 tentativas,
+// ZERO sucessos) e desiste em ~13,2s por chamada, esperando o interstitial ceder. A
+// cadeia de reviews da Comix são 4 chamadas ⇒ ~55s contra um teto de 25s: a fonte vinha
+// VAZIA em toda obra, com o FlareSolverr resolvendo a mesma cadeia em 2,4s.
+//
+// TTL longo porque bloqueio de Cloudflare dura DIAS, não segundos — sondar de minuto em
+// minuto é repagar 13,2s por nada. 15min mantém a recuperação automática (o sidecar volta
+// sozinho quando o host parar de bloqueá-lo) a um custo amortizado desprezível, e cobre a
+// cadeia inteira de uma obra depois da 1ª chamada.
+const BLOCKED_HOST_TTL_MS = 15 * 60_000
+const blockedHostUntil = new Map<string, number>()
+
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
 const num = (env: string | undefined, fallback: number) => {
   const n = Number(env)
   return Number.isFinite(n) && n > 0 ? n : fallback
@@ -74,6 +100,10 @@ export async function renderHtmlViaSidecar(
   const baseUrl = sidecarUrl()
   if (!baseUrl) return null
   if (Date.now() < renderCircuitOpenUntil) return null
+  // Host que o sidecar comprovadamente não atravessa agora → cai direto pro
+  // FlareSolverr, em vez de queimar o orçamento da chamada pra receber o mesmo bloqueio.
+  const host = hostOf(url)
+  if (Date.now() < (blockedHostUntil.get(host) ?? 0)) return null
 
   try {
     const res = await fetch(`${baseUrl}${RENDER_PATH}`, {
@@ -92,9 +122,17 @@ export async function renderHtmlViaSidecar(
     renderCircuitOpenUntil = 0 // o sidecar respondeu (mesmo que ok:false) → está vivo
     if (!parsed.data.ok) {
       // upstream_blocked = nem o browser real passou → o FlareSolverr é a última chance.
+      // E é uma propriedade do HOST, não desta chamada: abre o circuito dele pra que as
+      // próximas não repaguem a espera do interstitial (ver BLOCKED_HOST_TTL_MS).
+      if (parsed.data.error === "upstream_blocked") {
+        blockedHostUntil.set(host, Date.now() + BLOCKED_HOST_TTL_MS)
+      }
       console.error(`[comix-render] /render falhou: ${parsed.data.error} url=${url}`)
       return null
     }
+    // Passou: o host voltou a ser alcançável pelo sidecar — reabre na hora, sem esperar
+    // o TTL (senão uma recuperação ficaria escondida por até 15min).
+    blockedHostUntil.delete(host)
     return { html: parsed.data.html, finalUrl: parsed.data.finalUrl }
   } catch (err) {
     // Erro de conexão/timeout = sidecar indisponível → abre o circuito e deixa o
