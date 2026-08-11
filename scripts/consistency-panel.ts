@@ -28,10 +28,31 @@
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/consistency-panel.ts
  *   ... --save=.consistency/v26.json          # grava o retrato de hoje
  *   ... --baseline=.consistency/v26.json      # compara com um retrato anterior
+ *   ... --piloto=.pilot/piloto-v27-<ts>.json  # julga um PILOTO (seção 5)
  *
  * 🔴 Só o modo --baseline responde "melhorou?". Um número solto não diz nada: `protagonist`
  * com σ 0,89 é ruim, mas se o retrato anterior tinha 0,71 então a mudança FUNCIONOU. Medir
  * movimento é justamente o que a empreitada v23–v25 não conseguiu fazer.
+ *
+ * ── Por que `--piloto` existe (2026-08-10) ──────────────────────────────────────────────
+ *
+ * 🔴 **`--baseline` NÃO enxerga um piloto, e essa lacuna quase produziu a quinta rodada
+ * inconclusiva.** O `pilot-prompt-*.ts` não grava em `category_scores` nem em
+ * `ai_evaluation_scores` — de propósito, para não sujar o catálogo com uma régua em teste. As
+ * dimensões 1–3 leem exatamente essas duas tabelas. Logo, rodar o piloto e depois rodar o
+ * painel compara o catálogo com ele mesmo: os dois retratos vêm idênticos, e o piloto que
+ * custou dinheiro não entra na conta.
+ *
+ * 🔴 **E comparar as obras do piloto CONTRA o retrato do catálogo seria pior que não medir.**
+ * Os estratos são deliberadamente NÃO representativos (regressão+posse, ação×slice-of-life,
+ * protagonista passivo…) — foram escolhidos para concentrar os mecanismos sob teste. Qualquer
+ * diferença contra o catálogo mediria a seleção da amostra, não a mudança de régua, e mediria
+ * com sinal plausível. Por isso a seção 5 é PAREADA: as mesmas obras, antes × depois.
+ *
+ * ⚠️ **O piso do painel (0,289) é de AMPLITUDE por nota e não se aplica a share por faixa.**
+ * Usar um piso de uma grandeza para julgar outra é a mesma troca de régua que reprovou a
+ * v23–v25 pelo gold. Por isso a dimensão 3 passou a medir também a **taxa de troca de faixa
+ * entre rodadas idênticas** — o piso na grandeza em que a seção 5 fala.
  */
 import { createClient } from "@supabase/supabase-js"
 import { CRITERION_SLUGS } from "@/types/domain"
@@ -39,9 +60,21 @@ import { bandForScore } from "@/lib/criteria/justification"
 import fs from "node:fs"
 import path from "node:path"
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY!
-const sb = createClient(url, key, { auth: { persistSession: false } })
+/**
+ * ⚠️ PREGUIÇOSO de propósito. Criado no escopo do módulo, o cliente explode no `import` de
+ * quem só quer uma função pura daqui (`validateSupabaseUrl` rejeita `undefined`) — e aí a
+ * guarda de entrypoint lá embaixo vira decoração, porque o efeito colateral acontece antes
+ * de qualquer `main()`. Foi o que aconteceu ao escrever o teste do `zContraPiso`.
+ */
+let _sb: ReturnType<typeof createClient> | null = null
+function db() {
+  if (!_sb) {
+    _sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+      auth: { persistSession: false },
+    })
+  }
+  return _sb
+}
 
 const arg = (n: string) => process.argv.find((a) => a.startsWith(`--${n}=`))?.split("=").slice(1).join("=")
 
@@ -49,7 +82,7 @@ const arg = (n: string) => process.argv.find((a) => a.startsWith(`--${n}=`))?.sp
 async function todas<T>(tabela: string, cols: string, filtro?: (q: never) => unknown): Promise<T[]> {
   const out: T[] = []
   for (let from = 0; ; from += 1000) {
-    let q = sb.from(tabela).select(cols).range(from, from + 999)
+    let q = db().from(tabela).select(cols).range(from, from + 999)
     if (filtro) q = filtro(q as never) as typeof q
     const { data, error } = await q
     if (error) throw new Error(`${tabela}: ${error.message}`)
@@ -58,6 +91,21 @@ async function todas<T>(tabela: string, cols: string, filtro?: (q: never) => unk
     if (data.length < 1000) break
   }
   return out
+}
+
+/**
+ * z da CONTAGEM de trocas de faixa contra o piso de ruído (Bernoulli, p = piso).
+ *
+ * 🔴 Existe como função própria porque foi aqui que a 1ª versão errou: eu comparava
+ * `flipPct > piso * 2`, com o "2" escolhido por mim, sem nada por trás — e o limiar produziu
+ * um falso negativo de beira de faca no primeiro uso real (24,4% contra um piso de 12,2%,
+ * reprovado por um `>` estrito). Múltiplo do piso não tem noção de TAMANHO DE AMOSTRA: 3 de
+ * 12 e 60 de 240 dão a mesma porcentagem e evidências completamente diferentes.
+ */
+export function zContraPiso(flips: number, n: number, pisoPct: number): number {
+  const p0 = pisoPct / 100
+  const dp = Math.sqrt(n * p0 * (1 - p0))
+  return dp > 0 ? (flips - p0 * n) / dp : 0
 }
 
 function sigma(xs: number[]): number {
@@ -83,6 +131,110 @@ interface Retrato {
   dispersao: Record<string, { n: number; sigma: number; faixas: Record<string, number>; dominante: number }>
   reguas: { combinacoes: number; versoes: number; modelos: number; detalhe: Array<{ v: string; m: string; obras: number }> }
   reprodutibilidade: { pares_sem_controle: number; amplitude_sem_controle: number; pares_com_controle: number; amplitude_com_controle: number; por_criterio: Record<string, number> }
+}
+
+// ── 5. PILOTO — comparação PAREADA (antes × depois nas MESMAS obras) ─────────────────────
+
+interface PilotoItem {
+  grupo: string
+  workId: string
+  title: string
+  erro?: string
+  antes: Record<string, number>
+  depois: Record<string, number>
+}
+
+/**
+ * Julga um piloto sem ele ter tocado o catálogo.
+ *
+ * ⚠️ O que este julgamento NÃO isola: o `antes` foi produzido meses antes, com o pool de
+ * reviews da época, e o piloto remonta o contexto pelos helpers públicos. O delta mistura
+ * mudança de PROMPT com deriva das FONTES — está documentado no cabeçalho do próprio piloto.
+ * Isolar exigiria rodar as duas versões sobre o mesmo contexto na mesma execução (~2× o custo).
+ */
+function julgarPiloto(caminho: string, pisoFlipPct: number): void {
+  const j = JSON.parse(fs.readFileSync(caminho, "utf8")) as {
+    promptVersion: string
+    model: string
+    custo?: { usd?: number; chamadas?: number }
+    resultados: PilotoItem[]
+  }
+  const ok = j.resultados.filter((r) => !r.erro && Object.keys(r.depois).length > 0)
+
+  console.log(`\n5. PILOTO — ${path.basename(caminho)}  (${j.promptVersion} · ${j.model})`)
+  console.log(`   ${ok.length} obras válidas de ${j.resultados.length}${j.custo?.usd != null ? ` · custou $${j.custo.usd.toFixed(4)}` : ""}`)
+  console.log(`   🔴 PAREADO: mesmas obras antes × depois. NUNCA compare estes estratos com o catálogo —`)
+  console.log(`      eles foram escolhidos para concentrar os mecanismos, então a diferença mediria a AMOSTRA.`)
+
+  // Por critério: quanto a nota andou, e quantas cruzaram FAIXA (a grandeza que decide).
+  console.log(`\n   por critério (só notas presentes nos dois lados)`)
+  console.log(`   ${"critério".padEnd(18)}${"n".padStart(4)}${"Δ médio".padStart(10)}${"trocou faixa".padStart(14)}${"  ↓ / ↑".padEnd(10)}`)
+  let totalNotas = 0
+  let totalFlips = 0
+  for (const slug of CRITERION_SLUGS) {
+    const pares = ok
+      .filter((r) => r.antes[slug] != null && r.depois[slug] != null)
+      .map((r) => ({ a: Number(r.antes[slug]), d: Number(r.depois[slug]) }))
+    if (!pares.length) continue
+    const deltaMedio = pares.reduce((s, p) => s + (p.d - p.a), 0) / pares.length
+    const flips = pares.filter((p) => bandForScore(p.a) !== bandForScore(p.d))
+    const desceu = flips.filter((p) => p.d < p.a).length
+    totalNotas += pares.length
+    totalFlips += flips.length
+    console.log(
+      `   ${slug.padEnd(18)}${String(pares.length).padStart(4)}` +
+        `${(deltaMedio > 0 ? "+" : "") + f2(deltaMedio)}`.padStart(10) +
+        `${f1(pct(flips.length, pares.length))}%`.padStart(14) +
+        `${`${desceu} / ${flips.length - desceu}`.padStart(9)}`,
+    )
+  }
+
+  // 🔴 A leitura que decide: o movimento é distinguível do ruído de rodadas idênticas?
+  //
+  // ⚠️ NÃO use múltiplo do piso ("2× o piso") — a 1ª versão desta função fazia isso e o
+  // limiar era INVENTADO por mim, sem nada por trás. Pior: ele produziu um falso negativo de
+  // beira de faca logo no primeiro uso (24,4% contra 24,4%, reprovado por um `>` estrito).
+  // O teste certo já existe e não pede número escolhido a dedo: sob a hipótese de ruído puro,
+  // trocar de faixa é Bernoulli com p = piso, então o desvio-padrão da CONTAGEM é conhecido.
+  const flipPct = pct(totalFlips, totalNotas)
+  const p0 = pisoFlipPct / 100
+  const esperado = p0 * totalNotas
+  const dp = Math.sqrt(totalNotas * p0 * (1 - p0))
+  const z = zContraPiso(totalFlips, totalNotas, pisoFlipPct)
+  console.log(`\n   trocaram faixa: ${totalFlips}/${totalNotas} = ${f1(flipPct)}%   ·   piso (rodadas idênticas): ${f1(pisoFlipPct)}%`)
+  console.log(`   esperado sob ruído puro: ${f1(esperado)} ± ${f1(dp)}  ⇒  z = ${f1(z)}`)
+  console.log(
+    Math.abs(z) >= 2
+      ? `   ⇒ movimento DISTINGUÍVEL do ruído. O que ele significa depende do RUMO, abaixo.`
+      : `   ⇒ movimento DENTRO do ruído. Não sustenta conclusão nenhuma — nem "funcionou" nem "não funcionou".`,
+  )
+  // ⚠️ O piso é um teto disfarçado: os "pares idênticos" casam versão+modelo, mas foram
+  // avaliados em datas diferentes, com o pool de reviews de cada época. Ele já embute deriva
+  // de fonte — o que o torna CONSERVADOR para julgar um piloto que embute a mesma deriva.
+  console.log(`   ⚠️ "acima do ruído" não é "melhorou": faixa certa e faixa errada se movem igual. Quem`)
+  console.log(`      responde ACURÁCIA é o gold (scripts/gold-mae.ts), e ele continua obrigatório.`)
+
+  // Por estrato: cada um foi construído contra UM mecanismo. Movimento no controle é alarme.
+  console.log(`\n   por estrato (cada um mira um mecanismo; F-controle NÃO deveria andar)`)
+  for (const grupo of [...new Set(ok.map((r) => r.grupo))].sort()) {
+    const doGrupo = ok.filter((r) => r.grupo === grupo)
+    const pares = doGrupo.flatMap((r) =>
+      CRITERION_SLUGS.filter((s) => r.antes[s] != null && r.depois[s] != null).map((s) => ({
+        a: Number(r.antes[s]),
+        d: Number(r.depois[s]),
+      })),
+    )
+    if (!pares.length) continue
+    const absMedio = pares.reduce((s, p) => s + Math.abs(p.d - p.a), 0) / pares.length
+    const flips = pares.filter((p) => bandForScore(p.a) !== bandForScore(p.d)).length
+    const zG = zContraPiso(flips, pares.length, pisoFlipPct)
+    const marca = grupo.startsWith("F-") && zG >= 2 ? `  ⚠ controle se moveu (z=${f1(zG)})` : ""
+    console.log(
+      `   ${grupo.padEnd(22)}${String(doGrupo.length).padStart(3)} obras  |Δ| médio ${f2(absMedio)}  faixa ${f1(pct(flips, pares.length))}%${marca}`,
+    )
+  }
+  console.log(`   🔴 ENTANGLEMENT: as 9 notas saem de UMA leitura, então mexer numa rubrica move as vizinhas.`)
+  console.log(`      O controle andar não invalida o piloto — mas invalida ler o efeito como se fosse local.`)
 }
 
 async function main() {
@@ -167,6 +319,15 @@ async function main() {
     [...m.entries()].filter(([, v]) => v.length > 1).map(([k, v]) => ({ k, amp: Math.max(...v) - Math.min(...v) }))
   const aSem = amplitudes(semControle)
   const aCom = amplitudes(comControle)
+
+  // 🔴 O PISO NA GRANDEZA CERTA. A amplitude (0,289) é por NOTA; a seção 5 fala em FAIXA, e
+  // as duas não se convertem — uma amplitude de 0,3 pt não cruza faixa no meio dela e cruza
+  // na borda. Sem este número, "o piloto moveu 15% das notas de faixa" não tem contra o quê
+  // ser lido, e a tentação é comparar com 0,289, que é exatamente a troca de régua que
+  // reprovou a v23–v25 pelo instrumento errado.
+  const paresIdenticos = [...comControle.entries()].filter(([, v]) => v.length > 1)
+  const flipsIdenticos = paresIdenticos.filter(([, v]) => new Set(v.map(bandForScore)).size > 1).length
+  const pisoFlipPct = pct(flipsIdenticos, paresIdenticos.length)
   const media = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0)
   const porCriterio: Record<string, number> = {}
   for (const slug of CRITERION_SLUGS) {
@@ -217,11 +378,17 @@ async function main() {
   const atribuivel = r.amplitude_sem_controle ? pct(r.amplitude_sem_controle - r.amplitude_com_controle, r.amplitude_sem_controle) : 0
   console.log(`   ⇒ ${f1(atribuivel)}% da instabilidade vem da MISTURA de réguas, não do modelo`)
   console.log(`   ⚠️ o piso é o ruído entre rodadas idênticas (0,289 medido) — abaixo disso nada é distinguível`)
+  console.log(`   troca de FAIXA entre rodadas idênticas: ${f1(pisoFlipPct)}%  (${flipsIdenticos}/${paresIdenticos.length} pares)`)
+  console.log(`   ⚠️ este é o piso da seção 5 — a amplitude de 0,289 é por NOTA e NÃO se converte em faixa`)
   const piores = Object.entries(r.por_criterio).sort((a, b) => b[1] - a[1]).slice(0, 3)
   console.log(`   piores: ${piores.map(([s, v]) => `${s} ${f2(v)}`).join(" · ")}`)
 
   console.log("\n4. COERÊNCIA prosa×nota — rode `scripts/coherence-audit.ts` (checagem A, estrutural)")
-  console.log("   ⚠️ só a checagem A sobrevive à validação manual; as semânticas eram regex sobre prosa e deram 5/5 e 6/6 de falso positivo\n")
+  console.log("   ⚠️ só a checagem A sobrevive à validação manual; as semânticas eram regex sobre prosa e deram 5/5 e 6/6 de falso positivo")
+
+  const pilotoPath = arg("piloto")
+  if (pilotoPath) julgarPiloto(pilotoPath, pisoFlipPct)
+  console.log()
 
   const savePath = arg("save")
   if (savePath) {
@@ -231,7 +398,12 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error(e)
-  process.exit(1)
-})
+// ⚠️ Guarda de entrypoint: sem ela, `import` deste módulo (num teste) DISPARA a varredura do
+// catálogo inteiro. Mesmo motivo pelo qual o teste do `db-diff` tem de ler o source em vez de
+// importar — e é justamente o que impede testar a estatística que quebrou.
+if (process.argv[1] && process.argv[1].endsWith("consistency-panel.ts")) {
+  main().catch((e) => {
+    console.error(e)
+    process.exit(1)
+  })
+}
