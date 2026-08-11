@@ -25,13 +25,14 @@
  * Uso:
  * 🔴 ALVO: NUVEM — este script GRAVA. Rodá-lo contra o local, que é réplica
  *    descartável, joga o trabalho fora no próximo `db:pull`.
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/resolve-mangago-slugs.ts
- *   ...                                                          --limit=30
- *   ...                                                          --apply
+ *   npm run mangago:slugs                 # dry-run, ordenado por margem crescente
+ *   npm run mangago:slugs -- --limit=30
+ *   npm run mangago:slugs -- --apply      # ~11 min
  */
 import { createClient } from "@supabase/supabase-js"
 import { resolveMangagoUrlProd } from "../lib/external/mangago-resolve-prod"
 import { persistMangagoSlug } from "../lib/external/mangago-persist"
+import { exigeAlvoNuvem } from "./lib/exige-alvo-nuvem"
 
 const APPLY = process.argv.includes("--apply")
 const arg = (n: string) => process.argv.find((a) => a.startsWith(`--${n}=`))?.split("=")[1] ?? null
@@ -65,6 +66,11 @@ interface Achado {
 }
 
 async function main() {
+  // Gravar no local perde o trabalho no próximo `db:pull` — e quem copia o comando do
+  // cabeçalho não passa pelo npm script. Custo aqui não é dinheiro (IA zero), são os
+  // ~11 min de resolução jogados fora sem nada avisar.
+  if (APPLY) exigeAlvoNuvem("npm run mangago:slugs -- --apply")
+
   const works = (await paginar<{
     id: string
     title: string
