@@ -28,6 +28,13 @@
  *   node scripts/egress-baseline.mjs             # últimas 24h
  *   node scripts/egress-baseline.mjs --horas=6
  *   node scripts/egress-baseline.mjs --top=25    # detalha os N maiores grupos
+ *   node scripts/egress-baseline.mjs --horas=0.35 --fim-ha=0.77   # janela que NÃO termina agora
+ *
+ * ⚠️ `--fim-ha` existe porque "últimas N horas" não consegue isolar um silêncio que teve
+ * rajada DEPOIS dele. Medido em 2026-08-11: o `next dev` foi fechado às 23:14 e religado às
+ * 23:47, deixando 21 minutos limpos no meio — a única janela do dia capaz de separar o custo
+ * do app do custo do resto, e inalcançável por qualquer `--horas`. Sem isto, a saída seria
+ * uma média que descreve nenhum dos dois regimes ([[gotcha-dev-server-contra-a-nuvem-fatura-egress]]).
  */
 import fs from "node:fs"
 import path from "node:path"
@@ -37,6 +44,8 @@ const ROOT = path.resolve(import.meta.dirname, "..")
 const ARGS = process.argv.slice(2)
 const opt = (n, d) => Number(ARGS.find((a) => a.startsWith(`--${n}=`))?.split("=")[1] ?? d)
 const HORAS = opt("horas", 24)
+/** Quantas horas atrás a janela TERMINA. 0 = agora. */
+const FIM_HA = opt("fim-ha", 0)
 const TOP = opt("top", 15)
 
 function env(file) {
@@ -76,8 +85,8 @@ const iso = (h) => new Date(Date.now() - h * 3600_000).toISOString().replace(/\.
 async function logs(sql) {
   const u = new URL(`https://api.supabase.com/v1/projects/${REF}/analytics/endpoints/logs.all`)
   u.searchParams.set("sql", sql)
-  u.searchParams.set("iso_timestamp_start", iso(HORAS))
-  u.searchParams.set("iso_timestamp_end", iso(0))
+  u.searchParams.set("iso_timestamp_start", iso(FIM_HA + HORAS))
+  u.searchParams.set("iso_timestamp_end", iso(FIM_HA))
   const res = await fetch(u, { headers: { Authorization: `Bearer ${TOKEN}` } })
   const body = await res.json()
   if (body.error) throw new Error(String(body.error))
@@ -116,7 +125,10 @@ function familia(p, q = "") {
 const mb = (n) => (n / 1e6).toFixed(1)
 
 async function main() {
-  console.log(`\n══ EGRESS — últimas ${HORAS}h (payload medido no LOCAL, quota zero) ══\n`)
+  const janela = FIM_HA
+    ? `${HORAS}h terminando ${FIM_HA}h atrás (${iso(FIM_HA + HORAS).slice(11, 16)}Z → ${iso(FIM_HA).slice(11, 16)}Z)`
+    : `últimas ${HORAS}h`
+  console.log(`\n══ EGRESS — ${janela} (payload medido no LOCAL, quota zero) ══\n`)
   const grupos = await logs(
     "select req.path as path, req.search as qs, r.status_code as st, count(*) as n " +
       "from edge_logs cross join unnest(metadata) as m cross join unnest(m.request) as req " +
