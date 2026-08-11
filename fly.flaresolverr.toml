@@ -26,6 +26,17 @@ primary_region = "iad"
   auto_stop_machines = false   # scraping precisa dele de pé
   min_machines_running = 1
 
+  # 🔴 SEM ESTE BLOCO O SERVIÇO NÃO É ROTEÁVEL — e a falha não se parece com config.
+  # O FlareSolverr escuta em `0.0.0.0:8191`, que é IPv4; a rede privada da Fly (6PN) é
+  # IPv6. Quem faz a ponte é o fly-proxy, e ele só escuta se o serviço declarar uma
+  # porta. Sem isso o app existe, as máquinas sobem, o log diz "Serving on
+  # http://0.0.0.0:8191" e o `flyctl deploy` só emite um WARNING — mas
+  # `vibematch-flaresolverr.flycast:8191` devolve `TypeError: fetch failed`, e as fontes
+  # gateadas por Cloudflare somem em silêncio (medido em 2026-08-11, ponta a ponta a
+  # partir do container do `satoria`).
+  [[services.ports]]
+    port = 8191
+
 [[vm]]
   size = "shared-cpu-1x"
   memory = "1gb"               # Chromium headless precisa de folga
