@@ -6,6 +6,7 @@ import { searchComix, fetchComixById, fetchComixReviews } from "./comix"
 import { searchMangago, fetchMangagoById, fetchMangagoReviews } from "./mangago"
 import { resolveComixUrl } from "./comix-resolve"
 import { isComixRenderConfigured } from "./comix-render-client"
+import { recordComixFailure } from "./comix-gate"
 import { EXTERNAL_SOURCE_ORDER } from "./source-order"
 import { resolveMangagoUrlProd } from "./mangago-resolve-prod"
 import { boolEnv } from "./mangago-band"
@@ -1144,6 +1145,11 @@ export async function collectReviewsFromCandidate(
     const src = active[i].source
     if (entry.status === "rejected") {
       failedSources.push(src)
+      // A Comix é a única fonte com gate de saúde próprio, e ele só enxergava as
+      // CHAMADAS (que aqui deram certo — só chegaram tarde). Sem este aviso, a coleta
+      // descartada por estouro de teto voltava depois e marcava o gate como "ok",
+      // deixando o painel verde enquanto a fonte entregava zero.
+      if (src === "comix") recordComixFailure("delivery_timeout")
       return `${src}=FALHOU(${entry.reason instanceof Error ? entry.reason.message : String(entry.reason)})`
     }
     if (!entry.value) return `${src}=vazio`

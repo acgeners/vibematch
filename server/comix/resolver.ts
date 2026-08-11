@@ -19,7 +19,7 @@ import { extractComixHid } from "@/lib/external/comix-hid"
 import { isBlockedCoverUrl, recordCoverUrlResult } from "@/lib/external/blocked-covers"
 import { cleanSynopsisText, isSameSynopsis } from "@/lib/synopsis-text"
 import { flareSolverrHealth } from "@/lib/external/flaresolverr"
-import { getComixStatus } from "@/lib/external/comix-gate"
+import { getComixStatus, recordComixFailure } from "@/lib/external/comix-gate"
 import { ensureComixHid } from "@/server/actions/comix-hid"
 import { isComixRenderConfigured } from "@/lib/external/comix-render-client"
 import { ensureAdmin } from "@/server/queries/current-user"
@@ -455,6 +455,11 @@ export async function resolveComixHidForWork(workId: string): Promise<void> {
   console.log(`[resolveComixHidForWork] disparado para work ${workId}`)
   try {
     const code = await runResolverScript(["--work", workId])
+    // Código 3 = o script rodou CEGO (a busca da Comix não montou). Isso é uma falha
+    // da fonte, não "a obra não está lá" — e sem reportar aqui ela ficaria invisível:
+    // o gate só é alimentado pelo caminho de reviews/detalhe, então uma descoberta
+    // permanentemente cega não movia nenhum indicador.
+    if (code === 3) recordComixFailure("search_blind")
     if (code !== 0) return
     // Reaquece a Comix (bounded) se a sessão do FlareSolverr estiver fria/expirada,
     // pra o enrich não falhar à toa logo após achar o hid.

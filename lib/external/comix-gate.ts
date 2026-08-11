@@ -1,4 +1,8 @@
 import { isFlareSolverrCircuitOpen } from "./flaresolverr"
+import { isSidecarBlockedFor } from "./comix-render-client"
+
+/** Host da Comix — o alvo cujo bloqueio no sidecar interessa a este gate. */
+const COMIX_HOST = "comix.to"
 
 /**
  * ComixGate — fonte ÚNICA da saúde observada do Comix.
@@ -32,6 +36,12 @@ export type ComixFailure =
   | "flaresolverr_unavailable"
   | "network_error"
   | "api_auth_required"
+  // A fonte RESPONDEU, mas depois de o app ter desistido de esperar — do ponto de
+  // vista do produto a Comix entregou zero, ainda que nenhuma chamada tenha falhado.
+  | "delivery_timeout"
+  // A descoberta de hid rodou CEGA (a página de busca não montou). Não é "a obra não
+  // está na Comix": é não termos conseguido perguntar.
+  | "search_blind"
 
 export type ComixHealthState = "ok" | "degraded" | "down" | "unknown"
 
@@ -55,6 +65,12 @@ export interface ComixStatus {
   flaresolverrCircuitOpen: boolean
   /** Muro de token da API do Comix detectado recentemente (busca gateada). */
   authGated: boolean
+  /**
+   * O sidecar (camada PRIMÁRIA de bypass) está barrado na Comix agora. NÃO rebaixa o
+   * estado: com o FlareSolverr de pé a fonte segue entregando. É degradação silenciosa
+   * — a única superfície onde ela aparece.
+   */
+  sidecarBlocked: boolean
 }
 
 // Espelha COMIX_AUTH_CIRCUIT_TTL_MS (comix.ts): janela em que um `api_auth_required`
@@ -100,9 +116,25 @@ function maybePersist(): void {
     .catch(() => {})
 }
 
+/**
+ * Janela em que um `delivery_timeout` recente ainda desqualifica um sucesso.
+ * `withTimeout` só para de ESPERAR — a promise segue viva e as chamadas HTTP dela
+ * chamam `recordComixOk()` lá na frente. Sem esta guarda, a coleta que o app JOGOU
+ * FORA voltava e apagava a evidência do descarte, deixando o painel verde.
+ */
+const LATE_OK_GUARD_MS = 2 * 60_000
+let lastDeliveryTimeoutAt: number | null = null
+
 /** Registra um desfecho de SUCESSO de uma chamada ao Comix. */
 export function recordComixOk(): void {
   lastOkAt = Date.now()
+  // 🔴 Sucesso TARDIO não prova utilidade — é a evidência do contrário. A chamada
+  // respondeu, mas fora do orçamento, e quem pediu já seguiu sem ela. Atualiza
+  // `lastOkAt` (a fonte está viva) e preserva o sinal de falha.
+  if (lastDeliveryTimeoutAt != null && Date.now() - lastDeliveryTimeoutAt < LATE_OK_GUARD_MS) {
+    maybePersist()
+    return
+  }
   consecutiveFails = 0
   // Um sucesso PROVA que o muro de token / a falha anterior caiu. Limpa o sinal
   // de falha pra `authGated` (e o fallback "degraded" por lastFailAt) não manter
@@ -118,6 +150,7 @@ export function recordComixFailure(reason: ComixFailure): void {
   lastFailAt = Date.now()
   lastFailReason = reason
   consecutiveFails += 1
+  if (reason === "delivery_timeout") lastDeliveryTimeoutAt = lastFailAt
   maybePersist()
 }
 
@@ -148,5 +181,6 @@ export function getComixStatus(): ComixStatus {
     consecutiveFails,
     flaresolverrCircuitOpen,
     authGated,
+    sidecarBlocked: isSidecarBlockedFor(COMIX_HOST),
   }
 }
