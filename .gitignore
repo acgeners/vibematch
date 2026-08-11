@@ -88,3 +88,6 @@ Imagens/
 
 # saída do piloto de prompt (scripts/pilot-prompt-v25.ts)
 .pilot/
+
+# saída do e1:scope (listas de IDs para alimentar o backfill)
+.e1/

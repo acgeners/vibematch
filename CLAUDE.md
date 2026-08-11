@@ -273,20 +273,29 @@ do cabeçalho não passa pelo npm script. Guardado pelo mesmo
 `scripts-apontam-pro-local.test.ts`, que exige o guard em todo script pago marcado
 `ALVO: NUVEM` e **deriva a exceção do cabeçalho do arquivo**, nunca de uma allowlist.
 
-🔴 **PENDENTE: `e1:scope` e `e1:digest` estão QUEBRADOS desde a Fase F** (`329a446`,
-14/07/2026), e ninguém percebeu por ~4 semanas. Os dois morrem na primeira query com
-`FATAL: works: column works.personal_status_id does not exist` — a Fase F tirou as 19 colunas
-pessoais de `works` e o espelho (`user_work_state`) passou a ser a única fonte, mas
-`computeE1ProdScope` continuou lendo a coluna antiga. Conferido em 2026-08-10 rodando os dois.
+✅ **`e1:scope` e `e1:digest` foram consertados e RODADOS em 2026-08-10.** Ficaram quebrados
+~4 semanas desde a Fase F (`329a446`, 14/07/2026), morrendo na primeira query com
+`FATAL: works: column works.personal_status_id does not exist`: a Fase F tirou as 19 colunas
+pessoais de `works`, o espelho (`user_work_state`) virou a única fonte, e `computeE1ProdScope`
+continuou lendo a coluna antiga. Nada acusou — nenhum dos dois roda em CI nem por hábito.
 
-⚠️ **O trabalho que eles fariam é MENOR do que "as obras sem digest" sugere.** São 136 sem
-digest, mas o escopo exige **>3 reviews e ≥20 tags**, e dessas 136 **86 têm ZERO reviews** e
-27 têm 1–2 — sobram ~23 obras (~US$0,42). E o caminho normal do app (o botão de digest na
-página da obra) não depende desse script: ele faz uma a uma e funciona.
+🔴 **O status pessoal passou a ter DONO, e o conserto foi escolher qual.** Em `works` ele era
+global por acidente (uma linha só); no espelho há uma linha POR PESSOA. Ler sem `user_id`
+devolve o estado de outra pessoa, e ler pelo "usuário corrente" cai no singleton por fallback
+([[gotcha-anonimo-vira-dono]]). É operação de CATÁLOGO, então o rótulo é o do dono ⇒
+`loadOwnerLabels()`, que já é o dono único dessa leitura (service role + `user_id` explícito +
+paginação + guarda barulhento). Montar o `select` no script reabriria os três buracos.
 
-⚠️ **A trava de alvo neles continua correta** — script quebrado é consertado, e no dia em que
-for, o `--execute` já estará apontando pro lugar certo. Mas a urgência era só do
-`backfill:interest`, que funciona.
+🔴 **O "~23 obras (~US$0,42)" desta seção era INFERÊNCIA, e errou por 7×.** Saiu de subtrair
+reviews/tags das 136 obras sem digest, sem rodar a ferramenta. Rodado contra a nuvem: escopo
+**610 filtradas, 3 sem digest**, e o `--execute` fechou as 3 por **US$0,0612 reais**. Restam
+~0 no escopo. É a mesma armadilha que já tinha produzido o "US$2,49 de trabalho pendente"
+sobre um script que nem executava — **rode o dry-run antes de citar qualquer número daqui**.
+
+⚠️ **Dois defeitos, e o segundo estava escondido atrás do primeiro:** o `e1:scope` gravava os
+IDs num scratchpad de SESSÃO (`/private/tmp/claude-501/…/<uuid>/`) que já não existe. Ele teria
+estourado ENOENT depois de a consulta inteira rodar — mas o script morria antes, na 1ª query.
+Hoje escreve em `.e1/` no repo (gitignored, e no `.dockerignore` também, que não herda).
 
 ⚠️ `db:local` continua existindo para o caso raro de querer o **app** no local. Ele não mexe
 mais nos scripts. E quando o app está no local, uma **faixa de listras** aparece no topo

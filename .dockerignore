@@ -27,3 +27,7 @@ docker-compose.yml
 Imagens/
 # Saídas de experimento local (9,3 MB).
 .local-experiments/
+# Saídas de script que não vão pra imagem (listas de IDs, JSON de piloto). Pequenas hoje,
+# mas .dockerignore NÃO herda o .gitignore — foi assim que o contexto chegou a 1,7 GB.
+.e1/
+.pilot/
