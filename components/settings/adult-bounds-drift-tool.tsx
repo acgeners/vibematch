@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useTransition } from "react"
+import { titleToSlug } from "@/lib/utils"
 import Link from "next/link"
 import { ExternalLink, Wrench } from "lucide-react"
 import { toast } from "sonner"
@@ -54,7 +55,7 @@ export function AdultBoundsDriftTool({ initialQueue }: { initialQueue: AdultBoun
             <li key={item.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
               <div className="min-w-0 flex-1">
                 <Link
-                  href={`/titles/${item.id}`}
+                  href={`/titles/${titleToSlug(item.title)}`}
                   target="_blank"
                   className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground hover:underline"
                 >

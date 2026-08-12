@@ -6,7 +6,7 @@ import { ExternalLink, ShieldAlert, ShieldOff } from "lucide-react"
 import { toast } from "sonner"
 import { setAdultOverride } from "@/server/actions/works"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { cn, titleToSlug } from "@/lib/utils"
 import type { AdultAuditItem } from "@/server/queries/adult-audit"
 
 export function AdultAuditTool({ initialQueue }: { initialQueue: AdultAuditItem[] }) {
@@ -51,7 +51,7 @@ export function AdultAuditTool({ initialQueue }: { initialQueue: AdultAuditItem[
             <li key={item.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
               <div className="min-w-0 flex-1">
                 <Link
-                  href={`/titles/${item.id}`}
+                  href={`/titles/${titleToSlug(item.title)}`}
                   target="_blank"
                   className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground hover:underline"
                 >

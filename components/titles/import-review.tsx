@@ -18,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { cn } from "@/lib/utils"
+import { cn, titleToSlug } from "@/lib/utils"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { useIsAdmin } from "@/components/layout/admin-context"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
@@ -103,6 +103,11 @@ export function ImportReview({
   const [deleting, setDeleting] = useState(false)
 
   const byId = useMemo(() => new Map(works.map((w) => [w.id, w])), [works])
+  /** Link da obra pelo SLUG quando o título é conhecido; UUID só como último recurso. */
+  const hrefDaObra = (id: string) => {
+    const t = byId.get(id)?.title
+    return t ? `/titles/${titleToSlug(t)}` : `/titles/${id}`
+  }
   const visibleWorks = useMemo(() => works.filter((w) => !dismissed.has(w.id)), [works, dismissed])
   const coverless = useMemo(() => visibleWorks.filter((w) => w.coverCount === 0), [visibleWorks])
   const selectedWorks = useMemo(
@@ -256,7 +261,9 @@ export function ImportReview({
     if (!queue) {
       // Revisão avulsa: mantém o comportamento antigo — abre a obra em nova aba.
       setSoloId(null)
-      if (outcome === "reviewed") openInNewTab(`/titles/${id}`)
+      // Slug, não UUID: "abrir em nova aba" é load DIRETO, e a rota por UUID redireciona
+      // no servidor — o que responde 200 e estoura o Router do Next. `byId` já tem o título.
+      if (outcome === "reviewed") openInNewTab(hrefDaObra(id))
       void reload()
       return
     }
@@ -319,7 +326,7 @@ export function ImportReview({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => summary.reviewedIds.forEach((id) => openInNewTab(`/titles/${id}`))}
+                onClick={() => summary.reviewedIds.forEach((id) => openInNewTab(hrefDaObra(id)))}
               >
                 Abrir as revisadas em abas
               </Button>
@@ -455,7 +462,7 @@ export function ImportReview({
 
               {/* título + meta */}
               <div className="min-w-0 flex-1">
-                <Link href={`/titles/${work.id}`} className="block truncate font-medium hover:underline">
+                <Link href={`/titles/${titleToSlug(work.title)}`} className="block truncate font-medium hover:underline">
                   {work.title}
                 </Link>
                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
