@@ -610,6 +610,29 @@ linha em `user_settings`, caso que só `isCurrentUserAdmin()` resolve, pois prec
   pessoal: sem sessão os leitores per-usuário devolvem vazio, e o que existia ali antes eram os
   dados do dono.
 
+🔴 **"Pra você hoje" corta por STATUS PESSOAL, não por "ainda não avaliou"** (2026-08-11,
+`getTopPicksForToday`). O corte antigo era `user_score == null`, e ele deixava passar tudo que
+está EM CURSO: a prateleira oferecia como novidade obras em Reading/Started/On-hold, logo abaixo
+de um "Continue lendo" que existe justamente pra essas. Hoje entram só as **não-começadas**
+(`is_unread` → Want to Read e Untracked) **+ Read Again**, via `isPickablePersonalStatus`.
+Medido no clone local: 739 candidatas de 978 — a prateleira não fica magra.
+
+⚠️ **Não há coluna em `personal_status` que descreva essa união**, então "Read Again" é nomeado
+em `status-lookups.ts` — pelo SLUG, via `personalStatusNameBySlugOrThrow`, que ESTOURA num
+rename. Guardado por `tests/unit/home/prateleira-pra-voce-hoje.test.ts`, que **enumera a tabela
+inteira** em vez de listar os três nomes: status novo no Supabase vira falha em vez de entrar na
+prateleira sem ninguém decidir nada.
+
+⚠️ **`personalStatusNameOrDefault` é obrigatório no filtro**: obra sem linha no espelho tem
+`personalStatusId` NULL e APARENTA "Want to Read". Sem ele, a conta nova — que não tem linha
+nenhuma — veria a prateleira vazia. E o rótulo (`why`) segue o corte: "que você ainda não leu"
+descrevia o corte antigo e mentiria sobre as de releitura.
+
+⚠️ **Efeito conhecido, não bug:** "Read Again" é obra JÁ LIDA, logo costuma ter `user_score`, e a
+Nota Prevista dessas é **in-sample** (o Ridge treina nas obras com rótulo). Elas tendem a subir
+nesta ordenação por construção. No retrato de 2026-08-11 são só 2 obras e nenhuma entrou no
+top 12 — mas não conte com isso.
+
 ⚠️ **Rótulo depende da publicação:** "quase no fim" só vale pra obra concluída; em `Ongoing` a
 mesma banda quer dizer "quase em dia" (você está alcançando os lançamentos, não terminando).
 
@@ -634,6 +657,43 @@ um item que já estava dentro do menu).
 do topo ao rodapé e `/ranking` ordena pela Nota Prevista com presets de alguém — então os dois
 exigem `requiresSignedIn`, no topo **e** na bottom-nav. Ao visitante sobra Catálogo + busca +
 "Entrar". Guardado por `tests/unit/orchestration/top-nav-regua.test.ts`.
+
+### A busca (⌘K) abre VAZIA e é ancorada no TOPO
+
+Duas correções de 2026-08-11 em `components/search/global-search.tsx`, ambas do tipo que não
+quebra nada e só atrapalha quem usa:
+
+- **Sem termo, `matches` é `[]`.** O diálogo abria despejando o índice inteiro (~40 seções de
+  Configurações/Preferências/Páginas) na frente do campo que a pessoa veio usar. ⚠️ Isso não é o
+  mesmo que "filtrar por termo vazio": `visible` (o que o PAPEL alcança) continua sendo a fonte
+  dos chips de escopo.
+- **`top-[68px] translate-y-0` no `CommandDialog`.** O `DialogContent` padrão é
+  `top-1/2 -translate-y-1/2`, e num diálogo cuja ALTURA depende do resultado isso move a borda
+  de cima a cada tecla — o campo de busca escorrega debaixo do cursor. Medido no app com o topo
+  fixo: `top` não se move nos quatro estados (0 → 8 → 5 → 0 resultados) enquanto a altura vai de
+  156 a 548px; só a borda de baixo acompanha. ⚠️ O `translate-y-0` é obrigatório junto do
+  `top-*`: sem ele o −50% do padrão sobrevive e o topo volta a depender da altura.
+
+  ⚠️ **68px é DERIVADO da barra**: `h-14` (56) + 1px de borda + 11px de respiro. Se a barra
+  mudar de altura, o respiro muda junto e nada avisa. A 1ª versão usava `10vh`/`sm:14vh`, e o vh
+  trabalhava contra no pior caso — quanto mais baixa a janela, mais a lista quer espaço e mais o
+  topo descia junto: a 650px de altura dava 91px de topo e **81px** de folga no rodapé, contra
+  **104px** com o topo fixo.
+
+🔴 **Centralizar o CAMPO de busca na barra não cabe — é geometria, não gosto.** Medido em
+2026-08-11 com a barra de curador (logo 111 + 5 destinos 539 = **650px** à esquerda contra
+**~174px** à direita): a largura máxima de um campo centrado é **148px** a 1691px de janela,
+**28px** a 1440 e **negativa a partir de 1280** — daí o nav já cruza o centro geométrico. O
+mínimo do campo é 190px e hoje ele tem 460px. A barra é assimétrica por desenho (a zona
+esquerda são os destinos), então o meio da barra cai DENTRO do nav. Alinhar campo e painel só é
+possível movendo o PAINEL até o campo, nunca o contrário — e aí volta a valer o ⚠️ de que o
+gatilho é elástico (190–460px) e muda de lugar com papel e badges.
+
+Guardado por `tests/unit/search/busca-global-abre-vazia.test.tsx` — teste de **RENDER** de
+propósito, e com uma contraprova dentro. ⚠️ A 1ª versão dele passava verde com o bug ainda no
+lugar: os papéis são em **português** (`"curador"`, não `"curator"`), e com um nome inválido
+`roleAtLeast` compara `undefined >= undefined` → `false`, o índice fica vazio por motivo errado e
+"nenhum item na tela" vira tautologia. Daí o 2º caso, que digita e exige itens > 0.
 
 🔴 **A regra "ícone e não item de menu, porque dentro de dropdown o número não é visto" continua
 verdadeira** — o que mudou é que agora o **contador vive no gatilho**. Foi isso que permitiu
