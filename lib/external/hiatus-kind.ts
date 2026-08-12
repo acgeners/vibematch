@@ -157,6 +157,84 @@ export function classifyHiatus(statusText: string | null | undefined): HiatusCla
   return { kind: null, confidence: "low", evidence: "sem quebra por temporada no texto" }
 }
 
+const MESES_EN = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+const MESES_PT = [
+  "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+  "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+]
+
+/**
+ * Desde quando a publicação está parada, na resolução que o dado SUSTENTA.
+ *
+ * 🔴 **Mês só quando inequívoco.** O campo do MangaUpdates mistura as duas convenções de data
+ * no mesmo catálogo — medido em 2026-08-12: `"Since 27/8/24"` é DD/MM (27 não é mês) e
+ * `"since 11/25/2025"` é MM/DD (25 não é mês). Quando os dois componentes são ≤ 12
+ * (`"since 03/12/2026"`), **não há como decidir** entre março e dezembro, e chutar produziria
+ * "parada há 9 meses" onde são 0 — ou o contrário. Nesses casos devolve só o ano.
+ *
+ * ⚠️ Dia nunca é devolvido, mesmo quando dá para inferir. A pergunta que a tela faz é "há
+ * quanto tempo", e a precisão de dia sugere um rigor que a fonte não tem.
+ */
+export interface HiatusSince {
+  year: number
+  /** 1–12, ou `null` quando a data é ambígua entre DD/MM e MM/DD. */
+  month: number | null
+  /** Como sair na tela: "agosto de 2022" ou, sem mês, "2022". */
+  label: string
+}
+
+function comLabel(year: number, month: number | null): HiatusSince {
+  return { year, month, label: month ? `${MESES_PT[month - 1]} de ${year}` : String(year) }
+}
+
+const ano4 = (n: number) => (n >= 1900 ? n : n + 2000)
+
+export function parseHiatusSince(statusText: string | null | undefined): HiatusSince | null {
+  if (!statusText) return null
+  // Só o CABEÇALHO: abaixo dele vêm as faixas de capítulo (`41-75`), que casam com qualquer
+  // regex de data e produziriam "parado desde 1975".
+  const linhas = statusText.replace(/\\([~*\\])/g, "$1").replace(/\*/g, "").split("\n")
+  const iTemp = linhas.findIndex((l) => /^\s*(?:S(?:eason)?\s*\d+|Side\s+Stor|SS)\b/i.test(l.trim()))
+  const header = (iTemp > 0 ? linhas.slice(0, iTemp) : linhas.slice(0, 2)).join(" ")
+
+  // 1. Nome do mês — inequívoco.
+  const nome = header.match(
+    /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?,?\s+(?:\d{1,2},?\s+)?((?:19|20)\d{2})\b/i,
+  )
+  if (nome) return comLabel(Number(nome[2]), MESES_EN.indexOf(nome[1].toLowerCase()) + 1)
+
+  // 2. TRÊS componentes vêm primeiro, e a ordem é o mecanismo: em `03/12/2026` o padrão de
+  //    dois componentes casaria o sufixo `12/2026` — porque `/` é boundary — e devolveria
+  //    dezembro com ar de certeza, exatamente no caso que não tem resposta. Conferido em
+  //    teste (a versão anterior desta função reprovava lá).
+  //    Quem passa de 12 só pode ser DIA; o outro vira mês. Ambos ≤ 12 ⇒ ambíguo.
+  const tres = header.match(/\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})\b/)
+  if (tres) {
+    const a = Number(tres[1]), b = Number(tres[2]), y = ano4(Number(tres[3]))
+    if (a > 12 && b <= 12) return comLabel(y, b)
+    if (b > 12 && a <= 12) return comLabel(y, a)
+    return comLabel(y, null)
+  }
+
+  // 3. Dois componentes com ano de 4 dígitos — `05.2026`, `11/2024`, `12-2025`.
+  const mesAno = header.match(/\b(\d{1,2})[/.\-]((?:19|20)\d{2})\b/)
+  if (mesAno && Number(mesAno[1]) >= 1 && Number(mesAno[1]) <= 12) {
+    return comLabel(Number(mesAno[2]), Number(mesAno[1]))
+  }
+
+  // 4. Só o ano.
+  const soAno = header.match(/\b((?:19|20)\d{2})\b/)
+  return soAno ? comLabel(Number(soAno[1]), null) : null
+}
+
+/** Quantos meses desde o início do hiato — para a tela dizer "há 3 anos" sem fingir precisão. */
+export function mesesDesde(since: HiatusSince, agora: Date): number {
+  // Sem mês, ancora no MEIO do ano: assumir janeiro inflaria a idade em até 11 meses, e
+  // dezembro a zeraria. O erro fica em ±6 meses e não puxa para nenhum lado.
+  const mes = since.month ?? 6
+  return (agora.getFullYear() - since.year) * 12 + (agora.getMonth() + 1 - mes)
+}
+
 /** As três colunas de `works` que este módulo governa. */
 export interface HiatusWorkFields {
   publication_status_note: string | null

@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { hiatusDisplay, hiatusTooltip } from "@/lib/works/hiatus-display"
+import { hiatusDisplay, hiatusSinceLabel, hiatusTooltip } from "@/lib/works/hiatus-display"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { cn } from "@/lib/utils"
 import {
@@ -108,6 +108,10 @@ export function PublicationStatusBadge({
   const isHiatus = name === "Hiatus"
   const mark = isHiatus ? hiatusDisplay(hiatusKind, hiatusKindConfidence) : null
   const tip = isHiatus ? hiatusTooltip(hiatusKind, hiatusKindConfidence) : null
+  // "Parada desde agosto de 2022 · há 4 anos". Só dentro do hiato, e derivada da nota — a
+  // classe sozinha engana: 13 das 85 obras em hiato estão paradas há 2+ anos, e boa parte
+  // delas classifica como "entre temporadas", que é estruturalmente certo e soa transitório.
+  const desde = isHiatus ? hiatusSinceLabel(publicationStatusNote, new Date()) : null
 
   const badge = (
     <Badge
@@ -130,7 +134,10 @@ export function PublicationStatusBadge({
     </Badge>
   )
 
-  if (!tip) return badge
+  // ⚠️ A data sozinha JÁ justifica o tooltip. Exigir `tip` esconderia "parada desde 2022" nas
+  // obras cujo texto não decide o tipo — exatamente aquelas em que a idade é o único sinal
+  // que sobra.
+  if (!tip && !desde) return badge
 
   // 🔴 O `TooltipProvider` mora AQUI porque este app não tem um no layout raiz, e a falta dele
   // não degrada o tooltip: o Radix LANÇA no render e derrruba a árvore inteira que o contém.
@@ -142,10 +149,17 @@ export function PublicationStatusBadge({
           <span className="inline-flex cursor-help">{badge}</span>
         </TooltipTrigger>
         <TooltipContent className="max-w-[320px]">
-          <p className="font-semibold">{tip.title}</p>
-          {/* ⚠️ `TooltipContent` é invertido (bg-foreground). Tom secundário sai de
-              `text-background/70`; `text-muted-foreground` cai para ~3:1 no tema CLARO. */}
-          <p className="text-background/70">{tip.description}</p>
+          {tip ? (
+            <>
+              <p className="font-semibold">{tip.title}</p>
+              {/* ⚠️ `TooltipContent` é invertido (bg-foreground). Tom secundário sai de
+                  `text-background/70`; `text-muted-foreground` cai para ~3:1 no tema CLARO. */}
+              <p className="text-background/70">{tip.description}</p>
+            </>
+          ) : (
+            <p className="font-semibold">Em hiato</p>
+          )}
+          {desde && <p className="mt-1 font-medium text-background/90">{desde}</p>}
           {publicationStatusNote && (
             <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-background/15 p-1.5 font-mono text-[10px] leading-relaxed text-background/80">
               {publicationStatusNote}
