@@ -17,14 +17,19 @@
  * Juntar as duas num número só produziria "N obras erradas" sem dizer o que fazer com elas:
  * a primeira classe é dívida do código já paga, a segunda é rotina de curadoria.
  *
+ * ⚠️ O `--execute` PERSISTE `publication_status_note` de toda obra visitada, não só das que
+ * mudam de status. O texto do MU é fato da obra: buscá-lo para descartar obriga a repetir a
+ * rede quando a obra entrar em hiato — a 1ª versão fez exatamente isso com 590 obras.
+ *
  * Uso:
- * 🔴 ALVO: NUVEM — o modo `--execute` GRAVA `publication_status_id`.
+ * 🔴 ALVO: NUVEM — o `--execute` GRAVA `publication_status_id` e as 3 colunas de hiato.
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/auditar-status-publicacao.ts
- *   ... --status=Completed        (default: todos menos Hiatus, já auditado pelo backfill)
+ *   ... --status=Completed   (default: todos menos Hiatus, já coberto pelo backfill)
  *   ... --execute
  */
 import { createClient } from "@supabase/supabase-js"
-import { fetchMangaUpdatesById, mapStatus } from "@/lib/external/mangaupdates"
+import { fetchMangaUpdatesById } from "@/lib/external/mangaupdates"
+import { hiatusFieldsFor } from "@/lib/external/hiatus-kind"
 
 const EXECUTE = process.argv.includes("--execute")
 const statusArg = process.argv.find((a) => a.startsWith("--status="))?.split("=")[1]
@@ -80,6 +85,12 @@ async function main() {
 
   console.log(`${obras.length} obras a conferir${statusArg ? ` (status=${statusArg})` : " (todas menos Hiatus)"}\n`)
 
+  /** Toda obra visitada — o texto do MU é fato da obra e não deve ser jogado fora.
+   *  🔴 A 1ª versão deste script buscava o statusText de 590 obras e descartava: gravava só
+   *  `publication_status_id`. Resultado medido depois — 590 obras Completed com nota NULA,
+   *  tendo o texto passado pela memória do processo. Uma que entrasse em hiato depois
+   *  precisaria de rede de novo para ser classificada. */
+  const notas: Array<{ id: string; fields: ReturnType<typeof hiatusFieldsFor> }> = []
   const porParsing: Array<{ t: string; de: string; para: string; head: string; id: string }> = []
   const porIdade: Array<{ t: string; de: string; para: string; head: string; id: string }> = []
   let falhou = 0
@@ -90,6 +101,9 @@ async function main() {
     if (!d) { falhou++; await new Promise((r) => setTimeout(r, INTERVALO_MS)); continue }
 
     const novo = d.publicationStatus
+    // O status que vale é o do MU (é ele que decide a linha abaixo), então as colunas de
+    // hiato saem já coerentes com ele — e não com o que ainda está gravado.
+    notas.push({ id: o.id, fields: hiatusFieldsFor(d.statusText, novo === "Unknown" ? o.statusAtual : novo) })
     if (novo !== "Unknown" && novo !== o.statusAtual) {
       const antigo = mapStatusAntigo(d.statusText)
       const head = (d.statusText ?? "").split("\n").slice(0, 2).join(" ").trim().slice(0, 78)
@@ -111,17 +125,40 @@ async function main() {
   console.log(`\nMU não respondeu: ${falhou}`)
 
   const todas = [...porParsing, ...porIdade]
+  const comNota = notas.filter((n) => n.fields.publication_status_note).length
   if (!EXECUTE) {
-    console.log(`\nDry-run. ${todas.length} obras mudariam. Para gravar, acrescente --execute\n`)
+    console.log(`\nDry-run. ${todas.length} obras mudariam de status; ${comNota} teriam a nota gravada.`)
+    console.log(`Para gravar, acrescente --execute\n`)
     return
   }
-  let ok = 0
-  for (const l of todas) {
+
+  // 1) A NOTA de toda obra visitada. Vai primeiro porque não depende de nada e é o dado que
+  //    a execução anterior perdeu.
+  const mudouStatus = new Map(todas.map((l) => [l.id, idPorNome.get(l.para)]))
+  let okNota = 0
+  for (const n of notas) {
+    if (!n.fields.publication_status_note) continue
+    // Quem também muda de status leva tudo num UPDATE só — duas escritas na mesma linha
+    // fariam o trigger de hiato rodar contra o status intermediário (o antigo), que é
+    // exatamente o estado que não vale.
+    const patch: Record<string, unknown> = { ...n.fields }
+    const novoStatusId = mudouStatus.get(n.id)
+    if (novoStatusId) patch.publication_status_id = novoStatusId
+    const { error } = await sb.from("works").update(patch).eq("id", n.id)
+    if (error) console.log(`  ✗ nota ${n.id}: ${error.message}`)
+    else okNota++
+  }
+
+  // 2) As que mudam de status mas não tinham nota (o MU respondeu sem texto).
+  let okStatus = 0
+  const semNota = todas.filter((l) => !notas.find((n) => n.id === l.id && n.fields.publication_status_note))
+  for (const l of semNota) {
     const { error } = await sb.from("works").update({ publication_status_id: idPorNome.get(l.para) }).eq("id", l.id)
     if (error) console.log(`  ✗ ${l.t.slice(0, 40)}: ${error.message}`)
-    else ok++
+    else okStatus++
   }
-  console.log(`\n✅ ${ok}/${todas.length} obras atualizadas.`)
+
+  console.log(`\n✅ ${okNota} notas gravadas · ${todas.length} status corrigidos (${okStatus} sem nota).`)
 }
 
 main().catch((e) => { console.error("FATAL:", e instanceof Error ? e.message : e); process.exit(1) })
