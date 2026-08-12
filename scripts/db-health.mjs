@@ -284,6 +284,37 @@ try {
   reporta("obra editada?", "não deu para checar", null, String(e.message ?? e).split("\n")[0].slice(0, 60))
 }
 
+// ── slug duplicado ─────────────────────────────────────────────────────────────────────
+// 🔴 Desde 2026-08-12 os links internos de obra apontam para o SLUG, não para o UUID (PR
+// #381) — foi assim que o `redirect()` de `/titles/[id]` deixou de disparar na navegação
+// normal, e com ele o "Rendered more hooks" que estourava o Router do Next.
+//
+// O preço é esta invariante: **dois títulos que geram o mesmo slug quebram o link em
+// silêncio**. `getSlugToIdMap` resolve pelo PRIMEIRO id, então a segunda obra fica
+// inalcançável e a primeira aparece no lugar dela — sem erro, sem log, com cara de "abriu a
+// obra errada". A rota por UUID se protegia sozinha (`slugMatches.length === 1`); a por slug
+// não tem como.
+//
+// Zero quando o check nasceu (978 obras não-arquivadas), e é justamente por isso que ele
+// existe: o que precisa ser pego aqui é a obra que ainda não foi cadastrada.
+try {
+  const q = `
+    select count(*)::int as n from (
+      select lower(regexp_replace(regexp_replace(title, '[^a-zA-Z0-9\\s-]', '', 'g'), '\\s+', '-', 'g')) as slug
+      from public.works where is_archived = false
+      group by 1 having count(*) > 1
+    ) x`
+  const n = Number((await nuvem(q))[0]?.n ?? 0)
+  reporta(
+    "slug duplicado",
+    n ? `${n} slug(s) repetido(s)` : "0 obras",
+    n ? 1 : 0,
+    n ? "link por slug leva à obra ERRADA" : "links internos de obra usam slug",
+  )
+} catch (e) {
+  reporta("slug duplicado", "não deu para checar", null, String(e.message ?? e).split("\n")[0].slice(0, 60))
+}
+
 // ── saída ──────────────────────────────────────────────────────────────────────────────
 console.log("  " + pad("indicador", 16) + pad("valor", 22) + pad("", 13) + "estado")
 console.log("  " + "─".repeat(62))

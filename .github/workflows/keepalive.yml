@@ -1,0 +1,60 @@
+name: Keepalive
+
+# De 6 em 6 horas — a mesma cadência que o comentário de `app/api/health/route.ts`
+# já previa, porque a query é `count: exact, head: true` e não gasta egress.
+#
+# O `/api/health` deste repo já nasceu certo: ele exercita o banco, devolve 503 quando a
+# query falha e trata catálogo vazio como doente. Faltava só alguém chamando — este
+# workflow é essa parte.
+#
+# Duas coisas que ele protege:
+#   1. O projeto Supabase ser pausado por inatividade no plano free.
+#   2. A máquina da Fly, que tem `auto_stop_machines = "stop"` e `min_machines_running = 0`,
+#      não ficar tanto tempo parada que o primeiro visitante pague um cold start longo.
+#      O timeout aqui é generoso de propósito por causa disso.
+#
+# ⚠️ ARMADILHA CONHECIDA: o GitHub desativa workflows agendados após 60 DIAS SEM COMMIT
+# no repositório. Como o objetivo aqui é justamente sobreviver a períodos de inatividade,
+# o cron morreria sozinho exatamente no cenário para o qual existe. Ou entra commit no
+# repo de vez em quando, ou este monitor precisa migrar para um serviço externo.
+on:
+  schedule:
+    - cron: "47 */6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    name: Bater no healthcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: GET /api/health
+        run: |
+          set -euo pipefail
+
+          corpo=$(mktemp)
+          # 90s: a máquina da Fly dorme, e o cold start medido em 2026-08-11 foi ~7,5s.
+          # A folga é para o dia em que estiver mais lento, não para o dia comum.
+          status=$(curl -sS -m 90 -o "$corpo" -w '%{http_code}' \
+            https://satoria.fly.dev/api/health || echo "000")
+
+          echo "HTTP $status"
+          cat "$corpo"
+          echo
+
+          if [ "$status" != "200" ]; then
+            echo "::error title=SatorIA fora do ar::healthcheck respondeu HTTP $status"
+            exit 1
+          fi
+
+          # Conferir o CORPO, não só o status — a lição que custou três dias aqui mesmo,
+          # entre 2026-07-31 e 08-03.
+          if ! grep -q '"ok":true' "$corpo"; then
+            echo "::error title=Banco do SatorIA inacessível::status 200 mas ok != true"
+            exit 1
+          fi
