@@ -7,9 +7,39 @@ const MU_HEADERS = {
   Accept: "text/html,application/xhtml+xml,application/json",
 }
 
-function mapStatus(status: string | undefined): PublicationStatus {
+/**
+ * O "Status in Country of Origin" do MangaUpdates não é um campo de status — é um texto
+ * multi-linha escrito à mão, com o estado da publicação no CABEÇALHO e a quebra por temporada
+ * abaixo. Procurar a palavra no texto INTEIRO faz nome de capítulo virar status.
+ *
+ * 🔴 Medido em 2026-08-12 sobre os 97 textos persistidos em `works.publication_status_note`:
+ * `"44 Chapters + Hiatus Special + AU Special (Ongoing)"` era classificado **Hiatus** — o
+ * "Hiatus Special" é o NOME de um extra, e a obra está em publicação. Como `hiatus` é testado
+ * antes de `ongoing`, o erro só acontece numa direção: obra viva marcada como pausada.
+ *
+ * ⚠️ O cabeçalho é tudo ANTES da primeira linha de temporada, não a primeira linha. Uma versão
+ * anterior desta função lia só a linha 1 e regrediu `"62 Chapters + 3 Specials +\n9 Hiatus
+ * Specials (*Hiatus*)"` para `Unknown`, porque ali o estado mora na SEGUNDA linha. Os dois
+ * casos estão em `tests/unit/external/mangaupdates-map-status.test.ts`.
+ *
+ * ⚠️ Isto corrige o CÓDIGO, não o dado já gravado — `mapStatus` só roda ao buscar dados de uma
+ * obra. Quem reclassifica o que está no banco é `scripts/backfill-hiatus-kind.ts`.
+ */
+function headerOf(status: string): string {
+  const linhas = status.split("\n")
+  const iTemporada = linhas.findIndex((l) =>
+    /^\s*(?:\*\*)?\s*(?:S(?:eason)?\s*\d+|Side\s+Stor|SS)\b/i.test(l),
+  )
+  // Sem quebra por temporada, as 2 primeiras linhas cobrem o formato observado sem varrer a
+  // ficha inteira (é lá que moram os "(Complete)" de temporada que já saíram).
+  return (iTemporada > 0 ? linhas.slice(0, iTemporada) : linhas.slice(0, 2)).join(" ")
+}
+
+/** Exportada para teste: o corpus são textos reais do MU, e regex sobre prosa precisa de contraprova. */
+export function mapStatus(status: string | undefined): PublicationStatus {
   if (!status) return "Unknown" as PublicationStatus
-  const s = status.toLowerCase()
+  // "<algo> Special(s)" é nome de extra ("Hiatus Special", "AU Special"), nunca estado.
+  const s = headerOf(status).replace(/[\w-]+\s+Specials?/gi, "").toLowerCase()
   if (s.includes("complete")) return "Completed"
   if (s.includes("hiatus")) return "Hiatus"
   if (s.includes("cancel") || s.includes("axed")) return "Cancelled"
