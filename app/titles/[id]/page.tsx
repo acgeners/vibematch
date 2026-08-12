@@ -47,6 +47,8 @@ import { LABELS } from "@/lib/constants/ui-labels"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getWorkReviews } from "@/server/queries/work-reviews"
 import { getLastDeepDive } from "@/server/queries/deep-dive"
+import { getOpeningStructure } from "@/server/queries/opening-structure"
+import { OpeningStructureCard } from "@/components/titles/opening-structure-card"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getGenerationReadinessMany } from "@/server/queries/generation-readiness"
 import { getWorkAiCost, getFromScratchBaselineCost } from "@/server/queries/ai-usage"
@@ -358,11 +360,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData, hideAdultContent, archivedCovers, favoriteFolderMenu, aiProvenance, alignmentModel, embeddingProvenance] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, openingStructure, sources, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData, hideAdultContent, archivedCovers, favoriteFolderMenu, aiProvenance, alignmentModel, embeddingProvenance] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
     getLastDeepDive(work.id as string),
+    getOpeningStructure(work.id as string),
     getSourceRows(),
     canConsumeAi(),
     getAllTags(),
@@ -1197,6 +1200,18 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   />
                 </CardContent>
               </Card>
+              {/* Estrutura de abertura — flashforward ou início cronológico.
+                  Fica na VISÃO GERAL, junto da sinopse, e não em "Notas & Avaliações": é fato
+                  narrativo sobre a obra, não nota. E fica na coluna principal, não na sidebar,
+                  porque a CITAÇÃO que sustenta o veredito precisa caber na tela — numa faixa de
+                  240px ela viraria tooltip, e a régua do selo ✨ é o contrário: procedência no
+                  tooltip, prova e estado à vista. */}
+              <OpeningStructureCard
+                workId={work.id as string}
+                row={openingStructure}
+                canOverride={isAdmin}
+                canRunAi={canAi}
+              />
               <BatchCreatedNavigator currentId={work.id} />
             </TabsContent>
 

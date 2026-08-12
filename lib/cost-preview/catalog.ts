@@ -43,6 +43,8 @@ export type CostActionId =
   | "taste_profile"
   | "chat_message"
   | "suggest_groups"
+  | "opening_structure"
+  | "opening_structure_web"
 
 interface CostSpec {
   /** Rótulo curto da ação (título default do popup). */
@@ -90,6 +92,27 @@ const CATALOG: Record<CostActionId, CostSpec> = {
     base: tokens(6000, 12000),
     etaSeconds: 35,
     background: true,
+  },
+  opening_structure: {
+    label: "Analisar estrutura de abertura",
+    model: SONNET,
+    // Medido em 19 obras (piloto 2026-08-12): US$0,0163/obra. O input é a síntese das reviews
+    // + até 40 reviews (mediana ~3.700 tokens, p90 ~7.900); o output é uma tool call curta.
+    base: tokens(4200, 300),
+    etaSeconds: 15,
+    background: true,
+    note: "Decide ~1 obra em 5. Quando a evidência não sustenta nenhum veredito, a resposta é \"não sei\" — e isso é resultado, não falha.",
+  },
+  opening_structure_web: {
+    label: "Buscar a abertura na web",
+    model: SONNET,
+    // ~15× o passo local, e o custo NÃO são as buscas (US$0,01 cada): são os resultados delas
+    // voltando ao input a cada volta do loop de tool use. Medido: US$0,13–0,41/obra com 4
+    // voltas × 3 buscas; contido para 2 × 2. Resgatou 1 de 5 indeterminadas no piloto.
+    base: tokens(90000, 700),
+    etaSeconds: 40,
+    background: true,
+    note: "Só vale depois de a análise local não decidir. No piloto resgatou 1 obra a cada 5 tentativas.",
   },
   recommend: {
     label: "Recomendar com IA",
