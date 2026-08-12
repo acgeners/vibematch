@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { titleToSlug } from "@/lib/utils"
 import { ArrowRight, Star } from "lucide-react"
 import { CoverImage } from "@/components/ui/cover-image"
 import { PublicationStatusBadge } from "@/components/ui/status-badge"
@@ -94,7 +95,7 @@ export function PublicHome({
             {works.map((w) => (
               <li key={w.id}>
                 <Link
-                  href={`/titles/${w.id}`}
+                  href={`/titles/${titleToSlug(w.title)}`}
                   className="group flex h-full flex-col gap-2 rounded-lg border border-border/65 bg-background/40 p-3 transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:bg-card hover:shadow-md"
                 >
                   <div className="relative overflow-hidden rounded-md">

@@ -8,7 +8,7 @@ import type { ScoreColorThresholds } from "@/components/ui/score-badge"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { Button } from "@/components/ui/button"
 import { MarkReadButton } from "@/components/home/mark-read-button"
-import { cn } from "@/lib/utils"
+import { cn, titleToSlug } from "@/lib/utils"
 import { classifyPace, lastActivityAt } from "@/lib/reading/pace-bands"
 import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import type { ContinueReadingItem } from "@/server/queries/dashboard"
@@ -266,7 +266,7 @@ export function ContinueHero({
               </Button>
             ) : (
               <Button asChild size="sm">
-                <Link href={`/titles/${main.id}`}>
+                <Link href={`/titles/${titleToSlug(main.title)}`}>
                   Abrir obra
                   <ArrowRight className="size-3.5" />
                 </Link>
@@ -314,7 +314,7 @@ export function ContinueHero({
                 return (
                   <Link
                     key={item.id}
-                    href={`/titles/${item.id}`}
+                    href={`/titles/${titleToSlug(item.title)}`}
                     className="flex items-center gap-3 rounded-lg p-1.5 transition-colors hover:bg-muted/50"
                   >
                     <CoverImage

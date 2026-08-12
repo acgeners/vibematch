@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { classifyHiatus, hiatusFieldsFor } from "@/lib/external/hiatus-kind"
+import { classifyHiatus, hiatusFieldsFor, parseHiatusSince, mesesDesde } from "@/lib/external/hiatus-kind"
 
 /**
  * Todos os textos abaixo são REAIS — colhidos da API do MangaUpdates em 2026-08-11 para as 97
@@ -195,5 +195,55 @@ describe("hiatusFieldsFor: o tipo de hiato só existe dentro do hiato", () => {
   it("texto vazio vira NULL, não string vazia", () => {
     expect(hiatusFieldsFor("   ", "Hiatus").publication_status_note).toBeNull()
     expect(hiatusFieldsFor(undefined, "Hiatus").publication_status_note).toBeNull()
+  })
+})
+
+describe("parseHiatusSince: a data sai na resolução que o dado sustenta", () => {
+  it("nome de mês é inequívoco", () => {
+    expect(parseHiatusSince("142 Chapters (Hiatus as of Dec 2024)")).toMatchObject({ year: 2024, month: 12 })
+    expect(parseHiatusSince("106 Chapters (*Hiatus since March 2026)")).toMatchObject({ year: 2026, month: 3 })
+  })
+
+  it("mês/ano com ano de 4 dígitos é inequívoco", () => {
+    expect(parseHiatusSince("111 Chapters (Hiatus) since 06.2026")).toMatchObject({ year: 2026, month: 6 })
+    expect(parseHiatusSince("43 Chapters (Hiatus) Since 08/2022")).toMatchObject({ year: 2022, month: 8 })
+  })
+
+  /**
+   * 🔴 As DUAS convenções convivem no mesmo catálogo — é isto que proíbe chutar. Quando um
+   * componente passa de 12 ele só pode ser dia, e o outro vira mês.
+   */
+  it("desambigua pelo componente que não cabe em 12", () => {
+    expect(parseHiatusSince("41 Chapters (On Hiatus) Since 27/8/24")).toMatchObject({ year: 2024, month: 8 })
+    expect(parseHiatusSince("103 Chapters (Hiatus) since 11/25/2025")).toMatchObject({ year: 2025, month: 11 })
+  })
+
+  it("data genuinamente ambígua devolve só o ANO — nunca um mês chutado", () => {
+    const r = parseHiatusSince("159 Chapters (Hiatus) since 03/12/2026")
+    expect(r).toMatchObject({ year: 2026, month: null })
+    expect(r?.label).toBe("2026")
+  })
+
+  /**
+   * ⚠️ A faixa de capítulos casa com qualquer regex de data: sem cortar no cabeçalho,
+   * "S2: 35 Chapters (41-75)" viraria "parado desde 1975".
+   */
+  it("ignora as faixas de capítulo abaixo do cabeçalho", () => {
+    // A data está no cabeçalho e as faixas embaixo: sem o corte, `41-75` casaria primeiro.
+    expect(parseHiatusSince("111 Chapters (Hiatus) since 06.2026\n\nS1: 40 Chapters (01-40)\nS2: 35 Chapters (41-75)"))
+      .toMatchObject({ year: 2026, month: 6 })
+    // E sem data no cabeçalho o resultado é `null` — nunca um ano pescado de uma faixa.
+    expect(parseHiatusSince("111 Chapters (Hiatus)\n\nS1: 40 Chapters (01-40)\nS2: 35 Chapters (41-75)")).toBeNull()
+  })
+
+  it("texto sem data devolve null", () => {
+    expect(parseHiatusSince("27 Chapters (Hiatus)")).toBeNull()
+    expect(parseHiatusSince(null)).toBeNull()
+  })
+
+  it("sem mês, a idade ancora no MEIO do ano (erro de ±6 meses, sem viés)", () => {
+    const agora = new Date("2026-08-12")
+    expect(mesesDesde({ year: 2024, month: null, label: "2024" }, agora)).toBe(26)
+    expect(mesesDesde({ year: 2022, month: 8, label: "agosto de 2022" }, agora)).toBe(48)
   })
 })

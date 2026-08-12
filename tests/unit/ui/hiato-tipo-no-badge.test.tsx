@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { PublicationStatusBadge } from "@/components/ui/status-badge"
 import { classifyPace } from "@/lib/reading/pace-bands"
+import { hiatusSinceLabel } from "@/lib/works/hiatus-display"
 
 /**
  * 🔴 Teste de RENDER de propósito, e não por preferência de estilo. Este badge passou a montar
@@ -90,5 +91,49 @@ describe("classifyPace: as duas situações deixam de cair na mesma banda", () =
    */
   it("o tipo é ignorado quando a publicação não está em hiato", () => {
     expect(classifyPace({ ...base, publicationHiatus: false, hiatusKind: "mid_season" })).toBe("uptodate")
+  })
+})
+
+describe("PublicationStatusBadge: desde quando está parada", () => {
+  const COM_DATA = "43 Chapters (Hiatus) Since 08/2022\n\nS1: 35 Chapters (01-35)\nS2: 08 Chapters (36-43)"
+  const trigger = (c: HTMLElement) => c.querySelector("[data-slot='tooltip-trigger']")
+
+  /**
+   * ⚠️ O conteúdo do Radix só monta no hover, então o texto do tooltip é verificado em unit
+   * (`hiatusSinceLabel`); aqui o que importa é se o badge chega a MONTAR o tooltip.
+   */
+  it("monta o tooltip quando há data", () => {
+    const { container } = render(
+      <PublicationStatusBadge status="Hiatus" hiatusKind="between_seasons" hiatusKindConfidence="low" publicationStatusNote={COM_DATA} />,
+    )
+    expect(trigger(container)).not.toBeNull()
+  })
+
+  /**
+   * A data sozinha justifica o tooltip: nas obras cujo texto não decide o tipo, a idade é o
+   * único sinal que sobra — e era justamente onde ela ficaria escondida.
+   */
+  it("monta o tooltip mesmo SEM tipo, quando há data", () => {
+    const { container } = render(
+      <PublicationStatusBadge status="Hiatus" publicationStatusNote="65 Chapters (Hiatus) Since 4/2025" />,
+    )
+    expect(trigger(container)).not.toBeNull()
+  })
+
+  it("obra sem data e sem tipo não ganha tooltip", () => {
+    const { container } = render(<PublicationStatusBadge status="Hiatus" publicationStatusNote="27 Chapters (Hiatus)" />)
+    expect(trigger(container)).toBeNull()
+  })
+
+  it("o rótulo diz a data e, a partir de um ano, a idade", () => {
+    const agora = new Date("2026-08-12")
+    expect(hiatusSinceLabel(COM_DATA, agora)).toBe("Parada desde agosto de 2022 · há 4 anos")
+    expect(hiatusSinceLabel("65 Chapters (Hiatus) Since 4/2026", agora)).toBe("Parada desde abril de 2026")
+    expect(hiatusSinceLabel("27 Chapters (Hiatus)", agora)).toBeNull()
+  })
+
+  it("singular no primeiro ano completo", () => {
+    expect(hiatusSinceLabel("40 Chapters (Hiatus) since 06.2025", new Date("2026-08-12")))
+      .toBe("Parada desde junho de 2025 · há 1 ano")
   })
 })

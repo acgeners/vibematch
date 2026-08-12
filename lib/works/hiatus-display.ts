@@ -1,7 +1,8 @@
+import { mesesDesde, parseHiatusSince } from "@/lib/external/hiatus-kind"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
 
 /**
- * Como o tipo de hiato se APRESENTA — glifo, rótulo e a frase que explica.
+ * Como o tipo de hiato se APRESENTA — glifo, rótulo, a frase que explica e desde quando.
  *
  * 🔴 Dono único, e a razão é a de sempre neste projeto: são **três** superfícies consumindo o
  * mesmo estado (o badge de publicação, a banda da /leitura e o tooltip), e uma segunda cópia é
@@ -16,6 +17,7 @@ import type { HiatusKind } from "@/lib/external/hiatus-kind"
  * Os glifos são semânticos: `»` = há continuação anunciada; `—` = parou, sem continuação à
  * vista.
  */
+
 /**
  * As três colunas que viajam juntas da query até o badge.
  *
@@ -86,6 +88,35 @@ export function hiatusDisplay(
 ): HiatusDisplay | null {
   if (!kind || confidence !== "high") return null
   return DISPLAY[kind]
+}
+
+/**
+ * "Parada desde agosto de 2022 · há 4 anos" — a linha que separa uma pausa de temporada
+ * normal de uma obra que o autor abandonou.
+ *
+ * 🔴 Isto existe porque a CLASSE não basta: 13 das 85 obras em hiato estão paradas há 2+ anos
+ * (medido em 2026-08-12) e várias delas classificam como "entre temporadas" — estruturalmente
+ * correto, e enganoso sem a data. *Roxana* tem `S2` fechada e nenhuma `S3` anunciada desde
+ * **agosto de 2022**.
+ *
+ * ⚠️ A idade precisa de "agora", então quem chama passa a data — nunca `new Date()` aqui
+ * dentro. Componente de render que lê o relógio quebra a pureza que o lint do React exige e,
+ * pior, faz o HTML do servidor divergir do primeiro render do cliente.
+ */
+export function hiatusSinceLabel(
+  note: string | null | undefined,
+  agora: Date,
+): string | null {
+  const since = parseHiatusSince(note)
+  if (!since) return null
+
+  const meses = mesesDesde(since, agora)
+  // Abaixo de um ano a idade não acrescenta nada que a data já não diga, e "há 0 meses"
+  // (data no futuro, que o MU às vezes traz como previsão de volta) seria absurdo.
+  if (meses < 12) return `Parada desde ${since.label}`
+
+  const anos = Math.floor(meses / 12)
+  return `Parada desde ${since.label} · há ${anos} ${anos === 1 ? "ano" : "anos"}`
 }
 
 /**
