@@ -88,7 +88,11 @@ async function main() {
   )
   const alvos = works.filter((w) => !jaTem.has(w.id)).slice(0, LIMITE)
 
-  console.log(`obras sem vínculo do Mangago: ${works.filter((w) => !jaTem.has(w.id)).length}  (processando ${alvos.length})`)
+  // ETA impresso ANTES de começar: cada obra custa ~1,1s de resolve + a pausa, e o loop
+  // não imprime nada até o fim. Sem isto, uma execução normal de ~15min é indistinguível
+  // de um processo travado — foi exatamente essa a leitura na 1ª rodada real.
+  const etaMin = Math.ceil((alvos.length * (1100 + PAUSA_MS)) / 60000)
+  console.log(`obras sem vínculo do Mangago: ${works.filter((w) => !jaTem.has(w.id)).length}  (processando ${alvos.length}, ≈${etaMin} min)`)
   console.log(APPLY ? "  (APPLY — vai gravar na NUVEM)\n" : "  (DRY-RUN — nada será gravado)\n")
   if (!alvos.length) return
 
@@ -96,7 +100,8 @@ async function main() {
   let semCandidato = 0
   let naoAuto = 0
 
-  for (const w of alvos) {
+  const t0 = Date.now()
+  for (const [i, w] of alvos.entries()) {
     let r: Awaited<ReturnType<typeof resolveMangagoUrlProd>> = null
     try {
       r = await resolveMangagoUrlProd({ title: w.title })
@@ -118,6 +123,16 @@ async function main() {
         band: r.band,
         matchedCandidateTitle: r.matchedCandidateTitle,
       })
+    }
+    // Batimento de progresso: o resolvedor loga um JSON por obra, mas essa saída é ruído
+    // ilegível a olho. Uma linha a cada 25 diz o que importa — onde está e quanto falta.
+    const feito = i + 1
+    if (feito % 25 === 0 || feito === alvos.length) {
+      const restaMin = Math.ceil(((Date.now() - t0) / feito) * (alvos.length - feito) / 60000)
+      console.log(
+        `  ⏱  ${feito}/${alvos.length}  ·  auto ${achados.length} · review/reject ${naoAuto} · sem candidato ${semCandidato}` +
+          (feito < alvos.length ? `  ·  faltam ~${restaMin} min` : ""),
+      )
     }
     await sleep(PAUSA_MS)
   }
@@ -142,12 +157,16 @@ async function main() {
   }
 
   if (APPLY) {
+    // Uma chamada de rede POR SLUG, e nada impresso: mais um trecho longo que parecia
+    // travado. Grava tudo antes de qualquer resumo — interromper aqui perde só o resto.
+    console.log(`\n  gravando ${achados.length} slugs…`)
     let gravados = 0
-    for (const a of achados) {
+    for (const [i, a] of achados.entries()) {
       const res = await persistMangagoSlug({ supabase: sb, workId: a.workId, slug: a.slug })
       if (res) gravados += 1
+      if ((i + 1) % 50 === 0) console.log(`  ⏱  ${i + 1}/${achados.length} gravados`)
     }
-    console.log(`\n  slugs GRAVADOS: ${gravados}`)
+    console.log(`  slugs GRAVADOS: ${gravados}`)
   }
 
   console.log(`\n  resolvidos em banda AUTO: ${achados.length}`)
@@ -171,4 +190,15 @@ async function main() {
   if (!APPLY && achados.length) console.log(`\n──> DRY-RUN. Rode de novo com --apply pra gravar.`)
 }
 
+// 🔴 `process.exit(0)` explícito, como o `inspect-sources.ts`. Sem ele o processo fica
+// PENDURADO depois de imprimir o resumo — o trabalho já está gravado, mas o terminal não
+// volta, e isso é indistinguível de "ainda rodando". Medido em 2026-08-11: o lote do
+// Mangago terminou de persistir e seguiu vivo, com a contagem no banco estável por 75s.
+// Segura o event loop algum handle de keep-alive (fetch/undici, refresh de auth do
+// supabase-js); sair explicitamente é o que os outros scripts do repo já fazem.
 main()
+  .then(() => process.exit(0))
+  .catch((e) => {
+    console.error(e)
+    process.exit(1)
+  })

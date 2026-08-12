@@ -180,4 +180,15 @@ async function main() {
   if (!APPLY && comReview > 0) console.log(`\n──> DRY-RUN. Rode de novo com --apply pra gravar.`)
 }
 
+// 🔴 `process.exit(0)` explícito, como o `inspect-sources.ts`. Sem ele o processo fica
+// PENDURADO depois de imprimir o resumo — o trabalho já está gravado, mas o terminal não
+// volta, e isso é indistinguível de "ainda rodando". Medido em 2026-08-11: o lote do
+// Mangago terminou de persistir e seguiu vivo, com a contagem no banco estável por 75s.
+// Segura o event loop algum handle de keep-alive (fetch/undici, refresh de auth do
+// supabase-js); sair explicitamente é o que os outros scripts do repo já fazem.
 main()
+  .then(() => process.exit(0))
+  .catch((e) => {
+    console.error(e)
+    process.exit(1)
+  })
