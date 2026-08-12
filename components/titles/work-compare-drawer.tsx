@@ -1207,7 +1207,7 @@ function CompareGrid({
             {displayed.map((w) => (
               <CompareCell key={w.id}>
                 <div className="flex flex-wrap items-center gap-1">
-                  <PublicationStatusBadge statusId={w.publicationStatusId ?? undefined} />
+                  <PublicationStatusBadge statusId={w.publicationStatusId ?? undefined} hiatusKind={w.hiatusKind} hiatusKindConfidence={w.hiatusKindConfidence} publicationStatusNote={w.publicationStatusNote} />
                   <PersonalStatusBadge statusId={w.personalStatusId ?? undefined} />
                 </div>
               </CompareCell>

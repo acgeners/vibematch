@@ -899,7 +899,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Publicação
               </span>
-              <PublicationStatusBadge statusId={work.publication_status_id} />
+              <PublicationStatusBadge
+                statusId={work.publication_status_id}
+                hiatusKind={work.hiatus_kind ?? null}
+                hiatusKindConfidence={work.hiatus_kind_confidence ?? null}
+                publicationStatusNote={work.publication_status_note ?? null}
+              />
             </div>
           </div>
 

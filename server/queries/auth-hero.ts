@@ -1,8 +1,11 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { pickPrimaryCover } from "@/lib/covers"
+import { HIATUS_SELECT_COLUMNS, hiatusFieldsFromRow } from "@/lib/works/hiatus-display"
+import type { HiatusFields } from "@/lib/works/hiatus-display"
+import type { HiatusKind } from "@/lib/external/hiatus-kind"
 
-export type HeroWork = {
+export type HeroWork = HiatusFields & {
   title: string
   coverUrl: string
   nota: number | null
@@ -27,7 +30,7 @@ export async function getAuthHeroWorks(limit = 21): Promise<HeroWork[]> {
   const { data, error } = await supabase
     .from("calculated_scores")
     .select(
-      `platform_avg, works!inner(title, is_archived, publication_status_id, work_covers(url, is_primary, position))`,
+      `platform_avg, works!inner(title, is_archived, publication_status_id, ${HIATUS_SELECT_COLUMNS}, work_covers(url, is_primary, position))`,
     )
     .not("platform_avg", "is", null)
     .eq("works.is_archived", false)
@@ -41,6 +44,9 @@ export async function getAuthHeroWorks(limit = 21): Promise<HeroWork[]> {
     works: {
       title: string
       publication_status_id: number | null
+      hiatus_kind?: HiatusKind | null
+      hiatus_kind_confidence?: "high" | "low" | null
+      publication_status_note?: string | null
       work_covers?: { url: string; is_primary: boolean }[] | null
     }
   }>
@@ -54,6 +60,7 @@ export async function getAuthHeroWorks(limit = 21): Promise<HeroWork[]> {
       coverUrl,
       nota: row.platform_avg,
       publicationStatusId: row.works.publication_status_id,
+      ...hiatusFieldsFromRow(row.works),
     })
     if (out.length >= limit) break
   }

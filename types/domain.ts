@@ -2,6 +2,8 @@
 // Enums e constantes de domínio
 // ============================================================
 
+import type { HiatusKind } from "@/lib/external/hiatus-kind"
+
 export const PUBLICATION_STATUSES = ["Completed", "Ongoing", "Hiatus", "Cancelled", "Unknown"] as const
 export type PublicationStatus = (typeof PUBLICATION_STATUSES)[number]
 
@@ -166,6 +168,20 @@ export interface Work {
   year: number | null
   year_end: number | null
   publication_status_id: number | null
+  /**
+   * Qualifica o hiato (migration 183). `between_seasons` = a temporada fechou e a próxima está
+   * anunciada; `mid_season` = parou no meio de uma temporada. NULL = o texto da fonte não
+   * sustenta nenhuma das duas, ou a obra não está em hiato — quem garante o segundo caso é o
+   * trigger `trg_clear_hiatus_kind`, não o código de escrita.
+   *
+   * ⚠️ Não é status: `publication_status_id` segue sendo a fonte única de "Hiatus". Virar
+   * valor do enum seria apagado pelo merge multi-fonte, que fica com o status da primeira
+   * fonte aceita — e das 9 fontes só o MangaUpdates traz o texto que distingue os dois.
+   */
+  hiatus_kind: HiatusKind | null
+  hiatus_kind_confidence: "high" | "low" | null
+  /** Texto cru de "Status in Country of Origin" do MangaUpdates — a prova por trás do rótulo. */
+  publication_status_note: string | null
   personal_status_id: number | null
   total_chapters: number | null
   chapters_read: number | null

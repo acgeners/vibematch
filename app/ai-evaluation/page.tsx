@@ -1,4 +1,5 @@
 import { Wrench } from "lucide-react"
+import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { Header } from "@/components/layout/header"
 import { AiEvaluationPanel } from "@/components/ai-evaluation/ai-evaluation-panel"
@@ -333,13 +334,16 @@ async function getEligibleWorks(
     synopsis_quality: string | null
     total_chapters: number | null
     user_score: number | null
+    hiatus_kind: HiatusKind | null
+    hiatus_kind_confidence: "high" | "low" | null
+    publication_status_note: string | null
   }
   const worksResult = await chunkedInQuery<WorkRow>(eligibleIds, CHUNK_SIZE, (chunk) => {
     // `works_owner`: a fila de curadoria mostra o status de leitura, o ♥ e a NOTA DO DONO (é a
     // tela de trabalho dele). Vêm do espelho dele via a view — `works` já perdeu essas colunas.
     let q = supabase
       .from("works_owner")
-      .select("id, title, publication_status_id, personal_status_id, synopsis_quality, total_chapters, user_score")
+      .select("id, title, publication_status_id, personal_status_id, synopsis_quality, total_chapters, user_score, hiatus_kind, hiatus_kind_confidence, publication_status_note")
       .in("id", chunk)
       .eq("is_archived", false)
     if (pubStatusIds.length > 0) q = q.in("publication_status_id", pubStatusIds)
@@ -429,6 +433,9 @@ async function getEligibleWorks(
       title: row.title,
       publication_status: "",
       publication_status_id: row.publication_status_id ?? null,
+      hiatusKind: row.hiatus_kind ?? null,
+      hiatusKindConfidence: row.hiatus_kind_confidence ?? null,
+      publicationStatusNote: row.publication_status_note ?? null,
       personal_status: "",
       personal_status_id: row.personal_status_id ?? null,
       synopsis_quality: row.synopsis_quality ?? null,
@@ -700,7 +707,7 @@ export default async function CuradoriaDaObraPage({
       getWorksWithoutTags({ pubStatusIds, personalStatusIds, minTags, maxTags }),
     ])
     const merged = new Map<string, TagsReviewsWork>()
-    const base = (w: { id: string; title: string; coverUrl: string | null; publicationStatusId?: number | null; personalStatusId?: number | null; interest: string | null; canonicalPresent: boolean; inGolden: boolean; expectedScore: number | null }) => ({
+    const base = (w: { id: string; title: string; coverUrl: string | null; publicationStatusId?: number | null; personalStatusId?: number | null; interest: string | null; canonicalPresent: boolean; inGolden: boolean; expectedScore: number | null; hiatusKind?: HiatusKind | null; hiatusKindConfidence?: "high" | "low" | null; publicationStatusNote?: string | null }) => ({
       id: w.id,
       title: w.title,
       coverUrl: w.coverUrl,
@@ -710,6 +717,9 @@ export default async function CuradoriaDaObraPage({
       canonicalPresent: w.canonicalPresent,
       inGolden: w.inGolden,
       expectedScore: w.expectedScore,
+      hiatusKind: w.hiatusKind ?? null,
+      hiatusKindConfidence: w.hiatusKindConfidence ?? null,
+      publicationStatusNote: w.publicationStatusNote ?? null,
       tagCount: 0,
       reviewCount: 0,
     })

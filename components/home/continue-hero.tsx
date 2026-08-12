@@ -225,7 +225,7 @@ export function ContinueHero({
               que a capa e o que sobrava era vão, não respiro. */}
           <div className="flex flex-wrap items-center gap-1.5">
             {main.isAdult && <AdultBadge className="px-1.5 py-0" />}
-            <PublicationStatusBadge statusId={main.publicationStatusId} />
+            <PublicationStatusBadge statusId={main.publicationStatusId} hiatusKind={main.hiatusKind} hiatusKindConfidence={main.hiatusKindConfidence} publicationStatusNote={main.publicationStatusNote} />
             <PersonalStatusBadge statusId={main.personalStatusId} />
           </div>
 

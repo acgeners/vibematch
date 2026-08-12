@@ -16,7 +16,30 @@ export const ONPACE_PCT = 0.85 // ≥ 85% lido (e recente) → Acompanhando (qua
 export const BEHIND_PCT = 0.4 // < 40% lido → Atrasado (independe da recência)
 export const STALE_DAYS = 30 // ≥ 30 dias sem ler → "frio"
 
-export type ReadingBand = "onpace" | "uptodate" | "trailing" | "slowing" | "hiatus" | "behind"
+/**
+ * `season_break` e `interrupted` são hiato de PUBLICAÇÃO qualificado (migration 183); `hiatus`
+ * ficou com o resto.
+ *
+ * 🔴 A separação existe porque as duas pedem ações OPOSTAS de quem lê: "a S4 sai em setembro"
+ * é esperar, "o autor parou há 4 anos" é decidir se larga. Enquanto as duas caíam na mesma
+ * banda, a /leitura dava o mesmo conselho para as duas — e o rótulo era "Possível hiato" para
+ * uma obra cuja próxima temporada tem data anunciada.
+ *
+ * ⚠️ `hiatus` continua acumulando DOIS casos, e isso é herança, não desenho: hiato de
+ * publicação que o texto da fonte não qualifica (10 obras em 2026-08-11) **e** "você leu tudo e
+ * não volta há 30 dias", que não é hiato da obra e sim seu. O hint da banda sempre admitiu a
+ * mistura ("leu tudo e parou — ou série em hiato"); separá-la é outro trabalho, e mexe em quem
+ * não tem nada a ver com a publicação.
+ */
+export type ReadingBand =
+  | "onpace"
+  | "uptodate"
+  | "trailing"
+  | "slowing"
+  | "season_break"
+  | "interrupted"
+  | "hiatus"
+  | "behind"
 
 export interface PaceInput {
   /** Capítulos lidos por quem está olhando. */
@@ -29,6 +52,15 @@ export interface PaceInput {
   lastReadAt: string | null
   /** True quando a PUBLICAÇÃO está em hiato oficial. */
   publicationHiatus: boolean
+  /**
+   * `works.hiatus_kind` — qualifica o hiato quando ele existe. Só é lido com
+   * `publicationHiatus` true; sozinho não classifica nada, porque o trigger
+   * `trg_clear_hiatus_kind` já garante que obra fora do hiato tem isto nulo.
+   *
+   * ⚠️ Opcional de propósito: os chamadores que ainda não plumbaram a coluna continuam
+   * caindo em `hiatus`, que é o comportamento de antes — nunca num tipo inventado.
+   */
+  hiatusKind?: "between_seasons" | "mid_season" | null
 }
 
 /**
@@ -59,7 +91,11 @@ export function progressOf(input: PaceInput): number | null {
  * /leitura: hiato oficial > sem total > em dia > atrasado > frio > no ritmo.
  */
 export function classifyPace(input: PaceInput, now: Date = new Date()): ReadingBand {
-  if (input.publicationHiatus) return "hiatus"
+  if (input.publicationHiatus) {
+    if (input.hiatusKind === "between_seasons") return "season_break"
+    if (input.hiatusKind === "mid_season") return "interrupted"
+    return "hiatus"
+  }
 
   const pct = progressOf(input)
   // Sem total conhecido não dá pra medir progresso: fica em "Acompanhando" (neutro).

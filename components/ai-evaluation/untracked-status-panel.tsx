@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
+import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { SynopsisInputsPopover } from "@/components/ai-evaluation/synopsis-inputs-popover"
 import { WorkQueueCard } from "@/components/ai-evaluation/queue/work-queue-card"
 import { WorkQueueGrid } from "@/components/ai-evaluation/queue/work-queue-grid"
@@ -14,6 +15,9 @@ export interface UntrackedWorkWithMeta {
   coverUrl: string | null
   coverUrls: string[]
   publicationStatusId: number | null
+  hiatusKind: HiatusKind | null
+  hiatusKindConfidence: "high" | "low" | null
+  publicationStatusNote: string | null
   personalStatusId: number | null
   synopsisQuality: string | null
   expectedScore: number | null
@@ -63,6 +67,9 @@ export function UntrackedStatusPanel({ works, readIds = [] }: { works: Untracked
               isAdult={w.isAdult}
               userScore={w.userScore}
               publicationStatusId={w.publicationStatusId}
+              hiatusKind={w.hiatusKind}
+              hiatusKindConfidence={w.hiatusKindConfidence}
+              publicationStatusNote={w.publicationStatusNote}
               personalStatusId={w.personalStatusId}
               interest={w.synopsisQuality}
               tagCount={w.tagCount}

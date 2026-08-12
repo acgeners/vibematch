@@ -1,4 +1,5 @@
 import { ScoreBadge } from "@/components/ui/score-badge"
+import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import type { ScoreColorThresholds } from "@/components/ui/score-badge"
 import { PublicationStatusBadge, PersonalStatusBadge } from "@/components/ui/status-badge"
 import { AdultBadge } from "@/components/ui/adult-badge"
@@ -19,6 +20,13 @@ interface TopWorkCardProps {
     totalChapters?: number | null
     /** Interesse declarado (♥…♥♥♥♥). Ausente = ainda não avaliou a sinopse. */
     synopsisQuality?: string | null
+    /**
+     * Qualifica o hiato (migration 183). Opcionais porque este card é usado por duas
+     * prateleiras e a prova do badge só existe onde a query trouxe a coluna.
+     */
+    hiatusKind?: HiatusKind | null
+    hiatusKindConfidence?: "high" | "low" | null
+    publicationStatusNote?: string | null
   }
   scoreThresholds: ScoreColorThresholds | null
   /**
@@ -83,7 +91,7 @@ export function TopWorkCard({ rank, work, scoreThresholds, hideRank = false }: T
 
       <div className="mt-auto flex flex-wrap gap-1 pt-1">
         {work.isAdult && <AdultBadge className="px-1.5 py-0" />}
-        <PublicationStatusBadge statusId={work.publicationStatusId} />
+        <PublicationStatusBadge statusId={work.publicationStatusId} hiatusKind={work.hiatusKind ?? null} hiatusKindConfidence={work.hiatusKindConfidence ?? null} publicationStatusNote={work.publicationStatusNote ?? null} />
         <PersonalStatusBadge statusId={work.personalStatusId} />
       </div>
     </div>

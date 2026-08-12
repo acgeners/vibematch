@@ -1,4 +1,6 @@
 import "server-only"
+import { hiatusFieldsFromRow } from "@/lib/works/hiatus-display"
+import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchAllRowsParallel } from "@/lib/supabase/paginate"
 import { pickPrimaryCover } from "@/lib/work-derived"
@@ -79,7 +81,7 @@ export async function getWorksWithoutReviews(
   // essas colunas). Os filtros/`.in()` continuam valendo: a view expõe os mesmos nomes.
   let worksQ = sb
     .from("works_owner")
-    .select("id, title, ai_eval_status, canonical_synopsis, publication_status_id, personal_status_id, synopsis_quality, work_covers(url, is_primary, position), calculated_scores(expected_score)")
+    .select("id, title, ai_eval_status, canonical_synopsis, publication_status_id, personal_status_id, synopsis_quality, hiatus_kind, hiatus_kind_confidence, publication_status_note, work_covers(url, is_primary, position), calculated_scores(expected_score)")
     .eq("is_archived", false)
   if (filters.pubStatusIds && filters.pubStatusIds.length > 0) worksQ = worksQ.in("publication_status_id", filters.pubStatusIds)
   if (filters.personalStatusIds && filters.personalStatusIds.length > 0) worksQ = worksQ.in("personal_status_id", filters.personalStatusIds)
@@ -92,6 +94,9 @@ export async function getWorksWithoutReviews(
     ai_eval_status: string | null
     canonical_synopsis: string | null
     publication_status_id: number | null
+    hiatus_kind?: HiatusKind | null
+    hiatus_kind_confidence?: "high" | "low" | null
+    publication_status_note?: string | null
     personal_status_id: number | null
     synopsis_quality: string | null
     work_covers?: Array<{ url: string; is_primary: boolean | null; position: number | null }> | null
@@ -149,6 +154,7 @@ export async function getWorksWithoutReviews(
     coverUrl: pickPrimaryCover(w.work_covers),
     publicationStatus: w.publication_status_id != null ? (PUBLICATION_STATUSES_BY_ID[w.publication_status_id]?.status ?? "Unknown") : "Unknown",
     publicationStatusId: w.publication_status_id,
+    ...hiatusFieldsFromRow(w),
     personalStatus: w.personal_status_id != null ? (PERSONAL_STATUSES_BY_ID[w.personal_status_id]?.status ?? "—") : "—",
     personalStatusId: w.personal_status_id,
     aiEvalStatus: w.ai_eval_status,

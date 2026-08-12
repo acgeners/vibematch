@@ -1,6 +1,9 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { pickPrimaryCover } from "@/lib/covers"
+import { HIATUS_SELECT_COLUMNS, hiatusFieldsFromRow } from "@/lib/works/hiatus-display"
+import type { HiatusFields } from "@/lib/works/hiatus-display"
+import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { CRITERION_SLUGS } from "@/types/domain"
 
 /**
@@ -16,7 +19,7 @@ import { CRITERION_SLUGS } from "@/types/domain"
  * fosse consenso.
  */
 
-export interface PublicShowcaseWork {
+export interface PublicShowcaseWork extends HiatusFields {
   id: string
   title: string
   coverUrl: string | null
@@ -54,6 +57,7 @@ export async function getSpotlightWork(): Promise<SpotlightWork | null> {
     .select(
       `platform_avg, total_votes,
        works!inner(id, title, is_archived, is_adult, publication_status_id, total_chapters,
+                   ${HIATUS_SELECT_COLUMNS},
                    work_covers(url, is_primary, position),
                    category_scores(criterion_slug, score))`,
     )
@@ -74,6 +78,9 @@ export async function getSpotlightWork(): Promise<SpotlightWork | null> {
       is_adult?: boolean | null
       publication_status_id: number | null
       total_chapters: number | null
+      hiatus_kind?: HiatusKind | null
+      hiatus_kind_confidence?: "high" | "low" | null
+      publication_status_note?: string | null
       work_covers?: { url: string; is_primary: boolean; position: number }[] | null
       category_scores?: Array<{ criterion_slug: string; score: number | null }> | null
     }
@@ -100,6 +107,7 @@ export async function getSpotlightWork(): Promise<SpotlightWork | null> {
       publicationStatusId: row.works.publication_status_id,
       isAdult: false,
       totalChapters: row.works.total_chapters,
+      ...hiatusFieldsFromRow(row.works),
       scores: CRITERION_SLUGS.map((slug) => ({ slug, score: bySlug.get(slug) as number })),
     }
   }
@@ -116,6 +124,7 @@ export async function getPublicShowcase(limit = 12): Promise<PublicShowcaseWork[
     .select(
       `platform_avg, total_votes,
        works!inner(id, title, is_archived, is_adult, publication_status_id, total_chapters,
+                   ${HIATUS_SELECT_COLUMNS},
                    work_covers(url, is_primary, position))`,
     )
     .not("platform_avg", "is", null)
@@ -136,6 +145,9 @@ export async function getPublicShowcase(limit = 12): Promise<PublicShowcaseWork[
       is_adult?: boolean | null
       publication_status_id: number | null
       total_chapters: number | null
+      hiatus_kind?: HiatusKind | null
+      hiatus_kind_confidence?: "high" | "low" | null
+      publication_status_note?: string | null
       work_covers?: { url: string; is_primary: boolean; position: number }[] | null
     }
   }>
@@ -156,6 +168,7 @@ export async function getPublicShowcase(limit = 12): Promise<PublicShowcaseWork[
       publicationStatusId: row.works.publication_status_id,
       isAdult: false,
       totalChapters: row.works.total_chapters,
+      ...hiatusFieldsFromRow(row.works),
     })
     if (out.length >= limit) break
   }

@@ -846,6 +846,7 @@ function WorkCardsView({
                     statusId={work.publication_status_id}
                     compact
                     className="px-1.5 py-0 text-[10px]"
+                    hiatusKind={work.hiatus_kind ?? null} hiatusKindConfidence={work.hiatus_kind_confidence ?? null} publicationStatusNote={work.publication_status_note ?? null}
                   />
                   <PersonalStatusBadge
                     statusId={work.personal_status_id}
@@ -1011,7 +1012,7 @@ function WorkListView({
         />
       </span>
     ),
-    publication_status: (work) => <PublicationStatusBadge statusId={work.publication_status_id} compact />,
+    publication_status: (work) => <PublicationStatusBadge statusId={work.publication_status_id} compact hiatusKind={work.hiatus_kind ?? null} hiatusKindConfidence={work.hiatus_kind_confidence ?? null} publicationStatusNote={work.publication_status_note ?? null} />,
     personal_status: (work) => <PersonalStatusBadge statusId={work.personal_status_id} iconOnly />,
     chapters_total: (work) =>
       work.total_chapters != null ? (
@@ -1581,7 +1582,7 @@ function WorkListView({
                 />
               </div>
               <div className="flex flex-wrap gap-1">
-                <PublicationStatusBadge statusId={work.publication_status_id} />
+                <PublicationStatusBadge statusId={work.publication_status_id} hiatusKind={work.hiatus_kind ?? null} hiatusKindConfidence={work.hiatus_kind_confidence ?? null} publicationStatusNote={work.publication_status_note ?? null} />
                 <PersonalStatusBadge statusId={work.personal_status_id} />
                 <AiStatusBadge status={work.ai_eval_status} />
               </div>

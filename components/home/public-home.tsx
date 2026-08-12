@@ -116,7 +116,7 @@ export function PublicHome({
                     {w.totalChapters != null && ` · ${w.totalChapters} cap`}
                   </span>
                   <span className="mt-auto flex flex-wrap gap-1 pt-1">
-                    <PublicationStatusBadge statusId={w.publicationStatusId} />
+                    <PublicationStatusBadge statusId={w.publicationStatusId} hiatusKind={w.hiatusKind} hiatusKindConfidence={w.hiatusKindConfidence} publicationStatusNote={w.publicationStatusNote} />
                   </span>
                 </Link>
               </li>
