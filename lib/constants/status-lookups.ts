@@ -213,6 +213,27 @@ export function readingPersonalStatusName(): string {
 export const UNTRACKED_PERSONAL_STATUS = personalStatusNameBySlugOrThrow("untracked") as PersonalStatus
 
 /**
+ * "Dá pra pegar pra ler agora" — o conjunto da prateleira "Pra você hoje" da home.
+ *
+ * É a união de duas coisas que a tabela descreve separadamente: as NÃO-COMEÇADAS (`is_unread` →
+ * Want to Read e Untracked) mais **Read Again**, que já foi lida mas voltou pra fila por escolha
+ * explícita do usuário. Fica de fora tudo que está em curso (Reading/Started/Stalled/On-hold/
+ * Hiatus), encerrado (Finished/Dropped) ou recusado (Not Now/Not Interested).
+ *
+ * ⚠️ Não existe coluna em `personal_status` que descreva essa união, então "Read Again" é
+ * nomeado aqui — pelo SLUG, via [personalStatusNameBySlugOrThrow], que ESTOURA se o slug sumir
+ * do Supabase. Um `=== "Read Again"` escrito à mão faria a prateleira perder o status EM
+ * SILÊNCIO num rename, que é exatamente o bug que a migration 155 documenta. Se essa união
+ * virar conceito de produto em mais de um lugar, ela merece coluna própria na tabela.
+ */
+const READ_AGAIN_STATUS = personalStatusNameBySlugOrThrow("read_again")
+
+export function isPickablePersonalStatus(status: number | string | null | undefined): boolean {
+  if (isUnreadPersonalStatus(status)) return true
+  return infoOf(status)?.status === READ_AGAIN_STATUS
+}
+
+/**
  * O status canônico que significa "leu tudo" — hoje "Finished", ontem "Completed".
  *
  * Existe pros mapas de import (`lib/import/external-list/parsers.ts`), que traduzem o vocabulário

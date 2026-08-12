@@ -103,8 +103,8 @@ describe("vitrine da home, conta nova", () => {
   })
 
   it("diz que a prateleira veio da nota da comunidade quando não há modelo", async () => {
-    const { getTopUnratedByExpected } = await import("@/server/queries/dashboard")
-    const semModelo = await getTopUnratedByExpected(5)
+    const { getTopPicksForToday } = await import("@/server/queries/dashboard")
+    const semModelo = await getTopPicksForToday(5)
 
     expect(semModelo.items).toHaveLength(5)
     expect(
@@ -113,7 +113,7 @@ describe("vitrine da home, conta nova", () => {
     ).toBe("platform")
 
     hasModel = true
-    const comModelo = await getTopUnratedByExpected(5)
+    const comModelo = await getTopPicksForToday(5)
     expect(comModelo.basis).toBe("expected")
   })
 })

@@ -3,7 +3,7 @@ import { ArrowRight } from "lucide-react"
 import {
   getDashboardStats,
   getContinueReading,
-  getTopUnratedByExpected,
+  getTopPicksForToday,
 } from "@/server/queries/dashboard"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getCurrentUserProfile, getSessionUserId } from "@/server/queries/current-user"
@@ -54,7 +54,7 @@ export default async function HomePage() {
     // query já carrega todas as obras acompanhadas e filtra em memória, então subir o limite
     // não custa ida a mais ao banco.
     getContinueReading(60),
-    getTopUnratedByExpected(12),
+    getTopPicksForToday(12),
     getCurrentUserProfile(),
     getFirstStepsProgress(),
   ])
@@ -108,10 +108,13 @@ export default async function HomePage() {
 
       <WorkShelf
         title="Pra você hoje"
+        // O rótulo segue o corte de `getTopPicksForToday`, que é por STATUS: não-começadas
+        // (Want to Read / Untracked) + Read Again. "que você ainda não leu" descrevia o corte
+        // antigo (`user_score` nulo) e mentiria sobre as de releitura.
         why={
           semModelo
-            ? "as maiores notas da comunidade que você ainda não leu"
-            : "as maiores Notas Previstas que você ainda não leu"
+            ? "as maiores notas da comunidade entre as que você não começou — ou quer reler"
+            : "as maiores Notas Previstas entre as que você não começou — ou quer reler"
         }
         works={topPicks.items}
         thresholds={thresholds?.expected ?? null}

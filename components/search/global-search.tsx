@@ -56,6 +56,7 @@ const DEBOUNCE_MS = 200
 
 /** Referência estável: um `[]` novo a cada render invalidaria os memos que dependem dele. */
 const EMPTY_WORKS: WorkSuggestion[] = []
+const EMPTY_ENTRIES: SearchEntry[] = []
 
 type Scope = "tudo" | "obra" | "config" | "pref" | "page"
 
@@ -159,8 +160,17 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
 
   const visible = useMemo(() => index.filter(reaches), [index, reaches])
 
+  /**
+   * Sem termo, NADA. O diálogo abria despejando o índice inteiro (~40 seções de Configurações,
+   * Preferências e Páginas), e o efeito era o oposto do pretendido: uma parede de itens que a
+   * pessoa não pediu, ordenada pelo registry, na frente do campo que ela veio usar. A lista
+   * cheia também não é um menu utilizável — ninguém navega 40 linhas de teclado.
+   *
+   * ⚠️ Isto NÃO é o mesmo que filtrar por termo vazio: `visible` continua sendo a fonte dos
+   * chips de escopo (que dependem do que o PAPEL alcança, não do que foi digitado).
+   */
   const matches = useMemo(() => {
-    if (!term) return visible
+    if (!term) return EMPTY_ENTRIES
     const hay = (e: SearchEntry) => `${e.title} ${e.description} ${e.crumb ?? ""}`
     return visible.filter((e) => matchesTerm(hay(e), term))
   }, [visible, term])
@@ -279,6 +289,24 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
         onOpenChange={(v) => (v ? setOpen(true) : close())}
         title="Buscar"
         description="Busque obras, ajustes e páginas"
+        /**
+         * 🔴 Ancorado no TOPO, não centrado. O `DialogContent` padrão é
+         * `top-1/2 -translate-y-1/2`, e num diálogo cuja ALTURA depende do resultado isso move
+         * a borda de cima a cada tecla: o campo de busca — o único elemento que a pessoa está
+         * olhando e usando — escorrega debaixo do cursor enquanto ela digita. Com o topo fixo,
+         * só a borda de baixo acompanha o número de resultados.
+         *
+         * ⚠️ `translate-y-0` é obrigatório junto do `top-*`: sem ele o `-translate-y-1/2` do
+         * padrão continua valendo e o diálogo sobe metade da própria altura — que volta a
+         * depender do resultado, só que pra cima.
+         *
+         * ⚠️ 68px NÃO é número escolhido: é a altura da barra (`h-14` = 56) + 1px da borda de
+         * baixo + 11px de respiro. Se a barra mudar de altura, o respiro muda junto e nada
+         * avisa. Era `10vh`/`sm:14vh`, e o vh trabalhava contra no pior caso: quanto mais
+         * baixa a janela, mais a lista quer espaço e mais o topo descia junto dela (medido a
+         * 650px de altura: 91px de topo e só 81px de folga no rodapé, contra 104px hoje).
+         */
+        className="top-[68px] translate-y-0"
         // `shouldFilter={false}`: quem filtra somos nós (o casamento inclui descrição e
         // migalha, e as obras vêm já filtradas do servidor). Com o filtro do cmdk ligado,
         // ele re-filtraria por cima e sumiria com acertos legítimos de descrição.

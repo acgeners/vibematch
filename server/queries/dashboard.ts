@@ -11,7 +11,11 @@ import { comixWorkUrl } from "@/lib/external/comix"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { FOLLOWING_PERSONAL_STATUSES, DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
-import { isFollowingPersonalStatus, personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
+import {
+  isFollowingPersonalStatus,
+  isPickablePersonalStatus,
+  personalStatusNameOrDefault,
+} from "@/lib/constants/status-lookups"
 
 type CoverRow = { url: string; is_primary: boolean; position: number }
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean | null }
@@ -205,22 +209,31 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 }
 
 /**
- * Melhores obras que você ainda NÃO avaliou (user_score null) — a prateleira "o que ler a
- * seguir". Ordena por Nota Prevista quando há modelo de gosto e por nota da comunidade
- * (`platform_avg`) quando não há.
+ * Melhores obras que você PODE pegar pra ler agora — a prateleira "Pra você hoje". Ordena por
+ * Nota Prevista quando há modelo de gosto e por nota da comunidade (`platform_avg`) quando não há.
  *
  * ⚠️ Devolve `basis` junto, e não é enfeite: quem chama PRECISA saber por qual das duas a lista
  * foi ordenada pra se explicar. A home prometia "as maiores Notas Previstas" num rótulo fixo, e
  * pra conta nova (sem modelo) isso era falso — as capas ali vinham de `platform_avg`. Medido em
  * prod em 2026-08-04. Devolver só o array convida o chamador a adivinhar de novo.
+ *
+ * 🔴 O corte é o STATUS PESSOAL, não `user_score == null` — e a troca é deliberada. "Ainda não
+ * avaliou" deixava passar tudo que está em curso (Reading, Started, On-hold, Hiatus): a
+ * prateleira oferecia como novidade obras que a pessoa já está lendo, e o "Continue lendo" logo
+ * acima já cuida dessas. Hoje o corte é [isPickablePersonalStatus] — não-começadas + Read Again.
+ *
+ * ⚠️ Como "Read Again" é obra JÁ LIDA, ela costuma ter `user_score`, e a Nota Prevista dessas é
+ * IN-SAMPLE (o Ridge treina justamente nas obras com rótulo — ver `expected.ts`). Então elas
+ * tendem a ficar no topo desta ordenação por construção, não por mérito da previsão. É um efeito
+ * conhecido do pedido, não um bug a "consertar" filtrando-as de volta pra fora.
  */
-export async function getTopUnratedByExpected(
+export async function getTopPicksForToday(
   limit = 5,
 ): Promise<{ items: TopWorkItem[]; basis: "expected" | "platform" }> {
   const supabase = createAdminClient()
 
   // 🔴 Este widget é PESSOAL nas duas pontas — e as duas estavam erradas:
-  //   "que VOCÊ ainda não avaliou" filtrava por `works.user_score` (a nota do DONO)
+  //   o corte de quem entra filtrava por `works.*` (o estado do DONO)
   //   "melhores por Nota Prevista" ordenava por `calculated_scores` (a previsão DELE)
   // Ou seja, a home da Leitora recomendava obras pelo gosto dele, chamando de "pra você".
   // Passou batido na 2b porque eu religei o "Acompanhando" e os KPIs, mas não este.
@@ -260,14 +273,15 @@ export async function getTopUnratedByExpected(
         platformAvg: calc?.platform_avg ?? null,
         publicationStatusId: w.publication_status_id ?? null,
         personalStatusId: state.personalStatusId,
-        userScore: state.userScore,
         isAdult: Boolean(w.is_adult),
         totalChapters: w.total_chapters ?? null,
         synopsisQuality: state.synopsisQuality,
       }
     })
-    // "ainda não avaliou" = a nota DELA é nula (não a dele).
-    .filter((w) => w.userScore == null)
+    // Status pessoal DELA (não dele). `personalStatusNameOrDefault` é o que traduz "sem linha no
+    // espelho" para o status que a obra APARENTA ("Want to Read") — sem ele a conta nova, que não
+    // tem linha nenhuma, veria a prateleira vazia.
+    .filter((w) => isPickablePersonalStatus(personalStatusNameOrDefault(w.personalStatusId)))
 
   // Sem modelo, não há Nota Prevista pra ordenar — cai na nota da COMUNIDADE, como o ranking.
   const ordenadas = scores.hasModel
