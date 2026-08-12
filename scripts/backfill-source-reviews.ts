@@ -49,11 +49,16 @@ const arg = (n: string) => process.argv.find((a) => a.startsWith(`--${n}=`))?.sp
 const ESCOPO = (arg("escopo") ?? "todas") as "vazias" | "nunca" | "todas"
 /** Fontes suportadas: as gateadas por Cloudflare cujo id basta para buscar reviews. */
 const FONTES = {
-  comix: { fetch: (id: string) => fetchComixReviews(id), rotulo: "Comix" },
-  mangago: { fetch: (id: string) => fetchMangagoReviews(id), rotulo: "Mangago" },
+  comix: { fetch: (id: string, max?: number) => fetchComixReviews(id).then((r) => (max ? r.slice(0, max) : r)), rotulo: "Comix" },
+  mangago: { fetch: (id: string, max?: number) => fetchMangagoReviews(id, max ?? 40), rotulo: "Mangago" },
 } as const
 const FONTE = arg("fonte") as keyof typeof FONTES | null
 const LIMITE = Number(arg("limit")) || Infinity
+// Teto de reviews POR OBRA. É a única alavanca real de velocidade: `fetchMangagoReviews`
+// faz UM fetch por review (~44 requisições com o default 40 ⇒ ~37s/obra, medido), e
+// paralelizar não adianta — a sessão nomeada do FlareSolverr é serializada de propósito
+// (duas chamadas concorrentes na mesma sessão leem a página uma da outra).
+const MAX_REVIEWS = Number(arg("max-reviews")) || undefined
 // A cadeia da Comix já leva ~2,5s por obra (4 chamadas via FlareSolverr). A pausa é
 // polidez com o origin, não throttle nosso.
 const PAUSA_MS = 800
@@ -122,16 +127,35 @@ async function main() {
   )
   console.log(APPLY ? "  (APPLY — vai gravar na NUVEM)\n" : "  (DRY-RUN — nada será gravado)\n")
   if (!alvos.length) return
+  // 🔴 ETA impresso ANTES de começar. A Comix custa ~2,5s/obra; o Mangago ~37s, porque
+  // busca UMA página por review. Medido em 2026-08-11: 405 obras = ~3,7h, contra os
+  // "20-30 min" que eu havia estimado de cabeça. Estimativa que não sai do custo real da
+  // fonte não é estimativa — e um lote de horas sem ETA vira "está travado?".
+  const SEG_POR_OBRA: Record<string, number> = { comix: 2.5, mangago: 37 }
+  const eta = Math.round((alvos.length * (SEG_POR_OBRA[FONTE] ?? 10)) / 60)
+  console.log(`  ⏱  ≈${eta} min (${alvos.length} obras). Pode interromper: o escopo é recalculado,`)
+  console.log(`     então o que já gravou sai da lista e a retomada continua de onde parou.\n`)
 
   let totalReviews = 0
   let comReview = 0
   let semReview = 0
+  let feitas = 0
+  const t0 = Date.now()
+  // Uma linha por obra já dá sinal de vida, mas não diz QUANTO FALTA — e num lote de
+  // horas é isso que separa "está indo" de "está travado".
+  const marcarProgresso = () => {
+    feitas += 1
+    if (feitas % 20 !== 0 || feitas === alvos.length) return
+    const restaMin = Math.round(((Date.now() - t0) / feitas) * (alvos.length - feitas) / 60000)
+    console.log(`  ⏱  ${feitas}/${alvos.length} · ${totalReviews} reviews · faltam ~${restaMin} min`)
+  }
 
   for (const alvo of alvos) {
-    const textos = await fonte.fetch(alvo.externalId).catch(() => [] as string[])
+    const textos = await fonte.fetch(alvo.externalId, MAX_REVIEWS).catch(() => [] as string[])
     if (textos.length === 0) {
       semReview += 1
       console.log(`  ${"0".padStart(3)}  "${alvo.title.slice(0, 46)}"`)
+      marcarProgresso()
       await sleep(PAUSA_MS)
       continue
     }
@@ -159,6 +183,7 @@ async function main() {
     totalReviews += reviews.length
     comReview += 1
     console.log(`  ${String(reviews.length).padStart(3)}  "${alvo.title.slice(0, 46)}"`)
+    marcarProgresso()
     await sleep(PAUSA_MS)
   }
 
