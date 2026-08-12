@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { useMemo, useState } from "react"
 import { AlertTriangle, SquarePen } from "lucide-react"
 import { titleToSlug } from "@/lib/utils"
@@ -21,6 +22,9 @@ export interface TagsReviewsWork {
   title: string
   coverUrl: string | null
   publicationStatusId: number | null
+  hiatusKind: HiatusKind | null
+  hiatusKindConfidence: "high" | "low" | null
+  publicationStatusNote: string | null
   personalStatusId: number | null
   interest: string | null
   canonicalPresent: boolean
@@ -201,6 +205,9 @@ export function TagsReviewsTab({
                 isAdult={w.isAdult}
                 userScore={w.userScore}
                 publicationStatusId={w.publicationStatusId}
+                hiatusKind={w.hiatusKind}
+                hiatusKindConfidence={w.hiatusKindConfidence}
+                publicationStatusNote={w.publicationStatusNote}
                 personalStatusId={w.personalStatusId}
                 interest={w.interest}
                 tagCount={w.tagCount}

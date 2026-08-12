@@ -1203,18 +1203,14 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
       }
       setValue("external_ids", cleaned, { shouldDirty: true })
     }
-    // Pré-preenche Observações com o "Status in Country of Origin" do MU
-    // quando a obra está em Hiatus (status enum ou palavra no texto cru). Só
-    // toca se o usuário ainda não escreveu nada manualmente.
-    const statusText = data.mangaUpdatesStatusText
-    if (statusText) {
-      const isHiatus =
-        data.publicationStatus === "Hiatus" ||
-        statusText.toLowerCase().includes("hiatus")
-      const currentObs = (getValues("observations") ?? "").trim()
-      if (isHiatus && !currentObs) {
-        setValue("observations", statusText, { shouldDirty: true })
-      }
+    // O "Status in Country of Origin" do MU vai pra coluna de CATÁLOGO da obra, de onde o
+    // servidor deriva o tipo de hiato (migration 183). Ele já ia pra `observations` — que é
+    // anotação PESSOAL do leitor —, e por isso vinha com as duas ressalvas que sumiram aqui:
+    // só quando a obra estava em Hiatus, e só se ninguém tivesse escrito nada. Nenhuma das
+    // duas se aplica agora: o dono do campo é a FONTE, e a quebra por temporadas descreve a
+    // publicação em qualquer estado.
+    if (data.mangaUpdatesStatusText) {
+      setValue("publication_status_note", data.mangaUpdatesStatusText, { shouldDirty: true })
     }
   }
 

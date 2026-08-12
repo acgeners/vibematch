@@ -471,7 +471,7 @@ function renderCell(
   if (col.key === "fav")
     return <FavoriteCell workId={entry.workId} workTitle={entry.title} isFavorite={entry.isFavorite} />
   if (col.key === "title") return <TitleCell entry={entry} />
-  if (col.key === "publication_status") return <PublicationStatusBadge statusId={entry.publicationStatusId} compact />
+  if (col.key === "publication_status") return <PublicationStatusBadge statusId={entry.publicationStatusId} compact hiatusKind={entry.hiatusKind} hiatusKindConfidence={entry.hiatusKindConfidence} publicationStatusNote={entry.publicationStatusNote} />
   if (col.key === "personal_status") return <PersonalStatusBadge statusId={entry.personalStatusId} iconOnly />
   if (col.key === "year") return <span className="font-mono text-sm text-muted-foreground">{entry.year ?? "—"}</span>
   if (col.key === "chapters_total") return <span className="font-mono text-sm">{entry.totalChapters ?? "—"}</span>
@@ -1220,7 +1220,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-base truncate">{entry.title}</p>
                 <div className="flex flex-wrap gap-1 mt-1">
-                  <PublicationStatusBadge statusId={entry.publicationStatusId} />
+                  <PublicationStatusBadge statusId={entry.publicationStatusId} hiatusKind={entry.hiatusKind} hiatusKindConfidence={entry.hiatusKindConfidence} publicationStatusNote={entry.publicationStatusNote} />
                 </div>
                 <div className="flex flex-wrap gap-2 mt-2">
                   {KEY_CRITERIA.map((slug) => {
@@ -1785,7 +1785,7 @@ function RankingCard({
               {entry.title}
             </h3>
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-              <PublicationStatusBadge statusId={entry.publicationStatusId} compact className="gap-1 px-1.5 py-0 text-[10px]" />
+              <PublicationStatusBadge statusId={entry.publicationStatusId} compact className="gap-1 px-1.5 py-0 text-[10px]" hiatusKind={entry.hiatusKind} hiatusKindConfidence={entry.hiatusKindConfidence} publicationStatusNote={entry.publicationStatusNote} />
               {entry.isAdult && <AdultBadge className="px-1.5 py-0 text-[10px]" />}
               {entry.totalChapters != null && (
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold tabular-nums text-muted-foreground">

@@ -71,6 +71,16 @@ export const workFormBase = z.object({
   // conversão e grava ambos. Sairão obrigatórios após Fase 4.1.
   publication_status_id: z.number().int().nullable().optional(),
   personal_status_id: z.number().int().nullable().optional(),
+  /**
+   * "Status in Country of Origin" cru do MangaUpdates — FATO DA OBRA, e é dele que sai
+   * `works.hiatus_kind` (migration 183). Até aqui este texto ia pra `observations`, que é
+   * anotação PESSOAL do leitor: o fato da obra ficava guardado na linha de uma pessoa só.
+   *
+   * 🔴 O cliente manda só o TEXTO. `hiatus_kind` é derivado no SERVIDOR por `hiatusFieldsFor`
+   * e nunca aceito daqui — `workFormSchema` alimenta uma `"use server"`, que é endpoint
+   * público, e um veredito vindo de fora contradiria a nota que está do lado.
+   */
+  publication_status_note: z.string().max(4000).nullable().optional(),
   total_chapters: z.number().int().min(0).nullable().optional(),
   chapters_read: z.number().int().min(0).nullable().optional(),
   synopsis_quality: z.enum(SYNOPSIS_QUALITIES).nullable().optional(),

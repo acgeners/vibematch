@@ -20,7 +20,7 @@ function CoverCard({ work }: { work: HeroWork }) {
         </div>
       ) : null}
       <div className="absolute inset-x-0 bottom-0 flex items-end gap-1 bg-gradient-to-t from-black/75 via-black/25 to-transparent p-1">
-        <PublicationStatusBadge statusId={work.publicationStatusId} compact />
+        <PublicationStatusBadge statusId={work.publicationStatusId} compact hiatusKind={work.hiatusKind} hiatusKindConfidence={work.hiatusKindConfidence} publicationStatusNote={work.publicationStatusNote} />
       </div>
     </div>
   )

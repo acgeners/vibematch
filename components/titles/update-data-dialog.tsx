@@ -794,18 +794,13 @@ export function UpdateDataDialog({
       if (Object.keys(cleaned).length > 0) updates.externalIds = cleaned
     }
 
-    // Pré-preenche Observações com "Status in Country of Origin" do MU quando
-    // a obra está em Hiatus E observações atual está vazia. Não sobrescreve
-    // nota manual existente.
-    const statusText = data.mangaUpdatesStatusText
-    if (statusText) {
-      const isHiatus =
-        data.publicationStatus === "Hiatus" ||
-        statusText.toLowerCase().includes("hiatus")
-      const currentObs = (currentWork.observations ?? "").trim()
-      if (isHiatus && !currentObs) {
-        updates.observations = statusText
-      }
+    // O "Status in Country of Origin" do MU é fato da OBRA e vai pra coluna dela; o servidor
+    // deriva o tipo de hiato a partir dele (migration 183). Isto escrevia `observations`, que
+    // mora em `user_work_state` — a nota da obra caía na linha de quem clicou em "Atualizar
+    // dados", e só se ela estivesse vazia. As duas ressalvas ("só em Hiatus", "só se vazio")
+    // existiam por causa desse lugar errado e saíram junto com ele.
+    if (data.mangaUpdatesStatusText) {
+      updates.publicationStatusNote = data.mangaUpdatesStatusText
     }
 
     let result: { data?: { id: string; slug?: string }; error?: string }

@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getWorksByIds } from "@/server/queries/works"
+import type { HiatusFields } from "@/lib/works/hiatus-display"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug, WorkWithRelations } from "@/types/domain"
@@ -19,7 +20,7 @@ export interface CompareCriterionEntry {
   aiJustification: string | null
 }
 
-export interface CompareWork {
+export interface CompareWork extends HiatusFields {
   id: string
   title: string
   slug: string
@@ -157,6 +158,9 @@ function mapWorkToCompare(
     year: (work as { year?: number | null }).year ?? null,
     synopsisQuality: (work as { synopsis_quality?: string | null }).synopsis_quality ?? null,
     publicationStatusId: work.publication_status_id ?? null,
+    hiatusKind: work.hiatus_kind ?? null,
+    hiatusKindConfidence: work.hiatus_kind_confidence ?? null,
+    publicationStatusNote: work.publication_status_note ?? null,
     personalStatusId: work.personal_status_id ?? null,
     chaptersRead: work.chapters_read != null ? Number(work.chapters_read) : null,
     totalChapters: work.total_chapters != null ? Number(work.total_chapters) : null,

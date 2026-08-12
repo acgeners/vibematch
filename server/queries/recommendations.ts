@@ -1,4 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin"
+import { HIATUS_SELECT_COLUMNS, hiatusFieldsFromRow } from "@/lib/works/hiatus-display"
+import type { HiatusFields } from "@/lib/works/hiatus-display"
 import { getInterestReader } from "@/server/queries/user-interest"
 import { fetchAllRows, fetchAllRowsParallel } from "@/lib/supabase/paginate"
 import { pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/lib/work-derived"
@@ -639,7 +641,7 @@ export async function getAlignmentQueueWorks(opts: {
   return rows
 }
 
-export interface UntrackedWork {
+export interface UntrackedWork extends HiatusFields {
   id: string
   title: string
   coverUrl: string | null
@@ -675,7 +677,7 @@ export async function getUntrackedWorks(opts: {
   let query = supabase
     .from("works_owner")
     .select(
-      "id, title, publication_status_id, synopsis_quality, work_covers(url, is_primary, position), calculated_scores(expected_score)",
+      `id, title, publication_status_id, synopsis_quality, ${HIATUS_SELECT_COLUMNS}, work_covers(url, is_primary, position), calculated_scores(expected_score)`,
     )
     .eq("is_archived", false)
   if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
@@ -706,6 +708,7 @@ export async function getUntrackedWorks(opts: {
       personalStatusId,
       synopsisQuality: (w.synopsis_quality as string | null) ?? null,
       expectedScore: calc?.expected_score != null ? Number(calc.expected_score) : null,
+      ...hiatusFieldsFromRow(w as Parameters<typeof hiatusFieldsFromRow>[0]),
     })
   }
   rows.sort((a, b) => String(a.title ?? "").localeCompare(String(b.title ?? "")))

@@ -5,6 +5,9 @@ import {
   getPersonalStatusNameById,
   getPersonalStatusIdByName,
 } from "@/lib/constants/status-lookups"
+import { HIATUS_SELECT_COLUMNS, hiatusFieldsFromRow } from "@/lib/works/hiatus-display"
+import type { HiatusFields } from "@/lib/works/hiatus-display"
+import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { pickPrimaryCover } from "@/lib/covers"
 import type { SynopsisQuality } from "@/types/domain"
 import { comixWorkUrl } from "@/lib/external/comix"
@@ -59,7 +62,7 @@ export interface DashboardStats {
   wantToRead: number
 }
 
-export interface TopWorkItem {
+export interface TopWorkItem extends HiatusFields {
   id: string
   title: string
   coverUrl: string | null
@@ -74,7 +77,7 @@ export interface TopWorkItem {
   synopsisQuality: SynopsisQuality | null
 }
 
-export interface ContinueReadingItem {
+export interface ContinueReadingItem extends HiatusFields {
   id: string
   title: string
   coverUrl: string | null
@@ -243,6 +246,7 @@ export async function getTopPicksForToday(
     .from("works")
     .select(`
       id, title, is_archived, publication_status_id, is_adult, total_chapters,
+      ${HIATUS_SELECT_COLUMNS},
       calculated_scores(expected_score, platform_avg),
       work_covers(url, is_primary, position)
     `)
@@ -257,6 +261,9 @@ export async function getTopPicksForToday(
     publication_status_id: number | null
     is_adult?: boolean | null
     total_chapters?: number | null
+    hiatus_kind?: HiatusKind | null
+    hiatus_kind_confidence?: "high" | "low" | null
+    publication_status_note?: string | null
     calculated_scores: { expected_score: number | null; platform_avg: number | null } | null
     work_covers?: CoverRow[] | null
   }
@@ -276,6 +283,7 @@ export async function getTopPicksForToday(
         isAdult: Boolean(w.is_adult),
         totalChapters: w.total_chapters ?? null,
         synopsisQuality: state.synopsisQuality,
+        ...hiatusFieldsFromRow(w),
       }
     })
     // Status pessoal DELA (não dele). `personalStatusNameOrDefault` é o que traduz "sem linha no
@@ -298,6 +306,9 @@ export async function getTopPicksForToday(
       publicationStatusId: w.publicationStatusId,
       personalStatusId: w.personalStatusId,
       isAdult: w.isAdult,
+      hiatusKind: w.hiatusKind,
+      hiatusKindConfidence: w.hiatusKindConfidence,
+      publicationStatusNote: w.publicationStatusNote,
       totalChapters: w.totalChapters,
       synopsisQuality: w.synopsisQuality,
     })),
@@ -339,6 +350,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
     .from("works")
     .select(`
       id, title, total_chapters, is_adult, publication_status_id,
+      ${HIATUS_SELECT_COLUMNS},
       last_chapter_released_at, next_chapter_predicted_at,
       calculated_scores(expected_score),
       work_covers(url, is_primary, position),
@@ -357,6 +369,9 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
     last_chapter_released_at: string | null
     next_chapter_predicted_at: string | null
     publication_status_id?: number | null
+    hiatus_kind?: HiatusKind | null
+    hiatus_kind_confidence?: "high" | "low" | null
+    publication_status_note?: string | null
     calculated_scores?: { expected_score?: number | null } | null
     work_covers?: CoverRow[] | null
     work_external_ids?: ExternalIdRow[] | null
@@ -371,6 +386,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
       coverUrl: pickPrimaryCover(w.work_covers),
       personalStatusId: state.personalStatusId,
       publicationStatusId: w.publication_status_id ?? null,
+      ...hiatusFieldsFromRow(w),
       chaptersRead: state.chaptersRead,
       totalChapters: w.total_chapters ?? null,
       pending,

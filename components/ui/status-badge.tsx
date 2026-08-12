@@ -1,4 +1,7 @@
 import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { hiatusDisplay, hiatusTooltip } from "@/lib/works/hiatus-display"
+import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { cn } from "@/lib/utils"
 import {
   PUBLICATION_STATUS_LABELS,
@@ -73,21 +76,84 @@ interface PublicationStatusBadgeProps {
   /** Quando true, mostra só o símbolo (sem texto). */
   iconOnly?: boolean
   className?: string
+  /**
+   * `works.hiatus_kind` / `hiatus_kind_confidence` / `publication_status_note` (migration 183).
+   *
+   * ⚠️ Os três são OPCIONAIS, e é isso que mantém o badge utilizável nas ~20 telas que ainda
+   * não os plumbaram: sem eles o componente renderiza exatamente como antes. Um default que
+   * inventasse tipo faria a tela afirmar sobre dado que ela não carregou.
+   */
+  hiatusKind?: HiatusKind | null
+  hiatusKindConfidence?: "high" | "low" | null
+  /** Texto cru do MangaUpdates — vai no tooltip como a prova por trás do rótulo. */
+  publicationStatusNote?: string | null
 }
 
-export function PublicationStatusBadge({ statusId, status, compact, iconOnly, className }: PublicationStatusBadgeProps) {
+export function PublicationStatusBadge({
+  statusId,
+  status,
+  compact,
+  iconOnly,
+  className,
+  hiatusKind,
+  hiatusKindConfidence,
+  publicationStatusNote,
+}: PublicationStatusBadgeProps) {
   const info = resolvePublicationInfo(statusId, status)
   const name = info?.status ?? "Unknown"
   const display = compact ? (info?.short || name) : name
-  return (
+
+  // Só qualifica o que É hiato. O trigger `trg_clear_hiatus_kind` já zera a coluna fora dele,
+  // mas a tela não pode depender disso: ela também renderiza dado em voo, antes de gravar.
+  const isHiatus = name === "Hiatus"
+  const mark = isHiatus ? hiatusDisplay(hiatusKind, hiatusKindConfidence) : null
+  const tip = isHiatus ? hiatusTooltip(hiatusKind, hiatusKindConfidence) : null
+
+  const badge = (
     <Badge
       variant="outline"
       className={cn("gap-1", iconOnly && "px-1.5", PUB_STATUS_CLASSES[name] ?? PUB_STATUS_CLASSES.Unknown, className)}
-      title={iconOnly ? name : undefined}
+      title={iconOnly && !tip ? name : undefined}
     >
       <span aria-hidden>{info?.symbol || "?"}</span>
       {!iconOnly && display}
+      {mark && (
+        <span aria-hidden className="font-mono text-[0.9em] font-bold leading-none">
+          {mark.glyph}
+        </span>
+      )}
+      {/* O texto só entra onde há largura; o glifo acima é o que sobrevive ao resto. */}
+      {mark && !compact && !iconOnly && <span className="font-medium">{mark.label}</span>}
+      {/* O glifo é `aria-hidden` (é forma, não conteúdo), então o leitor de tela precisa da
+          palavra em algum lugar — senão a distinção existe só para quem enxerga. */}
+      {mark && (compact || iconOnly) && <span className="sr-only">{mark.label}</span>}
     </Badge>
+  )
+
+  if (!tip) return badge
+
+  // 🔴 O `TooltipProvider` mora AQUI porque este app não tem um no layout raiz, e a falta dele
+  // não degrada o tooltip: o Radix LANÇA no render e derrruba a árvore inteira que o contém.
+  // Este badge aparece em ~20 telas — uma delas sem provider seria uma página branca.
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex cursor-help">{badge}</span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-[320px]">
+          <p className="font-semibold">{tip.title}</p>
+          {/* ⚠️ `TooltipContent` é invertido (bg-foreground). Tom secundário sai de
+              `text-background/70`; `text-muted-foreground` cai para ~3:1 no tema CLARO. */}
+          <p className="text-background/70">{tip.description}</p>
+          {publicationStatusNote && (
+            <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-background/15 p-1.5 font-mono text-[10px] leading-relaxed text-background/80">
+              {publicationStatusNote}
+            </pre>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 

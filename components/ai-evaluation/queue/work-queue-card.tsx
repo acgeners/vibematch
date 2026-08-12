@@ -1,6 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react"
+import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { Tag, MessageSquare, Check, X } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -48,6 +49,10 @@ export interface WorkQueueCardProps {
   /** Sua nota (Real) — badge ao lado do título quando você já avaliou. */
   userScore?: number | null
   publicationStatusId?: number | null
+  /** Qualifica o hiato (migration 183) — na fila ele diz se ainda vale esperar a obra. */
+  hiatusKind?: HiatusKind | null
+  hiatusKindConfidence?: "high" | "low" | null
+  publicationStatusNote?: string | null
   personalStatusId?: number | null
   /** Interesse na sinopse (♥–♥♥♥♥), manual/efetivo. */
   interest?: string | null
@@ -103,6 +108,9 @@ export function WorkQueueCard({
   isAdult,
   userScore,
   publicationStatusId,
+  hiatusKind,
+  hiatusKindConfidence,
+  publicationStatusNote,
   personalStatusId,
   interest,
   tagCount,
@@ -179,7 +187,7 @@ export function WorkQueueCard({
             {/* Meta comum — status (short code) · Real · interesse · contagens */}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
               <span className="flex items-center gap-1.5">
-                <PublicationStatusBadge statusId={publicationStatusId ?? null} compact />
+                <PublicationStatusBadge statusId={publicationStatusId ?? null} compact hiatusKind={hiatusKind ?? null} hiatusKindConfidence={hiatusKindConfidence ?? null} publicationStatusNote={publicationStatusNote ?? null} />
                 <PersonalStatusBadge statusId={personalStatusId ?? null} iconOnly />
               </span>
               {userScore != null && (

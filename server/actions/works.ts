@@ -40,6 +40,7 @@ import { fetchAllRows } from "@/lib/supabase/paginate"
 import { startUpdateJob, finishUpdateJob } from "@/lib/background/update-jobs"
 import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
+import { hiatusFieldsFor } from "@/lib/external/hiatus-kind"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
 import { recomputeAdultAuto } from "@/lib/tags/adult-classify"
@@ -1230,6 +1231,10 @@ async function persistNewWork(
       year_end: data.year_end ?? null,
       publication_status_id:
         data.publication_status_id ?? getPublicationStatusIdByName(data.publication_status),
+      // O texto do MU é fato da obra; o tipo de hiato sai dele AQUI, no servidor, nunca do
+      // form. Ver `hiatusFieldsFor` — é ele que garante que obra fora de hiato não carrega
+      // tipo de hiato, invariante que o CHECK da migration 183 também guarda.
+      ...hiatusFieldsFor(data.publication_status_note, data.publication_status),
       total_chapters: data.total_chapters ?? null,
       ai_eval_status: "pending",
       approved: opts.approvedByRole,
@@ -2819,10 +2824,20 @@ export interface ExternalWorkUpdate {
   tags?: string[]
   platformRatings?: Array<{ platform: string; rating?: number | null; votes?: number | null }>
   externalIds?: Record<string, string>
-  /** Texto pra coluna `works.observations`. Usado pelo update dialog pra
-   * pré-preencher com "Status in Country of Origin" do MU quando a obra está
-   * em Hiatus e a coluna está vazia (decisão tomada no client). */
-  observations?: string | null
+  /**
+   * "Status in Country of Origin" cru do MangaUpdates → `works.publication_status_note`, e
+   * daí `works.hiatus_kind` (migration 183).
+   *
+   * 🔴 Isto ERA `observations`, e o lugar estava errado. `observations` mora em
+   * `user_work_state` desde a Fase F — é anotação PESSOAL do leitor —, então "Atualizar
+   * dados" gravava um fato da obra na linha de quem clicou, e só quando o campo estava
+   * vazio. Medido nas 97 obras em hiato: o texto da fonte convivia com anotação da curadora
+   * na mesma string ("Hiatus since 11/20/2025 ⏎ Sem explicação do motivo ⏎ S4: 52 Chapters").
+   *
+   * ⚠️ Sem a condição "só se estiver vazio" que o client aplicava: aqui o dono é a FONTE, e
+   * uma nota nova sobrescreve a velha, como todo o resto do catálogo neste caminho.
+   */
+  publicationStatusNote?: string | null
 }
 
 export async function updateWorkExternalData(
@@ -2848,7 +2863,9 @@ async function doUpdateWorkExternalData(
     const supabase = createAdminClient()
     const { data: existingWork } = await supabase
       .from("works")
-      .select("title")
+      // `publication_status_id` entra porque a nota de status precisa saber se a obra está em
+      // hiato para virar `hiatus_kind`, e o caller pode mandar a nota sem mandar o status.
+      .select("title, publication_status_id")
       .eq("id", id)
       .maybeSingle()
     const previousSlug = existingWork?.title ? titleToSlug(existingWork.title) : null
@@ -2865,6 +2882,16 @@ async function doUpdateWorkExternalData(
     }
     if (updates.totalChapters !== undefined) workFields.total_chapters = updates.totalChapters ?? null
 
+    // ⚠️ Depende do STATUS, então precisa dele mesmo quando o caller não o mandou — senão uma
+    // atualização que só traz a nota classificaria contra `undefined` e zeraria o tipo de
+    // hiato de uma obra que segue em hiato. Cai pro status já gravado nesse caso.
+    if (updates.publicationStatusNote !== undefined) {
+      const statusName = updates.publicationStatus !== undefined
+        ? updates.publicationStatus
+        : getPublicationStatusNameById(existingWork?.publication_status_id ?? null)
+      Object.assign(workFields, hiatusFieldsFor(updates.publicationStatusNote, statusName))
+    }
+
     // "Atualizar dados" sempre carimba o timestamp de refresh de dados —
     // separado de updated_at (que o trigger toca em qualquer edição da linha).
     workFields.data_refreshed_at = new Date().toISOString()
@@ -2872,20 +2899,10 @@ async function doUpdateWorkExternalData(
     const { error } = await supabase.from("works").update(workFields).eq("id", id)
     if (error) return { error: error.message }
 
-    // `observations` é a única coluna PESSOAL que este caminho escreve (o resto é catálogo:
-    // título, status de publicação, capítulos totais, capas). Vai pro estado de QUEM EDITA
-    // ("Atualizar dados" é interativo); nos caminhos SEM sessão (refresh automático/cascata)
-    // o campo não vem preenchido — e se vier, cai no espelho do dono, o comportamento antigo.
-    // Só quando o caller de fato mandou o campo: `undefined` significa "não mexi", não "apague".
-    if (updates.observations !== undefined) {
-      const editorId = await getSessionUserId()
-      const mirror = editorId
-        ? await writeReadingState(editorId, [id], { observations: updates.observations ?? null })
-        : await mirrorOwnerState(await getOwnerUserId(), [id], {
-            observations: updates.observations ?? null,
-          })
-      if (mirror.error) return { error: mirror.error }
-    }
+    // ✅ Este caminho voltou a ser 100% CATÁLOGO. Ele escrevia `observations` — a única coluna
+    // pessoal que tocava — para guardar o "Status in Country of Origin" do MU; hoje esse texto
+    // tem coluna própria em `works` (`publication_status_note`, acima). A anotação do leitor
+    // segue sendo dele, e "Atualizar dados" não a sobrescreve mais.
 
     // Desarquivar ANTES de gravar capas: o usuário restaurou estas no diálogo, e o
     // filtro do syncExternalCovers barra tudo que ainda está no arquivo. Some daqui

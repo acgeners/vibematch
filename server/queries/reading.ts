@@ -4,6 +4,7 @@ import { pickPrimaryCover } from "@/lib/covers"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
+import type { HiatusKind } from "@/lib/external/hiatus-kind"
 
 type CoverRow = { url: string; is_primary: boolean; position: number }
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean }
@@ -28,6 +29,11 @@ export interface ReadingWork {
   nextChapterPredictedAt: string | null
   /** Quando esta obra foi verificada pela última vez. `null` até a migration 087 / nunca verificada. */
   chaptersCheckedAt: string | null
+  /** Qualifica o hiato (migration 183): separa "a S4 sai em setembro" de "parou há 4 anos". */
+  hiatusKind: HiatusKind | null
+  hiatusKindConfidence: "high" | "low" | null
+  /** Texto cru do MangaUpdates — a prova que o tooltip do badge mostra. */
+  publicationStatusNote: string | null
 }
 
 // Colunas da migration 087. Mantidas num select separado pra degradar fail-soft
@@ -69,6 +75,7 @@ export async function getReadingWorks(
 
   const baseSelect = `
     id, title, publication_status_id, total_chapters, is_adult,
+    hiatus_kind, hiatus_kind_confidence, publication_status_note,
     calculated_scores(expected_score),
     work_covers(url, is_primary, position),
     work_external_ids(source, external_id, is_rejected)`
@@ -90,6 +97,9 @@ export async function getReadingWorks(
     publication_status_id: number | null
     total_chapters: number | null
     is_adult?: boolean | null
+    hiatus_kind?: HiatusKind | null
+    hiatus_kind_confidence?: "high" | "low" | null
+    publication_status_note?: string | null
     last_chapter_released_at?: string | null
     next_chapter_predicted_at?: string | null
     chapters_checked_at?: string | null
@@ -116,6 +126,9 @@ export async function getReadingWorks(
       lastChapterReleasedAt: w.last_chapter_released_at ?? null,
       nextChapterPredictedAt: w.next_chapter_predicted_at ?? null,
       chaptersCheckedAt: w.chapters_checked_at ?? null,
+      hiatusKind: w.hiatus_kind ?? null,
+      hiatusKindConfidence: w.hiatus_kind_confidence ?? null,
+      publicationStatusNote: w.publication_status_note ?? null,
     }
   })
 

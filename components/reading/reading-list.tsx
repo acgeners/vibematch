@@ -153,8 +153,10 @@ const READING_STATE_ORDER: readonly ReadingState[] = [
   "uptodate", // 2 Em dia
   "trailing", // 3 Muito atrás
   "slowing", // 4 Desacelerando
-  "hiatus", // 5 Possível hiato
-  "behind", // 6 Atrasado
+  "season_break", // 5 Entre temporadas   ─┐ hiato de PUBLICAÇÃO, qualificado (migration 183)
+  "interrupted", // 6 Interrompida        ─┘
+  "hiatus", // 7 Possível hiato — hiato que a fonte não qualifica, ou "leu tudo e parou"
+  "behind", // 8 Atrasado
 ]
 
 const READING_STATE_CONFIG: Record<ReadingState, BandConfig> = {
@@ -185,6 +187,28 @@ const READING_STATE_CONFIG: Record<ReadingState, BandConfig> = {
     bar: "bg-orange-500",
     progress: "bg-orange-500",
     chip: "border-orange-500/30 bg-orange-500/15 text-orange-600 dark:text-orange-400",
+  },
+  /**
+   * As duas bandas de hiato QUALIFICADO. Cor própria porque nesta superfície a cor é o
+   * organizador da lista (cada banda já tem a sua) — não é o caso do badge de publicação, onde
+   * os dois tipos dividem o âmbar do status e quem separa é a forma.
+   *
+   * Azul para a espera previsível, ardósia para a parada sem previsão: a segunda perde
+   * saturação de propósito, porque é a única das duas em que não há nada acontecendo.
+   */
+  season_break: {
+    label: "Entre temporadas",
+    hint: "a próxima temporada já foi anunciada",
+    bar: "bg-sky-500",
+    progress: "bg-sky-500",
+    chip: "border-sky-500/30 bg-sky-500/15 text-sky-600 dark:text-sky-400",
+  },
+  interrupted: {
+    label: "Publicação interrompida",
+    hint: "parou no meio da temporada, sem previsão de volta",
+    bar: "bg-slate-500",
+    progress: "bg-slate-500",
+    chip: "border-slate-500/30 bg-slate-500/15 text-slate-600 dark:text-slate-400",
   },
   hiatus: {
     label: "Possível hiato",
@@ -222,6 +246,7 @@ function classifyReadingState(
     publicationHiatus:
       w.publicationStatusId != null &&
       PUBLICATION_STATUSES_BY_ID[w.publicationStatusId]?.status === "Hiatus",
+    hiatusKind: w.hiatusKind,
   })
 }
 
@@ -1219,7 +1244,13 @@ function ReadingCard({
             <div className="flex shrink-0 items-center gap-1.5">
               {work.isAdult && <AdultBadge className="px-1.5 py-0" />}
               <ReadingStatusBadge pending={pending} cfg={cfg} />
-              <PublicationStatusBadge statusId={work.publicationStatusId} iconOnly />
+              <PublicationStatusBadge
+                statusId={work.publicationStatusId}
+                iconOnly
+                hiatusKind={work.hiatusKind}
+                hiatusKindConfidence={work.hiatusKindConfidence}
+                publicationStatusNote={work.publicationStatusNote}
+              />
             </div>
           </div>
 

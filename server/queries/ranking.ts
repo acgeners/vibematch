@@ -7,6 +7,7 @@ import {
   getPersonalStatusNameById,
 } from "@/lib/constants/status-lookups"
 import { pickPrimaryCover } from "@/lib/work-derived"
+import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 import { getAllActiveSynopsisPredictions } from "@/server/queries/synopsis-quality"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
@@ -88,6 +89,11 @@ export interface RankingEntry {
   publicationStatusId: number | null
   publicationStatusShort: string | null
   publicationStatusColor: string | null
+  /** Qualifica o hiato (migration 183) — o glifo »/— do badge sai daqui. */
+  hiatusKind: HiatusKind | null
+  hiatusKindConfidence: "high" | "low" | null
+  /** Texto cru do MangaUpdates; é a prova que o tooltip do badge mostra. */
+  publicationStatusNote: string | null
   personalStatus: string
   personalStatusId: number | null
   personalStatusSymbol: string | null
@@ -544,6 +550,7 @@ export async function getRanking(
       .from("works")
       .select(`
         id, title, publication_status_id, ai_eval_status,
+        hiatus_kind, hiatus_kind_confidence, publication_status_note,
         total_chapters, is_archived, is_adult,
         canonical_synopsis, year, updated_at,
         calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, chance_score, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
@@ -679,6 +686,9 @@ export async function getRanking(
       publicationStatusId,
       publicationStatusShort: publicationStatusDisplay?.short ?? null,
       publicationStatusColor: publicationStatusDisplay?.color ?? null,
+      hiatusKind: w.hiatus_kind ?? null,
+      hiatusKindConfidence: w.hiatus_kind_confidence ?? null,
+      publicationStatusNote: w.publication_status_note ?? null,
       personalStatus: personalStatusNameOrDefault(personalStatusId),
       personalStatusId,
       personalStatusSymbol:
