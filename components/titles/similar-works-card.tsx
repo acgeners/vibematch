@@ -23,6 +23,12 @@ interface SimilarWorksCardProps {
   works: SimilarWork[]
   className?: string
   /**
+   * A obra desta página, para o atalho "Cruzar com outras" (`/descobrir`).
+   *
+   * Opcional: sem ela o botão some, em vez de levar para uma busca sem semente.
+   */
+  workId?: string
+  /**
    * Modelo e data do embedding DESTA obra — o que ordena a lista.
    *
    * Vai no tooltip que já explica o método, e não num selo ✨ como o resto da
@@ -204,7 +210,7 @@ function Metric({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-export function SimilarWorksCard({ works, className, embedding }: SimilarWorksCardProps) {
+export function SimilarWorksCard({ works, className, embedding, workId }: SimilarWorksCardProps) {
   const [sortBy, setSortBy] = useState<"sim" | "nota">("sim")
   // "Não lidas" por padrão: recomendação serve pra achar a PRÓXIMA leitura.
   // O toggle "Todas" traz de volta as já lidas/em andamento.
@@ -294,6 +300,17 @@ export function SimilarWorksCard({ works, className, embedding }: SimilarWorksCa
           </CardTitle>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:shrink-0">
+            {/* Esta lista parte de UMA obra. O atalho leva pro cruzamento com várias +
+                o alinhamento com o perfil — a pergunta seguinte, não a mesma. */}
+            {workId && (
+              <Link
+                href={`/descobrir?seeds=${workId}`}
+                className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400"
+              >
+                <Radar className="h-3.5 w-3.5" />
+                Cruzar com outras
+              </Link>
+            )}
             <div className="flex items-center gap-2.5">
               <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground/60">
                 Mostrar

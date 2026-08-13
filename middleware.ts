@@ -29,8 +29,14 @@ const CONSOLE_PREFIXES = ["/curadoria", "/ai-evaluation", "/settings", "/ai-usag
  * corrigida na fonte (`getTasteProfileStatusAction` devolve vazio sem sessão); este
  * gate é a 2ª camada — e o CLAUDE.md já descrevia a rota como "**a SUA biblioteca** —
  * tudo aqui é de quem olha; nada é do catálogo", o que sempre pediu sessão.
+ *
+ * `/descobrir` ("Mais como estas") entra pela mesma régua: metade do resultado é o
+ * ALINHAMENTO de quem olha (`personal_fit_percentile`), e o filtro padrão esconde o que
+ * a pessoa já leu. Sem sessão a página não tem sujeito — e os leitores per-usuário
+ * devolveriam vazio, deixando um slider cuja metade não faz nada e uma lista que ignora
+ * o que já foi lido. Gatear é mais honesto do que renderizar meia página.
  */
-const SIGNED_IN_PREFIXES = ["/conta", "/painel"]
+const SIGNED_IN_PREFIXES = ["/conta", "/painel", "/descobrir"]
 
 function matchesPrefix(pathname: string, prefixes: string[]): boolean {
   return prefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`))

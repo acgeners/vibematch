@@ -1358,7 +1358,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             </TabsContent>
 
             <TabsContent value="recommendations" className="mt-0 space-y-5">
-              <SimilarWorksCard works={similarWorks} embedding={embeddingProvenance} />
+              <SimilarWorksCard works={similarWorks} embedding={embeddingProvenance} workId={work.id} />
             </TabsContent>
 
             <TabsContent value="scores" className="mt-0 space-y-6">
