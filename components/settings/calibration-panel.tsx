@@ -17,8 +17,7 @@ import type { CalibrationHistoryEntry } from "@/server/actions/settings"
 import { cn } from "@/lib/utils"
 import type { FormulaConfig } from "@/types/domain"
 import { CRITERION_SLUGS } from "@/types/domain"
-import { CRITERIA_INFO } from "@/lib/constants/criteria"
-import { POST_READING_WEIGHT_LABELS } from "@/lib/constants/post-reading-criteria"
+import { resolveFeatureLabel as featureLabel } from "@/lib/calculations/ridge-feature-labels"
 import type { BucketBreakdown, CalibrationDiff } from "@/lib/calculations/calibration"
 import {
   selectPrimaryModelMetric,
@@ -534,57 +533,15 @@ function toneClasses(tone: "primary" | "muted" | "personal" | "neutral"): string
   }
 }
 
-// Rótulos amigáveis pros nomes crus de feature na lista "Ver pesos por feature".
-// Os 9 critérios IA reusam CRITERIA_INFO e os post-scores reusam os labels
-// pós-leitura; o restante é mapeado aqui.
-const FEATURE_LABELS: Record<string, string> = {
-  "IA(n)": "Nota da IA (combinada)",
-  "Nota.M": "Média das plataformas",
-  LogVotos: "Volume de votos",
-  "Cps.N": "Capítulos",
-  SinopseScore: "Qualidade da sinopse",
-  LovedTagOverlap: "Tags que você amou",
-  AvoidedTagOverlap: "Tags que você evita",
-  CriterionFitScore: "Alinhamento de critérios",
-  ReleaseAge: "Idade da obra",
-  RunLength: "Duração",
-  ObsAdjustment: "Ajuste de observação",
-  MeanPostScore: "Nota pós-leitura (média)",
-}
-
-const STATUS_FEATURE_LABELS: Record<string, string> = {
-  Ongoing: "Em andamento",
-  Completed: "Completo",
-  Hiatus: "Hiato",
-  Cancelled: "Cancelado",
-  Unknown: "Desconhecido",
-}
-
-const ORIGIN_FEATURE_LABELS: Record<string, string> = {
-  ko: "Coreano (manhwa)",
-  ja: "Japonês (mangá)",
-  zh: "Chinês (manhua)",
-  other: "Outro",
-  unknown: "Desconhecido",
-}
-
-/** Resolve o nome cru de uma feature do Ridge pra um rótulo legível. */
-function featureLabel(name: string): string {
-  const criterion = CRITERIA_INFO[name as keyof typeof CRITERIA_INFO]
-  if (criterion) return criterion.name
-  const post = POST_READING_WEIGHT_LABELS[name as keyof typeof POST_READING_WEIGHT_LABELS]
-  if (post) return `Pós-leitura: ${post}`
-  if (FEATURE_LABELS[name]) return FEATURE_LABELS[name]
-  if (name.startsWith("Status_")) {
-    const raw = name.slice("Status_".length)
-    return `Status: ${STATUS_FEATURE_LABELS[raw] ?? raw}`
-  }
-  if (name.startsWith("Origin_")) {
-    const raw = name.slice("Origin_".length)
-    return `Origem: ${ORIGIN_FEATURE_LABELS[raw] ?? raw}`
-  }
-  return name
-}
+/*
+ * 🔴 Os três mapas de rótulo e o `featureLabel` viviam AQUI, byte a byte iguais aos de
+ * `lib/calculations/ridge-feature-labels.ts` — o comentário de lá até admitia ("Espelha o
+ * mapa do painel de Calibração"). Duas cópias do nome da MESMA feature é a armadilha do
+ * `LOW_BALANCE_USD`: em 2026-08-13 `SinopseScore` foi renomeado de "Qualidade da sinopse"
+ * para "Interesse na obra" (o valor vem de `synopsis_quality`, o ♥ do Interesse), e sem
+ * este import esta tela continuaria com o nome velho enquanto a `/conta/perfil` mostrava o
+ * novo — duas telas discordando sobre a mesma linha do modelo.
+ */
 
 function RidgeFeatureImportance({
   ridge,

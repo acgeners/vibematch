@@ -81,7 +81,12 @@ const STATUS: ProfileStatus = {
   regenCostUsd: 0.4,
 }
 
-const work = (n: number, expected: number, user: number | null): AlignedWork => ({
+const work = (
+  n: number,
+  expected: number,
+  user: number | null,
+  over?: Partial<AlignedWork>,
+): AlignedWork => ({
   id: `w${n}`,
   title: `Obra ${n}`,
   coverUrl: null,
@@ -92,6 +97,10 @@ const work = (n: number, expected: number, user: number | null): AlignedWork => 
   totalChapters: 100,
   userScore: user,
   expectedScore: expected,
+  // 2 = Ongoing, 3 = Hiatus (PUBLICATION_STATUSES_BY_ID)
+  publicationStatusId: 2,
+  chanceScore: 62,
+  ...over,
 })
 
 const ALIGNED: AlignedWorkSplit = {
@@ -251,6 +260,58 @@ describe("aba Tags e temas", () => {
 })
 
 describe("aba O que isso muda", () => {
+  it("🔴 o card da fila mostra ESTADO, afinidade e chance — cada um rotulado", () => {
+    // A fila responde "o que leio agora?", e o estado é o dado que decide se vale COMEÇAR:
+    // entre as 60 obras de maior Nota Prevista do catálogo, 12 (20%) estão em hiato ou
+    // canceladas. Afinidade e chance são dois "%" vizinhos falando de gosto — sem rótulo,
+    // leem como a mesma medida em desacordo.
+    renderPanel({
+      aligned: {
+        ...ALIGNED,
+        unread: [work(11, 8.7, null, { publicationStatusId: 3, personalFitPercentile: 94 })],
+      },
+    })
+    goTo(/O que isso muda/)
+    const card = screen.getByText("Obra 11").closest("li")!
+    expect(within(card).getByText("afinidade")).toBeTruthy()
+    expect(within(card).getByText("94%")).toBeTruthy()
+    expect(within(card).getByText("chance")).toBeTruthy()
+    expect(within(card).getByText("62%")).toBeTruthy()
+    // 3 = Hiatus, e o selo é o do app (modo compacto ⇒ o código curto do banco)
+    expect(within(card).getByText("HIA")).toBeTruthy()
+  })
+
+  it("chance vazia não vira número: sem previsão de verdade, sai '—'", () => {
+    // `chance_is_stub` já chega como null da query — com menos de 20 obras avaliadas o
+    // valor seria a média do treino com cara de previsão.
+    renderPanel({
+      aligned: { ...ALIGNED, unread: [work(11, 8.7, null, { chanceScore: null })] },
+    })
+    goTo(/O que isso muda/)
+    const card = screen.getByText("Obra 11").closest("li")!
+    expect(within(card).getByText("chance")).toBeTruthy()
+    // pelo título, não pelo texto: "—" também é o vazio de outras células
+    expect(within(card).getByTitle(/probabilidade de você gostar/i).textContent).toBe("—")
+    // e a afinidade, que TEM valor, segue impressa — o vazio é só da chance
+    expect(within(card).getByTitle(/casa com seu perfil/i).textContent).toBe("90%")
+  })
+
+  it("🔴 driver SEM explicação não ganha o pontilhado que anuncia o tooltip", () => {
+    // O `resolveFeatureDescription` devolve null pra feature que ninguém previu, e a UI
+    // tem que respeitar isso: um gatilho que abre vazio é pior do que uma linha muda.
+    renderPanel({
+      drivers: [
+        { name: "SinopseScore", label: "Interesse na obra", description: "O quanto…", coef: 1 },
+        { name: "FeatureNova", label: "FeatureNova", description: null, coef: 0.5 },
+      ],
+    })
+    goTo(/O que isso muda/)
+    const comTexto = screen.getByText("Interesse na obra")
+    const semTexto = screen.getByText("FeatureNova")
+    expect(comTexto.className).toContain("decoration-dotted")
+    expect(semTexto.className).not.toContain("decoration-dotted")
+  })
+
   it("pagina as próximas leituras e o rank continua entre páginas", () => {
     renderPanel()
     goTo(/O que isso muda/)
@@ -288,5 +349,61 @@ describe("aba A prova", () => {
     renderPanel()
     const card = screen.getByText("Obra 1").closest("li")!
     expect(within(card).getByTitle(/erro do modelo/i).textContent).toContain("0,3")
+  })
+
+  it("🔴 o rodapé do card é a PRECISÃO do modelo, não o alinhamento da obra", () => {
+    // Numa lista de obras JÁ LIDAS ordenada pela Nota Prevista, o alinhamento é quase
+    // constante (5 dos 6 cards reais marcavam ≥97%) e a pergunta da seção é outra: o
+    // quanto o MODELO acerta. O alinhamento continua na trilha de NÃO-lidas, onde ele
+    // de fato decide o que ler.
+    renderPanel()
+    const card = screen.getByText("Obra 1").closest("li")!
+    // erro 0,3 na escala de 0–10 ⇒ 97%
+    expect(within(card).getByText("97%")).toBeTruthy()
+    // o percentil de alinhamento da fixture é 90 — não pode sobrar na tira
+    expect(within(card).queryByText("90%")).toBeNull()
+  })
+
+  it("🔴 capítulos lidos ficam na CAPA, longe de qualquer barra ou porcentagem", () => {
+    // Na versão anterior "215/228" ficava colado numa barra de alinhamento em 99% e
+    // era lido como progresso de leitura — batia por acaso em 4 dos 6 cards reais.
+    renderPanel()
+    const card = screen.getByText("Obra 1").closest("li")!
+    const chapters = within(card).getByTitle(/capítulos lidos/i)
+    expect(chapters.textContent).toBe("100/100")
+    // é sobreposição (mora na capa), não item da tira
+    expect(chapters.className).toContain("absolute")
+    // e o invariante que interessa: a tira de números não hospeda capítulos
+    const strip = within(card).getByText("97%").closest("div")!
+    expect(within(strip).queryByTitle(/capítulos lidos/i)).toBeNull()
+  })
+
+  it("acerto exato não ganha sinal — '+0' apareceu na tela", () => {
+    // Visto no app rodando: obra com 8,6 previsto e 8,6 dado saía "+0", que afirma
+    // uma direção que a diferença não tem. E o erro cravado em 1 ponto saía "1",
+    // fora da coluna de uma casa que os outros cards formam.
+    renderPanel({
+      aligned: { ...ALIGNED, read: [work(1, 8.6, 8.6), work(2, 7.5, 8.5)] },
+    })
+    const exato = screen.getByText("Obra 1").closest("li")!
+    expect(within(exato).getByTitle(/erro do modelo/i).textContent).toBe("0,0")
+    expect(within(exato).getByText("100%")).toBeTruthy()
+
+    const cravado = screen.getByText("Obra 2").closest("li")!
+    expect(within(cravado).getByTitle(/erro do modelo/i).textContent).toBe("+1,0")
+    expect(within(cravado).getByText("90%")).toBeTruthy()
+  })
+
+  it("as abas são um controle segmentado, e a ativa continua anunciada", () => {
+    // O sublinhado de 2px sumia entre o hero e os cards. Trocar por trilho segmentado
+    // não pode custar a semântica: os testes acima navegam por getByRole("tab").
+    renderPanel()
+    const tabs = screen.getAllByRole("tab")
+    expect(tabs).toHaveLength(4)
+    expect(tabs.filter((t) => t.getAttribute("aria-selected") === "true")).toHaveLength(1)
+    goTo(/Tags e temas/)
+    expect(screen.getByRole("tab", { name: /Tags e temas/ }).getAttribute("aria-selected")).toBe(
+      "true",
+    )
   })
 })

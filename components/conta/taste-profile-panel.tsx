@@ -28,7 +28,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { AiProvenanceSeal } from "@/components/ui/ai-provenance"
-import { AlignmentCell } from "@/components/ranking/ranking-cells"
+import { PublicationStatusBadge } from "@/components/ui/status-badge"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { GENRE_NAMES, TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
@@ -426,45 +426,81 @@ export function TasteProfilePanel({
         <EmptyState insufficient={insufficient} />
       ) : (
         <>
-          {/* ═══════════ ABAS ═══════════ */}
+          {/* ═══════════ ABAS ═══════════
+           * Controle SEGMENTADO, não sublinhado: espremidas entre o hero violeta e os
+           * cards, um traço de 2px em texto de 13,5px era a coisa mais leve da página —
+           * e é a navegação principal dela.
+           *
+           * 🔴 O relevo vem do TRILHO ESCURECER, não da sombra. A 1ª tentativa manteve o
+           * fundo do trilho na claridade do card (`bg-card/60`, ~13% de luminosidade no
+           * escuro) e só somou `inset shadow`: ficou indistinguível da versão chapada.
+           * Sombra interna sobre fundo claro não vira sulco.
+           *
+           * ⚠️ Nada de `border-<cor>` aqui: o `* { border-color }` do globals.css vence
+           * as utilities do Tailwind v4 (ver CLAUDE.md). Sulco e aresta são box-shadow.
+           */}
           <div
             role="tablist"
             aria-label="Seções do perfil de gosto"
-            className="flex flex-wrap gap-1 border-b border-border/70"
+            className={cn(
+              "inline-flex flex-wrap gap-[3px] rounded-[11px] p-[5px]",
+              // o sulco: escurece o próprio trilho nos dois temas
+              "bg-black/[.07] dark:bg-black/40",
+              "shadow-[inset_0_2px_4px_rgba(0,0,0,0.16),0_1px_0_rgba(255,255,255,0.05)]",
+              "dark:shadow-[inset_0_2px_5px_rgba(0,0,0,0.8),0_1px_0_rgba(255,255,255,0.06)]",
+            )}
           >
-            {TABS.map((t, i) => (
-              <button
-                key={t.key}
-                role="tab"
-                id={`perfil-tab-${t.key}`}
-                aria-controls={`perfil-painel-${t.key}`}
-                aria-selected={tab === t.key}
-                tabIndex={tab === t.key ? 0 : -1}
-                onClick={() => setTab(t.key)}
-                onKeyDown={(e) => {
-                  const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0
-                  if (!d) return
-                  e.preventDefault()
-                  const next = TABS[(i + d + TABS.length) % TABS.length]
-                  setTab(next.key)
-                  document.getElementById(`perfil-tab-${next.key}`)?.focus()
-                }}
-                className={cn(
-                  "-mb-px border-b-2 px-3 py-2 text-[13.5px] font-medium outline-none transition-colors",
-                  "focus-visible:rounded-t-md focus-visible:ring-2 focus-visible:ring-ring",
-                  tab === t.key
-                    ? "border-sky-500 text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {t.label}
-                {t.count != null && (
-                  <span className="ml-1.5 text-[11px] tabular-nums text-muted-foreground">
-                    {t.count}
-                  </span>
-                )}
-              </button>
-            ))}
+            {TABS.map((t, i) => {
+              const active = tab === t.key
+              return (
+                <button
+                  key={t.key}
+                  role="tab"
+                  id={`perfil-tab-${t.key}`}
+                  aria-controls={`perfil-painel-${t.key}`}
+                  aria-selected={active}
+                  tabIndex={active ? 0 : -1}
+                  onClick={() => setTab(t.key)}
+                  onKeyDown={(e) => {
+                    const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0
+                    if (!d) return
+                    e.preventDefault()
+                    const next = TABS[(i + d + TABS.length) % TABS.length]
+                    setTab(next.key)
+                    document.getElementById(`perfil-tab-${next.key}`)?.focus()
+                  }}
+                  className={cn(
+                    "inline-flex items-center gap-[7px] rounded-lg px-[15px] py-2",
+                    "text-[13.5px] font-semibold outline-none transition-[background-color,color]",
+                    "focus-visible:ring-2 focus-visible:ring-ring",
+                    active
+                      ? [
+                          "bg-primary text-primary-foreground",
+                          // a aresta sólida de 3px é o que faz virar TECLA — e é o único
+                          // elemento da página que se parece com um botão físico, então
+                          // não disputa significado com nenhum outro sinal do app
+                          "-translate-y-px",
+                          "shadow-[0_3px_0_hsl(201_85%_40%),0_4px_6px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.6)]",
+                        ]
+                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+                  )}
+                >
+                  {t.label}
+                  {t.count != null && (
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 py-px font-mono text-[10.5px] font-bold tabular-nums",
+                        active
+                          ? "bg-primary-foreground/15 text-primary-foreground/85"
+                          : "bg-foreground/[.08] text-muted-foreground",
+                      )}
+                    >
+                      {t.count}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
           </div>
 
           <div
@@ -699,7 +735,10 @@ function ProofTab({
             icon={<Trophy />}
             accent="emerald"
             title="O que o modelo previu, ao lado do que você deu"
-            subtitle={`entre as ${aligned.readTotal} que você leu e avaliou · ordenadas pela Nota Prevista`}
+            // O rótulo do "%" é dito UMA vez aqui, e não seis vezes dentro dos cards:
+            // repetir "alinhamento" em cada tira era o que tornava a linha impossível
+            // de distribuir — rótulo + barra + número pra um número só.
+            subtitle={`entre as ${aligned.readTotal} que você leu e avaliou · ordenadas pela Nota Prevista · o % embaixo é a precisão do modelo nesta obra`}
           />
           <ol className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6 lg:gap-3">
             {aligned.read.map((work, i) => (
@@ -737,10 +776,55 @@ function ProofTab({
   )
 }
 
+/** Escala em que a precisão é lida: a mesma 0–10 em que a nota é escrita. */
+const PRECISION_SCALE = 10
+
+/**
+ * Quão perto a Nota Prevista chegou da nota que a pessoa deu, nesta obra.
+ *
+ * ⚠️ Ela fica sempre alta — a metade do meio das 105 obras lidas cai entre 97% e 91%
+ * (medido em 2026-08-13). Isso é DE PROPÓSITO e não é o mesmo defeito da barra de
+ * alinhamento que saiu daqui: o modelo é feito pra acertar, e mesmo o pior caso do
+ * catálogo (1,96 pt, quase 3× o cvMAE de 0,67) continua sendo uma previsão utilizável.
+ * O que separa acerto de erro grande é a COR, que segue a mesma faixa do chip do erro.
+ */
+function precisionPct(expected: number, user: number): number {
+  return Math.round(100 * (1 - Math.min(1, Math.abs(user - expected) / PRECISION_SCALE)))
+}
+
+/**
+ * O erro com sinal, sempre com uma casa.
+ *
+ * ⚠️ Duas coisas que o `nf` sozinho errava, e as duas apareceram na tela: acerto exato
+ * saía como "+0" — sinal numa diferença que não tem direção —, e erro de 1 ponto cravado
+ * saía "1" em vez de "1,0", quebrando a coluna de números que os outros cards formam.
+ */
+function deltaLabel(delta: number): string {
+  const abs = Math.abs(delta).toLocaleString("pt-BR", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })
+  if (abs === "0,0") return abs
+  return `${delta >= 0 ? "+" : "−"}${abs}`
+}
+
 /**
  * Card da trilha de confirmação: PREVISTA → SUA NOTA, cada uma rotulada, com o erro
- * do modelo ao lado. Mostrar só a nota da pessoa (como na v2) desperdiçava a única
- * comparação que a página tem para provar acerto obra a obra.
+ * do modelo rotulando a SETA — que é o que ele é, o salto da previsão até a nota real.
+ * Mostrar só a nota da pessoa (como na v2) desperdiçava a única comparação que a
+ * página tem para provar acerto obra a obra.
+ *
+ * 🔴 O rodapé é a PRECISÃO, e antes era o alinhamento. Duas razões, e a segunda é a
+ * que decidiu: (1) numa lista de obras JÁ LIDAS e ordenadas pela Nota Prevista, o
+ * alinhamento é quase constante — 5 dos 6 cards marcavam ≥97% e as seis barras
+ * saíam iguais; (2) a pergunta desta seção é o quanto o MODELO acerta, não o quanto
+ * a obra combina com o gosto — esse é o assunto da trilha de não-lidas, onde o
+ * `AlignmentCell` continua.
+ *
+ * ⚠️ Capítulos lidos saíram da tira e viraram selo na capa. Ali embaixo, colados na
+ * barra de alinhamento, eles produziam o pior bug da versão anterior: "215/228"
+ * seguido de uma barra em 99% lia como progresso de leitura — e batia, por acaso, em
+ * 4 dos 6 cards. O caso que denunciava era o 91/91 com a barra em 85%.
  */
 function ReadWorkCard({ work, rank }: { work: AlignedWork; rank: number }) {
   const delta =
@@ -748,6 +832,11 @@ function ReadWorkCard({ work, rank }: { work: AlignedWork; rank: number }) {
   // ±0,5 é meio ponto na escala de 0–10 que a tela mostra — abaixo disso a previsão
   // e a nota arredondam para o mesmo lugar na maioria dos casos.
   const closeEnough = delta != null && Math.abs(delta) <= 0.5
+  // Chip e rodapé falam do MESMO erro: tom único, senão a mesma obra sairia marcada
+  // como acerto num canto e como falha no outro.
+  const errorTone = closeEnough
+    ? "text-emerald-600 dark:text-emerald-400"
+    : "text-amber-600 dark:text-amber-400"
   return (
     <li className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20">
       <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted">
@@ -759,6 +848,14 @@ function ReadWorkCard({ work, rank }: { work: AlignedWork; rank: number }) {
         <span className="absolute left-1.5 top-1.5 grid size-5 place-items-center rounded-full bg-black/60 font-mono text-[11px] font-semibold text-white">
           {rank}
         </span>
+        {work.totalChapters ? (
+          <span
+            title="capítulos lidos"
+            className="absolute bottom-1.5 right-1.5 rounded-md bg-black/65 px-1.5 py-px font-mono text-[10px] leading-[1.4] tabular-nums text-white/85 backdrop-blur-[2px]"
+          >
+            {work.chaptersRead}/{work.totalChapters}
+          </span>
+        ) : null}
       </div>
       <div className="flex flex-1 flex-col gap-1.5 p-2">
         <WorkTitleLink
@@ -766,34 +863,43 @@ function ReadWorkCard({ work, rank }: { work: AlignedWork; rank: number }) {
           workId={work.id}
           className="line-clamp-2 min-h-[2rem] text-xs font-medium leading-snug hover:underline"
         />
-        <div className="mt-auto flex flex-col gap-1.5 pt-1">
+        {/* ⚠️ Aro e separador precisam de UMA cor por tema: um fio branco a 4% é
+            invisível sobre o `muted` claro, e um preto a 6% some no escuro. Visto na
+            tela — no claro a caixa ficava sem contorno e sem divisória. */}
+        <div className="mt-auto pt-1">
           {work.expectedScore != null && work.userScore != null && (
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 rounded-md bg-muted/60 px-1.5 py-1">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-0.5 rounded-lg bg-muted/60 px-1.5 pt-1 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
               <ScorePart label="prevista" value={nf(work.expectedScore)} tone="sky" />
-              <ArrowRight className="size-3 text-muted-foreground" />
+              <span className="flex min-w-0 flex-col items-center gap-px px-px">
+                {delta != null && (
+                  <span
+                    title="erro do modelo nesta obra"
+                    className={cn(
+                      "whitespace-nowrap rounded-full px-1 py-px font-mono text-[9.5px] font-bold leading-none",
+                      closeEnough ? "bg-emerald-500/15" : "bg-amber-500/15",
+                      errorTone,
+                    )}
+                  >
+                    {deltaLabel(delta)}
+                  </span>
+                )}
+                <ArrowRight className="mb-0.5 size-3 text-muted-foreground/80" />
+              </span>
               <ScorePart label="sua nota" value={nf(work.userScore)} tone="emerald" />
-            </div>
-          )}
-          <div className="flex items-center justify-between gap-1.5 text-[10.5px] tabular-nums text-muted-foreground">
-            <span className="truncate">
-              {work.totalChapters ? `${work.chaptersRead}/${work.totalChapters}` : "—"}
-            </span>
-            {delta != null && (
+              {/* Separador por inset shadow, não `border-t`: o `* { border-color }` do
+                  globals.css vence a utility de cor no Tailwind v4 (ver CLAUDE.md). */}
               <span
-                title="erro do modelo nesta obra"
+                title={`precisão da Nota Prevista nesta obra — diferença de ${deltaLabel(delta ?? 0)} ponto na escala de 0–10`}
                 className={cn(
-                  "shrink-0 rounded-full px-1.5 font-mono font-semibold",
-                  closeEnough
-                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-                    : "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+                  "col-span-full mt-1 pb-1 pt-[3px] text-center font-mono text-[10.5px] font-bold tabular-nums",
+                  "shadow-[inset_0_1px_0_rgba(0,0,0,0.1)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]",
+                  errorTone,
                 )}
               >
-                {delta >= 0 ? "+" : "−"}
-                {nf(Math.abs(delta))}
+                {precisionPct(work.expectedScore, work.userScore)}%
               </span>
-            )}
-          </div>
-          <AlignmentCell value={work.personalFit} percentile={work.personalFitPercentile} />
+            </div>
+          )}
         </div>
       </div>
     </li>
@@ -811,12 +917,14 @@ function ScorePart({
 }) {
   return (
     <span className="min-w-0 text-center">
-      <span className="block text-[8.5px] uppercase leading-tight tracking-wide text-muted-foreground">
+      {/* `whitespace-nowrap`: "SUA NOTA" quebrava em duas linhas e desalinhava os dois
+          lados da comparação, que é justamente o que o card existe pra parear. */}
+      <span className="block whitespace-nowrap text-[8.5px] uppercase leading-tight tracking-tight text-muted-foreground">
         {label}
       </span>
       <span
         className={cn(
-          "block font-mono text-sm font-bold leading-tight tabular-nums",
+          "block font-mono text-base font-bold leading-none tabular-nums",
           tone === "sky"
             ? "text-sky-600 dark:text-sky-400"
             : "text-emerald-600 dark:text-emerald-400",
@@ -1295,7 +1403,9 @@ function RecommendationTab({
             icon={<ArrowRight />}
             accent="blue"
             title="Próximas leituras alinhadas"
-            subtitle={`maior Nota Prevista entre as ${aligned.unreadTotal} que você ainda não leu`}
+            // Os dois "%" do card são explicados UMA vez aqui, e não em seis rótulos por
+            // linha — mesma escolha do rail de "A prova".
+            subtitle={`maior Nota Prevista entre as ${aligned.unreadTotal} que você ainda não leu · afinidade = o quanto casa com seu perfil · chance = probabilidade de você gostar`}
           />
           <ol className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6 lg:gap-3">
             {slice.map((work, i) => (
@@ -1355,7 +1465,44 @@ function RecommendationTab({
   )
 }
 
+/** Faixas do `AlignmentCell`, aplicadas ao percentil de afinidade. */
+function fitTone(percentile: number): string {
+  if (percentile >= 75) return "text-emerald-600 dark:text-emerald-400"
+  if (percentile >= 50) return "text-amber-600 dark:text-amber-400"
+  if (percentile >= 25) return "text-orange-600 dark:text-orange-400"
+  return "text-muted-foreground"
+}
+
+/**
+ * Escala PRÓPRIA da chance — não dá pra reusar a da afinidade.
+ *
+ * 🔴 Os dois são "%" e falam de gosto, mas moram em escalas diferentes: medido no catálogo
+ * em 2026-08-13, a afinidade (percentil) espalha por inteiro — p10 10 · mediana 49 · p90 90
+ * —, enquanto a chance vive embaixo — p10 12 · mediana 38 · p90 60, máximo 82. Pintar 62%
+ * de "mediano" nos dois faria a chance parecer sempre ruim: 62 ali é o topo do catálogo.
+ */
+function chanceTone(chance: number): string {
+  if (chance >= 60) return "text-emerald-600 dark:text-emerald-400"
+  if (chance >= 35) return "text-amber-600 dark:text-amber-400"
+  return "text-muted-foreground"
+}
+
+/**
+ * Card da fila de leitura. Responde "o que leio agora?", e por isso carrega três coisas que
+ * o card de "A prova" não carrega: o ESTADO de publicação, a afinidade e a chance.
+ *
+ * ⚠️ A afinidade FICA aqui, e saiu do card de lidas, porque só aqui ela informa: naquele
+ * rail (topo da Nota Prevista entre obras já lidas) 5 dos 6 cards marcavam ≥97% e as barras
+ * saíam iguais; aqui vai de 36% a 97% nos mesmos seis.
+ *
+ * 🔴 A folga do título sobe pro TOPO do corpo (`justify-end`), e isso não é estética. O
+ * título tem slot fixo de duas linhas: com um título de uma linha só, 16px ficavam em branco
+ * ENTRE o nome da obra e o estado — um buraco no meio do bloco de texto. Ancorado na base, o
+ * mesmo branco encosta na capa, onde lê como respiro, e as caixas dos seis cards continuam
+ * alinhadas.
+ */
 function UnreadWorkCard({ work, rank }: { work: AlignedWork; rank: number }) {
+  const percentile = work.personalFitPercentile
   return (
     <li className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20">
       <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted">
@@ -1368,29 +1515,82 @@ function UnreadWorkCard({ work, rank }: { work: AlignedWork; rank: number }) {
           {rank}
         </span>
       </div>
-      <div className="flex flex-1 flex-col gap-1.5 p-2">
+      <div className="flex flex-1 flex-col justify-end gap-1.5 p-2">
         <WorkTitleLink
           title={work.title}
           workId={work.id}
-          className="line-clamp-2 min-h-[2rem] text-xs font-medium leading-snug hover:underline"
+          className="line-clamp-2 text-xs font-medium leading-snug hover:underline"
         />
-        <div className="mt-auto flex flex-col gap-1.5 pt-1">
+        <div className="flex flex-col gap-1.5">
+          {/* Estado e tamanho como um PAR de pastilhas. O selo é o do app (`compact` =
+              símbolo + o código curto do banco); os capítulos ganharam a mesma altura,
+              raio e respiro — soltos em texto mono ao lado de um selo com borda, eles
+              liam como legenda de outra coisa. */}
+          <div className="flex flex-wrap items-center gap-1">
+            <PublicationStatusBadge
+              statusId={work.publicationStatusId}
+              compact
+              className="px-1.5 py-0 text-[10px] leading-[1.5]"
+            />
+            {work.totalChapters ? (
+              <span
+                title="capítulos publicados"
+                className="inline-flex items-center rounded-md bg-foreground/[0.06] px-1.5 py-0 font-mono text-[10px] font-semibold leading-[1.5] tabular-nums text-muted-foreground ring-1 ring-inset ring-foreground/10"
+              >
+                {work.totalChapters} cap
+              </span>
+            ) : null}
+          </div>
+
           {work.expectedScore != null && (
-            <div className="rounded-md bg-muted/60 px-1.5 py-1 text-center">
-              <span className="block text-[8.5px] uppercase leading-tight tracking-wide text-muted-foreground">
-                nota prevista
+            <div className="overflow-hidden rounded-lg bg-muted/60 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
+              <span className="block px-1.5 pb-1 pt-1 text-center">
+                <span className="block whitespace-nowrap text-[8.5px] uppercase leading-tight tracking-tight text-muted-foreground">
+                  nota prevista
+                </span>
+                <span className="block font-mono text-base font-bold leading-none tabular-nums text-sky-600 dark:text-sky-400">
+                  {nf(work.expectedScore)}
+                </span>
               </span>
-              <span className="block font-mono text-sm font-bold leading-tight tabular-nums text-sky-600 dark:text-sky-400">
-                {nf(work.expectedScore)}
-              </span>
+              {/* Rotulados e separados por um fio: sem isso, dois "%" vizinhos falando de
+                  gosto leem como a MESMA medida em desacordo. */}
+              {(percentile != null || work.chanceScore != null) && (
+                <span className="grid grid-cols-[1fr_1px_1fr] shadow-[inset_0_1px_0_rgba(0,0,0,0.1)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]">
+                  <span className="px-0.5 pb-1 pt-[3px] text-center">
+                    <span className="block text-[8.5px] uppercase leading-tight tracking-tight text-muted-foreground">
+                      afinidade
+                    </span>
+                    <span
+                      title="o quanto a obra casa com seu perfil, comparada à sua biblioteca"
+                      className={cn(
+                        "block font-mono text-[11.5px] font-bold leading-tight tabular-nums",
+                        percentile != null ? fitTone(percentile) : "text-muted-foreground",
+                      )}
+                    >
+                      {percentile != null ? `${Math.round(percentile)}%` : "—"}
+                    </span>
+                  </span>
+                  <span className="bg-foreground/10 dark:bg-white/[0.07]" />
+                  <span className="px-0.5 pb-1 pt-[3px] text-center">
+                    <span className="block text-[8.5px] uppercase leading-tight tracking-tight text-muted-foreground">
+                      chance
+                    </span>
+                    <span
+                      title="probabilidade de você gostar da obra"
+                      className={cn(
+                        "block font-mono text-[11.5px] font-bold leading-tight tabular-nums",
+                        work.chanceScore != null
+                          ? chanceTone(work.chanceScore)
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {work.chanceScore != null ? `${Math.round(work.chanceScore)}%` : "—"}
+                    </span>
+                  </span>
+                </span>
+              )}
             </div>
           )}
-          <div className="flex items-center justify-between gap-1.5 text-[10.5px] tabular-nums text-muted-foreground">
-            <span className="truncate">
-              {work.totalChapters ? `${work.totalChapters} cap` : "—"}
-            </span>
-          </div>
-          <AlignmentCell value={work.personalFit} percentile={work.personalFitPercentile} />
         </div>
       </div>
     </li>
@@ -1628,6 +1828,10 @@ function PredictionDrivers({ drivers }: { drivers: PredictionDriver[] }) {
   const maxAbs = Math.max(...drivers.map((d) => Math.abs(d.coef)), 1e-9)
   return (
     <div>
+      {/* 🔴 UM provider para a lista inteira, e ele é obrigatório: sem `TooltipProvider` o
+          Radix LANÇA no render e derruba a aba toda (mesmo motivo documentado no
+          `PublicationStatusBadge`). Um por linha funcionaria e criaria 7 contextos à toa. */}
+      <TooltipProvider delayDuration={200}>
       <div className="flex flex-col">
         {drivers.map((d) => {
           const up = d.coef >= 0
@@ -1637,9 +1841,28 @@ function PredictionDrivers({ drivers }: { drivers: PredictionDriver[] }) {
               key={d.name}
               className="grid grid-cols-[minmax(0,9.5rem)_1fr_1rem] items-center gap-2.5 py-[5px]"
             >
-              <span className="truncate text-xs text-foreground/85" title={d.label}>
-                {d.label}
-              </span>
+              {/* Sem descrição, sem tooltip E sem o pontilhado que o anuncia — ver
+                  `resolveFeatureDescription`. Uma linha muda é honesta; um gatilho que
+                  abre vazio, não. */}
+              {d.description ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="cursor-help truncate text-xs text-foreground/85 underline decoration-dotted decoration-muted-foreground/70 underline-offset-[3px] hover:text-foreground hover:decoration-sky-500">
+                      {d.label}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" align="start" className="max-w-[280px]">
+                    <p className="font-semibold">{d.label}</p>
+                    {/* ⚠️ `TooltipContent` é invertido (bg-foreground): tom secundário sai de
+                        `text-background/…`; `text-muted-foreground` cai a ~3:1 no tema CLARO. */}
+                    <p className="text-background/75">{d.description}</p>
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <span className="truncate text-xs text-foreground/85" title={d.label}>
+                  {d.label}
+                </span>
+              )}
               <div className="relative h-2 rounded-full bg-muted">
                 <div
                   className={cn(
@@ -1664,6 +1887,7 @@ function PredictionDrivers({ drivers }: { drivers: PredictionDriver[] }) {
           )
         })}
       </div>
+      </TooltipProvider>
       <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10.5px] text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <span className="size-2 rounded-full bg-emerald-500" />

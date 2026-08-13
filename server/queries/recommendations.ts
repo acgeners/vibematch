@@ -1559,6 +1559,21 @@ export interface AlignedWork {
   userScore: number | null
   /** Nota Prevista — o análogo da nota pessoal pra quem ainda não leu. */
   expectedScore: number | null
+  /**
+   * Estado de publicação (`works.publication_status_id`) — o dado que decide se vale
+   * COMEÇAR. Medido em 2026-08-13: entre as 60 obras de maior Nota Prevista do catálogo,
+   * 12 (20%) estão em hiato ou canceladas; uma fila de "o que leio agora" que não avisa
+   * isso manda a pessoa começar o que não tem fim.
+   */
+  publicationStatusId: number | null
+  /**
+   * Chance de gostar (0–100) — a Força 1 da Bússola, `chance_score` calibrado.
+   *
+   * ⚠️ NULL quando `chance_is_stub`, e isso é a correção e não a degradação: com menos de
+   * 20 obras avaliadas o valor é a média do treino, um chute com cara de previsão. Mesma
+   * regra do `/ranking`.
+   */
+  chanceScore: number | null
 }
 
 /**
@@ -1661,7 +1676,7 @@ export async function getAlignedWorkSplit(
       supabase
         .from("works")
         .select(
-          "id, title, total_chapters, work_covers(url, is_primary, position), calculated_scores!inner(personal_fit, personal_fit_percentile, expected_score)",
+          "id, title, total_chapters, publication_status_id, work_covers(url, is_primary, position), calculated_scores!inner(personal_fit, personal_fit_percentile, expected_score, chance_score, chance_is_stub)",
         )
         .eq("is_archived", false)
         .not("calculated_scores.personal_fit", "is", null)
@@ -1673,12 +1688,18 @@ export async function getAlignedWorkSplit(
   const works = rows
     .map((w) => {
       const id = w.id as string
+      // ⚠️ `chance_score` e `chance_is_stub` PRECISAM passar por aqui: os dois estão em
+      // `PERSONAL_SCORE_FIELDS`, então sem o overlay a Leitora veria a chance de gostar
+      // DO DONO apresentada como dela — a mesma classe do vazamento que o reader existe
+      // pra fechar.
       const calc = scoresReader.overlay(
         id,
         (w.calculated_scores as {
           personal_fit?: number | null
           personal_fit_percentile?: number | null
           expected_score?: number | null
+          chance_score?: number | null
+          chance_is_stub?: boolean | null
         } | null) ?? null,
       )
       const state = personal.get(id)
@@ -1700,6 +1721,11 @@ export async function getAlignedWorkSplit(
         totalChapters: (w.total_chapters as number | null) ?? null,
         userScore: state.userScore ?? null,
         expectedScore: calc?.expected_score != null ? Number(calc.expected_score) : null,
+        publicationStatusId: (w.publication_status_id as number | null) ?? null,
+        chanceScore:
+          calc?.chance_is_stub === true || calc?.chance_score == null
+            ? null
+            : Number(calc.chance_score),
       } satisfies AlignedWork
     })
     // O overlay zera os campos pessoais de quem não tem linha própria: sem este
