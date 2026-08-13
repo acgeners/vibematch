@@ -20,7 +20,13 @@ import { AdultBadge } from "@/components/ui/adult-badge"
 import { ExplainPanel } from "@/components/discovery/explain-panel"
 import { titleToSlug } from "@/lib/utils"
 import { searchWorkSuggestions } from "@/server/actions/work-search"
-import { blendCandidates, snapWeight } from "@/lib/discovery/blend"
+import {
+  blendCandidates,
+  snapWeight,
+  diversify,
+  countNearDuplicates,
+  NEAR_DUPLICATE_WARN_AT,
+} from "@/lib/discovery/blend"
 import {
   MAX_SEEDS,
   MAX_ANTI_SEEDS,
@@ -91,8 +97,14 @@ export function DiscoveryView({ result, onlyUnread }: Props) {
       fitPercentile: w.fitPercentile,
     }))
     const byId = new Map(result.works.map((w) => [w.id, w]))
-    const rows = blendCandidates(candidates, weight)
-      .slice(0, DEFAULT_RESULT_LIMIT)
+    const posById = new Map(result.works.map((w, i) => [w.id, i]))
+
+    // 🔴 Diversificar ANTES de cortar em 24, nunca depois: aplicado sobre a lista já cortada,
+    // o MMR só embaralharia as mesmas 24 obras — quem entra no lugar da quase-duplicata está
+    // na 25ª posição, fora do corte. Medido: 2,4 de 10 obras do top-10 tinham uma
+    // quase-duplicata, com posição mediana 4.
+    const ordenados = blendCandidates(candidates, weight)
+    const rows = diversify(ordenados, result.simMatrix, DEFAULT_RESULT_LIMIT)
       .map((b) => ({ work: byId.get(b.workId)!, score: b.score }))
       .filter((r) => r.work != null)
 
@@ -111,11 +123,19 @@ export function DiscoveryView({ result, onlyUnread }: Props) {
       if (n > rows.length / 2) dominante = id
     }
 
-    return rows.map((r) => ({
-      ...r,
-      showSeed: r.work.nearestSeedId != null && r.work.nearestSeedId !== dominante,
-    }))
-  }, [result.works, weight])
+    const duplicadas = countNearDuplicates(
+      rows.map((r) => ({ index: posById.get(r.work.id) ?? -1 })),
+      result.simMatrix,
+    )
+
+    return {
+      rows: rows.map((r) => ({
+        ...r,
+        showSeed: r.work.nearestSeedId != null && r.work.nearestSeedId !== dominante,
+      })),
+      duplicadas,
+    }
+  }, [result.works, result.simMatrix, weight])
 
   const hasSeeds = result.seeds.length >= MIN_SEEDS
 
@@ -171,8 +191,15 @@ export function DiscoveryView({ result, onlyUnread }: Props) {
               <CardTitle className="text-base">O que apareceu</CardTitle>
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
                 <span className="tabular-nums">
-                  {result.candidateCount} candidatas · top {ordered.length}
+                  {result.candidateCount} candidatas · top {ordered.rows.length}
                 </span>
+                {/* Só quando SOBRA repetição depois de diversificar. O limiar sai da
+                    distribuição medida (mediana 2, p90 4) — ver NEAR_DUPLICATE_WARN_AT. */}
+                {ordered.duplicadas > NEAR_DUPLICATE_WARN_AT && (
+                  <span className="text-amber-600 dark:text-amber-400">
+                    algumas obras aqui são muito parecidas entre si
+                  </span>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
@@ -184,7 +211,7 @@ export function DiscoveryView({ result, onlyUnread }: Props) {
               </div>
             </CardHeader>
             <CardContent>
-              {ordered.length === 0 ? (
+              {ordered.rows.length === 0 ? (
                 <p className="py-8 text-center text-sm text-muted-foreground">
                   Nenhuma obra sobrou com estes filtros.{" "}
                   {onlyUnread && "Tente incluir as já lidas."}
@@ -192,7 +219,7 @@ export function DiscoveryView({ result, onlyUnread }: Props) {
               ) : (
                 <div className="flex flex-col gap-4">
                   <ol className="flex flex-col gap-1">
-                    {ordered.map(({ work, score, showSeed }, i) => (
+                    {ordered.rows.map(({ work, score, showSeed }, i) => (
                       <ResultRow
                         key={work.id}
                         rank={i + 1}
@@ -209,7 +236,7 @@ export function DiscoveryView({ result, onlyUnread }: Props) {
                     <ExplainPanel
                       seedIds={seedIds}
                       antiIds={antiIds}
-                      works={ordered
+                      works={ordered.rows
                         .slice(0, EXPLAIN_COUNT)
                         .map((r) => ({ id: r.work.id, title: r.work.title }))}
                       weight={weight}

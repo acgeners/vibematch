@@ -90,6 +90,17 @@ export interface DiscoveryResult {
   /** Quantas do topo trocam entre as pontas do slider. 0 = o controle não muda nada aqui. */
   extremesDivergence: number
   weight: number
+  /**
+   * Similaridade entre os pares do pool (`works`), indexada pela POSIÇÃO no array.
+   *
+   * Serve à diversificação, que roda no cliente junto com a reordenação do slider. Índices
+   * e não ids porque o payload é O(n²): com ~50 obras são ~1.200 pares, e uuids dobrariam
+   * o tamanho sem acrescentar nada.
+   *
+   * Vazia quando a RPC `pairwise_similarity` (mig 189) ainda não existe — aí a lista sai
+   * sem diversificar, que é a degradação certa.
+   */
+  simMatrix: number[][]
 }
 
 interface SimRow {
@@ -168,6 +179,7 @@ export async function discoverBySeeds(opts: DiscoverBySeedsOptions): Promise<Dis
     fitAvailable: false,
     extremesDivergence: 0,
     weight,
+    simMatrix: [],
   }
 
   const supabase = createAdminClient()
@@ -257,8 +269,12 @@ export async function discoverBySeeds(opts: DiscoverBySeedsOptions): Promise<Dis
   // qualquer parada do slider pode mostrar — ver WEIGHT_STEPS.
   const top = unionOfTops(candidates, limit, weight)
 
+  const poolIds = top.map((t) => t.workId)
   // Metadados só do pool exibível — o conjunto avaliado tem ~1000 linhas.
-  const meta = await loadMeta(supabase, top.map((t) => t.workId))
+  const [meta, simMatrix] = await Promise.all([
+    loadMeta(supabase, poolIds),
+    loadSimMatrix(supabase, poolIds),
+  ])
   const simByWork = new Map(simRows.map((r) => [r.id, r]))
 
   const works: DiscoveryWork[] = top.map((b) => {
@@ -301,7 +317,43 @@ export async function discoverBySeeds(opts: DiscoverBySeedsOptions): Promise<Dis
     fitAvailable,
     extremesDivergence: extremesDivergence(candidates, Math.min(limit, 10)),
     weight,
+    simMatrix,
   }
+}
+
+/**
+ * Matriz de similaridade entre os candidatos do pool, para a diversificação.
+ *
+ * ⚠️ É O(n²): pedir isto para o conjunto avaliado (~1.000 obras) seriam 500 mil pares. Só
+ * para o pool exibível, que é o único lugar onde a diversificação atua.
+ *
+ * ⚠️ Falha vira matriz VAZIA, não exceção: sem a mig 189 a página continua servindo a lista
+ * (sem diversificar) em vez de quebrar inteira por causa de um refinamento.
+ */
+async function loadSimMatrix(
+  supabase: ReturnType<typeof createAdminClient>,
+  ids: string[],
+): Promise<number[][]> {
+  if (ids.length < 2) return []
+
+  const { data, error } = await supabase.rpc("pairwise_similarity", { work_ids: ids })
+  if (error) {
+    console.warn("[seed-discovery] pairwise_similarity falhou:", error.message)
+    return []
+  }
+
+  const pos = new Map(ids.map((id, i) => [id, i]))
+  const m: number[][] = ids.map(() => new Array(ids.length).fill(0))
+  for (const row of (data as Array<{ a: string; b: string; sim: number }> | null) ?? []) {
+    const i = pos.get(row.a)
+    const j = pos.get(row.b)
+    if (i == null || j == null) continue
+    const v = Number(row.sim)
+    // A RPC devolve só o triângulo superior; espelha aqui.
+    m[i][j] = v
+    m[j][i] = v
+  }
+  return m
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────

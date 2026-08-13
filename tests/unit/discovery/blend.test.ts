@@ -6,6 +6,9 @@ import {
   classifyCohesion,
   snapWeight,
   unionOfTops,
+  diversify,
+  countNearDuplicates,
+  NEAR_DUPLICATE_WARN_AT,
   WEIGHT_STEPS,
   ANTI_WEIGHT,
   NEUTRAL_FIT_PCT,
@@ -207,5 +210,81 @@ describe("classifyCohesion", () => {
     expect(classifyCohesion(0.001)).toBe("weak") // sementes aleatórias
     expect(classifyCohesion(0.20)).toBe("fair")
     expect(classifyCohesion(0.37)).toBe("strong") // as 3 sementes reais medidas
+  })
+})
+
+describe("diversify — MMR", () => {
+  // 4 candidatos: A e B são quase idênticos (0,9) e lideram; C e D são distintos e vêm atrás.
+  const ranked = [
+    { workId: "A", simPos: 0, simNeg: 0, fitPercentile: 0, simEffective: 0, simPercentile: 0, score: 90 },
+    { workId: "B", simPos: 0, simNeg: 0, fitPercentile: 0, simEffective: 0, simPercentile: 0, score: 88 },
+    { workId: "C", simPos: 0, simNeg: 0, fitPercentile: 0, simEffective: 0, simPercentile: 0, score: 80 },
+    { workId: "D", simPos: 0, simNeg: 0, fitPercentile: 0, simEffective: 0, simPercentile: 0, score: 78 },
+  ]
+  //        A     B     C     D
+  const sim = [
+    [0, 0.9, 0.05, 0.02],
+    [0.9, 0, 0.04, 0.03],
+    [0.05, 0.04, 0, 0.06],
+    [0.02, 0.03, 0.06, 0],
+  ]
+
+  it("λ=1 é a identidade — a ordem por score, intacta", () => {
+    expect(diversify(ranked, sim, 4, 1).map((r) => r.workId)).toEqual(["A", "B", "C", "D"])
+  })
+
+  it("🔴 com λ=0,8 a quase-duplicata cede a vez a quem é diferente", () => {
+    // B (88) só perde para C (80) porque se parece 0,9 com A, que já entrou.
+    const out = diversify(ranked, sim, 3, 0.8).map((r) => r.workId)
+    expect(out[0]).toBe("A")
+    expect(out, "B deveria ter cedido a vez").not.toContain("B")
+    expect(out).toEqual(["A", "C", "D"])
+  })
+
+  it("não descarta ninguém — só reordena", () => {
+    const out = diversify(ranked, sim, 4, 0.8)
+    expect(out.map((r) => r.workId).sort()).toEqual(["A", "B", "C", "D"])
+  })
+
+  it("matriz ausente/incompleta não penaliza (erra para o lado de não esconder)", () => {
+    expect(diversify(ranked, [], 4, 0.8).map((r) => r.workId)).toEqual(["A", "B", "C", "D"])
+  })
+
+  it("respeita k e não estoura com k maior que a lista", () => {
+    expect(diversify(ranked, sim, 2, 0.8)).toHaveLength(2)
+    expect(diversify(ranked, sim, 99, 0.8)).toHaveLength(4)
+    expect(diversify([], sim, 5, 0.8)).toEqual([])
+  })
+
+  it("a penalidade é comparável ao score — senão λ fica ligado sem efeito", () => {
+    // Sem multiplicar a similaridade por 100, a penalidade máxima (0,2×1) seria 0,2 ponto
+    // num score de 0–100 e NADA mudaria de posição. Este caso falha nessa versão.
+    const semEscala = diversify(ranked, sim, 3, 0.8).map((r) => r.workId)
+    expect(semEscala).not.toEqual(["A", "B", "C"])
+  })
+})
+
+describe("countNearDuplicates", () => {
+  const sim = [
+    [0, 0.9, 0.1],
+    [0.9, 0, 0.1],
+    [0.1, 0.1, 0],
+  ]
+  it("conta os pares acima do limiar", () => {
+    expect(countNearDuplicates([{ index: 0 }, { index: 1 }, { index: 2 }], sim)).toBe(1)
+  })
+  it("zero quando ninguém se parece", () => {
+    expect(countNearDuplicates([{ index: 0 }, { index: 2 }], sim)).toBe(0)
+  })
+})
+
+describe("NEAR_DUPLICATE_WARN_AT", () => {
+  it("🔴 fica acima do p90 medido — senão vira alarme que sempre toca", () => {
+    // Distribuição medida pós-diversificação em 12 listas: mediana 2, p90 4.
+    // Um limiar <= 4 acenderia em ~25% das listas; o aviso só informa se for raro.
+    const distribuicaoMedida = [0, 1, 1, 2, 2, 2, 2, 3, 3, 4, 4, 23]
+    const acende = distribuicaoMedida.filter((n) => n > NEAR_DUPLICATE_WARN_AT).length
+    expect(acende / distribuicaoMedida.length).toBeLessThanOrEqual(0.1)
+    expect(NEAR_DUPLICATE_WARN_AT).toBeGreaterThan(4)
   })
 })

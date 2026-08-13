@@ -150,6 +150,62 @@ export function blendCandidates(
 }
 
 /**
+ * Quanto o score manda contra a variedade, na hora de montar a lista final.
+ *
+ * 1 = só score (a lista antes desta régua existir); abaixo disso, entrar na lista fica mais
+ * caro para quem já se parece com quem entrou.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * 🔴 0,8 saiu de MEDIÇÃO, e a medição contradisse a média.
+ *
+ * Pelo agregado não havia problema: a redundância do top-24 era **0,106** contra **0,092**
+ * do próprio pool de candidatos — 15% acima, ou seja a lista já era quase tão diversa
+ * quanto o conjunto de onde saía. Por OBRA o quadro inverte: **2,4 de 10** obras do top-10
+ * tinham ao menos uma quase-duplicata (similaridade > 0,35), com posição mediana **4** —
+ * no topo, onde se lê. Medido em 12 conjuntos-semente coerentes, 9.360 pares, 2026-08-13.
+ *
+ * O trade-off medido:
+ *
+ *   λ=1,0 (antes)  score 88,1 · redundância 0,106 · 10,2 pares quase-duplicados
+ *   λ=0,8          score 87,7 · redundância 0,086 ·  3,9
+ *   λ=0,7          score 87,3 · redundância 0,078 ·  1,2
+ *
+ * ⚠️ **0,8 e não 0,7, de propósito.** λ=0,7 dá números melhores — mas quem escolheu cinco
+ * obras de vilã QUER vilã, e diversificar demais trai o pedido. Conferido à mão: os pares
+ * acima de 0,6 são obras DISTINTAS de premissa quase idêntica (cinco "The Villainess X"
+ * diferentes), não sequências. O que se espaça é a repetição dentro do tema, nunca o tema.
+ *
+ * ⚠️ Mexer neste número exige remedir. Não é um botão de gosto: é o ponto de equilíbrio
+ * entre "a lista que o modelo/percentil ordenou" e "a lista que não repete a mesma obra
+ * cinco vezes".
+ */
+export const DIVERSITY_LAMBDA = 0.8
+
+/**
+ * Acima de quantos pares repetidos a lista merece um aviso na tela.
+ *
+ * 🔴 Derivado da distribuição REAL depois da diversificação, não escolhido a olho. Medido
+ * em 12 listas (top-24, λ=0,8): `[0,1,1,2,2,2,2,3,3,4,4,23]` — mediana **2**, p90 **4**, e
+ * um único caso de 23 (nicho onde quase tudo se parece e o MMR não tem de onde tirar
+ * variedade).
+ *
+ * ⚠️ A 1ª versão usava `> 3` e teria acendido em **25%** das listas — o alarme que sempre
+ * toca, que é justamente o que este projeto evita em `db:health` e no painel "Estado da
+ * obra". Com `> 5` dispara em **1 de 12**: só quando a diversificação de fato não deu conta,
+ * que é a única hora em que o aviso informa alguma coisa.
+ */
+export const NEAR_DUPLICATE_WARN_AT = 5
+
+/**
+ * A partir de quanta similaridade duas obras contam como "a mesma coisa" para a variedade.
+ *
+ * 0,35 não é chute: entre os candidatos de uma busca, o p90 dos pares é **0,249** e o
+ * vizinho mais próximo médio de uma obra é ~0,43. 0,35 fica acima do p90 — pega o que
+ * destoa, não o normal.
+ */
+export const NEAR_DUPLICATE_SIM = 0.35
+
+/**
  * Os pesos que o slider pode assumir. Discreto de propósito — 11 paradas de 10 em 10.
  *
  * 🔴 É isto que permite o slider reordenar SEM ida ao servidor. A página traz metadados da
@@ -198,6 +254,85 @@ export function unionOfTops(
   }
 
   return out
+}
+
+/**
+ * Similaridade entre pares de candidatos: `sim[i][j]`, indexado pela posição no array de
+ * entrada. Simétrica, diagonal ignorada.
+ */
+export type SimMatrix = number[][]
+
+/**
+ * Monta a lista final espaçando quem se repete — MMR (maximal marginal relevance).
+ *
+ * A cada posição escolhe quem maximiza `λ·score − (1−λ)·100·maiorSemelhançaComOsJáEscolhidos`.
+ * Com `λ = 1` é exatamente a ordem por score; ver `DIVERSITY_LAMBDA` para de onde vem o 0,8.
+ *
+ * ⚠️ O termo de penalidade é multiplicado por 100 porque `score` está em 0–100 e a
+ * similaridade em 0–1. Sem isso a penalidade seria centésimos de ponto — o λ pareceria
+ * aplicado e não mudaria nada, que é a pior forma de "ligado sem efeito".
+ *
+ * ⚠️ `sim` pode vir incompleto (obra sem embedding, matriz não carregada): o que falta conta
+ * como 0, ou seja "não se parece com nada" — a obra concorre só pelo score. Errar para o
+ * lado de NÃO penalizar mantém a lista igual à de antes em vez de esconder obra por engano.
+ */
+export function diversify(
+  ranked: BlendedWork[],
+  sim: SimMatrix,
+  k: number,
+  lambda: number = DIVERSITY_LAMBDA,
+): BlendedWork[] {
+  const lam = Math.min(1, Math.max(0, lambda))
+  if (ranked.length === 0 || k <= 0) return []
+  // λ = 1 é a identidade; sair cedo evita percorrer a matriz à toa.
+  if (lam >= 1) return ranked.slice(0, k)
+
+  const restantes = ranked.map((_, i) => i)
+  const escolhidos: number[] = []
+  const out: BlendedWork[] = []
+
+  while (out.length < k && restantes.length > 0) {
+    let melhor = 0
+    let melhorValor = -Infinity
+
+    for (let p = 0; p < restantes.length; p++) {
+      const i = restantes[p]
+      let maxSim = 0
+      for (const j of escolhidos) {
+        const s = sim[i]?.[j] ?? 0
+        if (s > maxSim) maxSim = s
+      }
+      const valor = lam * ranked[i].score - (1 - lam) * 100 * maxSim
+      if (valor > melhorValor) {
+        melhorValor = valor
+        melhor = p
+      }
+    }
+
+    const idx = restantes.splice(melhor, 1)[0]
+    escolhidos.push(idx)
+    out.push(ranked[idx])
+  }
+
+  return out
+}
+
+/**
+ * Quantos pares da lista são quase-duplicatas — o número que a diversificação existe para
+ * baixar, e o único jeito honesto de dizer se ela está funcionando.
+ */
+export function countNearDuplicates(
+  works: Array<{ index: number }>,
+  sim: SimMatrix,
+  threshold: number = NEAR_DUPLICATE_SIM,
+): number {
+  let n = 0
+  for (let a = 0; a < works.length; a++) {
+    for (let b = a + 1; b < works.length; b++) {
+      if ((sim[works[a].index]?.[works[b].index] ?? 0) > threshold) n++
+    }
+  }
+  return n
 }
 
 /**
