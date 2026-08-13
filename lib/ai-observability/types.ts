@@ -158,11 +158,18 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   synopsis_quality_predict: {
     key: "synopsis_quality_predict",
-    label: "Qualidade da sinopse",
+    /**
+     * A chave (`synopsis_quality_predict`) e a coluna (`synopsis_quality`) são
+     * identificadores e ficam — o que mudou foi o CONCEITO: o modelo não julga a
+     * qualidade do texto da sinopse, ele prevê o quanto a pessoa vai querer ler a obra
+     * depois de lê-la. É o ♥..♥♥♥♥ do Interesse.
+     */
+    label: "Previsão de Interesse",
     defaultModel: "claude-sonnet-4-6",
     typicalWorkload: "recurring",
     hasResultCache: false,
-    description: "Rótulo de 4 níveis para a sinopse; feature do Ridge (expected_score).",
+    description:
+      "Prevê o Interesse (♥ a ♥♥♥♥) a partir da sinopse; vira feature do Ridge da Nota Prevista (expected_score).",
   },
   recommendation_rank: {
     key: "recommendation_rank",
