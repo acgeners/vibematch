@@ -1027,6 +1027,106 @@ Guardado por `tests/unit/ranking/bussola-empilhamento.test.tsx` e `bussola-legen
 — inclusive um teste que falha se a prop de faixas for ignorada, que era o jeito silencioso de a
 cor da nota regredir pro fallback.
 
+## A página da obra tem SEIS abas, e a régua delas é a PERGUNTA — não a procedência
+
+Medido em 13/08/2026 na obra mais completa do catálogo (*Villains Are Destined to Die*, 196
+reviews, 8 fontes, 98 tags), viewport 1400×1000: **Notas & Avaliações tinha 3.496px — 3,5
+telas** —, e **76% dela eram dois blocos**: "Notas por critério" (1.735px, nove cards de
+justificativa) e o card de reviews (933px). Bússola + Notas calculadas + Externas somavam
+1.054px, ou seja, cabiam numa tela.
+
+| Aba | Pergunta | O que entra |
+|---|---|---|
+| Visão Geral | *"quero ler isso?"* | Estado da obra · Sinopses + Interesse · Estrutura de abertura |
+| **Análise da IA** | *"o que a IA entendeu dela?"* | Resumo + 9 atributos · síntese das reviews · estimativa de arte · Deep Dive |
+| Notas & Avaliações | *"quanto vale perto das outras?"* | Bússola · Notas calculadas + Veredito · Avaliações externas |
+| Meu Status · Recomendações · Gêneros e Tags | como estavam | |
+
+🔴 **A régua NÃO é "gerado por IA", e a diferença é estrutural.** Por procedência, a
+**sinopse consolidada** (escrita por modelo), o **Interesse previsto**, a **Estrutura de
+abertura** e as **tags inferidas** teriam que sair da Visão Geral — e o **Veredito IA**, que
+é LLM puro, sairia de perto da Nota Prevista e do Alinhamento, quebrando o único lugar onde
+os três números comparáveis aparecem juntos. O que separa é **o que se faz com o conteúdo**.
+
+⚠️ **O caso difícil, e a régua que o resolve:** os 9 atributos são números, mas cada um vem
+com justificativa em prosa e faixa da rubrica — são a *leitura* da obra. A Nota Prevista é o
+modelo estatístico *em cima* dessa leitura. Por isso os atributos vão pra aba da IA e a
+Prevista fica em Notas, mesmo os dois sendo "nota".
+
+**Botões: a ação mora onde o resultado aparece.** "Avaliar com IA" e Deep Dive na aba da IA;
+"Recalcular Veredito" junto do Veredito; "Analisar abertura" e "Prever interesse" dentro dos
+cards deles. **Exceção única: "Gerar tudo"** fica no topo da Visão Geral — ele não pertence a
+nenhum resultado, porque cria todos.
+
+⚠️ **Resultado medido depois:** Notas **3.496 → 650px**, Visão Geral 906 → 982px (o painel de
+estado entrou, o card do Resumo saiu), e a **aba nova nasceu com 2.949px**. Mover é metade do
+trabalho: o scroll mudou de endereço. A outra metade é a **grade compacta dos 9 critérios**
+(nota + faixa + barra, justificativa abrindo ao lado, ~1.735 → ~520px) — decidida, ainda não
+implementada, e vale PR próprio.
+
+Guardado por `tests/unit/orchestration/abas-da-obra.test.ts`, que **recorta cada
+`<TabsContent>` do source** e falha quando um bloco muda de aba. ⚠️ Ele lê o arquivo **sem os
+comentários**: eles citam o que foi movido ("as datas saíram daqui"), e a 1ª versão reprovou
+acusando a própria explicação da mudança.
+
+### O painel "Estado da obra" responde uma pergunta que morava em três lugares
+
+`components/titles/work-state-panel.tsx`, no topo da Visão Geral: **Matéria-prima** (quantas
+reviews, de quantas fontes, quantas foram ao prompt da avaliação, quantas entraram na síntese,
+e os chips de fonte vinculada) · **Frescor** (criada, dados, avaliada, síntese, tags, sua
+leitura) · **Precisa de você**. Antes: duas caixinhas embaixo da capa (que saíram), o número
+de reviews da avaliação **enterrado no tooltip do selo ✨**, e o "Veredito desatualizado"
+visível só dentro da aba de Notas.
+
+🔴 **Chip de pendência é o que é RARO e acionável.** Medido nas 988 obras: **562 (57%)**
+receberam reviews depois da última avaliação e **502 (51%)** nunca tiveram tags inferidas —
+alarme para isso deixaria o painel âmbar em quase toda obra, e alarme que sempre toca não é
+lido (mesma armadilha do `db:health`). O que é maioria vira **número**; só o raro vira chip:
+Veredito desatualizado (17 · 1,7%), avaliação a revisar (1), nunca avaliada (6), sem síntese
+(136).
+
+⚠️ Os chips **não navegam**: as abas são `Tabs` não-controladas (`defaultValue`), e linkar pra
+dentro de uma aba exigiria subir esse estado pro cliente inteiro.
+
+### O "Resumo da avaliação IA" não era redundante com a sinopse — era com os critérios
+
+Medido em 400 obras (vocabulário de 4+ letras, sem palavras comuns): o resumo sobrepõe
+**4,4%** do da sinopse (Jaccard; **nenhuma** obra passa de 0,17), **14,8%** do consenso do
+digest, e **46%** do das nove justificativas — com **35% das obras acima de 50%**. A sinopse
+conta o **enredo**; o resumo diz **tipo e tom** ("manhwa *wholesome* de reencarnação, tom leve
+e caloroso, drama moderado"), e é a única frase da página que faz isso.
+
+Por isso ele **deixou de ser card próprio** e virou a **primeira linha do bloco "Notas por
+critério"**: 353 caracteres de mediana, e é o contexto que os nove números pedem. Na Visão
+Geral eram dois parágrafos cinzas disputando o mesmo olhar.
+
+⚠️ **Uso melhor, ainda não feito:** o hover de obra nas listas e o comparador mostram a
+*sinopse* (847 caracteres de enredo). O resumo tem 353 e responde "que tipo de obra é essa?",
+que é a pergunta de quem varre uma lista.
+
+### Dois ajustes da faixa de stats
+
+🔴 **"0 / 73" só aparece pra quem acompanha progresso**, e a régua vem do banco
+(`personal_status.tracks_progress`), nunca de uma lista de nomes. Hoje os quatro sem progresso
+são Want to Read, Untracked, Not Now e Not Interested — em todos, o zero é o default de quem
+nunca abriu a obra, e desenhado como fração ele lê como leitura ABANDONADA. Status novo no
+Supabase entra na régua sozinho. ⚠️ O popover de edição continua inteiro (é por ele que se
+começa a acompanhar) e a barra volta assim que o número sai do zero, antes mesmo de salvar.
+
+**Títulos alternativos: inglês primeiro** (`lib/titles/title-language.ts`). São **10.072
+títulos** no catálogo — 63,6% em alfabeto latino, o resto em japonês/chinês (18,4%), coreano
+(6,3%), cirílico (5,9%), tailandês (4,7%) e árabe (1,0%) —, e sem ordenação o chip legível
+aparece em posição aleatória.
+
+🔴 **Inglês só por sinal POSITIVO, nunca por ausência de sinal.** A 1ª versão classificava
+"ASCII sem marca de outra língua" como inglês e promovia romanização asiática ("Neukdae
+Sillang", "S-geup Dungeon-ui Yeojuin") ao topo. Hoje decide por palavra funcional inglesa ou
+morfologia (`'s`, `-ing`, `-ed`, `-tion`); o erro que sobra é o barato — um título inglês sem
+palavra funcional cai um grupo. Conferido à mão em **70 títulos sorteados**, sem falso
+positivo. ⚠️ `a`, `o`, `e`, `no`, `do` ficaram FORA da lista inglesa: com eles, "A Herdeira
+Acidental" contava como inglês. ⚠️ O título ATUAL e o ORIGINAL não entram na ordenação — não
+são "alternativos", são identidade, e cada um tem marcador próprio.
+
 ## Dado gerado por IA carrega um SELO — e nenhuma procedência fica solta na tela
 
 Todo bloco da página da obra cujo conteúdo saiu de um modelo leva o selo ✨
