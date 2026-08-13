@@ -3,6 +3,7 @@
 import { useLayoutEffect, useRef, useState } from "react"
 import { Eye } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { sortByTitleLanguage } from "@/lib/titles/title-language"
 import { cn } from "@/lib/utils"
 
 interface AltTitlesChipsProps {
@@ -34,6 +35,11 @@ export function AltTitlesChips({
   const hasOriginal = Boolean(original) && original !== mainTitle
 
   // Dedup mantendo a ordem: título atual (1º), depois o original, depois os alternativos.
+  //
+  // ⚠️ O atual e o original NÃO entram na ordenação por idioma: eles não são "alternativos",
+  // são identidade — um é o que a página exibe e o outro é o nome de origem, cada um com
+  // marcador próprio. Mover o original pro meio da lista por ele ser japonês tiraria dele
+  // justamente o que o marcador diz.
   const seen = new Set<string>()
   const chips: Chip[] = []
   const add = (value: string | null | undefined, kind: ChipKind) => {
@@ -44,7 +50,9 @@ export function AltTitlesChips({
   }
   add(mainTitle, "current")
   if (hasOriginal) add(original, "original")
-  for (const alt of alternativeTitles ?? []) add(alt, "alt")
+  // Inglês primeiro, depois o resto do alfabeto latino, depois os outros sistemas de
+  // escrita (36,4% dos títulos do catálogo). Ver `lib/titles/title-language.ts`.
+  for (const alt of sortByTitleLanguage(alternativeTitles ?? [], (t) => t)) add(alt, "alt")
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [expanded, setExpanded] = useState(false)

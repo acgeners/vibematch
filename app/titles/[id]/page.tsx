@@ -82,7 +82,7 @@ import {
 import { BatchCreatedNavigator } from "@/components/titles/batch-created-navigator"
 import { DevWorkAiCost } from "@/components/titles/dev-work-ai-cost"
 import { WorkCoverGallery } from "@/components/titles/work-cover-gallery"
-import { LinkedSources } from "@/components/titles/linked-sources"
+import { WorkStatePanel } from "@/components/titles/work-state-panel"
 import { SynopsesViewer } from "@/components/titles/synopses-viewer"
 import { BackButton } from "@/components/titles/back-button"
 import { AltTitlesChips } from "@/components/titles/alt-titles-chips"
@@ -727,17 +727,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
 
   const categoriesCount = genres.length + tags.length
 
-  const toValidDate = (raw: string | null | undefined): Date | null => {
-    if (!raw) return null
-    const d = new Date(raw)
-    return Number.isNaN(d.getTime()) ? null : d
-  }
-  // "Atualizada em" reflete só o último "Atualizar dados" (data_refreshed_at),
-  // distinto de "Última avaliação" (data da avaliação IA mais recente).
-  const dataRefreshedDate = toValidDate(
-    (work as { data_refreshed_at?: string | null }).data_refreshed_at
-  )
-  const lastAiEvalDate = toValidDate(latestAiEval?.created_at)
+  // ⚠️ `dataRefreshedDate`/`lastAiEvalDate` saíram junto com a caixa de datas da coluna da
+  // capa: as duas datas agora vão CRUAS (ISO) pro `WorkStatePanel`, que as formata pela
+  // régua dos selos ✨ ("Ontem às 22:40"). Formatar aqui devolveria a segunda cópia.
 
   const tabsListClass =
     "h-auto w-full flex flex-wrap justify-start gap-2 bg-transparent rounded-none p-0"
@@ -849,6 +841,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             <LayoutDashboard />
             <span className="hidden sm:inline">Visão Geral</span>
             <span className="sm:hidden">Geral</span>
+          </TabsTrigger>
+          <TabsTrigger value="ai" className={tabTriggerClass}>
+            <BrainCircuit />
+            <span className="hidden sm:inline">Análise da IA</span>
+            <span className="sm:hidden">IA</span>
           </TabsTrigger>
           <TabsTrigger value="scores" className={tabTriggerClass}>
             <BarChart3 />
@@ -996,48 +993,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               />
             </div>
 
-            {(dataRefreshedDate || lastAiEvalDate || work.last_read_at) && (
-              <div className="flex flex-col gap-1.5 rounded-md border bg-card/40 p-3 text-xs text-muted-foreground">
-                {work.last_read_at && (
-                  <div>
-                    Última leitura em{" "}
-                    <span className="font-medium text-foreground/80">
-                      {new Date(`${work.last_read_at}T00:00:00`).toLocaleDateString("pt-BR", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric",
-                      })}
-                    </span>
-                  </div>
-                )}
-                {lastAiEvalDate && (
-                  <div title={`Última avaliação IA: ${lastAiEvalDate.toLocaleString("pt-BR")}`}>
-                    Última avaliação em{" "}
-                    <span className="font-medium text-foreground/80">
-                      {lastAiEvalDate.toLocaleDateString("pt-BR", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric",
-                      })}
-                    </span>
-                  </div>
-                )}
-                {dataRefreshedDate && (
-                  <div title={`Última atualização de dados: ${dataRefreshedDate.toLocaleString("pt-BR")}`}>
-                    Atualizada em{" "}
-                    <span className="font-medium text-foreground/80">
-                      {dataRefreshedDate.toLocaleDateString("pt-BR", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric",
-                      })}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <LinkedSources externalIds={externalIdMap} />
+            {/* ⚠️ As datas ("Última avaliação em / Atualizada em") e os chips de fonte
+                saíram daqui em 2026-08-13: viraram as colunas Frescor e Matéria-prima do
+                painel "Estado da obra", no topo da Visão Geral. Estavam na coluna da capa
+                por proximidade com a ficha, mas respondiam a mesma pergunta que o número
+                de reviews da avaliação (enterrado num tooltip) e o Veredito desatualizado
+                (visível só dentro da aba de Notas) — três lugares pra uma pergunta só. */}
           </aside>
 
           {/* Coluna do conteúdo das abas */}
@@ -1120,27 +1081,39 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 originalTitle={work.original_title}
                 alternativeTitles={work.alternative_titles}
               />
-              {latestAiEval?.summary && (
-                <Card className="gap-2 py-4 bg-card/50">
-                  <CardHeader className="px-4">
-                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-                      <div className="flex items-center gap-2">
-                        <BrainCircuit className="h-4.5 w-4.5 text-muted-foreground" />
-                        <CardTitle className="text-base font-bold text-foreground">Resumo da última avaliação IA</CardTitle>
-                        {/* A faixa "Modelo · Confiança · Reviews · Data" que ficava aqui era
-                            IDÊNTICA à do cabeçalho de "Notas por critério" — o mesmo dado, duas
-                            vezes na mesma página. Toda ela virou este selo. */}
-                        {aiEvalProvenance && <AiProvenanceSeal {...aiEvalProvenance} />}
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="px-4">
-                    <p className="whitespace-pre-line text-sm leading-6 text-foreground/85">
-                      {latestAiEval.summary}
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
+              {/* "Em que pé está esta obra?" — matéria-prima, frescor e pendências num lugar
+                  só. Antes eram três: duas caixinhas embaixo da capa (que saíram), o tooltip
+                  do selo ✨ (quantas reviews foram ao prompt) e um chip que só existia dentro
+                  da aba de Notas (o Veredito desatualizado). */}
+              <WorkStatePanel
+                reviews={{
+                  total: reviewsSnapshot.total + reviewsSnapshot.manual.length,
+                  sources: new Set([
+                    ...reviewsSnapshot.bySource.map((s) => s.source),
+                    ...reviewsSnapshot.manual.map((r) => r.source),
+                  ]).size,
+                  digestN: reviewsSnapshot.digestN,
+                  evalLabel: reviewUsage ? reviewUsageLabel(reviewUsage).text : null,
+                  newSinceEval: Boolean(
+                    (work as { ai_eval_reviews_stale?: boolean | null }).ai_eval_reviews_stale,
+                  ),
+                }}
+                dates={{
+                  created: (work as { created_at?: string | null }).created_at ?? null,
+                  refreshed: (work as { data_refreshed_at?: string | null }).data_refreshed_at ?? null,
+                  evaluated: latestAiEval?.created_at ?? null,
+                  digest: reviewsSnapshot.digestAt,
+                  tags: tagsInferredAt,
+                  lastRead: (work as { last_read_at?: string | null }).last_read_at ?? null,
+                }}
+                externalIds={externalIdMap}
+                pending={{
+                  verdictStale: Boolean(work.calculated_scores?.alignment_stale),
+                  reviewPending: work.ai_eval_status === "review_pending",
+                  neverEvaluated: work.ai_eval_status === "pending",
+                  noDigest: reviewsSnapshot.digest == null,
+                }}
+              />
               <Card className="gap-2 py-4 bg-card/50">
                 <CardHeader className="px-4">
                   <div className="flex items-center justify-between gap-2">
@@ -1219,6 +1192,157 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               <BatchCreatedNavigator currentId={work.id} />
             </TabsContent>
 
+            <TabsContent value="ai" className="mt-0 space-y-6">
+      {/* Aba ANÁLISE DA IA (2026-08-13). A régua das abas não é procedência, é o que se
+          faz com o conteúdo: aqui mora a LEITURA da obra pela IA (atributos com
+          justificativa, síntese das reviews, estimativa de arte, deep dive); a comparação
+          com o catálogo — Nota Prevista, Nota.Calc, Alinhamento, Veredito — fica em
+          "Notas & Avaliações"; e o que descreve a obra pra decidir a leitura fica na Visão
+          Geral. Se a régua fosse procedência, a sinopse consolidada (escrita por modelo)
+          teria que vir pra cá e o Veredito sairia de perto dos números comparáveis.
+
+          Os botões seguem a régua da página: a ação mora onde o resultado aparece. Por
+          isso "Avaliar com IA" e o Deep Dive vivem aqui, e o "Gerar tudo" — que não
+          pertence a nenhum resultado, porque cria todos — segue no topo da Visão Geral. */}
+      <AiEvaluationButton
+        workId={work.id}
+        workTitle={work.title}
+        hasCriteriaScores={Object.keys(scoreMap).length > 0}
+        coverUrl={primaryCover}
+        latestEvaluation={latestAiEval ?? null}
+        externalEditorEnabled={externalEditorEnabled}
+        externalReviews={externalManualReviews}
+      />
+      {/* Notas por critério */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Sliders className="h-4.5 w-4.5 text-muted-foreground" />
+            <CardTitle className="text-base font-bold text-foreground">Notas por critério</CardTitle>
+            {/* Mesmo objeto de proveniência do "Resumo da última avaliação IA": as
+                9 notas e o resumo saem da MESMA avaliação. */}
+            {aiEvalProvenance && <AiProvenanceSeal {...aiEvalProvenance} />}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {/* O resumo da avaliação abre o bloco, em vez de ser um card próprio na Visão
+              Geral. Medido em 400 obras (13/08/2026): ele sobrepõe só 4,4% do vocabulário
+              da sinopse — não é redundante com ela —, mas 46% do das justificativas logo
+              abaixo (p90 61,5%). Ou seja: ele NÃO conta o enredo, ele caracteriza tom e
+              tipo, que é exatamente o contexto que as nove notas pedem. Empilhado sob a
+              sinopse eram dois parágrafos cinzas disputando o mesmo olhar. */}
+          {latestAiEval?.summary && (
+            <p className="mb-4 border-b border-border/50 pb-3.5 whitespace-pre-line text-sm leading-6 text-foreground/85">
+              {latestAiEval.summary}
+            </p>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {CRITERION_SLUGS.map((slug) => {
+              const info = CRITERIA_INFO[slug]
+              const score = scoreMap[slug]
+              const aiScore = latestAiScoreMap.get(slug)
+              const pref = criterionPrefs[slug]
+              const hasIdeal = !!pref && pref.weight >= 0.05
+              // Cor/tier pela faixa ideal do perfil; sem pref → neutro (não pinta como se fosse fit).
+              const tier: CriterionTier =
+                score == null ? "neutral" : pref ? pickCriterionTierByRange(score, pref) : "neutral"
+              // Legenda (faixa + rótulo) separada da justificativa específica da obra. A faixa é
+              // DERIVADA da nota vigente, nunca da prosa da IA — ver `bandForScore` para os três
+              // jeitos silenciosos de a faixa citada apodrecer.
+              const parsed = aiScore?.justification ? parseJustification(aiScore.justification) : null
+              const band = score != null ? bandForScore(score) : null
+              const [bandLo, bandHi] = band ? bandBarBounds(band) : [null, null]
+              return (
+                <div
+                  key={slug}
+                  className="flex flex-col gap-2.5 rounded-lg border bg-muted/20 p-3.5"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="grid h-[52px] w-[52px] shrink-0 place-items-center">
+                      <CriterionIcon slug={slug} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <CriterionTitleTooltip name={info.name} description={info.description} multiline />
+                    </div>
+                    {score != null ? (
+                      <div
+                        className={cn(
+                          "grid h-9 min-w-[52px] shrink-0 place-items-center rounded-md px-2 font-mono text-lg font-bold leading-none",
+                          criterionTierPillClass(tier),
+                        )}
+                      >
+                        {score.toFixed(1)}
+                      </div>
+                    ) : (
+                      <div className="grid h-9 min-w-[52px] shrink-0 place-items-center rounded-md border border-dashed text-base text-muted-foreground">
+                        —
+                      </div>
+                    )}
+                  </div>
+                  {band && (
+                    <CriterionBandChip
+                      band={band}
+                      label={rubricTitle(slug, band)}
+                      rubric={rubricForBand(slug, band)}
+                    />
+                  )}
+                  {parsed?.detail && (
+                    <p className="text-xs leading-relaxed text-muted-foreground">{parsed.detail}</p>
+                  )}
+                  {score != null && (
+                    <div className="mt-auto pt-1">
+                      <CriterionFitBar
+                        score={score}
+                        tier={tier}
+                        idealMin={pref?.ideal_min ?? 0}
+                        idealMax={pref?.ideal_max ?? 0}
+                        hasIdeal={hasIdeal}
+                        bandLo={bandLo}
+                        bandHi={bandHi}
+                        bandLabel={band}
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </CardContent>
+      </Card>
+      {/* Reviews externas — apoiam visualmente os scores da IA. "Buscar reviews" vive no header do card. */}
+      {/* A síntese estruturada e o resumo em prosa são gerações SEPARADAS, com
+          modelos e datas próprios — por isso as duas descem no mesmo objeto. */}
+      <WorkReviewsCard
+        snapshot={reviewsSnapshot}
+        workId={work.id as string}
+        provenance={{
+          digestModel: aiProvenance.review_digest?.model ?? null,
+          digestPromptVersion: aiProvenance.review_digest?.promptVersion ?? null,
+          summaryModel: aiProvenance.review_summarizer?.model ?? null,
+        }}
+      />
+
+      {/* Consultor IA — Deep Dive (entre as notas e o detalhamento por critério).
+          Em obra de leitura ENCERRADA não cabe rodar NOVA análise, mas se já existe uma
+          salva o card aparece em modo só-leitura ("Ver análise"). Quais status são
+          "terminais" vem do banco (`personal_status.is_terminal`) — antes estava escrito
+          "Completed" aqui, e o rename para "Finished" o deixou sempre falso. */}
+      {(() => {
+        const isTerminalStatus = isTerminalPersonalStatus(statusInitial.personal_status)
+        if (isTerminalStatus && lastDeepDive == null) return null
+        return (
+          <DeepDiveButton
+            workId={work.id}
+            workTitle={work.title}
+            lastDive={lastDeepDive}
+            isPaid={isPaidPlan}
+            allowNew={!isTerminalStatus}
+          />
+        )
+      })()}
+            </TabsContent>
+
+
             <TabsContent value="status" className="mt-0 space-y-5">
               <PostReadingFlow
                 workId={work.id as string}
@@ -1244,15 +1368,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       {/* "Atualizar avaliação IA" sozinho numa linha. O Consultor IA (Deep Dive)
           fica logo abaixo das notas calculadas/externas, antes das "Notas por critério".
           O "Gerar tudo" mudou pra linha de ações da aba Geral (ao lado de Revalidar/Atualizar). */}
-      <AiEvaluationButton
-        workId={work.id}
-        workTitle={work.title}
-        hasCriteriaScores={Object.keys(scoreMap).length > 0}
-        coverUrl={primaryCover}
-        latestEvaluation={latestAiEval ?? null}
-        externalEditorEnabled={externalEditorEnabled}
-        externalReviews={externalManualReviews}
-      />
       {/* Bússola de leitura — 3 forças de decisão (ver PLANO-BUSSOLA-3-FORCAS.md) */}
       <Card>
         <CardHeader className="pb-2">
@@ -1638,123 +1753,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         )}
       </div>
 
-      {/* Consultor IA — Deep Dive (entre as notas e o detalhamento por critério).
-          Em obra de leitura ENCERRADA não cabe rodar NOVA análise, mas se já existe uma
-          salva o card aparece em modo só-leitura ("Ver análise"). Quais status são
-          "terminais" vem do banco (`personal_status.is_terminal`) — antes estava escrito
-          "Completed" aqui, e o rename para "Finished" o deixou sempre falso. */}
-      {(() => {
-        const isTerminalStatus = isTerminalPersonalStatus(statusInitial.personal_status)
-        if (isTerminalStatus && lastDeepDive == null) return null
-        return (
-          <DeepDiveButton
-            workId={work.id}
-            workTitle={work.title}
-            lastDive={lastDeepDive}
-            isPaid={isPaidPlan}
-            allowNew={!isTerminalStatus}
-          />
-        )
-      })()}
 
-      {/* Notas por critério */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <Sliders className="h-4.5 w-4.5 text-muted-foreground" />
-            <CardTitle className="text-base font-bold text-foreground">Notas por critério</CardTitle>
-            {/* Mesmo objeto de proveniência do "Resumo da última avaliação IA": as
-                9 notas e o resumo saem da MESMA avaliação. */}
-            {aiEvalProvenance && <AiProvenanceSeal {...aiEvalProvenance} />}
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {CRITERION_SLUGS.map((slug) => {
-              const info = CRITERIA_INFO[slug]
-              const score = scoreMap[slug]
-              const aiScore = latestAiScoreMap.get(slug)
-              const pref = criterionPrefs[slug]
-              const hasIdeal = !!pref && pref.weight >= 0.05
-              // Cor/tier pela faixa ideal do perfil; sem pref → neutro (não pinta como se fosse fit).
-              const tier: CriterionTier =
-                score == null ? "neutral" : pref ? pickCriterionTierByRange(score, pref) : "neutral"
-              // Legenda (faixa + rótulo) separada da justificativa específica da obra. A faixa é
-              // DERIVADA da nota vigente, nunca da prosa da IA — ver `bandForScore` para os três
-              // jeitos silenciosos de a faixa citada apodrecer.
-              const parsed = aiScore?.justification ? parseJustification(aiScore.justification) : null
-              const band = score != null ? bandForScore(score) : null
-              const [bandLo, bandHi] = band ? bandBarBounds(band) : [null, null]
-              return (
-                <div
-                  key={slug}
-                  className="flex flex-col gap-2.5 rounded-lg border bg-muted/20 p-3.5"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="grid h-[52px] w-[52px] shrink-0 place-items-center">
-                      <CriterionIcon slug={slug} />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <CriterionTitleTooltip name={info.name} description={info.description} multiline />
-                    </div>
-                    {score != null ? (
-                      <div
-                        className={cn(
-                          "grid h-9 min-w-[52px] shrink-0 place-items-center rounded-md px-2 font-mono text-lg font-bold leading-none",
-                          criterionTierPillClass(tier),
-                        )}
-                      >
-                        {score.toFixed(1)}
-                      </div>
-                    ) : (
-                      <div className="grid h-9 min-w-[52px] shrink-0 place-items-center rounded-md border border-dashed text-base text-muted-foreground">
-                        —
-                      </div>
-                    )}
-                  </div>
-                  {band && (
-                    <CriterionBandChip
-                      band={band}
-                      label={rubricTitle(slug, band)}
-                      rubric={rubricForBand(slug, band)}
-                    />
-                  )}
-                  {parsed?.detail && (
-                    <p className="text-xs leading-relaxed text-muted-foreground">{parsed.detail}</p>
-                  )}
-                  {score != null && (
-                    <div className="mt-auto pt-1">
-                      <CriterionFitBar
-                        score={score}
-                        tier={tier}
-                        idealMin={pref?.ideal_min ?? 0}
-                        idealMax={pref?.ideal_max ?? 0}
-                        hasIdeal={hasIdeal}
-                        bandLo={bandLo}
-                        bandHi={bandHi}
-                        bandLabel={band}
-                      />
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </CardContent>
-      </Card>
 
-      {/* Reviews externas — apoiam visualmente os scores da IA. "Buscar reviews" vive no header do card. */}
-      {/* A síntese estruturada e o resumo em prosa são gerações SEPARADAS, com
-          modelos e datas próprios — por isso as duas descem no mesmo objeto. */}
-      <WorkReviewsCard
-        snapshot={reviewsSnapshot}
-        workId={work.id as string}
-        provenance={{
-          digestModel: aiProvenance.review_digest?.model ?? null,
-          digestPromptVersion: aiProvenance.review_digest?.promptVersion ?? null,
-          summaryModel: aiProvenance.review_summarizer?.model ?? null,
-        }}
-      />
         </TabsContent>
 
             <TabsContent value="tags" className="mt-0 space-y-6">

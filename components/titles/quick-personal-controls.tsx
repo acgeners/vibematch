@@ -90,6 +90,25 @@ export function QuickChaptersCell({
   const [clampedFrom, setClampedFrom] = useState<number | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  /**
+   * O progresso ("12 / 73" e a barra) só existe quando o status ACOMPANHA progresso.
+   *
+   * 🔴 A régua vem do banco (`personal_status.tracks_progress`), nunca de uma lista de
+   * nomes: hoje os quatro sem progresso são Want to Read, Untracked, Not Now e
+   * Not Interested — todos casos de "ainda não comecei / não vou começar", em que "0 / 73"
+   * não é informação, é ruído que ainda por cima parece leitura abandonada. Um status novo
+   * no Supabase entra na régua sozinho; uma lista fixa aqui erraria calada.
+   *
+   * ⚠️ Sem status (obra nunca tocada) também não mostra progresso — é o mesmo caso de
+   * "não comecei", e `personalStatusId` é null antes do primeiro toque.
+   *
+   * O popover de edição continua inteiro: é por ele que se começa a acompanhar, e escrever
+   * capítulo promove o status pra Reading (`promotedStatus`), que devolve o "12 / 73".
+   */
+  const showsProgress = personalStatusId != null
+    ? (PERSONAL_STATUSES_BY_ID[personalStatusId]?.tracksProgress ?? false)
+    : false
+
   // Mesmo padrão "adjust during render" do QuickStatusCell — ver o comentário lá.
   if (chaptersRead !== syncedProp) {
     setSyncedProp(chaptersRead)
@@ -102,7 +121,8 @@ export function QuickChaptersCell({
 
   if (!canEdit) {
     const total = totalChapters != null && totalChapters > 0 ? totalChapters : null
-    const readDisplay = chaptersRead != null && chaptersRead > 0 ? chaptersRead : null
+    const readDisplay =
+      showsProgress && chaptersRead != null && chaptersRead > 0 ? chaptersRead : null
     const text =
       readDisplay != null && total != null
         ? `${readDisplay} / ${total} capítulos`
@@ -204,6 +224,8 @@ export function QuickChaptersCell({
   const previewed = draft !== null && draft.trim() !== "" ? Number(draft) : read
   const shown = Number.isFinite(previewed) ? clampChaptersRead(previewed, ceiling).value : read
   const pct = totalChapters && totalChapters > 0 ? readingProgressPercent(shown, totalChapters) : null
+  /** No editor, progresso aparece também assim que o número sai do zero (ver abaixo). */
+  const progressInPopover = showsProgress || shown > 0
 
   return (
     <div className={CELL_CLASS}>
@@ -215,7 +237,7 @@ export function QuickChaptersCell({
           title="Editar capítulos lidos"
         >
           <span className="font-mono text-sm font-semibold text-foreground">
-            {totalChapters ? `${read} / ${totalChapters}` : read}
+            {totalChapters ? (showsProgress ? `${read} / ${totalChapters}` : totalChapters) : read}
           </span>
           <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:opacity-100" />
         </PopoverTrigger>
@@ -281,18 +303,25 @@ export function QuickChaptersCell({
             {totalChapters ? (
               <>
                 <span className="font-mono text-sm text-muted-foreground">/ {totalChapters}</span>
-                <span className="ml-auto font-mono text-xs font-bold text-primary">{pct}%</span>
+                {/* A % e a barra acompanham o mesmo critério do gatilho — mas voltam assim que
+                    o número sai do zero, mesmo antes de salvar: é o retorno visual que diz
+                    "entendi 18", e escrever capítulo promove o status pra Reading. */}
+                {progressInPopover && (
+                  <span className="ml-auto font-mono text-xs font-bold text-primary">{pct}%</span>
+                )}
               </>
             ) : null}
           </div>
           {totalChapters ? (
             <>
-              <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-primary transition-[width]"
-                  style={{ width: `${Math.min(100, pct ?? 0)}%` }}
-                />
-              </div>
+              {progressInPopover && (
+                <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-primary transition-[width]"
+                    style={{ width: `${Math.min(100, pct ?? 0)}%` }}
+                  />
+                </div>
+              )}
               {clampedFrom != null ? (
                 // Corrigir o número em silêncio vira "o app comeu o que eu digitei". Diz o
                 // que recebeu e o que fez — e nomeia o catálogo como origem do teto.
