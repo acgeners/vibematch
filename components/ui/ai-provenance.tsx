@@ -23,6 +23,7 @@
 
 import { Sparkles } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { formatProvenanceWhen } from "@/lib/date-utils"
 import { cn } from "@/lib/utils"
 
 export interface AiProvenanceRow {
@@ -58,19 +59,15 @@ export interface AiProvenanceSealProps {
 }
 
 /**
- * DD/MM/AAAA por SLICE do ISO, não `toLocaleDateString`.
+ * Quando o artefato foi gerado, na régua dos selos: `Hoje às 09:14` ·
+ * `Ontem às 22:40` · `Terça às 14:30` · `10/08/2026` (≥7 dias).
  *
- * O selo renderiza nos dois lados (server component da obra e cards client), e
- * `new Date(iso).toLocaleDateString()` usa o fuso de QUEM renderiza — o HTML do
- * SSR sairia com uma data e o primeiro render do cliente com outra, quebrando a
- * hidratação. Slice é determinístico nos dois. Mesmo formatador do rodapé do
- * Interesse, que já resolvia isso assim.
+ * O dono é `lib/date-utils.ts` — uma segunda cópia aqui é como dois tooltips da
+ * mesma página passam a discordar sobre o mesmo instante. Reexportado porque o
+ * tooltip do embedding ("Obras parecidas") escreve a proveniência dele à mão, e
+ * a régua vale pra ele também.
  */
-export function formatProvenanceDate(iso: string | null | undefined): string | null {
-  if (!iso) return null
-  const [y, m, d] = iso.slice(0, 10).split("-")
-  return y && m && d ? `${d}/${m}/${y}` : null
-}
+export { formatProvenanceWhen }
 
 /** Junta modelo e versão do prompt num valor só. `null` quando não há modelo. */
 export function formatProvenanceModel(
@@ -114,9 +111,12 @@ export function AiProvenanceSeal({
   align = "center",
   className,
 }: AiProvenanceSealProps) {
+  // ⚠️ A DATA vem primeiro, e não o modelo. A pergunta que se faz olhando um selo é
+  // "isso ainda vale?" — quem responde é o quando, e ele estava em segundo lugar num
+  // formato (10/08/2026) que não diz se foi hoje de manhã ou há três meses.
   const rows: AiProvenanceRow[] = [
+    { label: "Data", value: formatProvenanceWhen(at) },
     { label: "Modelo", value: formatProvenanceModel(model, promptVersion) },
-    { label: "Data", value: formatProvenanceDate(at) },
     ...(extra ?? []),
   ]
 

@@ -72,3 +72,75 @@ export function formatFullDateTime(input: DateInput): string {
   if (!d) return "—"
   return d.toLocaleString("pt-BR")
 }
+
+/* ------------------------------------------------------------------ */
+/* Data de proveniência (tooltips de IA)                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 🔴 Fuso FIXO, e não o de quem renderiza.
+ *
+ * Os selos ✨ renderizam nos dois lados: no server component da página da obra e
+ * dentro de cards `"use client"` (reviews, Interesse, estrutura de abertura). O
+ * servidor em produção roda em UTC e o navegador em UTC−3 — com o fuso do runtime,
+ * o HTML do SSR sairia "Hoje às 21:40" e a hidratação recalcularia "Hoje às 18:40",
+ * que é a mesma classe de quebra da sidebar em `localStorage`. Ancorar em
+ * São Paulo dá o MESMO texto nos dois lados e é o fuso de quem lê.
+ */
+const PROVENANCE_TZ = "America/Sao_Paulo"
+
+const PROVENANCE_PARTS = new Intl.DateTimeFormat("pt-BR", {
+  timeZone: PROVENANCE_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+  weekday: "long",
+})
+
+function zonedParts(d: Date) {
+  const p = Object.fromEntries(PROVENANCE_PARTS.formatToParts(d).map((x) => [x.type, x.value]))
+  return {
+    year: Number(p.year),
+    month: Number(p.month),
+    day: Number(p.day),
+    hour: p.hour ?? "00",
+    minute: p.minute ?? "00",
+    weekday: p.weekday ?? "",
+    ymd: p.day && p.month && p.year ? `${p.day}/${p.month}/${p.year}` : null,
+  }
+}
+
+/**
+ * Quando um artefato de IA foi gerado, na régua dos selos ✨:
+ * `Hoje às 09:14` · `Ontem às 22:40` · `Terça às 14:30` · `10/08/2026`.
+ *
+ * A pergunta que se faz olhando um selo é "isso ainda vale?", e a distância em dias
+ * responde melhor que o número — mas só enquanto ela IDENTIFICA o dia. O corte fica
+ * em 6 dias (e não nos 7 do pedido) porque na volta da semana o nome do dia repete o
+ * de hoje: numa quarta, "Quarta" seria hoje ou sete dias atrás, sem como distinguir.
+ *
+ * Irmão de `formatRelativeDateTime`, não substituto: aquele usa o fuso do runtime e
+ * vive em telas 100% client (lista de leitura, histórico de runs), onde não há SSR
+ * pra divergir.
+ */
+export function formatProvenanceWhen(input: DateInput): string | null {
+  const d = toDate(input)
+  if (!d) return null
+  const at = zonedParts(d)
+  const now = zonedParts(new Date())
+  const days =
+    (Date.UTC(now.year, now.month - 1, now.day) - Date.UTC(at.year, at.month - 1, at.day)) / 86_400_000
+
+  const time = `${at.hour}:${at.minute}`
+  if (days === 0) return `Hoje às ${time}`
+  if (days === 1) return `Ontem às ${time}`
+  if (days >= 2 && days <= 6) {
+    return `${capitalize(at.weekday.replace(/-feira$/, ""))} às ${time}`
+  }
+  // ≥7 dias — e também data no FUTURO, que só existe por relógio torto: nos dois
+  // casos o número é o que informa.
+  return at.ymd
+}

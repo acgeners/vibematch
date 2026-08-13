@@ -2,12 +2,23 @@
 
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { STATUS_CHIP_BASE, STATUS_TONE } from "@/lib/ui/status-tone"
+import type { StatusTone } from "@/lib/ui/status-tone"
 import type { InputConfidence, UiReadiness } from "@/lib/orchestration/ui-readiness"
 
-const TONE: Record<InputConfidence, string> = {
-  alta: "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-400/10 dark:text-emerald-300",
-  média: "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-300",
-  baixa: "border-rose-300 bg-rose-50 text-rose-600 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-300",
+/**
+ * ⚠️ **A confiança dos inputs deixou de disputar cor com "desatualizado" (2026-08-12).**
+ *
+ * O nível médio era âmbar — a mesma cor de "Desatualizado" no Veredito e de "Previsão
+ * desatualizada" logo ao lado, no MESMO card do Interesse. Só que este selo é passivo:
+ * ele não pede ação nenhuma, só qualifica o que entrou. Quem pede ação ficou com o
+ * âmbar sozinho (`lib/ui/status-tone.ts`), e o nível daqui passou a ser dito pela
+ * FORMA — três pontos, dos quais N acesos —, com cor apenas nos extremos.
+ */
+const LEVEL: Record<InputConfidence, { tone: StatusTone; filled: number }> = {
+  alta: { tone: "ok", filled: 3 },
+  média: { tone: "absent", filled: 2 },
+  baixa: { tone: "failed", filled: 1 },
 }
 
 /**
@@ -23,18 +34,30 @@ export function InputConfidenceSeal({
   className?: string
 }) {
   const missing = [...readiness.weakening, ...readiness.softMissing]
+  const level = LEVEL[readiness.confidence]
   return (
     <TooltipProvider delayDuration={150}>
       <Tooltip>
         <TooltipTrigger asChild>
           <span
             className={cn(
-              "inline-flex cursor-default items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-              TONE[readiness.confidence],
+              STATUS_CHIP_BASE,
+              "cursor-default",
+              STATUS_TONE[level.tone].chip,
               className,
             )}
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" aria-hidden />
+            <span className="flex items-center gap-[3px]" aria-hidden>
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className={cn(
+                    "h-1.5 w-1.5 rounded-full bg-current",
+                    i < level.filled ? "opacity-90" : "opacity-25",
+                  )}
+                />
+              ))}
+            </span>
             Inputs: {readiness.confidence}
           </span>
         </TooltipTrigger>

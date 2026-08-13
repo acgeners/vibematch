@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Sparkles, ImageOff, Info, BookOpen, ChevronDown, Star, Users, Target } from "lucide-react"
+import { Radar, ImageOff, Info, BookOpen, ChevronDown, Star, Users, Target } from "lucide-react"
 import type { ReactNode } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -16,7 +16,7 @@ import { LABELS } from "@/lib/constants/ui-labels"
 import { cn, titleToSlug } from "@/lib/utils"
 import { CoverImage } from "@/components/ui/cover-image"
 import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
-import { formatProvenanceDate } from "@/components/ui/ai-provenance"
+import { formatProvenanceWhen } from "@/components/ui/ai-provenance"
 import type { SimilarWork } from "@/server/queries/similar-works"
 
 interface SimilarWorksCardProps {
@@ -238,7 +238,11 @@ export function SimilarWorksCard({ works, className, embedding }: SimilarWorksCa
       <Card className={className}>
         <CardHeader className="pb-2">
           <CardTitle className="text-base flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-violet-500" />
+            {/* ⚠️ Alvo, não ✨. Aqui nenhum texto foi escrito por um modelo: é busca
+                vetorial (distância cosseno entre embeddings). O ✨ violeta afirmava
+                "isto é geração de IA" — e ainda por cima sem tooltip nenhum, enquanto
+                o ℹ️ ao lado é quem explica o método e carrega o modelo do vetor. */}
+            <Radar className="h-4 w-4 text-muted-foreground" />
             Obras parecidas
           </CardTitle>
         </CardHeader>
@@ -255,7 +259,11 @@ export function SimilarWorksCard({ works, className, embedding }: SimilarWorksCa
       <CardHeader className="pb-0">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="text-base flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-violet-500" />
+            {/* ⚠️ Alvo, não ✨. Aqui nenhum texto foi escrito por um modelo: é busca
+                vetorial (distância cosseno entre embeddings). O ✨ violeta afirmava
+                "isto é geração de IA" — e ainda por cima sem tooltip nenhum, enquanto
+                o ℹ️ ao lado é quem explica o método e carrega o modelo do vetor. */}
+            <Radar className="h-4 w-4 text-muted-foreground" />
             Obras parecidas
             <TooltipProvider>
               <Tooltip>
@@ -277,7 +285,7 @@ export function SimilarWorksCard({ works, className, embedding }: SimilarWorksCa
                   {embedding && (
                     <span className="mt-2 block border-t border-background/20 pt-1.5 text-[11px] text-muted-foreground">
                       Vetor desta obra: <span className="font-mono font-semibold">{embedding.model ?? "sem registro"}</span>
-                      {formatProvenanceDate(embedding.at) && <> · {formatProvenanceDate(embedding.at)}</>}
+                      {formatProvenanceWhen(embedding.at) && <> · {formatProvenanceWhen(embedding.at)}</>}
                     </span>
                   )}
                 </TooltipContent>
@@ -522,6 +530,8 @@ export function SimilarWorksCard({ works, className, embedding }: SimilarWorksCa
                     )}
                     <Metric label={LABELS.alignment_score.full}>
                       {w.alignmentScore != null ? (
+                        // Sem ✨: o rótulo da métrica já diz "Veredito IA", e um ícone que
+                        // não abre proveniência só gasta a marca (régua de 2026-08-12).
                         <span
                           className={cn(
                             "inline-flex items-center gap-1",
@@ -529,7 +539,6 @@ export function SimilarWorksCard({ works, className, embedding }: SimilarWorksCa
                             w.alignmentStale && "opacity-60",
                           )}
                         >
-                          <Sparkles className="size-3" />
                           {Math.round(w.alignmentScore)}
                         </span>
                       ) : (

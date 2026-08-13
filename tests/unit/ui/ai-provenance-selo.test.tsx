@@ -1,11 +1,19 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { vi, describe, it, expect, afterEach } from "vitest"
-import { render, cleanup, screen } from "@testing-library/react"
+import { render, cleanup, screen, fireEvent } from "@testing-library/react"
 
 vi.mock("server-only", () => ({}))
 
-import { AiProvenanceSeal, formatProvenanceDate } from "@/components/ui/ai-provenance"
+// O Radix mede o gatilho pra posicionar o tooltip; jsdom não tem ResizeObserver, e sem
+// este stub o corpo do tooltip nem chega a montar (o teste morreria antes de asserir).
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver
+
+import { AiProvenanceSeal, formatProvenanceWhen } from "@/components/ui/ai-provenance"
 
 /**
  * O selo de proveniência de IA, em RENDER.
@@ -20,21 +28,43 @@ import { AiProvenanceSeal, formatProvenanceDate } from "@/components/ui/ai-prove
  * pureza dos formatadores; o corpo é coberto pelo `defaultOpen` do Radix via `open`.
  */
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
-describe("formatProvenanceDate", () => {
-  it("formata por SLICE do ISO, não pelo fuso de quem renderiza", () => {
-    // 🔴 O selo renderiza no server component da obra E em cards client. Com
-    // `toLocaleDateString` o HTML do SSR sairia com uma data e o primeiro render do
-    // cliente com outra (fusos diferentes), quebrando a hidratação. Este ISO é o caso
-    // que denuncia: 00:30 UTC vira o DIA ANTERIOR em qualquer fuso negativo.
-    expect(formatProvenanceDate("2026-08-08T00:30:00.000Z")).toBe("08/08/2026")
+/** Quarta-feira, 12/08/2026, meio-dia em São Paulo (15:00 UTC). */
+function congelaEm(iso: string) {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date(iso))
+}
+
+describe("formatProvenanceWhen", () => {
+  it("fala em DIAS enquanto o dia for identificável, e em número depois", () => {
+    // A pergunta que se faz olhando um selo é "isso ainda vale?". "10/08/2026" não
+    // responde sem contar nos dedos; "Ontem às 22:40" responde.
+    congelaEm("2026-08-12T15:00:00.000Z")
+    expect(formatProvenanceWhen("2026-08-12T12:14:00.000Z")).toBe("Hoje às 09:14")
+    expect(formatProvenanceWhen("2026-08-12T01:40:00.000Z")).toBe("Ontem às 22:40")
+    expect(formatProvenanceWhen("2026-08-08T17:30:00.000Z")).toBe("Sábado às 14:30")
+    // 7 dias atrás também é quarta: o nome do dia deixa de identificar e vira número.
+    expect(formatProvenanceWhen("2026-08-05T17:30:00.000Z")).toBe("05/08/2026")
+  })
+
+  it("ancora em São Paulo, não no fuso de quem renderiza", () => {
+    // 🔴 O selo renderiza no server component da obra E em cards client. O servidor em
+    // produção roda em UTC e o navegador em UTC−3: com o fuso do runtime, o HTML do SSR
+    // e a hidratação escreveriam horas diferentes e a árvore seria descartada.
+    // Este ISO é o caso que denuncia — 02:30 UTC ainda é o dia ANTERIOR em São Paulo,
+    // e o formatador antigo (slice do ISO) diria "12/08".
+    congelaEm("2026-08-12T15:00:00.000Z")
+    expect(formatProvenanceWhen("2026-08-12T02:30:00.000Z")).toBe("Ontem às 23:30")
   })
 
   it("devolve null pra data ausente, em vez de inventar um dia", () => {
-    expect(formatProvenanceDate(null)).toBeNull()
-    expect(formatProvenanceDate(undefined)).toBeNull()
-    expect(formatProvenanceDate("")).toBeNull()
+    expect(formatProvenanceWhen(null)).toBeNull()
+    expect(formatProvenanceWhen(undefined)).toBeNull()
+    expect(formatProvenanceWhen("")).toBeNull()
   })
 })
 
@@ -55,6 +85,25 @@ describe("AiProvenanceSeal", () => {
     )
     expect(container.textContent).not.toContain("08/08/2026")
     expect(container.textContent).not.toContain("claude-sonnet-5")
+  })
+
+  it("a DATA é a primeira linha do tooltip, antes do modelo", () => {
+    // A ordem é a hierarquia da pergunta: primeiro "isso ainda vale?" (data), depois
+    // "quem escreveu?" (modelo). O Radix monta o corpo só quando abre — e ele abre no
+    // FOCO, que é o mesmo caminho de quem usa teclado.
+    congelaEm("2026-08-12T15:00:00.000Z")
+    render(
+      <AiProvenanceSeal
+        title="Síntese gerada por IA"
+        model="claude-sonnet-5"
+        at="2026-08-12T12:14:00.000Z"
+      />,
+    )
+    fireEvent.focus(screen.getByRole("button", { name: /Síntese gerada por IA/ }))
+    const rotulos = screen.getAllByRole("term").map((el) => el.textContent)
+    expect(rotulos[0]).toBe("Data")
+    expect(rotulos[1]).toBe("Modelo")
+    expect(screen.getAllByText("Hoje às 09:14").length).toBeGreaterThan(0)
   })
 
   it("com `label`, o rótulo aparece — rodapé de vários itens precisa dele", () => {

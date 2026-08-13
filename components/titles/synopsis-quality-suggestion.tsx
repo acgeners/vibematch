@@ -17,7 +17,8 @@ import { InputConfidenceSeal } from "@/components/generation/input-confidence-se
 import { QualityHearts } from "@/components/ui/quality-hearts"
 import { SynopsisQualityPicker } from "@/components/titles/synopsis-quality-picker"
 import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
-import { AiProvenanceSeal } from "@/components/ui/ai-provenance"
+import { AiProvenanceSeal, formatProvenanceWhen } from "@/components/ui/ai-provenance"
+import { STATUS_TONE } from "@/lib/ui/status-tone"
 
 export interface SynopsisQualitySuggestionProps {
   workId: string
@@ -43,13 +44,6 @@ export interface SynopsisQualitySuggestionProps {
   readiness?: UiReadiness | null
   /** Previsão IA é feature do plano Pago. Controla só a aparência. */
   isPaid?: boolean
-}
-
-/** DD/MM/AAAA a partir do ISO (slice — evita mismatch de fuso/hidratação). */
-function fmtDate(iso: string | null | undefined): string | null {
-  if (!iso) return null
-  const [y, m, d] = iso.slice(0, 10).split("-")
-  return y && m && d ? `${d}/${m}/${y}` : null
 }
 
 /**
@@ -130,7 +124,9 @@ export function SynopsisQualitySuggestion({
         : "Sem sinopse canônica para avaliar."
 
   const stale = Boolean(prediction?.stale)
-  const predictedOn = fmtDate(prediction?.predictedAt)
+  // Mesma régua dos selos ✨ ("Ontem às 22:40"), e não um DD/MM próprio: era a segunda
+  // cópia de formatador de data neste mesmo card.
+  const predictedOn = formatProvenanceWhen(prediction?.predictedAt)
 
   // O botão herda o aviso: âmbar quando a previsão envelheceu. O texto do porquê fica
   // no `title` e no rodapé — uma faixa inteira só pra repetir a data era o maior bloco
@@ -139,7 +135,7 @@ export function SynopsisQualitySuggestion({
   const predictTitle = blocked
     ? blockTitle
     : stale
-      ? `Previsão${predictedOn ? ` de ${predictedOn}` : ""} desatualizada: a sinopse ou seu perfil de gosto mudaram desde então.`
+      ? `Previsão${predictedOn ? ` de ${predictedOn.toLowerCase()}` : ""} desatualizada: a sinopse ou seu perfil de gosto mudaram desde então.`
       : undefined
 
   const applyLabel = alreadyApplied
@@ -161,7 +157,8 @@ export function SynopsisQualitySuggestion({
           size="sm"
           className={cn(
             "h-7 gap-1.5 text-xs",
-            stale && !blocked && "border-amber-400/40 text-amber-600 hover:text-amber-600 dark:text-amber-300",
+            // Âmbar = desatualizado, e só isso (lib/ui/status-tone.ts).
+            stale && !blocked && cn(STATUS_TONE.stale.text, STATUS_TONE.stale.outline, "hover:text-amber-600"),
           )}
           onClick={() => void runPredict()}
           disabled={predicting || blocked}
@@ -176,8 +173,11 @@ export function SynopsisQualitySuggestion({
           sugestão pro seu ♥, então o botão separado só repetia o gesto. */}
       <div className="grid items-stretch gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-1 rounded-lg border border-border/50 bg-muted/30 px-3 py-2">
+          {/* ⚠️ Um ✨ só. Havia dois colados aqui — um ícone fixo e o selo clicável —, e
+              o decorativo gastava a marca sem abrir nada: quem visse o par não saberia
+              qual dos dois responde "quem escreveu isto". */}
           <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            <Sparkles className="h-3 w-3" /> A IA sugere
+            A IA sugere
             {prediction && (
               <AiProvenanceSeal
                 title="Interesse previsto por IA"
@@ -245,7 +245,7 @@ export function SynopsisQualitySuggestion({
                       "grid size-9 place-items-center rounded-full border transition-colors",
                       "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                       alreadyApplied
-                        ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+                        ? cn(STATUS_TONE.ok.chip, "rounded-full")
                         : prediction == null || applying
                           ? "border-border/60 text-muted-foreground opacity-50"
                           : "border-border bg-background text-foreground hover:border-primary hover:bg-primary/10 hover:text-primary",
@@ -327,7 +327,7 @@ export function SynopsisQualitySuggestion({
               cálculo. Esconder qualquer um dos dois num tooltip seria enterrar o aviso. */}
           {stale && (
             <>
-              <span className="text-amber-600 dark:text-amber-300">Previsão desatualizada</span>
+              <span className={STATUS_TONE.stale.text}>Previsão desatualizada</span>
               <span aria-hidden>·</span>
             </>
           )}

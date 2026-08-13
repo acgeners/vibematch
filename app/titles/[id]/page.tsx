@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 import { notFound, redirect } from "next/navigation"
-import { Archive, BarChart3, Ban, ChevronDown, Compass, Heart, LayoutDashboard, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash, ExternalLink } from "lucide-react"
+import { Archive, BarChart3, Ban, ChevronDown, Compass, Heart, LayoutDashboard, Lightbulb, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash, ExternalLink } from "lucide-react"
 import { ArchivedBanner } from "@/components/titles/archived-banner"
 import {
   CurationRequestActions,
@@ -117,6 +117,7 @@ import {
   type PostReadingScoreField,
 } from "@/lib/constants/post-reading-criteria"
 import { cn, titleToSlug } from "@/lib/utils"
+import { STATUS_CHIP_BASE, STATUS_TONE } from "@/lib/ui/status-tone"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { unstable_cache } from "next/cache"
 
@@ -860,7 +861,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             <span className="sm:hidden">Status</span>
           </TabsTrigger>
           <TabsTrigger value="recommendations" className={tabTriggerClass}>
-            <Sparkles />
+            {/* Lightbulb e não ✨: a aba é NAVEGAÇÃO. O ✨ é a marca de "um modelo escreveu
+                isto" (e, em botão, de "esta ação chama um modelo") — numa aba ele não abre
+                proveniência nenhuma e gasta a marca. */}
+            <Lightbulb />
             <span className="hidden sm:inline">Recomendações</span>
             <span className="sm:hidden">Recom.</span>
           </TabsTrigger>
@@ -1423,7 +1427,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                           />
                         </span>
                         {stale ? (
-                          <span className="inline-flex max-w-full items-center rounded-full border border-amber-500/55 bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                          <span className={cn(STATUS_CHIP_BASE, STATUS_TONE.stale.chip)}>
                             Desatualizado
                           </span>
                         ) : (
@@ -1440,7 +1444,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                               cls,
                               // !important: o reset global `* { border-color }` (globals.css,
                               // sem @layer) vence utilities no Tailwind v4; sem o ! a borda fica cinza.
-                              stale && "border-amber-600! dark:border-amber-400!",
+                              stale && STATUS_TONE.stale.outline,
                             )}>
                               {Math.round(rk)}
                             </span>
@@ -1920,8 +1924,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                         align="end"
                       />
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
-                        <Sparkles className="h-3 w-3" /> inferência de tags: nunca rodou
+                      // "Nunca rodou" é PENDÊNCIA, não resultado velho — e o ✨ aqui marcava
+                      // uma geração que não existe. Chip da régua (lib/ui/status-tone.ts).
+                      <span className={cn(STATUS_CHIP_BASE, STATUS_TONE.pending.chip)}>
+                        inferência de tags: nunca rodou
                       </span>
                     )}
                     {tagsInferenceRan ? (
