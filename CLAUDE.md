@@ -894,6 +894,51 @@ recomendação (UI própria) · resolvedor Comix (job com painel de polling).
    ranking **14,0s** (p90 47,9s) · digest 13,4s · avaliação IA 17,5s · tags 7,6s · Interesse
    4,9s. Deep dive **sem medição** (zero linhas locais).
 
+## Cor de ESTADO tem um significado só — e o âmbar é do "desatualizado"
+
+Irmã da seção acima (lá a cor diz *onde a ação vive*; aqui ela diz *o que fazer com o
+resultado*). Dono único: **`lib/ui/status-tone.ts`** (`STATUS_TONE` + `STATUS_CHIP_BASE`).
+
+Até 2026-08-12 o âmbar dizia **cinco coisas** na mesma página da obra: "Desatualizado"
+(Veredito), "Previsão desatualizada" (Interesse), "Inputs: média", avisos de conteúdo,
+"síntese corrompida" e "inferência de tags: nunca rodou" — os dois primeiros **no mesmo
+card**. Quando tudo é âmbar, nada é urgente: o que CHAMA AÇÃO some no meio do que só
+descreve.
+
+| tom | quer dizer | onde |
+|---|---|---|
+| **`stale`** âmbar | existe, mas os inputs mudaram ⇒ não aplique sem refazer | Veredito · Interesse · Estrutura de abertura · IA-Rk |
+| `pending` sky | nunca rodou / está na fila ⇒ falta uma ação sua | "inferência de tags: nunca rodou" |
+| `ok` emerald | confirmado, aplicado | "Aplicado" do Interesse |
+| `failed` rose | quebrou, corrompeu, falta input obrigatório | digest corrompido · reviews curtas demais |
+| `content` red | fato sobre a **obra**, não sobre o sistema | avisos de conteúdo · 🔞 18+ |
+| `absent` slate | ausente / não se aplica | "Evidência insuficiente" da abertura |
+
+🔴 **O âmbar ficou com o `stale` por FREQUÊNCIA, não por gosto** (escolha da Ana,
+12/08/2026): "desatualizado" aparece em quatro pontos da página e é o estado mais
+acionável dela. Os avisos de conteúdo foram pro vermelho do 🔞 — os dois falam da obra,
+e ali a proximidade é coerência.
+
+⚠️ **Confiança dos inputs deixou de disputar cor.** `InputConfidenceSeal` é passivo (não
+pede ação), então o nível virou **forma**: três pontos, N acesos, com cor só nos extremos
+(alta emerald · média slate · baixa rose). Ele fica a dois centímetros de "Previsão
+desatualizada" no card do Interesse — eram os dois âmbares.
+
+⚠️ **Escala de VALOR não é estado.** Nota, similaridade, alinhamento e Veredito são rampas
+contínuas e vêm sempre com o número ao lado (`8,4`, `72%`); elas seguem usando amarelo no
+meio da rampa. O que a régua proíbe é **chip de palavra** em âmbar que não seja
+"desatualizado".
+
+⚠️ **Violeta fica FORA da régua**: `✨` é procedência ("quem escreveu isto"), não estado.
+
+⚠️ **`border-<cor>` não pinta** (o `* { border-color }` do `globals.css` vence utilities no
+Tailwind v4) — por isso `box` usa `ring-*` e `outline` carrega `!`.
+
+Guardado por `tests/unit/ui/cores-de-estado.test.ts`, que **deriva os tons do próprio
+objeto** (papel novo entra na checagem sozinho) e reprova cor repetida entre papéis, e por
+um caso de render em `interesse-obra-veredito-pareado.test.tsx` — a colisão é entre
+VIZINHOS, e isso só aparece na árvore desenhada.
+
 ## A query string do /ranking é um CONTRATO — e ela fala PONTOS
 
 Os limiares dos 9 atributos (`min_<slug>`/`max_<slug>`) estão **sempre em pontos (0–10)** na
@@ -1005,6 +1050,43 @@ Dois problemas que a ausência da régua produzia:
 ficam na tela. Não são procedência — são o que impede aplicar ao pipeline de notas um número
 que a IA já não sustenta. Enterrá-los num tooltip devolve o "aplicar cego".
 
+**A DATA é a primeira linha do tooltip, e fala em dias** (2026-08-12). A pergunta que se faz
+olhando um selo é *"isso ainda vale?"* — quem responde é o quando, e ele estava em 2º lugar
+num formato (`10/08/2026`) que não diz se foi hoje de manhã ou há três meses:
+
+| quando | sai assim |
+|---|---|
+| hoje / ontem | `Hoje às 09:14` · `Ontem às 22:40` |
+| 2 a 6 dias | `Terça às 14:30` |
+| 7 dias ou mais (e futuro) | `10/08/2026` |
+
+⚠️ **O corte é 6 dias, não 7:** na volta da semana o nome do dia repete o de hoje — numa
+quarta, "Quarta" seria hoje ou sete dias atrás. Dono: `formatProvenanceWhen`
+(`lib/date-utils.ts`), usado pelo selo, pelo rodapé do card de reviews, pelo tooltip do
+embedding e pelo aviso de previsão velha.
+
+🔴 **Fuso FIXO (`America/Sao_Paulo`), nunca o do runtime.** O selo renderiza no server
+component da obra E dentro de cards `"use client"`; o servidor no Fly roda em UTC e o
+navegador em UTC−3, então o SSR escreveria "Hoje às 21:40" e a hidratação "Hoje às 18:40" —
+a mesma classe de quebra da sidebar em `localStorage`. O formatador antigo resolvia isso
+por SLICE do ISO (determinístico, porém em UTC: 02:30Z aparecia como o dia seguinte).
+
+**O ✨ tem TRÊS usos, e o terceiro é proibido** (mesma data). A marca é o que dá sentido ao
+selo; se ela aparece como enfeite, deixa de significar "um modelo escreveu isto":
+
+| uso | regra |
+|---|---|
+| **selo** violeta clicável | conteúdo na tela saiu de um modelo — tooltip de proveniência |
+| **em botão**, com texto | a ação CHAMA um modelo (e custa): "Prever de novo", "Avaliar com IA" |
+| ~~ícone fixo de título/aba/métrica~~ | **não** — não abre nada e gasta a marca |
+
+Saíram nesta leva: o ✨ do título de **"Obras parecidas"** (o card é busca vetorial, não
+texto de LLM — hoje é um alvo, e o ℹ️ ao lado continua sendo quem explica o método e mostra
+o modelo do embedding), o ✨ da métrica **Veredito IA** do mesmo card (o rótulo já diz IA), o
+**segundo** ✨ de "✨ A IA sugere ✨" no Interesse (ficou só o selo clicável), o da **aba
+Recomendações** (virou 💡 — aba é navegação) e o de **"inferência de tags: nunca rodou"**,
+que virou chip `pending` da régua de estado.
+
 ⚠️ **Fora da régua, de propósito:** Nota Prevista, Nota.Calc, Alinhamento e a Bússola são Ridge
 e aritmética em TS, sem LLM — selo "gerado por IA" ali seria mentira. A caixa lateral
 ("Última avaliação em / Atualizada em") também fica: é painel de FRESCOR da ficha, e
@@ -1070,6 +1152,33 @@ Quatro invariantes que se pagam caro se forem esquecidas:
 o card mede **868px** ali dentro — `@4xl` (896px) nunca disparava e as duas colunas viravam
 pilha, em silêncio. Meça no app antes de escolher o breakpoint. E o rodapé é **irmão** do
 `CardContent`: sem `@container` próprio, as classes `@2xl:` dele eram letra morta.
+
+### O layout SEGUE O DADO — a coluna fixa era vão na maioria das obras
+
+Duas linhas fixas (`[texto | 292px]` em cima, `[régua | painel]` embaixo) só ficam cheias na
+obra completa. Medido nas **852 obras com síntese** (12/08/2026):
+
+| caso | obras | o que acontecia |
+|---|---|---|
+| só avisos (sem notas de leitor) | **459 · 53,9%** | 292px reservados pra um bloco de ~130px |
+| notas + avisos | 270 · 31,7% | linha de cima cheia; o vão descia pro lado da régua |
+| **nada** na coluna direita | 81 · 9,5% | 292px vazios e o texto espremido em 1fr |
+| só notas | 42 · 4,9% | — |
+
+E o vão de baixo é **estrutural**: **91% das obras têm 5 a 7 eixos** (régua de 190–260px)
+contra **2,2 traços** no eixo mais citado (painel de ~110px). Hoje:
+
+- **sem histograma** ⇒ não existe coluna: consenso e divergência **dividem a largura**, e a
+  divergência ganha corte de 10 linhas em vez de 4 (389 caracteres de mediana cabem inteiros
+  em meia largura; empilhada sob o consenso, 4 linhas seguem certas);
+- **avisos de conteúdo vão pro vão MAIOR**, e ele muda de lugar: com histograma ficam no topo
+  (o gráfico tem 250px contra um consenso longo), sem histograma descem pro lado da régua;
+- **o painel do eixo não estica** (`items-start`) — quem define a altura da linha é a régua, e
+  o texto continua num espaço já reservado.
+
+⚠️ **8 obras não têm traço nenhum**, e sem régua os avisos não têm onde encostar: existe um
+ramo só pra elas. Sem ele, o bloco sumiria em silêncio junto com a régua que passou a
+hospedá-lo. Guardado por `tests/unit/reviews/digest-layout-adaptativo.test.tsx`.
 
 Guardado por `tests/unit/reviews/digest-view.test.ts` e `tests/unit/work-reviews-card.test.tsx`
 — este último é teste de RENDER de propósito: um teste que lesse o objeto do digest passaria

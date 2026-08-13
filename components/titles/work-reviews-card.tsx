@@ -11,13 +11,13 @@ import { ExpandableText } from "@/components/ui/expandable-text"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
-import { formatRelativeDateTime } from "@/lib/date-utils"
 import { useRefresh } from "@/lib/use-refresh"
 import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { generateWorkReviewDigest } from "@/server/actions/review-digest"
 import { isDigestCorrupted } from "@/lib/ai-recommendation/digest-integrity"
 import { RefetchReviewsButton } from "@/components/titles/refetch-reviews-button"
-import { AiProvenanceSeal, formatProvenanceDate } from "@/components/ui/ai-provenance"
+import { AiProvenanceSeal, formatProvenanceWhen } from "@/components/ui/ai-provenance"
+import { STATUS_TONE } from "@/lib/ui/status-tone"
 import {
   collectUserRatings,
   defaultAxisKey,
@@ -200,6 +200,64 @@ function RatingsPanel({ bins, total }: { bins: RatingBin[]; total: number }) {
   )
 }
 
+/**
+ * Avisos de conteúdo. Pílulas à vista, texto inteiro no popover (mediana de 3 avisos,
+ * 85% das obras têm).
+ *
+ * ⚠️ **Vermelho, não âmbar (2026-08-12).** O âmbar passou a significar só "desatualizado"
+ * (`lib/ui/status-tone.ts`), e o aviso migrou para a família do selo 🔞 18+: os dois são
+ * fato sobre a OBRA — quem lê decide —, não estado do sistema.
+ *
+ * ⚠️ Ele deixou de morar na coluna do topo: ver o comentário do layout, no corpo do card.
+ */
+function ContentWarningsPanel({ warnings }: { warnings: string[] }) {
+  return (
+    <div className={cn("flex flex-col gap-2 rounded-xl p-3", STATUS_TONE.content.box)}>
+      <div className={cn("flex items-center gap-1.5 text-xs font-semibold", STATUS_TONE.content.text)}>
+        <AlertTriangle className="size-3.5 shrink-0" />
+        {warnings.length} aviso{warnings.length === 1 ? "" : "s"} de conteúdo
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="ml-auto text-[11.5px] font-semibold text-muted-foreground underline decoration-dotted underline-offset-4 transition-colors hover:text-foreground"
+            >
+              ver
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-80 space-y-2">
+            <p className="text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">
+              Avisos de conteúdo
+            </p>
+            <ul className="flex flex-col gap-2">
+              {warnings.map((w, i) => (
+                <li key={i} className="flex gap-2 text-[12.5px] leading-relaxed">
+                  <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-red-500" aria-hidden />
+                  {w}
+                </li>
+              ))}
+            </ul>
+          </PopoverContent>
+        </Popover>
+      </div>
+      <div className="flex flex-col items-start gap-1">
+        {warnings.map((w, i) => (
+          <span
+            key={i}
+            title={w}
+            className={cn(
+              "max-w-full truncate rounded-full bg-background/60 px-2 py-0.5 text-[11px] text-muted-foreground",
+              STATUS_TONE.content.ring,
+            )}
+          >
+            {w}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /** Quatro barrinhas crescentes — quantas acesas vem de `reviewSignal`. */
 function SignalBars({ bars }: { bars: number }) {
   return (
@@ -325,6 +383,20 @@ export function WorkReviewsCard({ snapshot, workId, provenance }: WorkReviewsCar
   const activeGroup = axisGroups.find((g) => g.key === selectedAxis) ?? axisGroups[0] ?? null
   const signal = reviewSignal(totalReviews, sourceCount)
 
+  // O que EXISTE nesta obra decide o layout do painel (ver o comentário do bloco CIMA).
+  const hasRatings = ratings.bins.length > 0
+  const hasDivergence = Boolean(digest?.divergence?.trim())
+  const warnings = digest?.content_warnings ?? []
+  /**
+   * Os avisos de conteúdo vão pro VÃO MAIOR, e ele muda de lugar com o histograma.
+   *
+   * Medido no app (obras reais, 12/08/2026): com histograma, a coluna do topo sobra ~580px
+   * (o consenso é longo e o gráfico tem 250px) enquanto embaixo a régua e o painel quase
+   * empatam; sem histograma é o oposto — o topo vira duas colunas de texto e todo o vão
+   * fica ao lado da régua, que tem 5–7 linhas contra um painel de ~110px.
+   */
+  const avisosNoTopo = warnings.length > 0 && hasRatings
+
   return (
     <Card>
       {/* HEADER: título + força do sinal + ações de curadoria em peso mínimo (só ícone). */}
@@ -358,7 +430,7 @@ export function WorkReviewsCard({ snapshot, workId, provenance }: WorkReviewsCar
                             label: "Prosa",
                             value: [
                               provenance?.summaryModel,
-                              formatProvenanceDate(snapshot.summaryAt),
+                              formatProvenanceWhen(snapshot.summaryAt),
                             ]
                               .filter(Boolean)
                               .join(" · ") || null,
@@ -445,80 +517,69 @@ export function WorkReviewsCard({ snapshot, workId, provenance }: WorkReviewsCar
       <CardContent className="@container flex flex-col gap-4 pt-0">
         {digestLeads && digest ? (
           <>
-            {/* CIMA: os textos à esquerda; as notas e os avisos à direita, na coluna que
-                antes era o vão do card. */}
-            <div className="grid items-start gap-4 @3xl:grid-cols-[minmax(0,1fr)_292px]">
-              <div className="flex min-w-0 flex-col gap-3">
+            {/* CIMA — o layout SEGUE O DADO (2026-08-12).
+                A coluna fixa de 292px existia sempre, e medido nas 852 obras com síntese
+                ela vinha VAZIA em 81 (9,5%) e carregava só um bloco de ~130px em outras
+                459 (53,9%) — 292px reservados contra um texto espremido em 1fr. Hoje:
+                  · com histograma  → [texto | 292px], como antes;
+                  · sem histograma  → consenso e divergência DIVIDEM a largura;
+                  · sem os dois     → consenso ocupa a linha inteira.
+                Os avisos de conteúdo desceram pro lado da régua de eixos (ver o bloco
+                BAIXO), que é onde o vão sobrava de verdade. */}
+            <div
+              className={cn(
+                "grid items-start gap-4",
+                hasRatings
+                  ? "@3xl:grid-cols-[minmax(0,1fr)_292px]"
+                  : hasDivergence
+                    ? "@3xl:grid-cols-2"
+                    : "grid-cols-1",
+              )}
+            >
+              {/* `contents`: sem a coluna de 292px, consenso e divergência viram itens
+                  diretos do grid e dividem a largura em vez de empilhar dentro de 1fr. */}
+              <div className={cn("flex min-w-0 flex-col gap-3", !hasRatings && "contents")}>
                 <div>
                   <SectionLabel icon={Users}>O que quase todos dizem</SectionLabel>
                   <p className="mt-1.5 text-[15px] leading-relaxed">{digest.consensus}</p>
                 </div>
-                {digest.divergence?.trim() && (
+                {hasDivergence && (
                   <div className="rounded-xl bg-muted/50 p-3.5">
                     <SectionLabel icon={ArrowLeftRight}>Onde as opiniões racham</SectionLabel>
+                    {/* Em COLUNA (sem histograma) o corte vai a 10 linhas: a divergência tem
+                        389 caracteres de mediana e cabe inteira em meia largura, então
+                        cortar em 4 deixaria um "…" com espaço vazio embaixo. Empilhada sob
+                        o consenso, 4 linhas seguem sendo o certo — ali ela compete com o
+                        texto principal. */}
                     <ExpandableText
                       text={digest.divergence}
-                      maxLines={4}
+                      maxLines={hasRatings ? 4 : 10}
                       className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground"
                     />
                   </div>
                 )}
               </div>
 
-              <div className="flex min-w-0 flex-col gap-3">
-                {ratings.bins.length > 0 && <RatingsPanel bins={ratings.bins} total={ratings.total} />}
-
-                {/* Aviso de conteúdo — único amber do painel. As pílulas ficam à vista; o
-                    texto inteiro abre no popover, porque é o que muda decisão e não cabe
-                    numa linha (mediana de 3 avisos, 85% das obras têm). */}
-                {digest.content_warnings?.length > 0 && (
-                  <div className="flex flex-col gap-2 rounded-xl bg-amber-500/10 p-3 ring-1 ring-amber-500/30">
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
-                      <AlertTriangle className="size-3.5 shrink-0" />
-                      {digest.content_warnings.length} aviso{digest.content_warnings.length === 1 ? "" : "s"} de conteúdo
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <button
-                            type="button"
-                            className="ml-auto text-[11.5px] font-semibold text-muted-foreground underline decoration-dotted underline-offset-4 transition-colors hover:text-foreground"
-                          >
-                            ver
-                          </button>
-                        </PopoverTrigger>
-                        <PopoverContent align="end" className="w-80 space-y-2">
-                          <p className="text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">
-                            Avisos de conteúdo
-                          </p>
-                          <ul className="flex flex-col gap-2">
-                            {digest.content_warnings.map((w, i) => (
-                              <li key={i} className="flex gap-2 text-[12.5px] leading-relaxed">
-                                <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
-                                {w}
-                              </li>
-                            ))}
-                          </ul>
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                    <div className="flex flex-col items-start gap-1">
-                      {digest.content_warnings.map((w, i) => (
-                        <span
-                          key={i}
-                          title={w}
-                          className="max-w-full truncate rounded-full bg-background/60 px-2 py-0.5 text-[11px] text-muted-foreground ring-1 ring-amber-500/30"
-                        >
-                          {w}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              {hasRatings && (
+                <div className="flex min-w-0 flex-col gap-3">
+                  <RatingsPanel bins={ratings.bins} total={ratings.total} />
+                  {avisosNoTopo && <ContentWarningsPanel warnings={warnings} />}
+                </div>
+              )}
             </div>
 
-            {/* BAIXO: régua de eixos à esquerda, o que as reviews dizem do eixo à direita.
-                O texto entra num espaço JÁ reservado — por isso a altura do card não muda
-                ao trocar de eixo. */}
+            {/* Sem coluna à direita e sem régua de eixos, os avisos não têm onde encostar —
+                sem este ramo eles sumiriam junto com a régua que passou a hospedá-los. */}
+            {warnings.length > 0 && !avisosNoTopo && axisGroups.length === 0 && (
+              <ContentWarningsPanel warnings={warnings} />
+            )}
+
+            {/* BAIXO: régua de eixos à esquerda; à direita o que as reviews dizem do eixo
+                escolhido e, embaixo, os avisos de conteúdo.
+                O texto do traço continua num espaço JÁ reservado — a altura do card não
+                muda ao trocar de eixo, porque quem define a altura da linha é a régua.
+                Medido: 91% das obras têm 5 a 7 eixos (régua de 190–260px) e o eixo mais
+                citado tem 2,2 traços (painel de ~110px) — era daí que vinha o vão fixo. */}
             {axisGroups.length > 0 && (
               <div>
                 <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
@@ -529,9 +590,12 @@ export function WorkReviewsCard({ snapshot, workId, provenance }: WorkReviewsCar
                     {axisGroups.length === 1 ? "" : "s"}
                   </span>
                 </div>
-                <div className="grid items-stretch gap-3.5 @3xl:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
+                <div className="grid items-start gap-3.5 @3xl:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
                   <AxisRuler groups={axisGroups} selected={activeGroup?.key ?? null} onSelect={setAxisKey} />
-                  <AxisDetail group={activeGroup} />
+                  <div className="flex min-w-0 flex-col gap-3">
+                    <AxisDetail group={activeGroup} />
+                    {warnings.length > 0 && !avisosNoTopo && <ContentWarningsPanel warnings={warnings} />}
+                  </div>
                 </div>
                 <p className="mt-1.5 text-[11.5px] text-muted-foreground">
                   Clique num eixo para ler o que as reviews dizem dele. O número é quantos traços daquele eixo elas citaram.
@@ -544,8 +608,9 @@ export function WorkReviewsCard({ snapshot, workId, provenance }: WorkReviewsCar
             {/* Digest corrompido (tool-call mal-serializado): renderizar isso engana mais
                 do que informa. A prosa abaixo, se houver, mantém a obra falando. */}
             {corrupted && (
-              <div className="flex items-start gap-2 rounded-md bg-amber-500/10 p-3 text-sm text-muted-foreground ring-1 ring-amber-500/30">
-                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              // Falha, não "desatualizado": a síntese existe e não pode ser usada.
+              <div className={cn("flex items-start gap-2 rounded-md p-3 text-sm text-muted-foreground", STATUS_TONE.failed.box)}>
+                <AlertTriangle className={cn("mt-0.5 size-4 shrink-0", STATUS_TONE.failed.text)} />
                 <span>
                   A síntese estruturada foi gerada com uma resposta corrompida do modelo e não pode
                   ser exibida. Use <span className="font-medium text-foreground">Regerar síntese</span> para refazê-la.
@@ -585,9 +650,9 @@ export function WorkReviewsCard({ snapshot, workId, provenance }: WorkReviewsCar
         )}
 
         {noSummarizableReview && (
-          <div className="rounded-md bg-amber-500/10 p-3 ring-1 ring-amber-500/30">
+          <div className={cn("rounded-md p-3", STATUS_TONE.failed.box)}>
             <div className="flex items-center gap-2">
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+              <AlertTriangle className={cn("h-3.5 w-3.5", STATUS_TONE.failed.text)} />
               <span className="text-xs font-semibold text-foreground">Sem síntese — reviews curtas demais</span>
             </div>
             <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
@@ -604,7 +669,7 @@ export function WorkReviewsCard({ snapshot, workId, provenance }: WorkReviewsCar
                   <span className="line-clamp-1 max-w-[24rem] italic text-muted-foreground">
                     “{r.text.trim()}”
                   </span>
-                  <span className="ml-auto font-mono text-[11px] text-amber-600 dark:text-amber-400">
+                  <span className={cn("ml-auto font-mono text-[11px]", STATUS_TONE.failed.text)}>
                     {r.len} car.
                   </span>
                 </li>
@@ -669,7 +734,7 @@ export function WorkReviewsCard({ snapshot, workId, provenance }: WorkReviewsCar
           )}
             {snapshot.fetchedAt && (
               <span className="ml-auto text-[11px] text-muted-foreground/70">
-                buscadas {formatRelativeDateTime(snapshot.fetchedAt)}
+                buscadas {formatProvenanceWhen(snapshot.fetchedAt)}
               </span>
             )}
           </button>

@@ -55,6 +55,18 @@ function renderBlock(over: Partial<Parameters<typeof SynopsisQualitySuggestion>[
   )
 }
 
+/** Prontidão com um item que só ENFRAQUECE ⇒ selo "Inputs: média". */
+const READINESS_MEDIA = {
+  action: "predict_interest",
+  label: "Interesse",
+  ready: true,
+  blocking: [],
+  weakening: [{ dataKey: "review_digest" as const, label: "síntese das reviews", hint: "afina o veredito" }],
+  softMissing: [],
+  autoSteps: [],
+  confidence: "média" as const,
+}
+
 afterEach(cleanup)
 
 describe("Interesse na Obra: veredito pareado", () => {
@@ -138,6 +150,25 @@ describe("Interesse na Obra: veredito pareado", () => {
     expect(texto).not.toMatch(/12\/07\/2026/)
     expect(texto).not.toMatch(/claude-sonnet-4-6/)
     expect(screen.getByRole("button", { name: /Prever de novo/ })).toBeTruthy()
+  })
+
+  it("“desatualizada” e “Inputs: média” NÃO dividem a mesma cor", () => {
+    // 🔴 Os dois moram no MESMO card e eram os dois âmbares (2026-08-12). Um pede ação
+    // ("não aplique sem refazer") e o outro só qualifica o que entrou — pintados igual,
+    // o que chama ação some no meio do que não chama. Hoje o âmbar é exclusivo do
+    // "desatualizado" (`lib/ui/status-tone.ts`) e a confiança dos inputs diz o nível
+    // pela FORMA (três pontos, N acesos).
+    renderBlock({ prediction: { ...PRED, stale: true }, readiness: READINESS_MEDIA })
+    const stale = screen.getByText("Previsão desatualizada")
+    expect(stale.className).toMatch(/amber/)
+
+    const inputs = screen.getByText(/Inputs: média/)
+    const chip = inputs.closest("span")!
+    expect(chip.className).not.toMatch(/amber/)
+    // A forma é que carrega o nível: 3 pontos, 2 acesos.
+    const pontos = chip.querySelectorAll("span.rounded-full")
+    expect(pontos.length).toBe(3)
+    expect([...pontos].filter((p) => p.className.includes("opacity-90"))).toHaveLength(2)
   })
 
   it("o selo de proveniência existe e é alcançável por teclado", () => {

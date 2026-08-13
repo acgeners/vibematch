@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { AiProvenanceSeal } from "@/components/ui/ai-provenance"
+import { STATUS_CHIP_BASE, STATUS_TONE } from "@/lib/ui/status-tone"
 import { runTask } from "@/lib/tasks-store"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import { useCostConfirm } from "@/components/cost/cost-confirm"
@@ -192,8 +193,11 @@ export function OpeningStructureCard({ workId, row, canOverride, canRunAi }: Pro
     // de Notas, onde vários deles dividem a linha — solto aqui, ele lê como fragmento.
     <Card
       className={cn(
+        // ⚠️ O realce do "indeterminado" deixou de ser âmbar em 2026-08-12: âmbar passou a
+        // significar SÓ "desatualizado" (lib/ui/status-tone.ts). E "evidência insuficiente"
+        // não é resultado velho nem falha — é ausência de resposta, com o caminho ao lado.
         "gap-2 py-4 transition-colors",
-        effective === "indeterminado" ? "border-amber-500/55 bg-card/50" : "bg-card/50",
+        effective === "indeterminado" ? "border-slate-500/45 bg-card/50" : "bg-card/50",
       )}
     >
       <CardHeader className="px-4">
@@ -212,7 +216,7 @@ export function OpeningStructureCard({ workId, row, canOverride, canRunAi }: Pro
           ) : effective ? (
             <>
               {effective === "indeterminado" ? (
-                <span className="inline-flex max-w-full items-center rounded-full border border-amber-500/55 bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                <span className={cn(STATUS_CHIP_BASE, STATUS_TONE.absent.chip)}>
                   Evidência insuficiente
                 </span>
               ) : (
@@ -271,7 +275,7 @@ export function OpeningStructureCard({ workId, row, canOverride, canRunAi }: Pro
                 <Button
                   variant="outline"
                   size="sm"
-                  className="gap-1.5 border-amber-400/40 text-amber-600 hover:text-amber-600 dark:text-amber-300"
+                  className="gap-1.5"
                   disabled={!canRunAi}
                   onClick={() => void onAnalyze("web")}
                 >
