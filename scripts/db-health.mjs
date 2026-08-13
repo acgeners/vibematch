@@ -315,6 +315,70 @@ try {
   reporta("slug duplicado", "não deu para checar", null, String(e.message ?? e).split("\n")[0].slice(0, 60))
 }
 
+// ── obras dividindo o mesmo id externo ─────────────────────────────────────────────────
+// `work_external_ids` é o que liga a obra às fontes. Duas obras com o mesmo par
+// (source, external_id) fazem reviews e capítulos de UMA serem atribuídos a DUAS — e nada
+// reclama, porque o app busca por id e escreve onde mandarem. O sintoma não é erro: é
+// avaliação de IA feita sobre reviews da obra errada, ou ficha mostrando 4 reviews numa obra
+// que tem 45. Foi exatamente isso em 2026-08-13: `Loved by the Villains` tinha 4 reviews
+// enquanto 41 estavam na duplicata arquivada.
+//
+// 🔴 SÓ o que é acionável ALARMA. Depois da correção sobrou 1 par legítimo — duas entradas da
+// MESMA obra, uma já arquivada, dividindo os 7 ids que de fato são dela. Pôr isso no alarme
+// faria o db:health gritar para sempre por um estado correto, que é o erro que este arquivo
+// evita no check de escrita local e no de `total_chapters`. Então: par com uma arquivada vira
+// NOTA; alarme fica para obras distintas com id trocado e para duplicata ainda no catálogo.
+//
+// ⚠️ A régua entre "é a mesma obra" e "id trocado" é quantas FONTES concordam, nunca o título:
+// título alternativo ("Oppa's Friends…" × "My Brother's Friend…") é justamente o que confunde
+// o matcher. 7 fontes batendo ⇒ mesma obra; 6 divergindo e 1 batendo ⇒ aquela fonte errou.
+//
+// ⚠️ `external_id` NULO fica de fora: "não tem id nesta fonte" não é "tem o mesmo id".
+// Agrupar os nulos junta todas as obras nunca resolvidas naquela fonte num falso par gigante
+// (custou 3 pares reais virarem 7 quando isto foi levantado a primeira vez).
+let idsCompartilhados = null
+try {
+  const q = `
+    with vinculos as (
+      select source, external_id, work_id from public.work_external_ids
+      where external_id is not null and btrim(external_id) <> ''
+    ),
+    colisoes as (
+      select source, external_id, array_agg(distinct work_id order by work_id) as works
+      from vinculos group by source, external_id having count(distinct work_id) > 1
+    ),
+    pares as (select works, count(*)::int as fontes from colisoes group by works),
+    classificado as (
+      select p.fontes,
+             (select count(*) from public.works w where w.id = any(p.works) and w.is_archived) as arquivadas
+      from pares p
+    )
+    select
+      count(*) filter (where fontes < 3)::int                          as id_errado,
+      count(*) filter (where fontes >= 3 and arquivadas = 0)::int      as duplicata_ativa,
+      count(*) filter (where fontes >= 3 and arquivadas > 0)::int      as duplicata_arquivada
+    from classificado`
+  const r = (await nuvem(q))[0] ?? {}
+  idsCompartilhados = {
+    idErrado: Number(r.id_errado ?? 0),
+    duplicataAtiva: Number(r.duplicata_ativa ?? 0),
+    arquivada: Number(r.duplicata_arquivada ?? 0),
+  }
+  const acionavel = idsCompartilhados.idErrado + idsCompartilhados.duplicataAtiva
+  reporta(
+    "id repetido",
+    acionavel ? `${acionavel} par(es) a resolver` : "0 pares",
+    acionavel ? 1 : 0,
+    acionavel
+      ? "review/capítulo indo pra obra errada"
+      : idsCompartilhados.arquivada
+        ? `${idsCompartilhados.arquivada} duplicata(s) já arquivada(s) — ok`
+        : "cada obra responde só pelos ids dela",
+  )
+} catch (e) {
+  reporta("id repetido", "não deu para checar", null, String(e.message ?? e).split("\n")[0].slice(0, 60))
+}
+
 // ── saída ──────────────────────────────────────────────────────────────────────────────
 console.log("  " + pad("indicador", 16) + pad("valor", 22) + pad("", 13) + "estado")
 console.log("  " + "─".repeat(62))
@@ -333,6 +397,19 @@ if (editadas?.n > 0) {
   console.log(`\n  🔴 ${editadas.n} obra(s) com CONTEÚDO diferente entre local e nuvem.`)
   console.log(`     Carimbos e caches já estão fora da comparação, então isto é edição de verdade.`)
   console.log(`     Veja quais: \`node scripts/db-diff.mjs works\``)
+}
+
+if (idsCompartilhados?.idErrado || idsCompartilhados?.duplicataAtiva) {
+  const { idErrado, duplicataAtiva } = idsCompartilhados
+  console.log(`\n  🔴 obras dividindo o mesmo id externo:`)
+  if (idErrado) {
+    console.log(`       ${pad(idErrado + " par(es)", 18)} obras DISTINTAS — uma está com id que não é dela`)
+  }
+  if (duplicataAtiva) {
+    console.log(`       ${pad(duplicataAtiva + " par(es)", 18)} mesma obra DUAS vezes no catálogo, nenhuma arquivada`)
+  }
+  console.log(`     Reviews e capítulos de uma estão indo para as duas.`)
+  console.log(`     Veja quais: \`npx tsx --env-file=.env.local scripts/diag-external-ids-compartilhados.ts\``)
 }
 
 if (escritaLocal.navegacao?.length || editadas?.soCapitulo) {
