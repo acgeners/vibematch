@@ -34,7 +34,7 @@ const SUMMARY: WorkAiCostSummary = {
     { operation: "ai_evaluation", label: "Avaliação IA", nCalls: 2, totalCostUsd: 0.053716 },
     { operation: "review_digest", label: "Digest de reviews", nCalls: 3, totalCostUsd: 0.039772 },
     { operation: "synopsis_consolidator", label: "Sinopse canônica", nCalls: 2, totalCostUsd: 0.015298 },
-    { operation: "synopsis_quality_predict", label: "Qualidade da sinopse", nCalls: 2, totalCostUsd: 0.011428 },
+    { operation: "synopsis_quality_predict", label: "Previsão de Interesse", nCalls: 2, totalCostUsd: 0.011428 },
     { operation: "review_summarizer", label: "Resumo de reviews", nCalls: 2, totalCostUsd: 0.005041 },
   ],
 }

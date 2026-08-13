@@ -1455,8 +1455,12 @@ function RecommendationTab({
 
           {aligned.otherTotal > 0 && (
             <p className="mt-3 border-t border-border/60 pt-2.5 text-[11px] leading-relaxed text-muted-foreground">
-              {aligned.otherTotal} obras em andamento ou pausadas não entram em nenhuma das duas
-              linhas — não confirmam o gosto nem são sugestão de próxima leitura.
+              {/* "lidas sem nota" entrou aqui quando a trilha de cima passou a exigir nota:
+                  sem esta palavra, essas obras sumiriam das três contas e o rodapé deixaria
+                  de fechar com a biblioteca. */}
+              {aligned.otherTotal} obras em andamento, pausadas ou lidas sem nota não entram em
+              nenhuma das duas linhas — não confirmam o gosto nem são sugestão de próxima
+              leitura.
             </p>
           )}
         </section>

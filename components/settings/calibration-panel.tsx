@@ -515,7 +515,7 @@ const RIDGE_FEATURE_GROUPS: Array<{
     label: "Contexto da obra",
     tone: "muted",
     description:
-      "Metadados estruturais: capítulos, qualidade da sinopse, status de publicação, idade/duração e origem (manhwa/mangá/manhua). Sinal de contexto que não cai nos grupos acima. (Internos: Cps.N, SinopseScore, Status_*, ReleaseAge, RunLength, Origin_*.)",
+      "Metadados estruturais: capítulos, interesse na obra, status de publicação, idade/duração e origem (manhwa/mangá/manhua). Sinal de contexto que não cai nos grupos acima. (Internos: Cps.N, SinopseScore, Status_*, ReleaseAge, RunLength, Origin_*.)",
     belongs: () => true, // catch-all (último — não-IA, não-plataforma, não-pessoal)
   },
 ]

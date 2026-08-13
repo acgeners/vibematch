@@ -1787,11 +1787,18 @@ export async function getAlignedWorkSplit(
     (b.expectedScore ?? Number.NEGATIVE_INFINITY) - (a.expectedScore ?? Number.NEGATIVE_INFINITY)
 
   return {
-    read: [...read].sort(byExpected).slice(0, readLimit),
+    // 🔴 A trilha usa `ratedRead`, NÃO `read`: o card inteiro é a comparação
+    // "previu X, você deu Y", e obra lida SEM nota não tem o Y — renderizaria só a capa,
+    // um buraco no meio da prova. O subtítulo sempre disse "que você leu e avaliou"; era
+    // o filtro que dizia só "leu". Hoje é 1 obra de 107, então o defeito é latente: basta
+    // ela subir no top-6 por Nota Prevista para aparecer.
+    read: [...ratedRead].sort(byExpected).slice(0, readLimit),
     unread: [...unread].sort(byExpected).slice(0, unreadLimit),
-    readTotal: read.length,
+    readTotal: ratedRead.length,
     unreadTotal: unread.length,
-    otherTotal: works.length - read.length - unread.length,
+    // ⚠️ Sai de `ratedRead`, e não de `read`, senão a lida-sem-nota some das TRÊS contas
+    // e o rodapé deixa de fechar com o total da biblioteca — um sumiço silencioso.
+    otherTotal: works.length - ratedRead.length - unread.length,
     confirmation,
   }
 }

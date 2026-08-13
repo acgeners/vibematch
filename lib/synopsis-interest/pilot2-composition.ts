@@ -12,7 +12,7 @@
 export type Split = "development" | "holdout"
 export const SPLITS: readonly Split[] = ["development", "holdout"]
 
-/** Strata = qualidade da sinopse, ordem ordinal congelada. */
+/** Strata = nível de Interesse (♥..♥♥♥♥), ordem ordinal congelada. */
 export const STRATA = ["♥", "♥♥", "♥♥♥", "♥♥♥♥"] as const
 export type Stratum = (typeof STRATA)[number]
 
