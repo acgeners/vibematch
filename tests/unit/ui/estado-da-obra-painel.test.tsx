@@ -58,7 +58,7 @@ describe("painel Estado da obra", () => {
   it("o que vale pra maioria do catálogo é NÚMERO, não alerta", () => {
     // "Chegaram reviews novas" acontece em 57% das obras: informação, sem cor de estado.
     const { container } = renderPainel({ reviews: { ...BASE.reviews, newSinceEval: true } })
-    const aviso = screen.getByText(/Chegaram reviews novas/)
+    const aviso = screen.getByText(/reviews desde a avaliação/)
     expect(aviso.className).not.toMatch(/amber/)
     expect(container.textContent).toContain("Nada pendente")
   })
