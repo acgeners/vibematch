@@ -62,31 +62,25 @@ export interface WorkStatePanelProps {
   }
 }
 
-function Linha({ k, v }: { k: string; v: string | null }) {
+const ROTULO = "text-[10px] font-bold uppercase tracking-[0.09em] text-muted-foreground"
+
+/** Um par rótulo-em-cima / valor-embaixo — o mesmo desenho da faixa de stats do topo. */
+function Marco({ k, v }: { k: string; v: string | null }) {
   return (
-    <div className="flex items-baseline gap-2 text-[12.5px]">
-      <span className="w-[64px] shrink-0 text-muted-foreground">{k}</span>
-      <span className={cn("font-semibold tabular-nums", v ? "text-foreground/90" : "text-muted-foreground/70")}>
+    <div className="flex min-w-0 flex-col gap-0.5 px-3 py-1 first:pl-0">
+      <span className="text-[9.5px] font-semibold uppercase tracking-wide text-muted-foreground/75">
+        {k}
+      </span>
+      <span
+        className={cn(
+          "truncate text-[12.5px] font-semibold tabular-nums",
+          v ? "text-foreground/90" : "text-muted-foreground/60",
+        )}
+        title={v ?? undefined}
+      >
         {v ?? "—"}
       </span>
     </div>
-  )
-}
-
-function Coluna({
-  titulo,
-  children,
-}: {
-  titulo: string
-  children: React.ReactNode
-}) {
-  return (
-    <section className="flex min-w-0 flex-col gap-1.5">
-      <span className="text-[10px] font-bold uppercase tracking-[0.09em] text-muted-foreground">
-        {titulo}
-      </span>
-      {children}
-    </section>
   )
 }
 
@@ -98,56 +92,77 @@ export function WorkStatePanel({ reviews, dates, externalIds, pending }: WorkSta
   if (pending.noDigest) chips.push("Sem síntese das reviews")
 
   return (
-    <Card className="gap-0 border-border/70 bg-card/50 px-4 py-3.5">
-      <div className="grid gap-x-6 gap-y-4 sm:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,1fr)]">
-        <Coluna titulo="Matéria-prima">
-          <p className="text-[15px] font-bold tabular-nums text-foreground">
+    <Card className="gap-0 border-border/70 bg-card/50 px-4 py-3">
+      {/* FAIXA 1 — a evidência, e o que ela pede. Em três colunas verticais (a 1ª versão),
+          a coluna de pendências ficava vazia na maioria das obras e as datas usavam metade
+          da largura reservada: 490px de altura com vão à direita. Horizontal, a mesma
+          informação cabe em ~200px e a largura inteira é usada. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+          <span className="text-[15px] font-bold tabular-nums text-foreground">
             {reviews.total} {reviews.total === 1 ? "review" : "reviews"}
             <span className="mx-1.5 font-normal text-muted-foreground/50">·</span>
             {reviews.sources} {reviews.sources === 1 ? "fonte" : "fontes"}
-          </p>
-          <Linha k="avaliação" v={reviews.evalLabel} />
-          <Linha
-            k="síntese"
-            v={reviews.digestN != null ? `${reviews.digestN} de ${reviews.total}` : null}
-          />
+          </span>
+          {reviews.evalLabel && (
+            <span className="text-[12.5px] text-muted-foreground">
+              avaliação{" "}
+              <span className="font-semibold tabular-nums text-foreground/90">{reviews.evalLabel}</span>
+            </span>
+          )}
+          {reviews.digestN != null && (
+            <span className="text-[12.5px] text-muted-foreground">
+              síntese{" "}
+              <span className="font-semibold tabular-nums text-foreground/90">
+                {reviews.digestN} de {reviews.total}
+              </span>
+            </span>
+          )}
           {reviews.newSinceEval && (
             // Vale pra 57% do catálogo: informação, não alerta (ver a régua no topo).
-            <p className="text-[11.5px] leading-snug text-muted-foreground">
-              Chegaram reviews novas depois da avaliação.
-            </p>
+            <span className="text-[11.5px] text-muted-foreground/80">
+              +reviews desde a avaliação
+            </span>
           )}
-          <div className="mt-0.5">
-            <LinkedSources externalIds={externalIds} />
-          </div>
-        </Coluna>
+        </div>
 
-        <Coluna titulo="Frescor">
-          <Linha k="criada" v={formatProvenanceWhen(dates.created)} />
-          <Linha k="dados" v={formatProvenanceWhen(dates.refreshed)} />
-          <Linha k="avaliada" v={formatProvenanceWhen(dates.evaluated)} />
-          <Linha k="síntese" v={formatProvenanceWhen(dates.digest)} />
-          <Linha k="tags" v={formatProvenanceWhen(dates.tags)} />
-          {dates.lastRead && <Linha k="sua leitura" v={formatProvenanceWhen(dates.lastRead)} />}
-        </Coluna>
-
-        <Coluna titulo="Precisa de você">
+        <div className="flex flex-wrap items-center gap-1.5">
           {chips.length > 0 ? (
-            <div className="flex flex-col items-start gap-1.5">
-              {chips.map((chip) => (
-                <span key={chip} className={cn(STATUS_CHIP_BASE, STATUS_TONE.stale.chip)}>
-                  <AlertTriangle className="size-3 shrink-0" aria-hidden />
-                  {chip}
-                </span>
-              ))}
-            </div>
+            chips.map((chip) => (
+              <span key={chip} className={cn(STATUS_CHIP_BASE, STATUS_TONE.stale.chip)}>
+                <AlertTriangle className="size-3 shrink-0" aria-hidden />
+                {chip}
+              </span>
+            ))
           ) : (
-            <span className={cn(STATUS_CHIP_BASE, STATUS_TONE.ok.chip, "w-fit")}>
+            <span className={cn(STATUS_CHIP_BASE, STATUS_TONE.ok.chip)}>
               <CheckCircle2 className="size-3 shrink-0" aria-hidden />
               Nada pendente
             </span>
           )}
-        </Coluna>
+        </div>
+      </div>
+
+      {/* FAIXA 2 — frescor. Grid de marcos, como a faixa de stats do topo da página: rótulo
+          minúsculo em cima, data embaixo. `auto-fit` porque "sua leitura" só existe pra
+          quem leu, e uma coluna fixa deixaria um buraco no lugar dela. */}
+      <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(96px,1fr))] gap-y-1 border-t border-border/50 pt-2.5">
+        <Marco k="criada" v={formatProvenanceWhen(dates.created)} />
+        <Marco k="dados" v={formatProvenanceWhen(dates.refreshed)} />
+        <Marco k="avaliada" v={formatProvenanceWhen(dates.evaluated)} />
+        <Marco k="síntese" v={formatProvenanceWhen(dates.digest)} />
+        <Marco k="tags" v={formatProvenanceWhen(dates.tags)} />
+        {dates.lastRead && <Marco k="sua leitura" v={formatProvenanceWhen(dates.lastRead)} />}
+      </div>
+
+      {/* FAIXA 3 — as fontes ocupam a largura inteira, então os 9 chips cabem em uma linha
+          ou duas em vez das quatro que sobravam dentro de uma coluna de 1/3. */}
+      {/* `items-start` + `leading-5` alinham o rótulo com a PRIMEIRA linha de chips: com
+          `items-center` ele descia até o meio do bloco quando os chips quebravam em duas
+          linhas, e ficava boiando. */}
+      <div className="mt-2.5 flex flex-wrap items-start gap-x-3 gap-y-1.5 border-t border-border/50 pt-2.5">
+        <span className={cn(ROTULO, "leading-5")}>Fontes</span>
+        <LinkedSources externalIds={externalIds} variant="inline" />
       </div>
     </Card>
   )
