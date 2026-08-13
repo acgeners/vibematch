@@ -1,5 +1,6 @@
 import Link from "next/link"
-import { AlertTriangle, ArrowRight, MessageCircle, Sparkles } from "lucide-react"
+import { AlertTriangle, ArrowRight, MessageCircle, Radar, Sparkles } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Header } from "@/components/layout/header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { RecommendDialog } from "@/components/recommendations/recommend-dialog"
@@ -128,6 +129,33 @@ export default async function RecommendationsPage() {
 
         {/* Coluna direita: modo rápido + histórico */}
         <div className="space-y-5">
+          {/* "Mais como estas" fica ACIMA do modo rápido de propósito: é a única entrada
+              aqui que não custa nada e não depende de plano — determinística do começo ao
+              fim. Enterrá-la abaixo de duas features pagas esconderia justamente a que
+              qualquer pessoa logada pode usar agora. */}
+          <Card className="border border-indigo-500/30 bg-indigo-500/5 shadow-sm">
+            <CardContent className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="grid size-7 place-items-center rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                    <Radar className="h-3.5 w-3.5" />
+                  </span>
+                  <h3 className="text-sm font-bold text-foreground">Mais como estas</h3>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Aponte de 2 a 5 obras e cruze a parecença com elas contra o alinhamento com
+                  o seu perfil — dois eixos independentes.
+                </p>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">
+                  Sem custo · resultado imediato
+                </div>
+              </div>
+              <Button asChild variant="outline" className="w-full shrink-0 sm:w-auto">
+                <Link href="/descobrir">Escolher sementes</Link>
+              </Button>
+            </CardContent>
+          </Card>
+
           <Card className="border border-border/80 bg-card/25 shadow-sm">
             <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="space-y-1">

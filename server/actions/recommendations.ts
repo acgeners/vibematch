@@ -1156,3 +1156,229 @@ export async function rankSpecificWorksForChat(args: {
     return { error: err instanceof Error ? err.message : "Erro desconhecido" }
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// "Mais como estas" (/descobrir) — explicar sob demanda, aplicar sob confirmação
+//
+// 🔴 A separação entre EXPLICAR e APLICAR é o desenho, não um passo a mais por precaução.
+//
+// O ranking de `/descobrir` é aritmética (percentis de parecença × alinhamento) e não custa
+// nada. Só a PROSA custa — e ela é escrita sob o contexto daquelas sementes, então não é a
+// mesma coisa que o Veredito IA que o /ranking mostra. Gravá-la direto em
+// `calculated_scores.alignment_*` publicaria em todas as telas um julgamento feito para uma
+// exploração descartável.
+//
+// ⚠️ Por isso NÃO dá para reusar `rerankClusterAction`: ele chama `persistAlignmentScores`
+// incondicionalmente (o `persist` de lá controla só o histórico). Aqui a gravação nos scores
+// é o passo que a pessoa confirma.
+//
+// 🔴 O que SEMPRE é gravado é a `recommendation_runs` — a chamada foi paga, e descartá-la
+// porque ninguém clicou em "aplicar" queimaria ~5¢ sem deixar rastro. É dela que o
+// `applySeedVerdictAction` relê o resultado.
+//
+// 🔴 E é por isso que o "aplicar" recebe um runId, NUNCA as notas: `"use server"` é endpoint
+// HTTP público ([[project_use_server_public_endpoints]]). Aceitar `alignment_score` do
+// cliente deixaria qualquer um gravar o número que quisesse no Veredito de qualquer obra.
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+export interface ExplainSeedsResult {
+  runId: string
+  slug: string
+  rankings: Array<{ workId: string; alignmentScore: number; justification: string }>
+  modeSummary: string
+}
+
+/**
+ * Roda o consultor sobre as obras que `/descobrir` encontrou, no contexto das sementes.
+ *
+ * Cria a run (mode `seeds`) e devolve o resultado — sem tocar em `calculated_scores`.
+ */
+export async function explainSeedResultsAction(args: {
+  seedIds: string[]
+  antiIds?: string[]
+  workIds: string[]
+  weight?: number
+}): Promise<{ data?: ExplainSeedsResult; error?: string }> {
+  try {
+    const gate = await ensureAiConsumption()
+    if (!gate.ok) return { error: gate.error }
+    const identity = await ensureReadingStateWriter()
+    if (!identity.ok) return { error: identity.error }
+
+    const seedIds = Array.from(new Set(args.seedIds)).filter(Boolean)
+    if (seedIds.length < 2) return { error: "Escolha pelo menos duas obras-semente." }
+
+    const workIds = Array.from(new Set(args.workIds)).filter(Boolean)
+    if (workIds.length === 0) return { error: "Nenhuma obra para explicar." }
+    const limited = workIds.slice(0, MAX_CANDIDATES_HARD_LIMIT)
+
+    const runsToday = await getRunsToday()
+    if (runsToday >= MAX_RUNS_PER_DAY) {
+      return {
+        error: `Limite diário de ${MAX_RUNS_PER_DAY} execuções atingido. Tente novamente amanhã.`,
+      }
+    }
+
+    const profileResult = await loadOrEnsureProfile()
+    if ("error" in profileResult) return { error: profileResult.error }
+    const profile = profileResult.profile
+    if (profile.is_stub) {
+      return {
+        error: "Perfil ainda em modo stub — avalie mais obras pra desbloquear a explicação por IA.",
+      }
+    }
+
+    const supabase = createAdminClient()
+    const antiIds = Array.from(new Set(args.antiIds ?? [])).filter(Boolean)
+
+    const [candidates, preferenceRules, seedTitles] = await Promise.all([
+      getCandidatesByIds(limited),
+      getPreferenceRules(),
+      loadWorkTitles(supabase, [...seedIds, ...antiIds]),
+    ])
+    if (candidates.length === 0) {
+      return { error: "As obras encontradas não estão mais disponíveis." }
+    }
+
+    // O modelo precisa saber DE ONDE a lista veio — senão escreve como se fosse uma
+    // recomendação genérica e a justificativa não menciona o que a pessoa pediu.
+    const nomes = (ids: string[]) =>
+      ids.map((id) => seedTitles.get(id)).filter(Boolean).join(", ")
+    const contextoSementes = [
+      `Esta lista veio de uma busca por semelhança com estas obras: ${nomes(seedIds)}.`,
+      antiIds.length > 0 ? `A pessoa pediu para EVITAR o que lembra: ${nomes(antiIds)}.` : "",
+      "Ao justificar, diga o que cada obra tem em comum com as obras-semente (ou onde se afasta delas), além do encaixe com o perfil.",
+    ]
+      .filter(Boolean)
+      .join(" ")
+
+    const result = await rankFavorites({
+      profile: profile.profile,
+      candidates,
+      mode: "ranking",
+      userContext: contextoSementes,
+      preferenceRules,
+    })
+
+    const runRow = await insertRecommendationRun(supabase, {
+      mode: "seeds",
+      taste_profile_id: profile.id,
+      user_context: contextoSementes,
+      n_candidates: candidates.length,
+      n_available: workIds.length,
+      // A procedência da justificativa: sem isto não dá para responder depois "de que
+      // sementes saiu este Veredito?", e é justamente isso que o diferencia do /ranking.
+      source_meta: {
+        seeds: true,
+        seed_ids: seedIds,
+        anti_ids: antiIds,
+        weight: args.weight ?? null,
+      },
+      candidate_work_ids: candidates.map((c) => c.id),
+      results: result.rankings,
+      mode_summary: result.modeSummary,
+      model_name: result.modelName,
+      prompt_version: result.promptVersion,
+      input_tokens: result.usage.inputTokens,
+      output_tokens: result.usage.outputTokens,
+      cache_read_tokens: result.usage.cacheReadTokens,
+      cache_creation_tokens: result.usage.cacheCreationTokens,
+      ai_api_call_id: result.apiCallId,
+    })
+
+    if (!runRow) {
+      return { error: "A explicação foi gerada, mas não foi possível salvá-la. Tente de novo." }
+    }
+
+    const candidateIds = new Set(candidates.map((c) => c.id))
+    const rankings = result.rankings
+      .filter((r) => candidateIds.has(r.work_id))
+      .map((r) => ({
+        workId: r.work_id,
+        alignmentScore: r.alignment_score,
+        justification: r.justification,
+      }))
+      .sort((a, b) => b.alignmentScore - a.alignmentScore)
+
+    revalidatePath("/recommendations")
+
+    return {
+      data: { runId: runRow.id, slug: runRow.slug, rankings, modeSummary: result.modeSummary },
+    }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Erro desconhecido" }
+  }
+}
+
+/**
+ * Aplica ao catálogo o Veredito de uma run de sementes já paga.
+ *
+ * Não chama modelo nenhum: relê a run do banco e copia para `calculated_scores`.
+ */
+export async function applySeedVerdictAction(
+  runId: string,
+): Promise<{ data?: { applied: number }; error?: string }> {
+  try {
+    // Sem `ensureAiConsumption`: isto não gasta token. O gate aqui é IDENTIDADE — quem
+    // escreve tem que ser dono do que escreve.
+    const identity = await ensureReadingStateWriter()
+    if (!identity.ok) return { error: identity.error }
+
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from("recommendation_runs")
+      .select("id, user_id, mode, results")
+      .eq("id", runId)
+      .maybeSingle()
+
+    if (error) return { error: `Não foi possível ler a explicação: ${error.message}` }
+    if (!data) return { error: "Explicação não encontrada." }
+
+    const row = data as { id: string; user_id: string | null; mode: string; results: RankedWork[] }
+
+    // 🔴 A run tem dono, e aplicar a de outra pessoa gravaria o Veredito dela no catálogo
+    // desta. `user_id` nulo é run pré-migration 141 e não tem dono comprovável — recusa.
+    if (row.user_id !== identity.userId) {
+      return { error: "Explicação não encontrada." }
+    }
+    if (row.mode !== "seeds") {
+      return { error: "Esta explicação não é de uma busca por sementes." }
+    }
+
+    const now = new Date().toISOString()
+    const rows = (row.results ?? [])
+      .filter((r) => r?.work_id && typeof r.alignment_score === "number")
+      .map((r) => ({
+        work_id: r.work_id,
+        alignment_score: r.alignment_score,
+        alignment_run_id: row.id,
+        alignment_justification: r.justification,
+        alignment_payload: buildAlignmentPayload(r),
+        alignment_at: now,
+        alignment_stale: false,
+      }))
+
+    if (rows.length === 0) return { error: "A explicação não trouxe nenhuma nota para aplicar." }
+
+    const persistResult = await persistAlignmentScores(identity.userId, identity.isOwner, rows)
+    if (persistResult.error) return { error: persistResult.error }
+
+    revalidatePath("/ranking")
+    revalidatePath("/favorites")
+    revalidatePath("/descobrir")
+
+    return { data: { applied: rows.length } }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Erro desconhecido" }
+  }
+}
+
+/** Títulos por id — para montar o contexto das sementes no prompt. */
+async function loadWorkTitles(
+  supabase: ReturnType<typeof createAdminClient>,
+  ids: string[],
+): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map()
+  const { data } = await supabase.from("works").select("id, title").in("id", ids)
+  return new Map(((data ?? []) as Array<{ id: string; title: string }>).map((w) => [w.id, w.title]))
+}
