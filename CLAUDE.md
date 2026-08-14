@@ -2347,12 +2347,95 @@ O catálogo **não tem política**: é lido/escrito pela service role, que ignor
 
 `category_scores.source`: `"manual"` | `"imported"` | `"ai_accepted"` | `"ai_edited"`.
 
+## A classe de erro que mais custou aqui: DOIS critérios para o MESMO fato
+
+Quase todo bug caro deste projeto tem a mesma forma. Não é lógica errada — é **duas coisas
+que deveriam concordar sobre um fato, medindo-o por critérios diferentes**. A mais cega
+vence, em silêncio, e o resultado é plausível.
+
+Quatro ocorrências MEDIDAS em 2026-08-13/14, todas com suíte verde:
+
+| onde | um lado media… | o outro media… | o que aconteceu |
+|---|---|---|---|
+| painel de embeddings | linha ausente em `work_embeddings` | o `input_hash` do texto | contador dizia "0 pendentes · 100%" e **desabilitava** o botão; no mesmo clique, 84 obras foram embedadas |
+| `db:health` "obra editada?" | md5 da linha inteira | — (não olhava direção) | 978 obras "divergindo" por `art_signal`, que a NUVEM tem e o local não: o regime normal virando alarme |
+| teste de `.backups` | a string literal `".backups"` | o filesystem, no `podar()` | 3 escritores gravando sem família, invisíveis por escreverem `".backups/x"` |
+| dono de um id externo | o texto de uma review | o slug da URL da fonte | hid removido da obra ERRADA, e o resolvedor o recriou 2h37 depois |
+| `deep-dive.ts` × RPC | um `as SimilarRow[]` em TS | o `RETURNS TABLE` em SQL | a migration 151 tirou `user_score`; "obras similares na biblioteca" saiu VAZIA por um mês |
+
+🔴 **A régua: quando duas coisas afirmam o mesmo fato, uma tem que ser DERIVADA da outra.**
+É o que já vale para `LOW_BALANCE_USD`, `STRONG_TAG_WEIGHT`, `CRITERIA_SCALE_LEGEND` e
+`decision-queues.ts` — e é a mesma régua, não uma parecida. Ao ver um contador ao lado de uma
+ação, a pergunta é: *os dois chamam a mesma função?* Se não, um vai mentir sobre o outro, e o
+que mente costuma ser o que decide se o botão fica clicável.
+
+⚠️ **Contador barato + ação completa é um par legítimo — o que não pode é o barato TRANCAR a
+completa.** `countStaleEmbeddings()` puxaria o catálogo inteiro a cada visita ao `/settings`;
+manter o contador barato foi certo. Errado foi `disabled={pendingCount === 0}`, que deu a uma
+medida incompleta poder de veto sobre a completa. Hoje o botão só apaga o TOM quando o
+contador é zero, e o `title` explica a assimetria.
+
+⚠️ **`as X[]` sobre resposta de RPC é a versão SILENCIOSA disto.** O tipo é uma AFIRMAÇÃO
+sobre um contrato que mora em SQL, e o compilador não a verifica. Quando a migration 151
+tirou `user_score` do `RETURNS TABLE`, o campo passou a chegar `undefined`, `loved`/`avoided`
+ficaram sempre vazios e o prompt do Deep Dive imprimia "(nenhuma obra similar…)" enquanto
+promete o contrário — por um mês, sem erro nem log. Guardado por
+`tests/unit/orchestration/rpc-similares-contrato.test.ts`, que **deriva as colunas do RETURNS
+TABLE da migration vigente**: lista fixa envelheceria na próxima migration.
+
+### Teste de arquitetura tem que casar o FATO, não a grafia
+
+🔴 Se dá para satisfazer o teste **mudando como se escreve** algo, sem mudar o comportamento,
+ele protege a grafia. `backups-retencao-tem-dono.test.ts` procurava `'".backups"'` — literal
+fechado — e por isso três scripts que usavam `".backups/backfill-tags"` nunca entraram na
+varredura. Um deles gravava sem dono havia meses. Quem os pegou foi o `podar()` do `db:pull`,
+olhando o diretório de verdade.
+
+⚠️ Ao escrever varredura de source, pergunte: *qual é a menor mudança inocente que fura isto?*
+Se a resposta for "escrever o mesmo caminho de outro jeito", o padrão está estreito demais.
+
+### Alarme: o limiar sai da DISTRIBUIÇÃO, nunca do olho
+
+🔴 O projeto já repete "alarme que sempre toca não é lido" no `db:health` e no painel
+"Estado da obra". O que faltava era o corolário: **medir a distribuição antes de escolher o
+corte.** Em `/descobrir`, "avisar quando houver > 3 pares repetidos" acenderia em **25%** das
+listas; a distribuição real pós-diversificação era `[0,1,1,2,2,2,2,3,3,4,4,23]` — mediana 2,
+p90 4 —, e só `> 5` isola o caso que informa (1 em 12). O limiar vive em
+`NEAR_DUPLICATE_WARN_AT` com a distribuição escrita ao lado.
+
+⚠️ Vale para alarme e para VEREDITO: comparar contra "o dobro do piso" foi o que quase
+reprovou o piloto v25 por um `>` estrito. Porcentagem não sabe o tamanho da amostra — 3 de 12
+e 60 de 240 são o mesmo múltiplo e evidências opostas (1,3σ × 5,9σ).
+
+### Evidência: o que a coisa É vence o que alguém VIU
+
+🔴 Ao decidir a quem pertence um dado externo, a fonte é o **identificador da própria fonte**
+— slug da URL, id canônico —, nunca prosa de terceiro. Medido: uma review dizia *"The correct
+title for this manhwa is: Oppa's Friends…"* e eu tirei o hid `rdx28` de *My Brother's Friend*
+com base nisso. O slug dizia o contrário
+(`comix.to/title/rdx28-my-brothers-friend-cant-be-this-big`): a reclamação era sobre a página
+estar com título e capa trocados, num estado que a fonte depois corrigiu. Texto de leitor
+descreve o que ele viu naquele dia; o slug descreve o que a página é.
+
+⚠️ **E só remover não fecha caso de vínculo errado** — o resolvedor recria. Ou se dá o id
+CERTO, ou se marca a ausência (`markComixAbsent` → `is_rejected=true`, lido por
+`ensureComixHid`). Ferramentas: `scripts/diag-external-ids-compartilhados.ts` (vê) e
+`fix-external-ids-compartilhados.ts` (corrige), com o `db:health` vigiando como "id repetido".
+
+### O que essas quatro têm em comum, na prática
+
+Antes de confiar num número da tela ou de um script, pergunte **de onde ele vem** e **o que
+mais afirma a mesma coisa**. Foi assim que apareceram: o painel contra o botão, o `db:health`
+contra a comparação coluna a coluna, o teste contra o `podar()`, a review contra o slug. Duas
+fontes discordando não é ruído — é uma delas quebrada, e descobrir qual sai mais barato do
+que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
+
 ## Tests
 
-`npm run test` → **2.440 passando (+24 pulados) em 229 arquivos** (224 passando + 5 pulados;
-medido em 2026-08-10). A linha já disse "~1.780 em ~157", "~2.353 em 218", "2.386 em
-221", "2.408 em 225", "2.428 em 228" e "2.433 em 228", todas envelhecendo sem nada acusar —
-**re-meça antes de editar este número**, não incremente de cabeça. Vitest, jsdom, alias `@` → raiz. A
+`npm run test` → **2.717 passando (+24 pulados) em 255 arquivos** (250 passando + 5 pulados;
+medido em 2026-08-14). A linha já disse "~1.780 em ~157", "~2.353 em 218", "2.386 em
+221", "2.408 em 225", "2.428 em 228", "2.433 em 228" e "2.440 em 229", todas envelhecendo sem
+nada acusar — **re-meça antes de editar este número**, não incremente de cabeça. Vitest, jsdom, alias `@` → raiz. A
 descrição antiga ("só `tests/unit/calculations/`, sem teste de componente") estava desatualizada
 havia muito: hoje `calculations` é a 4ª maior pasta, atrás de `synopsis-interest` (36),
 `external` (30) e `orchestration` (19), e há `.test.tsx` de componente.
