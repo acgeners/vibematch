@@ -11,6 +11,14 @@ import { ResolveRequestButtons } from "@/components/curadoria/resolve-request-bu
  * rodando local. Esta página é o outro lado desse desenho: o leitor pede, isto aparece aqui,
  * você roda o fluxo no Mac e fecha o pedido.
  *
+ * 🔴 "Local" aqui é o AMBIENTE DE EXECUÇÃO — o Mac, onde o sidecar e o FlareSolverr moram —,
+ * nunca o BANCO. Desde o cutover de 10/08/2026 o `.env.local` aponta pra NUVEM, então o
+ * `npm run dev` grava direto em produção e **não existe passo de push**. Esta cópia dizia
+ * "depois empurra com os scripts de push" e mandava fazer um trabalho que já não existe: o
+ * `db:push-curation` está aposentado (exige `--eu-sei-o-que-estou-fazendo`). Ao reescrever
+ * este texto, não devolva a ambiguidade — foi ela que fez a instrução envelhecer sem nada
+ * acusar.
+ *
  * ⚠️ Cadastro de obra NÃO aparece aqui — `works.ai_eval_status = 'pending'` já expressa isso e
  * já alimenta "Curadoria da Obra". Duplicar criaria duas fontes de verdade para o mesmo fato.
  */
@@ -19,17 +27,17 @@ const ROTULO: Record<CurationRequestKind, { texto: string; cor: string; oQueFaze
   update_data: {
     texto: "atualizar dados",
     cor: "border-amber-500/55 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-    oQueFazer: "Rode “Atualizar dados” na obra, no ambiente local.",
+    oQueFazer: "Rode “Atualizar dados” na obra, no dev do Mac.",
   },
   review_eval: {
     texto: "revisar avaliação",
     cor: "border-violet-500/55 bg-violet-500/10 text-violet-700 dark:text-violet-300",
-    oQueFazer: "Reavalie a obra com IA, no ambiente local.",
+    oQueFazer: "Reavalie a obra com IA, no dev do Mac.",
   },
   create_by_name: {
     texto: "cadastrar pelo nome",
     cor: "border-emerald-500/55 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-    oQueFazer: "A busca de produção não achou. Procure local, onde as 9 fontes respondem.",
+    oQueFazer: "A busca de produção não achou. Procure no dev do Mac, onde as 9 fontes respondem.",
   },
 }
 
@@ -50,8 +58,9 @@ export default async function PedidosPage() {
       <header>
         <h1 className="text-2xl font-bold tracking-tight">Pedidos</h1>
         <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-          O que os leitores pediram. Produção não alcança todas as fontes — quem roda estes
-          fluxos é você, no ambiente local, e depois empurra com os scripts de push.
+          O que os leitores pediram. Produção não tem o bypass de Cloudflare — quem roda estes
+          fluxos é você, no dev do Mac, onde o sidecar responde. O app já grava na nuvem: não
+          há push depois.
         </p>
       </header>
 
