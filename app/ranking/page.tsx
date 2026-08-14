@@ -149,6 +149,8 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     // Notas (novo pipeline)
     "decision", "recommended",
     "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
+    // Sua nota (Real) — a coluna `user_score` da RankingTable ordena por este campo.
+    "user_score",
     "alignment_score",
     // Estimativa de arte — ordena pelo PERCENTIL (o valor cru nem chega ao cliente).
     "art",

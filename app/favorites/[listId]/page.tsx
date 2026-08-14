@@ -102,9 +102,10 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
   const validSortFields = new Set<string>([
     "decision",
     "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
+    "user_score",
     "alignment_score",
     "platform_avg", "total_votes",
-    "title", "year", "synopsis_q",
+    "title", "year", "synopsis_q", "synopsis_pred",
     "chapters", "chapters_total", "chapters_read",
     "publication_status", "personal_status", "ai_eval_status",
     "updated_at", "last_read_at",

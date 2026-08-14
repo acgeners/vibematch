@@ -25,10 +25,17 @@ const HEADER_TEXT_CLASS = "text-xs font-semibold uppercase tracking-wide"
 
 const LABELS_BY_KEY = LABELS as Record<string, HeaderForms | undefined>
 
-/** As 3 formas do rótulo de uma coluna, ou null se ela não tem entrada no LABELS
- *  (estruturais/critérios) — nesse caso o chamador mantém o rótulo estático. */
+/** As 3 formas do rótulo de uma coluna, ou null se ela não tem entrada no LABELS nem
+ *  declara as suas (estruturais/critérios) — nesse caso o chamador mantém o rótulo
+ *  estático.
+ *
+ *  ⚠️ A ordem importa: o LABELS (gerado da tabela `ui_labels`) VENCE o que a coluna
+ *  declara. O `col.headerForms` é a saída para coluna que ainda não tem linha no banco —
+ *  sem ele o cabeçalho dela é desenhado por outro caminho, com tipografia diferente da
+ *  dos vizinhos (foi o que aconteceu com "Real" ao lado de "N. PREV.").
+ */
 export function headerFormsFor(col: WorkColumnDef): HeaderForms | null {
-  const entry = LABELS_BY_KEY[col.key]
+  const entry = LABELS_BY_KEY[col.key] ?? col.headerForms
   return entry ? { full: entry.full, short: entry.short, abbrev: entry.abbrev } : null
 }
 

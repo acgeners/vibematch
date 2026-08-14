@@ -8,6 +8,15 @@ export interface WorkColumnDef {
   key: string
   label: string
   configLabel?: string
+  /**
+   * As 3 formas do cabeçalho (full → short → abbrev) para coluna que NÃO tem linha em
+   * `ui_labels`. Sem elas o cabeçalho cai no rótulo estático, que é desenhado por outro
+   * caminho e sai com tipografia diferente da dos vizinhos — medido na tela: "Real" em
+   * caixa mista no meio de "N. PREV." e "N. EXT." em caixa alta.
+   * ⚠️ O LABELS (gerado do banco) VENCE isto: no dia em que a coluna ganhar linha em
+   * `ui_labels`, ela passa a mandar sozinha e este campo vira o valor morto que deve sair.
+   */
+  headerForms?: { full: string; short: string; abbrev: string }
   /** Texto explicativo exibido na tooltip do cabeçalho (abaixo do título). */
   description?: string
   align?: "left" | "right" | "center"
@@ -51,11 +60,16 @@ export const DEFAULT_WORK_COLUMN_NAMESPACE: WorkColumnNamespace = "titles"
 // salvo em qualquer namespace: `normalizeWorkColumnConfig` acrescenta coluna nova
 // ao fim do `order`, e o `hidden` gravado obviamente não a menciona — mesmo modo
 // de falha que a `synopsis_pred` teve, e nas outras telas ela ficaria só vazia.
+// Bump em favorites/ranking/recommendations ao adicionar a coluna "Minha nota (Real)"
+// (user_score), que nasce OCULTA nos três. `titles` NÃO é bumpado de propósito: lá ela é
+// visível por padrão, e é justamente isso que dispensa o bump — config salvo não menciona
+// coluna nova no `hidden`, então ela já apareceria. Bumpar ali só descartaria a ordem e as
+// larguras que a pessoa ajustou, em troca de nada.
 const NAMESPACE_STORAGE_VERSION: Record<WorkColumnNamespace, string> = {
   titles: "v9",
-  favorites: "v11",
-  ranking: "v10",
-  recommendations: "v7",
+  favorites: "v12",
+  ranking: "v11",
+  recommendations: "v8",
 }
 
 function storageKeyFor(namespace: WorkColumnNamespace): string {
@@ -86,6 +100,24 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
   { key: "decision", label: LABELS.decision.short, configLabel: LABELS.decision.short, description: LABELS.decision.tooltip_full, align: "center", group: "notas" },
   // Novo (Fase 1.5): expected_score é o L1 que substitui o trio N.IA/N.Pr/N.Final
   { key: "expected_score", label: LABELS.expected_score.short, configLabel: LABELS.expected_score.full, description: LABELS.expected_score.tooltip_full, align: "center", group: "notas" },
+  // Sua nota (user_score), vinda do espelho de QUEM OLHA (`user_work_state`, via
+  // `withPersonalState`) — não da linha compartilhada de `works`. Fica logo ao lado da
+  // Prevista de propósito: é o par "Prevista / Real" que a prévia de hover e o cabeçalho
+  // da obra já mostram juntos, e é o RÓTULO com que o Ridge da Prevista foi treinado.
+  // Rótulo literal (como `separator`): não tem linha em `ui_labels`, então o cabeçalho
+  // não troca full→short→abbrev por largura; se um dia tiver, migra pra LABELS.
+  // ⚠️ Vazia em quem você ainda não avaliou: 211 de 988 obras (21,4%) tinham nota em
+  // 2026-08-14 — por isso ela nasce OCULTA fora de /titles (em /favorites são 7 de 126).
+  {
+    key: "user_score",
+    label: "Real",
+    headerForms: { full: "Minha nota (Real)", short: "Minha nota", abbrev: "Real" },
+    configLabel: "Minha nota (Real)",
+    description:
+      "A nota que VOCÊ deu à obra, depois de ler — o rótulo com que a Nota Prevista é treinada. Fica vazia enquanto você não avaliar.",
+    align: "center",
+    group: "notas",
+  },
   { key: "personal_fit", label: LABELS.personal_fit.abbrev, configLabel: LABELS.personal_fit.full, description: LABELS.personal_fit.tooltip_full, align: "center", group: "notas" },
   { key: "platform_avg", label: LABELS.platform_avg.abbrev, configLabel: LABELS.platform_avg.short, description: LABELS.platform_avg.tooltip_full, align: "center", group: "notas" },
   { key: "total_votes", label: LABELS.total_votes.short, configLabel: LABELS.total_votes.short, description: LABELS.total_votes.tooltip_full, align: "center", group: "notas" },
@@ -157,6 +189,9 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
   favorites: [
     "separator",
     "fav",
+    // Medido em 2026-08-14: só 7 das 126 favoritas (5,6%) têm nota — a coluna viria
+    // vazia em 19 de cada 20 linhas justamente na tela mais densa.
+    "user_score",
     "personal_status",
     "chapters_read",
     "chapters_progress",
@@ -170,6 +205,7 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
   // Veredito IA. visível — quem chega aqui geralmente quer ver o re-rank IA.
   ranking: [
     "decision",
+    "user_score",
     "publication_status",
     "personal_status",
     "chapters_read",
@@ -185,6 +221,8 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
   recommendations: [
     "separator",
     "decision",
+    // Recomendação é sobre o que você AINDA NÃO leu — a coluna seria vazia por desenho.
+    "user_score",
     "synopsis_q",
     "synopsis_pred",
     "year",
@@ -267,6 +305,7 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   synopsis_q: 90,
   decision: 90,
   expected_score: 90,
+  user_score: 80,
   personal_fit: 64,
   calc_score: 80,
   predicted_score: 80,
@@ -355,13 +394,14 @@ export function writeWorkColumnConfig(
 }
 
 // Colunas renderizáveis no heatmap. Inclui:
-//   - notas 0-10 com color coding (final, calc, predicted, expected, criterios)
+//   - notas 0-10 com color coding (final, calc, predicted, expected, user_score, criterios)
 //   - `personal_fit` (Alinhamento — percentil 0-100, célula própria)
 //   - `total_votes` (count sem color coding — formatado como 1.5k/50k)
 //   - `synopsis_q` (string de corações ♥-♥♥♥♥ pra interesse na sinopse informado)
 //   - `synopsis_pred` (Interesse IA — previsão ♥-♥♥♥♥; dado só em /favorites)
 const SCORE_COLUMN_KEYS = new Set<string>([
   "expected_score",
+  "user_score",
   "personal_fit",
   "platform_avg",
   "total_votes",
