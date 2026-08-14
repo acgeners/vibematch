@@ -73,6 +73,40 @@ export const FAMILIAS = [
     env: "PULL_KEEP",
   },
   {
+    id: "backfill-tags",
+    dono: "backfill-external-tags-map.ts",
+    // 🔴 Escapou da varredura por ANOS porque o teste só reconhecia a string `".backups"`
+    // fechada, e este script usa `".backups/backfill-tags"`. Diretório fixo com um JSON por
+    // execução — ao contrário das famílias datadas, aqui a poda não remove nada; o valor de
+    // declarar é o `podar()` parar de acusá-lo como órfão e o próximo leitor saber quem grava.
+    oQueE: "mapa de tags externas → internas gerado pelo backfill (um JSON por execução)",
+    casa: (n) => n === "backfill-tags",
+    keepPadrao: 1,
+    env: "BACKFILL_TAGS_KEEP",
+  },
+  {
+    id: "fix-external-ids",
+    dono: "fix-external-ids-compartilhados.ts",
+    // Um diretório DATADO por execução, com o snapshot das linhas ANTES da correção.
+    // Pequeno (poucos KB), mas é a única rede para desfazer: o banco não tem PITR.
+    // ⚠️ Datado, e não um diretório fixo: `podar` ordena por stamp e corta o excedente —
+    // uma entrada só nunca seria podada e a "retenção" seria decorativa.
+    oQueE: "estado anterior das linhas corrigidas (ids externos trocados)",
+    casa: (n) => /^fix-external-ids-\d{4}/.test(n),
+    keepPadrao: 10,
+    env: "FIX_IDS_KEEP",
+  },
+  {
+    id: "push-opening-structure",
+    dono: "push-opening-structure.ts",
+    oQueE: "estado anterior da nuvem ao resgatar estrutura de abertura do local",
+    // ⚠️ O dígito logo após o prefixo é o que impede a família `push-evals` (/^push-\d{4}/)
+    // de engolir estas entradas — e vice-versa. Famílias têm de ser mutuamente exclusivas.
+    casa: (n) => /^push-opening-structure-\d{4}/.test(n),
+    keepPadrao: 10,
+    env: "PUSH_OPENING_KEEP",
+  },
+  {
     id: "push-curation",
     dono: "db-push-curation.mjs",
     oQueE: "STAGING do push de curadoria (~95 MB) — TSV do que foi lido, não é backup",

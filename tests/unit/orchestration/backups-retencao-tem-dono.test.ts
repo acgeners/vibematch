@@ -34,7 +34,12 @@ function escritoresDeBackups(): string[] {
     .filter((n) => n.endsWith(".mjs") || n.endsWith(".ts"))
     .filter((n) => {
       const src = fs.readFileSync(path.join(SCRIPTS_DIR, n), "utf8")
-      return src.includes('".backups"') && src.includes("mkdirSync")
+      // 🔴 Qualquer forma de citar `.backups`, não só a string exata `".backups"`.
+      // A 1ª versão exigia o literal fechado, e por isso deixou passar dois escritores que
+      // usavam `".backups/fix-external-ids"` — o caminho embutido no próprio literal. Quem
+      // os pegou foi o `podar()` do db:pull, olhando o filesystem de verdade, dias depois.
+      // Um teste que só reconhece uma grafia protege a grafia, não a invariante.
+      return /["'`]\.backups[/"'`]/.test(src) && src.includes("mkdirSync")
     })
 }
 
@@ -98,6 +103,9 @@ describe("retenção de .backups: um dono único, e ninguém grava sem família"
       "new-works-2026-08-04T15-56-02-670Z",
       "synopsis-lab-2026-07-30T05-38-06-927Z",
       "fingerprints",
+      "backfill-tags",
+      "fix-external-ids-2026-08-14T00-15-58-115Z",
+      "push-opening-structure-2026-08-14T01-00-49-104Z",
     ]
     for (const nome of nomes) {
       const casam = FAMILIAS.filter((f) => f.casa(nome)).map((f) => f.id)
@@ -111,7 +119,9 @@ describe("retenção de .backups: um dono único, e ninguém grava sem família"
     const cobertas = new Set(
       ["2026-08-10T15-46-58-638Z", "pull-2026-07-30T00-31-49-679Z", "push-2026-08-04T04-19-44-904Z",
        "push-curation-2026-08-10T17-37-07-121Z", "new-works-2026-08-04T15-56-02-670Z",
-       "synopsis-lab-2026-07-30T05-38-06-927Z", "fingerprints"]
+       "synopsis-lab-2026-07-30T05-38-06-927Z", "fingerprints", "backfill-tags",
+       "fix-external-ids-2026-08-14T00-15-58-115Z",
+       "push-opening-structure-2026-08-14T01-00-49-104Z"]
         .flatMap((n) => FAMILIAS.filter((f) => f.casa(n)).map((f) => f.id)),
     )
     for (const f of FAMILIAS) expect(cobertas.has(f.id), `família "${f.id}" sem nome de exemplo`).toBe(true)
