@@ -96,7 +96,7 @@ export interface WorkSeparator {
  *
  * 🔴 **A calibração acima é de BANDA 0,5, e a banda virou 0,25 (migration 190,
  * 2026-08-13). Os 73% não valem mais.** Remedido no clone local no mesmo dia, com os
- * módulos de produção (`.local-experiments/diag-separador-vs-banda.ts`):
+ * módulos de produção (`scripts/diag-separador-vs-banda.ts`):
  *
  *   recorte             banda 0,5   banda 0,25
  *   topo-45 (calibração)   62,2%       53,3%
@@ -123,7 +123,7 @@ export interface WorkSeparator {
  * crescia junto: é daí que vinha a maior parte da queda, não de sinal que sumiu.
  *
  * A grade que decidiu — os DOIS eixos juntos, porque varrer um só foi o erro que
- * criou a situação (`.local-experiments/diag-separador-grade.ts`, topo-40, banda
+ * criou a situação (`scripts/diag-separador-grade.ts`, topo-40, banda
  * 0,25, clone local de 13/08):
  *
  *   limiar σ   média inclusiva   média das outras

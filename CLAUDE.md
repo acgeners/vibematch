@@ -2441,10 +2441,12 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.717 passando (+24 pulados) em 255 arquivos** (250 passando + 5 pulados;
-medido em 2026-08-14). A linha já disse "~1.780 em ~157", "~2.353 em 218", "2.386 em
-221", "2.408 em 225", "2.428 em 228", "2.433 em 228" e "2.440 em 229", todas envelhecendo sem
-nada acusar — **re-meça antes de editar este número**, não incremente de cabeça. Vitest, jsdom, alias `@` → raiz. A
+`npm run test` → **2.727 passando (+24 pulados) em 255 arquivos** (250 passando + 5 pulados;
+re-medido em 2026-08-14). A linha já disse "~1.780 em ~157", "~2.353 em 218", "2.386 em
+221", "2.408 em 225", "2.428 em 228", "2.433 em 228", "2.440 em 229" e "2.717 em 255", todas
+envelhecendo sem nada acusar — **re-meça antes de editar este número**, não incremente de cabeça.
+⚠️ O "2.717" durou menos de um dia: dois PRs do mesmo dia somaram 10 testes e nenhum dos dois
+tocou nesta linha. Envelhecer aqui é o normal, não a exceção. Vitest, jsdom, alias `@` → raiz. A
 descrição antiga ("só `tests/unit/calculations/`, sem teste de componente") estava desatualizada
 havia muito: hoje `calculations` é a 4ª maior pasta, atrás de `synopsis-interest` (36),
 `external` (30) e `orchestration` (19), e há `.test.tsx` de componente.
