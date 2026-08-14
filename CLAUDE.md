@@ -2361,6 +2361,7 @@ Quatro ocorrências MEDIDAS em 2026-08-13/14, todas com suíte verde:
 | `db:health` "obra editada?" | md5 da linha inteira | — (não olhava direção) | 978 obras "divergindo" por `art_signal`, que a NUVEM tem e o local não: o regime normal virando alarme |
 | teste de `.backups` | a string literal `".backups"` | o filesystem, no `podar()` | 3 escritores gravando sem família, invisíveis por escreverem `".backups/x"` |
 | dono de um id externo | o texto de uma review | o slug da URL da fonte | hid removido da obra ERRADA, e o resolvedor o recriou 2h37 depois |
+| `deep-dive.ts` × RPC | um `as SimilarRow[]` em TS | o `RETURNS TABLE` em SQL | a migration 151 tirou `user_score`; "obras similares na biblioteca" saiu VAZIA por um mês |
 
 🔴 **A régua: quando duas coisas afirmam o mesmo fato, uma tem que ser DERIVADA da outra.**
 É o que já vale para `LOW_BALANCE_USD`, `STRONG_TAG_WEIGHT`, `CRITERIA_SCALE_LEGEND` e
@@ -2373,6 +2374,14 @@ completa.** `countStaleEmbeddings()` puxaria o catálogo inteiro a cada visita a
 manter o contador barato foi certo. Errado foi `disabled={pendingCount === 0}`, que deu a uma
 medida incompleta poder de veto sobre a completa. Hoje o botão só apaga o TOM quando o
 contador é zero, e o `title` explica a assimetria.
+
+⚠️ **`as X[]` sobre resposta de RPC é a versão SILENCIOSA disto.** O tipo é uma AFIRMAÇÃO
+sobre um contrato que mora em SQL, e o compilador não a verifica. Quando a migration 151
+tirou `user_score` do `RETURNS TABLE`, o campo passou a chegar `undefined`, `loved`/`avoided`
+ficaram sempre vazios e o prompt do Deep Dive imprimia "(nenhuma obra similar…)" enquanto
+promete o contrário — por um mês, sem erro nem log. Guardado por
+`tests/unit/orchestration/rpc-similares-contrato.test.ts`, que **deriva as colunas do RETURNS
+TABLE da migration vigente**: lista fixa envelheceria na próxima migration.
 
 ### Teste de arquitetura tem que casar o FATO, não a grafia
 
@@ -2423,7 +2432,7 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.708 passando (+24 pulados) em 254 arquivos** (249 passando + 5 pulados;
+`npm run test` → **2.714 passando (+24 pulados) em 255 arquivos** (250 passando + 5 pulados;
 medido em 2026-08-14). A linha já disse "~1.780 em ~157", "~2.353 em 218", "2.386 em
 221", "2.408 em 225", "2.428 em 228", "2.433 em 228" e "2.440 em 229", todas envelhecendo sem
 nada acusar — **re-meça antes de editar este número**, não incremente de cabeça. Vitest, jsdom, alias `@` → raiz. A
