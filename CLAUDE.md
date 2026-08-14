@@ -1536,6 +1536,14 @@ chips, onde a borda esquerda é o que dá o que ler.
 `normalizeRowsConfig` descarta chave desconhecida: sem o bump, quem tinha "status" escondido
 veria as duas linhas novas VISÍVEIS — a escolha da pessoa invertida em silêncio.
 
+⚠️ **O grupo "Básico" ganhou cabeçalho colapsável** quando foi de 3 para 5 linhas — era o único
+sem, e o que mais cresceu. A condição é "existe ALGUMA linha visível": título de seção sobre
+nada é pior que título nenhum, e o seletor de Linhas pode esconder as cinco.
+
+⚠️ **O tooltip do título traz os alternativos**, ordenados por `sortByTitleLanguage` (o mesmo
+dono da página da obra — sem ele, o alternativo legível cai em posição aleatória entre
+romanizações). Corta em 3 + "(+N)": `title=` nativo não rola nem tem largura máxima.
+
 Guardado por `tests/unit/ui/comparador-linhas-e-cabecalho.test.ts`.
 
 ## Três controles do painel de filtros que mentiam pelo desenho
@@ -1558,6 +1566,16 @@ não reconhece como padrão, e o "Todos" reacenderia no render seguinte.
 ⚠️ Havia uma 2ª cópia dos rótulos (`ART_FILTER_LABELS`) que **ninguém lia**: repetia palavra por
 palavra o texto de `ART_BAND_LABELS` (o do card da obra) e só era exercitada por um teste que
 lia o objeto, não a tela. Foi apagada; o tooltip do controle deriva de `ART_BAND_LABELS`.
+
+⚠️ **Custo medido dos rótulos novos:** o segmentado vai de 180 para **249px** e a linha passa a
+quebrar em duas de 1440 a 1920px (o vizinho "Esconder tags evitadas" não quebra). Não estoura o
+card, e **o painel não cresce**: "Conteúdo exibido" tem **53px de folga vertical** contra os
+~36px que a quebra consome. Encurtar para caber exigiria algo como "Sem 20%", que não diz de quê.
+⚠️ O controle é gateado por dono, então **não dá para vê-lo sem sessão** — as larguras acima
+foram medidas clonando a linha vizinha no browser, com a fonte real, e a árvore desenhada é
+guardada por `tests/unit/ranking/filtro-de-arte-render.test.tsx` (que monta o segmentado pelo
+MESMO `ART_FILTER_ORDER.map` do painel: uma cópia dos três botões passaria verde com o painel
+enumerando à mão de novo).
 ⚠️ Os cortes saíram de `lib/arte/model.ts` para **`lib/arte/bands.ts`** por peso de bundle: o
 painel é `"use client"` e importar o modelo levaria `lib/ml/{ridge,logistic,preprocessing}` junto.
 
@@ -2574,8 +2592,14 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.807 passando (+24 pulados) em 266 arquivos** (261 passando + 5 pulados;
-re-medido em 2026-08-14, depois do redesenho do comparador e dos filtros). A linha já disse "~1.780 em
+`npm run test` → **2.813 passando (+24 pulados) em 267 arquivos** (262 passando + 5 pulados;
+re-medido em 2026-08-14, depois do redesenho do comparador e dos filtros).
+
+🔴 **Medir isto numa árvore SUJA conta o que não está no commit.** O número anterior ("2.807 em
+266") foi medido com 6 arquivos de teste ainda **não commitados** por outra sessão, e entrou no
+PR #402 sem eles: a linha ficou 35 testes e 6 arquivos adiantada em relação à `main` real, que
+tinha 2.772 em 260. Rode `git status` antes de re-medir — árvore limpa, ou desconte o que ainda
+não está no índice. A linha já disse "~1.780 em
 ~157", "~2.353 em 218", "2.386 em 221", "2.408 em 225", "2.428 em 228", "2.433 em 228",
 "2.440 em 229", "2.717 em 255", "2.727 em 255", "2.753 em 258", "2.776 em 261", "2.784 em 263" e "2.788 em 264", todas envelhecendo sem nada
 acusar — **re-meça antes de editar este número**,
