@@ -2733,15 +2733,20 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.787 passando (+24 pulados) em 263 arquivos** (258 passando + 5 pulados;
-medido em 2026-08-14 com a árvore limpa exceto o próprio PR — `git status` conferido —, na branch
-do selo 18+ das views densas, com os títulos de aba por rota).
+`npm run test` → **2.823 passando (+24 pulados) em 269 arquivos** (264 passando + 5 pulados;
+medido em 2026-08-14 na branch dos títulos de aba, com `git status` LIMPO e já rebaseada em
+`origin/main`; 269 executados = 269 do `find`, então a execução foi completa).
 
-⚠️ **Na medição de 14/08 dois arquivos falharam por `ENOSPC` (disco a 399 MB livres), não por
-teste.** Isolados, os dois passam (14 testes). Disco cheio aqui não é hipótese — o `.next` estava
-com 3,2 GB e `.backups` com 745 MB; ver `npm run clean`. Falha cujo texto é `no space left on
-device` não entra na contagem como queda de teste, mas **também não autoriza chamar de verde sem
-re-rodar os acusados**.
+🔴 **Este número tem que ser medido DEPOIS do rebase, não antes — e eu quase publiquei o de
+antes.** A branch nasceu de `4af3e64`, e enquanto ela existia entraram na `main` os PRs #403 e
+#404, com **6 arquivos de teste**. Medido na base velha dava "2.787 em 263" — verdade sobre uma
+árvore que ninguém mais teria. É a mesma família do 🔴 da árvore SUJA: ali o excesso vem do que
+não está commitado, aqui a falta vem do que já está na `main`. **Meça no que vai virar o merge.**
+
+⚠️ **Na 1ª medição de 14/08 dois arquivos falharam por `ENOSPC` — disco a 399 MB livres —, não
+por teste.** Isolados, os dois passavam. Disco cheio aqui não é hipótese: o `.next` tinha 3,2 GB
+(`npm run clean` devolveu 6,4 GB). Falha cujo texto é `no space left on device` não é queda de
+teste, mas **também não autoriza chamar de verde sem re-rodar os acusados**.
 
 🔴 **Medir isto numa árvore SUJA conta o que não está no commit — e a correção de 14/08 CAIU NA
 MESMA armadilha.** O "2.807 em 266" saiu de 6 arquivos ainda **não commitados** por outra sessão;
