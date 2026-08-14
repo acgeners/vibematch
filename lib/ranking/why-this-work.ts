@@ -114,20 +114,29 @@ export interface WorkSeparator {
  * telas que falam em σ; mexer aqui sem mexer lá cria a segunda régua. E cobertura
  * BAIXA não é defeito por si — o defeito documentado é a alta (rotular todo mundo).
  *
- * 🔴 **O suspeito não é o limiar: é a MÉDIA INCLUSIVA.** `mean` é a média do grupo
- * COM a própria obra dentro, então o desvio sai encolhido pelo fator exato
- * `(k−1)/k`, onde k é quantas obras do tier **têm aquela força** (não o tamanho do
- * tier: nulos saem de `peers`). Num par, ×0,50 — ou seja, a coluna é mais fraca
- * justamente no empate de duas obras, que é o caso que ela existe para resolver. E
- * estreitar a banda cria mais tiers pequenos, então o encolhimento cresce junto.
+ * 🔴 **O culpado não era o limiar: era a MÉDIA INCLUSIVA — corrigido.** Ela punha a
+ * própria obra dentro da média contra a qual a obra é medida, e o desvio saía
+ * encolhido pelo fator exato `(k−1)/k`, onde k é quantas obras do tier **têm aquela
+ * força** (não o tamanho do tier: nulos saem de `peers`). Num par, ×0,50 — a coluna
+ * era mais fraca justamente no empate de duas obras, que é o caso que ela existe
+ * para resolver. E estreitar a banda cria mais tiers pequenos, então o encolhimento
+ * crescia junto: é daí que vinha a maior parte da queda, não de sinal que sumiu.
  *
- * Medido no topo-40 do clone local (banda 0,5, tiers de 22 e 18): média inclusiva
- * rotula **23 de 40**; média das OUTRAS (leave-one-out) rotula **31 de 40**. Os 23
- * foram conferidos por duas implementações independentes, que batem exatamente.
+ * A grade que decidiu — os DOIS eixos juntos, porque varrer um só foi o erro que
+ * criou a situação (`.local-experiments/diag-separador-grade.ts`, topo-40, banda
+ * 0,25, clone local de 13/08):
  *
- * ⚠️ **Trocar por leave-one-out é candidato, NÃO conclusão** — 31/40 é 77,5%, e a
- * própria calibração acima trata cobertura alta como o defeito a evitar. Quem decide
- * é uma medição do par (média × limiar) junto, não um patch de um lado só.
+ *   limiar σ   média inclusiva   média das outras
+ *     0,75         82,5%              87,5%      ← rotula quase todo mundo
+ *     1,00         47,5%              72,5%      ← ESCOLHIDO (alvo da calibração: ~73%)
+ *     1,25         35,0%              35,0%
+ *     1,50         25,0%              27,5%
+ *
+ * No catálogo inteiro a troca quase não mexe (43,3% → 44,5% em 1σ): ela age onde o
+ * tier é pequeno, que é onde o encolhimento era grande.
+ *
+ * ⚠️ O limiar continua 1σ, e de propósito — ele é o mesmo `HIGHLIGHT_SIGMA_THRESHOLD`,
+ * e mexer aqui sem mexer lá criaria a segunda régua para a mesma palavra.
  */
 export const SEPARATOR_MIN_SIGMA = 1
 
@@ -205,7 +214,29 @@ export function whyThisWork(
       .filter((v): v is number => v != null && Number.isFinite(v))
     if (peers.length < 2) continue
 
-    const mean = peers.reduce((a, b) => a + b, 0) / peers.length
+    /**
+     * 🔴 A média é a das OUTRAS obras do tier, não a do grupo inteiro.
+     *
+     * Com a própria obra dentro, ela puxa a média na direção dela e o desvio sai
+     * encolhido pelo fator exato `(k−1)/k`, onde k = `peers.length`: **×0,50 num
+     * empate de duas** — justo o caso que esta coluna existe para resolver. Não é
+     * ajuste de sensibilidade, é a conta errada: "o que a separa das empatadas"
+     * pede a média DELAS.
+     *
+     * ⚠️ `peers` (com a obra) continua sendo a base do `rank` logo abaixo: "a mais
+     * alta do grupo" é uma afirmação sobre o grupo INTEIRO, e tirar a obra de lá
+     * faria toda obra ser o próprio máximo.
+     */
+    const others = groupForces
+      .filter((_, i) => group[i] !== item)
+      .map((f) => f[key])
+      .filter((v): v is number => v != null && Number.isFinite(v))
+    // Defensivo: `item` fora de `group` (o contrato pede que esteja) deixaria
+    // `others` do mesmo tamanho de `peers` — a média inclusiva, que é o pior caso
+    // conhecido, nunca um crash.
+    const base = others.length ? others : peers
+
+    const mean = base.reduce((a, b) => a + b, 0) / base.length
     const z = (value - mean) / moment.sd
     if (!Number.isFinite(z) || Math.abs(z) < threshold) continue
 
