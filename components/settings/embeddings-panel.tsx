@@ -125,10 +125,27 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
             usar `countStaleEmbeddings()` aqui, puxaria o catálogo inteiro com tags,
             sinopses e digest a cada visita ao /settings.
           */}
+          {/*
+            Sem obra "sem embedding", o botão fica APAGADO — mas continua clicável, e o
+            hover devolve a cor cheia.
+            🔴 O apagado é só tom, nunca `disabled`, porque zero aqui NÃO quer dizer "nada a
+            fazer": o contador conta linha ausente e o botão trabalha por hash. Medido na
+            própria tela em 2026-08-13 — "Sem embedding 0" e, no mesmo clique, **84 obras
+            embedadas**. Voltar a desabilitar tranca de novo o caminho de re-embedar.
+          */}
           <Button
             onClick={handleRefresh}
             disabled={isPending}
-            className={ACCENT_BUTTON[accent]}
+            title={
+              pendingCount === 0
+                ? "Nenhuma obra sem embedding — mas ainda re-embeda o que teve texto alterado"
+                : undefined
+            }
+            className={`${ACCENT_BUTTON[accent]} ${
+              pendingCount === 0 && !isPending
+                ? "opacity-50 transition-opacity hover:opacity-100 focus-visible:opacity-100"
+                : ""
+            }`}
           >
             {isPending ? (
               <Loader2 className="mr-1 h-4 w-4 animate-spin" />
