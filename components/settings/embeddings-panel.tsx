@@ -24,7 +24,13 @@ interface EmbeddingsPanelProps {
   accent: SettingsAccent
   /** Quantas obras já têm embedding cacheado (lido do DB no server). */
   initialCachedCount: number
-  /** Quantas obras precisam re-embedar (sem linha OU com hash desatualizado). */
+  /**
+   * Quantas obras NUNCA foram embedadas (sem linha em `work_embeddings`).
+   *
+   * ⚠️ Não inclui hash desatualizado — vem de `countMissingEmbeddings()`, que só checa
+   * existência. Este doc-comment já dizia "OU com hash desatualizado" e era falso; foi essa
+   * frase que sustentou o `disabled={pendingCount === 0}` no botão.
+   */
   initialPendingCount: number
   totalWorks: number
   initialLastRun: string | null
@@ -93,18 +99,53 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
             Gera a representação vetorial (1536 dims) de cada obra via OpenAI{" "}
             <span className="font-mono">text-embedding-3-small</span> — fundação das &quot;obras
             parecidas&quot; e do kNN predictor. Cacheada em{" "}
-            <span className="font-mono">work_embeddings</span>; só re-embeda quando sinopse, tags ou
-            critérios mudam.
+            <span className="font-mono">work_embeddings</span>; só re-embeda quando o texto da obra
+            muda — sinopse, tags, critérios ou a síntese das reviews.
           </p>
           <p className="text-xs">
-            Custo ~2¢ por milhão de tokens (~$0,10–1,00 pra base inteira).
+            Custo ~2¢ por milhão de tokens (~$0,10–1,00 pra base inteira). Pode rodar a
+            qualquer momento: só processa o que mudou, mesmo com &quot;Sem embedding&quot; em 0.
           </p>
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
+          {/*
+            🔴 NÃO desabilitar por `pendingCount === 0`.
+
+            O contador vem de `countMissingEmbeddings()`, que só olha se EXISTE linha em
+            `work_embeddings` — ele nunca compara o `input_hash`. Já o botão chama
+            `refreshEmbeddings()`, que re-embeda pelo hash. Ou seja: os dois usam critérios
+            diferentes, e o mais cego estava trancando o mais completo.
+
+            Medido em 2026-08-13: "Loved by the Villains" ganhou 37 reviews, o digest entrou
+            no texto embedado e o hash mudou — mas o painel dizia "Pendentes 0 · 100% da
+            base" e o botão ficava cinza. Não havia como re-embedar pela interface.
+
+            O botão é idempotente e barato (re-embeda só o que mudou; ~2¢ por milhão de
+            tokens), então deixá-lo sempre clicável não tem custo real — e a alternativa,
+            usar `countStaleEmbeddings()` aqui, puxaria o catálogo inteiro com tags,
+            sinopses e digest a cada visita ao /settings.
+          */}
+          {/*
+            Sem obra "sem embedding", o botão fica APAGADO — mas continua clicável, e o
+            hover devolve a cor cheia.
+            🔴 O apagado é só tom, nunca `disabled`, porque zero aqui NÃO quer dizer "nada a
+            fazer": o contador conta linha ausente e o botão trabalha por hash. Medido na
+            própria tela em 2026-08-13 — "Sem embedding 0" e, no mesmo clique, **84 obras
+            embedadas**. Voltar a desabilitar tranca de novo o caminho de re-embedar.
+          */}
           <Button
             onClick={handleRefresh}
-            disabled={isPending || pendingCount === 0}
-            className={ACCENT_BUTTON[accent]}
+            disabled={isPending}
+            title={
+              pendingCount === 0
+                ? "Nenhuma obra sem embedding — mas ainda re-embeda o que teve texto alterado"
+                : undefined
+            }
+            className={`${ACCENT_BUTTON[accent]} ${
+              pendingCount === 0 && !isPending
+                ? "opacity-50 transition-opacity hover:opacity-100 focus-visible:opacity-100"
+                : ""
+            }`}
           >
             {isPending ? (
               <Loader2 className="mr-1 h-4 w-4 animate-spin" />
@@ -120,10 +161,14 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
       <RunningStrip accent={accent} label="Gerando embeddings das obras" running={isPending} />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {/* ⚠️ "sem embedding", e NADA além disso: este número conta linha ausente em
+            `work_embeddings`, não hash desatualizado. Dizia "ou com hash desatualizado" e
+            era falso — obra re-embedável ficava fora da conta, com 0 na tela. Quem detecta
+            hash é o botão. */}
         <StatCard
-          label="Pendentes"
+          label="Sem embedding"
           value={Math.max(0, pendingCount)}
-          hint="obras sem embedding ou com hash desatualizado"
+          hint="obra que nunca foi embedada"
         />
         <StatCard
           label="Cacheados"

@@ -4,6 +4,12 @@
  *
  *   npm run db:health
  *
+ * ALVO: NUVEM — por construção, não por descuido. A pergunta deste comando é "como está o
+ * banco de PRODUÇÃO?", e ele lê pelo endpoint SQL da Management API usando o ref de
+ * `.env.supabase-cloud`. Do `.env.local` sai apenas o `SUPABASE_ACCESS_TOKEN`. Os únicos
+ * trechos que tocam o LOCAL são as comparações local × nuvem (via `psql`), que existem
+ * justamente para achar curadoria feita no banco errado.
+ *
  * ## Por que existe
  *
  * O plano de operação de dados (2026-08-10) tem gatilhos objetivos: egress, tamanho do banco,
