@@ -1962,6 +1962,45 @@ Two distinct paths both ultimately call `requestAiEvaluation()` in `lib/ai-evalu
 (curadoria do catálogo — do dono), e as filas de **Veredito IA / IA-Rk / Interesse / Sinopse**
 foram pra **`/fila-recomendacao`** (qualquer logado).
 
+🔴 **"Aguardando revisão" nomeava uma ação que não existia — corrigido em 2026-08-14.** O modal
+de revisão só abria como RESULTADO de uma avaliação paga (`handleEvaluate` → confirmação de
+custo → `triggerAiEvaluation`), então a única forma de ver a avaliação **já gravada** era pagar
+outra. O ciclo se contradizia por escrito: ao terminar uma avaliação, o toast oferece "Revisar"
+apontando pra `/ai-evaluation` (`components/titles/ai-evaluation-button.tsx`), e a página não
+sabia revisar. Hoje `loadAiEvaluationForReview` (só leitura, sem LLM) abre a avaliação
+persistida — medido no app: **2,2s e zero chamada à Anthropic**.
+
+⚠️ **Ela devolve a MESMA forma do caminho pago** (`{ evaluation, currentScores,
+currentEvaluation }`) porque quem consome é o mesmo `AiEvaluationReviewForm`. Um segundo formato
+faria as duas telas divergirem na primeira mudança do formulário. E **não** passa pelo
+`confirmCost`: pedir confirmação de gasto numa leitura ensina a clicar "ok" sem ler, e é
+justamente esse popup que precisa ser levado a sério no botão ao lado.
+
+🔴 **O botão sai de `works.ai_eval_status`, NUNCA de `matchedFilters`.** `matchedFilters` responde
+"por que a obra apareceu" — a intersecção com os filtros LIGADOS. Uma obra em `review_pending`
+que entre pela lista por confiança baixa chega com `["low-confidence"]`, e derivar dali esconderia
+o botão de quem está esperando revisão. Estado é fato do banco; filtro é uma pergunta que alguém
+fez. É a família "dois critérios pro mesmo fato", aqui decidindo se a ação existe.
+
+🔴 **A confiança tinha sumido do card em `73a9510`**, quando as ações viraram pilha vertical: a
+`ConfidencePill` foi apagada e nada entrou no lugar. Sobreviveu só DENTRO do chip de confiança
+baixa — ou seja, sumia justamente na obra em "Aguardando revisão", que é quando o número decide
+se dá pra aceitar a nota —, enquanto o seletor "Ordenar" seguia oferecendo **Confiança IA**: dava
+pra ordenar por um número que o card não mostrava. Hoje ela vive na **linha de procedência**,
+junto de data e modelo/prompt — os três são fatos sobre a MESMA avaliação —, e o chip âmbar diz só
+"Confiança baixa": o número tem **um** lugar.
+
+⚠️ **Os cortes 0,75/0,5 agora têm dono: `confidenceBand` (`lib/ai-evaluation/confidence-ruler.ts`).**
+Estavam copiados no formulário de revisão e no comparador, e o card seria a terceira cópia — duas
+telas discordando sobre a mesma avaliação ser verde ou âmbar. ⚠️ Isso COLORE, não julga acerto: a
+confiança mede volume de evidência (rho 0,44 com nº de reviews) e **não é comparável entre
+modelos** — é o assunto do resto daquele arquivo.
+
+Guardado por `tests/unit/ai-evaluation/card-confianca-e-revisar.test.tsx` — teste de **RENDER** de
+propósito (um teste que lesse o objeto do work passaria verde nos dois defeitos), com o caso do
+"apareceu por OUTRO filtro" explícito. Conferido com três sondas: derivar do filtro, esconder a
+confiança e devolvê-la ao chip reprovam.
+
 🔴 **A terceira aba de `/ai-evaluation` é "Digests" (2026-08-14)** — a fila do digest
 estruturado, que era um painel CEGO em `/settings?g=ia`: sabia dizer "125 pendentes" e
 processava 10 obras que ninguém escolhia nem via. Digest é curadoria de CATÁLOGO (pago,
@@ -2733,9 +2772,9 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.823 passando (+24 pulados) em 269 arquivos** (264 passando + 5 pulados;
-medido em 2026-08-14 na branch dos títulos de aba, com `git status` LIMPO e já rebaseada em
-`origin/main`; 269 executados = 269 do `find`, então a execução foi completa).
+`npm run test` → **2.828 passando (+24 pulados) em 270 arquivos** (265 passando + 5 pulados;
+medido em 2026-08-14 na branch do card da fila de atributos, rebaseada em `origin/main`;
+270 executados = 270 do `find`, então a execução foi completa).
 
 🔴 **Este número tem que ser medido DEPOIS do rebase, não antes — e eu quase publiquei o de
 antes.** A branch nasceu de `4af3e64`, e enquanto ela existia entraram na `main` os PRs #403 e

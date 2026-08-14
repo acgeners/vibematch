@@ -68,6 +68,8 @@ interface EligibleWork {
   reviewCount?: number | null
   /** Razões pelas quais a obra apareceu (intersecção com os filtros ativos). */
   matchedFilters: EvaluationFilter[]
+  /** Estado REAL da obra (works.ai_eval_status) — é ele que libera o "Revisar". */
+  aiEvalStatus: string | null
   evaluation: {
     confidence: number | null
     modelName: string | null
@@ -339,13 +341,23 @@ async function getEligibleWorks(
     hiatus_kind: HiatusKind | null
     hiatus_kind_confidence: "high" | "low" | null
     publication_status_note: string | null
+    /**
+     * ⚠️ O botão "Revisar" sai DAQUI, nunca de `matchedFilters`.
+     *
+     * `matchedFilters` diz por que a obra apareceu na lista — a intersecção com os
+     * filtros LIGADOS. Uma obra em `review_pending` que entre pelo filtro de
+     * confiança baixa vem com `["low-confidence"]`, e derivar dali esconderia o
+     * botão exatamente de quem está esperando revisão. O estado da obra é fato do
+     * banco; o filtro é uma pergunta que alguém fez.
+     */
+    ai_eval_status: string | null
   }
   const worksResult = await chunkedInQuery<WorkRow>(eligibleIds, CHUNK_SIZE, (chunk) => {
     // `works_owner`: a fila de curadoria mostra o status de leitura, o ♥ e a NOTA DO DONO (é a
     // tela de trabalho dele). Vêm do espelho dele via a view — `works` já perdeu essas colunas.
     let q = supabase
       .from("works_owner")
-      .select("id, title, publication_status_id, personal_status_id, synopsis_quality, total_chapters, user_score, hiatus_kind, hiatus_kind_confidence, publication_status_note")
+      .select("id, title, publication_status_id, personal_status_id, synopsis_quality, total_chapters, user_score, hiatus_kind, hiatus_kind_confidence, publication_status_note, ai_eval_status")
       .in("id", chunk)
       .eq("is_archived", false)
     if (pubStatusIds.length > 0) q = q.in("publication_status_id", pubStatusIds)
@@ -447,6 +459,7 @@ async function getEligibleWorks(
       is_adult: adultByWork.get(row.id) ?? false,
       user_score: row.user_score ?? null,
       matchedFilters: matchedByWork.get(row.id) ?? [],
+      aiEvalStatus: row.ai_eval_status ?? null,
       evaluation: evalByWork.get(row.id) ?? null,
     } as EligibleWork
   })

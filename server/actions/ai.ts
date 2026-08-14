@@ -513,6 +513,57 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
 }
 
 /**
+ * Carrega a avaliação que já está esperando revisão. **Só leitura: não chama o
+ * LLM, não grava nada, não custa nada.**
+ *
+ * 🔴 Isto faltava, e a ausência quebrava o ciclo no meio. `review_pending`
+ * significa "a IA já rodou, falta você conferir" — mas a única porta pro modal de
+ * revisão era `triggerAiEvaluation`, ou seja, **pagar outra avaliação pra ver a
+ * que já estava pronta**. O próprio app prometia o contrário: ao terminar uma
+ * avaliação, o toast oferece "Revisar" apontando pra `/ai-evaluation`
+ * (`components/titles/ai-evaluation-button.tsx`), e a página não sabia revisar.
+ *
+ * Devolve a MESMA forma que o caminho pago (`{ evaluation, currentScores,
+ * currentEvaluation }`), porque quem consome é o mesmo `AiEvaluationReviewForm` —
+ * montar um segundo formato aqui faria as duas telas divergirem na primeira
+ * mudança do formulário.
+ *
+ * ⚠️ `currentEvaluation` é a avaliação que respalda as notas **atuais** (a
+ * anterior), não esta. É ela que dá a coluna "Atual" do diff. Numa obra já
+ * revisada as duas coincidem e o diff fica vazio — por isso quem chama mostra o
+ * botão só quando a obra está de fato em `review_pending`.
+ */
+export async function loadAiEvaluationForReview(workId: string) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
+  const supabase = createAdminClient()
+
+  const { data: evaluation, error } = await supabase
+    .from("ai_evaluations")
+    .select("*, ai_evaluation_scores(*)")
+    .eq("work_id", workId)
+    .eq("status", "completed")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) return { error: error.message }
+  if (!evaluation) return { error: "Esta obra não tem avaliação concluída para revisar." }
+
+  const { data: currentScoreRows } = await supabase
+    .from("category_scores")
+    .select("criterion_slug, score, ai_evaluation_id")
+    .eq("work_id", workId)
+
+  const currentScores: Record<string, number> = Object.fromEntries(
+    (currentScoreRows ?? []).map((row) => [row.criterion_slug, Number(row.score)]),
+  )
+  const currentEvaluation = await loadCurrentEvaluationMeta(supabase, currentScoreRows ?? [])
+
+  return { data: { evaluation: evaluation as AiEvaluation, currentScores, currentEvaluation } }
+}
+
+/**
  * Pré-aquece o cache de contexto externo (`reviewContextCache`, TTL ~5min) de
  * uma obra, sem chamar o LLM nem gravar nada. Disparado pela UI quando a obra
  * entra na fila do Avaliar (ou no hover do botão) pra que `triggerAiEvaluation`

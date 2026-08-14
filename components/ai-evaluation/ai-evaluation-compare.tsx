@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
+import { confidenceBand } from "@/lib/ai-evaluation/confidence-ruler"
 import { CRITERION_SLUGS } from "@/types/domain"
 
 /**
@@ -32,10 +33,13 @@ function modelLabel(modelName: string | null): string {
   return modelName
 }
 
+/** Cortes de `confidenceBand` (dono único) — as três superfícies que pintam
+ *  confiança precisam concordar sobre a mesma avaliação ser verde ou âmbar. */
 function confidenceBadgeClass(confidence: number | null): string {
   if (confidence == null) return "border-border bg-muted text-muted-foreground"
-  if (confidence >= 0.75) return "border-emerald-300 bg-emerald-50 text-emerald-700"
-  if (confidence >= 0.5) return "border-amber-300 bg-amber-50 text-amber-700"
+  const band = confidenceBand(confidence)
+  if (band === "alta") return "border-emerald-300 bg-emerald-50 text-emerald-700"
+  if (band === "media") return "border-amber-300 bg-amber-50 text-amber-700"
   return "border-rose-300 bg-rose-50 text-rose-700"
 }
 

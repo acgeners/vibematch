@@ -20,7 +20,7 @@ import {
 } from "@/lib/ai-evaluation/no-reviews"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import { SHOW_HAIKU_AB } from "@/lib/ai-evaluation/ab-config"
-import { describeCrossRuler, formatRuler } from "@/lib/ai-evaluation/confidence-ruler"
+import { confidenceBand, describeCrossRuler, formatRuler } from "@/lib/ai-evaluation/confidence-ruler"
 import type { AiEvaluation } from "@/types/domain"
 
 // Limiar fixo de fricção no "Salvar" e no botão "Reavaliar com Opus".
@@ -81,10 +81,13 @@ type ReviewUsageState =
   | { kind: "used"; count: number; available: number }
 
 /** Só a COR DO TEXTO da confiança — o fundo é do botão que a contém. Sem
- *  `border-<cor>`: `* { border-color }` em globals.css mata essas utilidades no TW v4. */
-function confidenceTextClass(confidence: number): string {
-  if (confidence >= 0.75) return "text-emerald-600 dark:text-emerald-400"
-  if (confidence >= 0.5) return "text-amber-600 dark:text-amber-400"
+ *  `border-<cor>`: `* { border-color }` em globals.css mata essas utilidades no TW v4.
+ *  Os CORTES vêm de `confidenceBand` (dono único) — exportada porque o card da fila
+ *  em `/ai-evaluation` mostra a mesma confiança e não pode discordar desta cor. */
+export function confidenceTextClass(confidence: number): string {
+  const band = confidenceBand(confidence)
+  if (band === "alta") return "text-emerald-600 dark:text-emerald-400"
+  if (band === "media") return "text-amber-600 dark:text-amber-400"
   return "text-rose-600 dark:text-rose-400"
 }
 
