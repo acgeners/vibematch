@@ -442,6 +442,61 @@ try {
   reporta("id repetido", "não deu para checar", null, String(e.message ?? e).split("\n")[0].slice(0, 60))
 }
 
+// ── banda dos tiers: código × nuvem × local ────────────────────────────────────────────
+//
+// 🔴 Este indicador existe por um erro MEDIDO. Em 06/08 a largura da banda foi calibrada e a
+// constante do código foi para 0,25; a mensagem do commit anunciava o `UPDATE` junto. Ele
+// nunca rodou — em 13/08 os dois bancos ainda tinham 0,5, com `updated_at` de 23/07, duas
+// semanas ANTES do commit. E `resolveTierBandWidth` só usa a constante quando o valor é
+// ausente (a coluna é NOT NULL), então o valor medido nunca esteve em vigor: o /ranking
+// agrupou uma semana na largura que a medição havia reprovado, com a suíte verde.
+//
+// ⚠️ O esperado é DERIVADO da migration mais recente que define a coluna, nunca escrito aqui:
+// uma 4ª cópia do mesmo número é o próprio defeito que este indicador vigia. Mesma fonte que
+// `tests/unit/ranking/tier-config.test.ts` usa.
+//
+// ⚠️ Divergir do esperado NÃO é alarme: a coluna existe para ser ajustada sem deploy, e um
+// valor escolhido à mão é decisão de alguém. Alarme é só os DOIS BANCOS discordando entre si,
+// que não é escolha de ninguém.
+try {
+  const dir = path.join(ROOT, "supabase/migrations")
+  const doMigration = fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith(".sql"))
+    .map((arquivo) => {
+      const stmt = fs
+        .readFileSync(path.join(dir, arquivo), "utf8")
+        .split(";")
+        .map((s) => s.replace(/^\s*--.*$/gm, ""))
+        .find((s) => /tier_band_width/.test(s) && /\bdefault\s+[\d.]+/i.test(s))
+      if (!stmt) return null
+      return { num: Number(arquivo.split("_")[0]), valor: Number(/\bdefault\s+([\d.]+)/i.exec(stmt)[1]) }
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.num - b.num)
+    .at(-1)
+
+  const naNuvem = Number((await nuvem("select tier_band_width from formula_config limit 1"))[0]?.tier_band_width)
+  const noLocal = Number(local("select tier_band_width from formula_config limit 1"))
+  const discordam = naNuvem !== noLocal
+  const foraDoEsperado = doMigration && naNuvem !== doMigration.valor
+
+  reporta(
+    "banda do tier",
+    // Curto de propósito: a coluna tem 22 caracteres e "nuvem X × local Y" a estoura,
+    // colando no gráfico de barra. Quem é quem vai na nota.
+    discordam ? `${naNuvem} × ${noLocal}` : String(naNuvem),
+    discordam ? 1 : 0,
+    discordam
+      ? "nuvem × local discordam — um deles não recebeu a migration"
+      : foraDoEsperado
+        ? `⚠️ migration diz ${doMigration.valor}; valor à mão? (o banco vence o código)`
+        : "igual à migration vigente",
+  )
+} catch (e) {
+  reporta("banda do tier", "não deu para checar", null, String(e.message ?? e).split("\n")[0].slice(0, 60))
+}
+
 // ── saída ──────────────────────────────────────────────────────────────────────────────
 console.log("  " + pad("indicador", 16) + pad("valor", 22) + pad("", 13) + "estado")
 console.log("  " + "─".repeat(62))

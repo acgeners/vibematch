@@ -48,7 +48,7 @@ const PERSONAL = [
  */
 function renderFilters(query = "") {
   currentQuery = query
-  return render(
+  const r = render(
     <RankingFilters
       availableGenres={[]}
       availableTags={[]}
@@ -60,6 +60,21 @@ function renderFilters(query = "") {
       defaultPersonalStatus="all"
     />
   )
+  // A zona `−` é MODO, desligado por padrão (ver o describe "o modo de exclusão…").
+  // Uma URL que já traz exclusão acende o modo sozinha; sem ela, os casos abaixo
+  // precisam ligá-lo — é o gesto que a pessoa faz antes de excluir qualquer coisa.
+  ligarModoExcluir()
+  return r
+}
+
+/** Liga o modo de exclusão nos dois cards, se ainda não estiver ligado. */
+function ligarModoExcluir() {
+  for (const dimensao of ["de publicação", "pessoais"]) {
+    const btn = screen.queryByRole("button", {
+      name: `Excluir status ${dimensao} em vez de selecionar`,
+    })
+    if (btn) fireEvent.click(btn)
+  }
 }
 
 /**
@@ -92,6 +107,79 @@ afterEach(() => {
   cleanup()
   nav.replace.mockClear()
   currentQuery = ""
+})
+
+/**
+ * O modo de exclusão, em RENDER — e este bloco NÃO usa `renderFilters`, que liga o modo
+ * por conveniência dos demais. Aqui o que está sendo medido é justamente o estado
+ * inicial.
+ */
+describe("o modo de exclusão nasce desligado e não esconde filtro", () => {
+  function renderCru(query = "") {
+    currentQuery = query
+    return render(
+      <RankingFilters
+        availableGenres={[]}
+        availableTags={[]}
+        defaultTopN={40}
+        defaultSort="expected_score:desc"
+        publicationStatuses={PUBLICATION}
+        personalStatuses={PERSONAL}
+        defaultPublicationStatus="all"
+        defaultPersonalStatus="all"
+      />
+    )
+  }
+
+  it("sem modo ligado, nenhum pill oferece a zona −", () => {
+    renderCru()
+    expect(screen.queryByRole("button", { name: "Excluir Cancelled" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Excluir Want to Read" })).toBeNull()
+    // …e o pill continua sendo clicável para SELECIONAR, que é o uso comum.
+    expect(screen.getByText("Cancelled").closest("button")).toBeTruthy()
+  })
+
+  it("ligar o modo de um card não liga o do outro", () => {
+    renderCru()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Excluir status de publicação em vez de selecionar" })
+    )
+    expect(screen.getByRole("button", { name: "Excluir Cancelled" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Excluir Want to Read" })).toBeNull()
+  })
+
+  /**
+   * 🔴 Exclusão vinda de FORA do painel — preset salvo, link colado, voltar do browser —
+   * tem que acender o controle. Se o modo fosse só state, o filtro estaria valendo com
+   * a zona `−` invisível: filtro ativo sem nada na tela que o explique, que é o que o
+   * badge "Todos" já é obrigado a evitar.
+   */
+  it("URL que já traz exclusão acende o modo sozinha", () => {
+    renderCru("pub_status_exclude=Cancelled")
+    expect(screen.getByRole("button", { name: "Parar de excluir Cancelled" })).toBeTruthy()
+    // e só o card daquela dimensão
+    expect(screen.queryByRole("button", { name: "Excluir Want to Read" })).toBeNull()
+  })
+
+  it("desligar o modo remove as exclusões daquela dimensão", () => {
+    renderCru("pub_status_exclude=Cancelled&per_status_exclude=Reading")
+    fireEvent.click(
+      screen.getByRole("button", { name: "Sair do modo excluir status de publicação (remove a exclusão)" })
+    )
+    const q = applyAndRead()
+    expect(q.get("pub_status_exclude")).toBeNull()
+    // a outra dimensão não é tocada — cada card tem o seu interruptor
+    expect(q.get("per_status_exclude")).toBe("Reading")
+  })
+
+  it("desligado, a zona − some junto com a exclusão", () => {
+    renderCru("pub_status_exclude=Cancelled")
+    fireEvent.click(
+      screen.getByRole("button", { name: "Sair do modo excluir status de publicação (remove a exclusão)" })
+    )
+    expect(screen.queryByRole("button", { name: "Parar de excluir Cancelled" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Excluir Cancelled" })).toBeNull()
+  })
 })
 
 describe("a zona − existe e escreve o par de parâmetros", () => {

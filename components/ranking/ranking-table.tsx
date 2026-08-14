@@ -140,8 +140,9 @@ interface Tier {
  * Particiona as entries (ordenadas desc pelo campo `scoreOf`) em tiers contíguos
  * via `buildRankingTiers` (banda ancorada na 1ª obra do tier, limite inclusivo —
  * ver lib/ranking/build-tiers). A largura (`bandWidth`) vem de
- * `formula_config.tier_band_width` (ajustável sem mudança de código; provisória,
- * a validar). `scoreOf` é o campo ordenado (decisão OU Nota Prevista). Entries com
+ * `formula_config.tier_band_width` (ajustável sem mudança de código; hoje 0,25, valor
+ * MEDIDO — ver lib/ranking/tier-config.ts). `scoreOf` é o campo ordenado (decisão OU
+ * Nota Prevista). Entries com
  * score null caem num tier final.
  *
  * A tabela comunica prioridade por SEPARAÇÃO em tiers, não por um decimal falso
@@ -177,7 +178,8 @@ function computeTiers(
  *
  * Havia um `reorderTiersByFit` aqui: ele reordenava cada tier por `tagOverlapNet`
  * desc, por cima da ordem que o servidor já tinha produzido. A premissa era "dentro
- * do tier tudo empata" — e ela é FALSA: com banda 0,5 um tier cobre 8,5 → 8,0, então
+ * do tier tudo empata" — e ela é FALSA: um tier cobre 8,5 → 8,25 na banda de hoje (e
+ * cobria 8,5 → 8,0 na banda de 0,5 em que isto foi descoberto), então
  * o reorder descartava tanto o 2º nível de ordenação escolhido (ex.: Veredito) quanto
  * a própria Nota Prevista. A lista saía numa ordem que nenhum controle da tela
  * explicava, e a coluna "#" era reescrita pra parecer monotônica por cima disso.
@@ -271,7 +273,7 @@ interface RankingTableProps {
   defaultSort?: string
   /** Quando false, o re-rank por IA por-linha ("Rankear") é desabilitado (feature Pago). */
   isPaid?: boolean
-  /** Largura da banda de tiers (formula_config.tier_band_width). Provisória, a validar. */
+  /** Largura da banda de tiers (formula_config.tier_band_width). Valor medido; ver tier-config.ts. */
   tierBandWidth?: number
   /** Faixas ideais por critério (perfil) — repassadas ao drawer de comparação. */
   criterionPrefs?: Record<string, CriterionRange>

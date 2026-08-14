@@ -1028,7 +1028,8 @@ export async function getRanking(
   //
   // Este desempate morava no CLIENTE (`reorderTiersByFit`, view Lista), aplicado
   // por tier — e ali ele reordenava obras que a pessoa tinha mandado ordenar por
-  // outra coisa. Com banda 0,5 um tier cobre 8,5 → 8,0, então "dentro do tier tudo
+  // outra coisa. Um tier cobre 8,5 → 8,25 na banda de hoje (0,25) e cobria 8,5 → 8,0
+  // na banda de 0,5 em que isto foi descoberto, então "dentro do tier tudo
   // empata" era falso: ele descartava tanto o nível 2 escolhido (ex.: Veredito)
   // quanto a própria Nota Prevista. A lista saía numa ordem que nenhum controle
   // da tela explicava.
