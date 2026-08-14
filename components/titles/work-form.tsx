@@ -79,6 +79,7 @@ import { BarChart3, ChevronDown, ImageIcon, Info, LayoutDashboard, Loader2, Penc
 import { PROGRESS_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 import { isFullyReadPersonalStatus } from "@/lib/constants/status-lookups"
 import { UNTRACKED_PERSONAL_STATUS } from "@/lib/constants/status-lookups"
+import { confidenceBadgeClass } from "@/lib/ai-evaluation/confidence-tone"
 
 export interface WorkFormAiEvaluation {
   model_name: string | null
@@ -1879,7 +1880,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
           aria-live="polite"
         >
           <div className="w-full max-w-sm rounded-xl border border-emerald-300 bg-background p-6 text-center shadow-2xl shadow-emerald-950/20">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
               <Loader2 className="h-8 w-8 animate-spin" />
             </div>
             <p className="text-base font-semibold text-foreground">{topFeedback}</p>
@@ -1904,7 +1905,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
 
           {duplicateResolution && (
             <div className="space-y-4">
-              <div className="rounded-lg border bg-amber-50 p-3 text-sm text-amber-950">
+              <div className="rounded-lg ring-1 ring-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
                 Encontramos <span className="font-semibold">{duplicateResolution.existing.title}</span> no banco.
                 Ao confirmar, a obra existente será atualizada com os campos escolhidos.
               </div>
@@ -1923,7 +1924,9 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                           type="button"
                           className={`rounded-md border p-3 text-left text-sm transition-colors ${
                             selected === "existing"
-                              ? "border-emerald-500 bg-emerald-50 text-emerald-950"
+                              // `border-emerald-500` não pinta (o `*` sem layer do globals.css vence); o
+                              // que marca a escolha é o anel + o fundo em alfa, que serve os 2 temas.
+                              ? "ring-1 ring-emerald-500/60 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200"
                               : "bg-background hover:bg-accent/40"
                           }`}
                           onClick={() => handleDuplicateChoiceChange(field.name, "existing")}
@@ -1937,7 +1940,9 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                           type="button"
                           className={`rounded-md border p-3 text-left text-sm transition-colors ${
                             selected === "incoming"
-                              ? "border-emerald-500 bg-emerald-50 text-emerald-950"
+                              // `border-emerald-500` não pinta (o `*` sem layer do globals.css vence); o
+                              // que marca a escolha é o anel + o fundo em alfa, que serve os 2 temas.
+                              ? "ring-1 ring-emerald-500/60 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200"
                               : "bg-background hover:bg-accent/40"
                           }`}
                           onClick={() => handleDuplicateChoiceChange(field.name, "incoming")}
@@ -2057,7 +2062,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                     {draft.values.title}
                   </p>
                   {editingDraftId === draft.localId && (
-                    <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900">
+                    <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-800 dark:text-amber-200">
                       editando
                     </span>
                   )}
@@ -2751,13 +2756,12 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                   </span>
                   {aiMeta.confidence != null && (
                     <span
+                      // 🔴 Era a QUARTA cópia dos cortes 0,75/0,5 e das três classes —
+                      // achada só ao varrer cor clara fixa, depois de as outras três já
+                      // terem sido unificadas. Ver `lib/ai-evaluation/confidence-tone.ts`.
                       className={
-                        "rounded-full border px-2 py-0.5 font-medium " +
-                        (aiMeta.confidence >= 0.75
-                          ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                          : aiMeta.confidence >= 0.5
-                            ? "border-amber-300 bg-amber-50 text-amber-700"
-                            : "border-rose-300 bg-rose-50 text-rose-700")
+                        "rounded-full ring-1 px-2 py-0.5 font-medium " +
+                        confidenceBadgeClass(aiMeta.confidence)
                       }
                       title="Confiança declarada pela IA: 0 = sem certeza, 1 = alta certeza"
                     >
@@ -2765,7 +2769,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                     </span>
                   )}
                   {aiMeta.noReviewsReason && (
-                    <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
+                    <span className="rounded-full ring-1 ring-border bg-muted px-2 py-0.5 font-medium text-muted-foreground">
                       sem reviews externas
                     </span>
                   )}

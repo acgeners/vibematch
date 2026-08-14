@@ -1907,8 +1907,8 @@ function GenreRuleGrid({
                   onClick={() => onSetRule(item, rule === "exclude" ? null : "exclude")}
                   aria-label={removeTitle}
                   title={removeTitle}
-                  className={`flex h-full items-center justify-center border-r transition-colors hover:bg-rose-100 ${
-                    rule === "exclude" ? "bg-rose-100 text-rose-700" : "text-muted-foreground"
+                  className={`flex h-full items-center justify-center border-r transition-colors hover:bg-rose-500/15 ${
+                    rule === "exclude" ? "bg-rose-500/20 text-rose-700 dark:text-rose-300" : "text-muted-foreground"
                   }`}
                 >
                   <Minus className="h-3.5 w-3.5" />
@@ -1937,10 +1937,10 @@ function GenreRuleGrid({
                   title={addTitle}
                   className={`flex h-full items-center justify-center border-l transition-colors ${
                     rule === "all"
-                      ? "bg-emerald-100 text-emerald-700 hover:bg-sky-100 hover:text-sky-700"
+                      ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 hover:bg-sky-500/20 hover:text-sky-700 dark:hover:text-sky-300"
                       : rule === "any"
-                        ? "bg-sky-100 text-sky-700 hover:bg-muted"
-                        : "text-muted-foreground hover:bg-emerald-100 hover:text-emerald-700"
+                        ? "bg-sky-500/20 text-sky-700 dark:text-sky-300 hover:bg-muted"
+                        : "text-muted-foreground hover:bg-emerald-500/15 hover:text-emerald-700 dark:hover:text-emerald-300"
                   }`}
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -2206,8 +2206,8 @@ function GroupedTagRuleGrid({
           onClick={() => onSetRule(item.value, rule === "exclude" ? null : "exclude")}
           aria-label={removeTitle}
           title={removeTitle}
-          className={`flex h-full items-center justify-center border-r transition-colors hover:bg-rose-100 ${
-            rule === "exclude" ? "bg-rose-100 text-rose-700" : "text-muted-foreground"
+          className={`flex h-full items-center justify-center border-r transition-colors hover:bg-rose-500/15 ${
+            rule === "exclude" ? "bg-rose-500/20 text-rose-700 dark:text-rose-300" : "text-muted-foreground"
           }`}
         >
           <Minus className="h-3.5 w-3.5" />
@@ -2241,10 +2241,10 @@ function GroupedTagRuleGrid({
           title={addTitle}
           className={`flex h-full items-center justify-center border-l transition-colors ${
             rule === "all"
-              ? "bg-emerald-100 text-emerald-700 hover:bg-sky-100 hover:text-sky-700"
+              ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 hover:bg-sky-500/20 hover:text-sky-700 dark:hover:text-sky-300"
               : rule === "any"
-                ? "bg-sky-100 text-sky-700 hover:bg-muted"
-                : "text-muted-foreground hover:bg-emerald-100 hover:text-emerald-700"
+                ? "bg-sky-500/20 text-sky-700 dark:text-sky-300 hover:bg-muted"
+                : "text-muted-foreground hover:bg-emerald-500/15 hover:text-emerald-700 dark:hover:text-emerald-300"
           }`}
         >
           <Plus className="h-3.5 w-3.5" />

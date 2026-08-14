@@ -37,12 +37,12 @@ export function PendingBatchBanner({ initialCount }: PendingBatchBannerProps) {
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 rounded-lg ring-1 ring-amber-500/40 bg-amber-500/10 p-4 text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
       <div className="space-y-1">
         <p className="text-sm font-medium">
           {count} obra{count === 1 ? "" : "s"} aguardando recálculo
         </p>
-        <p className="text-sm text-amber-900/80">
+        <p className="text-sm text-amber-800/80 dark:text-amber-200/80">
           Finalize o lote quando terminar de incluir todos os títulos.
         </p>
       </div>
