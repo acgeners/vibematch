@@ -2432,7 +2432,7 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.714 passando (+24 pulados) em 255 arquivos** (250 passando + 5 pulados;
+`npm run test` → **2.717 passando (+24 pulados) em 255 arquivos** (250 passando + 5 pulados;
 medido em 2026-08-14). A linha já disse "~1.780 em ~157", "~2.353 em 218", "2.386 em
 221", "2.408 em 225", "2.428 em 228", "2.433 em 228" e "2.440 em 229", todas envelhecendo sem
 nada acusar — **re-meça antes de editar este número**, não incremente de cabeça. Vitest, jsdom, alias `@` → raiz. A

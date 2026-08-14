@@ -5,6 +5,7 @@ import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-util
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getCurrentUserId, getSessionUserId } from "@/server/queries/current-user"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
+import { getScoresReader } from "@/server/queries/user-scores"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import { fetchReviewDigestsBatch } from "@/server/queries/recommendations"
 import {
@@ -148,21 +149,17 @@ async function fetchWorkBundle(workId: string): Promise<{
   coverUrl: string | null
 } | null> {
   const supabase = createAdminClient()
+  // 🔴 `works`, não a view `works_owner`: ela carrega os 8 `post_*_score`, que são a
+  // avaliação pós-leitura DO DONO. Pela view, qualquer pessoa que rodasse Deep Dive levava as
+  // notas dele para dentro do prompt — e elas aparecem lá em `post_scores:`, ao lado de
+  // `Nota Esperada` e `fit_score`. O pós-leitura de quem olha vem do espelho, logo abaixo.
   const { data, error } = await supabase
-    .from("works_owner")
+    .from("works")
     .select(`
       id,
       title,
       canonical_synopsis,
       review_summary,
-      post_story_score,
-      post_fl_score,
-      post_ml_score,
-      post_character_development_score,
-      post_pacing_score,
-      post_art_visual_score,
-      post_impact_immersion_score,
-      post_originality_score,
       category_scores(criterion_slug, score, source),
       calculated_scores(expected_score, expected_is_stub, personal_fit),
       work_tags(tags(name, tag_group_id)),
@@ -190,10 +187,22 @@ async function fetchWorkBundle(workId: string): Promise<{
   ])
   const biasMap = await getBiasMap(await getCurrentUserId(supabase), supabase)
 
+  // A avaliação pós-leitura é de QUEM OLHA. Sem sessão não há pós-leitura nenhuma — melhor um
+  // bloco ausente no prompt do que o do dono com cara de ser da pessoa.
   const postScores: Partial<Record<string, number>> = {}
-  for (const field of POST_SCORE_FIELDS) {
-    const v = row[field]
-    if (v != null) postScores[field] = Number(v)
+  const sessionId = await getSessionUserId()
+  if (sessionId) {
+    const { data: mine } = await supabase
+      .from("user_work_state")
+      .select(POST_SCORE_FIELDS.join(", "))
+      .eq("user_id", sessionId)
+      .eq("work_id", workId)
+      .maybeSingle()
+    const linha = (mine ?? {}) as Record<string, unknown>
+    for (const field of POST_SCORE_FIELDS) {
+      const v = linha[field]
+      if (v != null) postScores[field] = Number(v)
+    }
   }
 
   const ratings = (row.platform_ratings as RawPlatformRatingRow[] | undefined) ?? []
@@ -204,12 +213,16 @@ async function fetchWorkBundle(workId: string): Promise<{
       ? rated.reduce((sum, r) => sum + Number(r.rating) * (r.vote_count ?? 0), 0) / totalVotes
       : null
 
-  const calc = (Array.isArray(row.calculated_scores)
+  // ⚠️ `calculated_scores` não tem `user_id` — a linha é do DONO. O overlay troca os campos
+  // pessoais pelos de quem olha (ou os zera), como `similar-works.ts` e `getRanking` já fazem.
+  const calcBruto = (Array.isArray(row.calculated_scores)
     ? row.calculated_scores[0]
     : row.calculated_scores) as
     | { expected_score: number | null; expected_is_stub: boolean | null; personal_fit: number | null }
     | null
     | undefined
+  const scoresReader = await getScoresReader()
+  const calc = calcBruto ? scoresReader.overlay(workId, calcBruto) : calcBruto
 
   const work: DeepDiveWorkBundle = {
     id: row.id as string,
@@ -288,30 +301,58 @@ async function fetchSimilarsForWork(workId: string): Promise<DeepDiveSimilarsBun
   return { loved, avoided }
 }
 
+/**
+ * "O que você avaliou recentemente" — o bloco que dá contexto ao prompt do Deep Dive.
+ *
+ * 🔴 Lê `user_work_state` de QUEM OLHA, nunca a view `works_owner`. Ela é do DONO: com ela,
+ * outra pessoa rodava Deep Dive e o prompt levava a atividade recente DELE — as obras que ele
+ * avaliou e as notas que ele deu — como se fosse a dela. É a mesma família de
+ * [[gotcha-anonimo-vira-dono]], e a nota logo abaixo neste arquivo já contava a versão dela
+ * que vazou pelo `deep_dive_results`.
+ *
+ * ⚠️ Sem sessão devolve VAZIO, e o guard é explícito. `getSessionUserId()` é null para o
+ * anônimo; `getCurrentUserId()` cairia no singleton (o dono) e o filtro por `user_id`
+ * existiria sem filtrar nada — o código conteria `user_id` e passaria em qualquer revisão.
+ *
+ * ⚠️ Ordena pelo `updated_at` do ESTADO PESSOAL, não do catálogo: a pergunta é "o que EU mexi
+ * por último", e `works.updated_at` se move por qualquer edição de catálogo (o cache de
+ * capítulos sozinho reescreve dezenas de linhas).
+ */
 async function fetchRecentActivity(excludeWorkId: string): Promise<
   Array<{ id: string; title: string; userScore: number | null; updatedAt: string }>
 > {
+  const userId = await getSessionUserId()
+  if (!userId) return []
+
   const supabase = createAdminClient()
   const { data, error } = await supabase
-    .from("works_owner")
-    .select("id, title, user_score, updated_at")
+    .from("user_work_state")
+    .select("work_id, user_score, updated_at, works!inner(id, title, is_archived)")
+    .eq("user_id", userId)
     .not("user_score", "is", null)
-    .eq("is_archived", false)
-    .neq("id", excludeWorkId)
+    .eq("works.is_archived", false)
+    .neq("work_id", excludeWorkId)
     .order("updated_at", { ascending: false })
     .limit(RECENT_ACTIVITY_LIMIT)
   if (error) {
     console.error("[deep-dive] erro lendo recent activity:", error)
     return []
   }
-  return (data ?? []).map((row) => {
-    const r = row as { id: string; title: string; user_score: number | string | null; updated_at: string }
-    return {
-      id: r.id,
-      title: r.title,
+  return (data ?? []).flatMap((row) => {
+    const r = row as {
+      work_id: string
+      user_score: number | string | null
+      updated_at: string
+      works: { id: string; title: string } | { id: string; title: string }[] | null
+    }
+    const w = Array.isArray(r.works) ? r.works[0] : r.works
+    if (!w?.title) return []
+    return [{
+      id: r.work_id,
+      title: w.title,
       userScore: r.user_score != null ? Number(r.user_score) : null,
       updatedAt: r.updated_at,
-    }
+    }]
   })
 }
 

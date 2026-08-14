@@ -112,3 +112,36 @@ describe("contrato da RPC find_similar_works", () => {
     }
   })
 })
+
+/**
+ * O Deep Dive monta um prompt caro (extended thinking, 8–12k tokens) com dado PESSOAL:
+ * pós-leitura, Nota Esperada, fit e atividade recente. Tudo isso tem de ser de QUEM OLHA.
+ *
+ * 🔴 Medido em 2026-08-14: `fetchWorkBundle` e `fetchRecentActivity` liam a view
+ * `works_owner`, que é do DONO. Qualquer pessoa que rodasse Deep Dive levava para o prompt as
+ * notas pós-leitura dele e as obras que ele tinha avaliado — impressas como `post_scores:` e
+ * na seção de atividade recente. Nada acusava: a view responde, os campos existem, o tipo bate.
+ */
+describe("deep-dive não serve dado do DONO a quem olha", () => {
+  const SRC = readFileSync(join(ROOT, "server/queries/deep-dive.ts"), "utf8")
+  const semComentarios = SRC.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")
+
+  it("🔴 não lê a view works_owner", () => {
+    // A view carrega user_score, is_favorite, chapters_read e os 8 post_*_score do dono.
+    expect(
+      /\.from\(\s*["'`]works_owner["'`]/.test(semComentarios),
+      "deep-dive.ts voltou a ler works_owner — ela é do DONO",
+    ).toBe(false)
+  })
+
+  it("resolve a identidade por sessão, nunca pelo singleton", () => {
+    // `getCurrentUserId()` cai no dono sem sessão: o filtro por user_id existiria sem filtrar.
+    expect(semComentarios).toContain("getSessionUserId()")
+  })
+
+  it("passa `calculated_scores` pelo overlay per-user", () => {
+    // A tabela não tem user_id — a linha crua é do dono.
+    expect(semComentarios).toContain("getScoresReader()")
+    expect(semComentarios).toMatch(/scoresReader\.overlay\(/)
+  })
+})
