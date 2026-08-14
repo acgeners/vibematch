@@ -66,7 +66,7 @@ const CRITERION_LABELS: Record<string, string> = {
 }
 
 /**
- * Opções de ordenação AGRUPADAS — 26 itens numa lista corrida não davam pra
+ * Opções de ordenação AGRUPADAS — 27 itens numa lista corrida não davam pra
  * varrer. Os três primeiros grupos são os mesmos do seletor de colunas
  * (`WORK_COLUMN_GROUP_LABELS`: Básico/Notas/Atributos), de propósito: quem
  * aprendeu onde está "Veredito" ali acha aqui no mesmo lugar.
@@ -229,6 +229,13 @@ function SortLevelsSection({ searchParams, updateParams, className, defaultSort 
                 >
                   <SelectValue />
                 </SelectTrigger>
+                {/* ⚠️ Não adianta pôr `max-h-*` aqui: em `position="item-aligned"` (o
+                    default do nosso `SelectContent`) o Radix escreve `max-height: 100%`
+                    INLINE no content e quem manda na altura é o wrapper que ele
+                    posiciona — inline vence classe, e a classe some do computed sem
+                    nada acusar (medido: painel 498px com um teto de 22rem "aplicado").
+                    Quem limita é a folga da janela, e é por isso que o rótulo de grupo
+                    em `SortFieldOptions` é sticky: a lista é maior que o painel. */}
                 <SelectContent>
                   <SortFieldOptions />
                 </SelectContent>
@@ -364,19 +371,64 @@ function MyRangeToggle({
   )
 }
 
-/** Itens do seletor de ordenação, agrupados. Componente próprio porque a mesma
- *  lista é aberta uma vez por chip da trilha. */
+/**
+ * Itens do seletor de ordenação, agrupados. Componente próprio porque a mesma
+ * lista é aberta uma vez por chip da trilha.
+ *
+ * O agrupamento já existia no dado (`SORTABLE_FIELD_GROUPS`) e não chegava na
+ * tela: rótulo a 10px contra item a 12px, mesma família de cor, e entre um grupo
+ * e o próximo só o `py-1.5` do próprio rótulo — 27 opções em 31 linhas corridas.
+ *
+ * A gramática aqui é a MESMA do seletor de colunas (`components/ui/column-picker.tsx`):
+ * rótulo semibold apagado, respiro entre seções e itens indentados pelo espaço que
+ * lá é do checkbox. Quem aprendeu a ler um lê o outro — que é o motivo de os três
+ * primeiros grupos já compartilharem os nomes de `WORK_COLUMN_GROUP_LABELS`.
+ *
+ * ⚠️ Uma coisa é própria DAQUI, e a razão é o tamanho: a lista tem ~870px, mais
+ * que a janela — situação que o picker de colunas nunca alcança. Por isso o rótulo
+ * é **sticky**: sem ele se lê "Tragédia" sem saber que se está em Atributos. O
+ * scroller é o Viewport do Radix (`overflow: hidden auto` inline), então o sticky
+ * gruda nele; um `overflow-hidden` em qualquer nível entre os dois o desliga.
+ *
+ * ⚠️ Os `SelectItem` ficam dentro de uma `<div>` (o trilho de indentação). O
+ * collection do Radix é por contexto/ref, não por filho direto, então seta e
+ * typeahead seguem valendo — mas a ORDEM é a do DOM: um grupo novo entra no fim
+ * da navegação por teclado, não onde o olho espera.
+ */
 function SortFieldOptions() {
   return (
     <>
-      {SORTABLE_FIELD_GROUPS.map((group) => (
-        <SelectGroup key={group.label}>
-          <SelectLabel className="text-[10px] uppercase tracking-wider">{group.label}</SelectLabel>
-          {group.fields.map((f) => (
-            <SelectItem key={f.value} value={f.value} className="text-xs">
-              {f.label}
-            </SelectItem>
-          ))}
+      {SORTABLE_FIELD_GROUPS.map((group, i) => (
+        <SelectGroup
+          key={group.label}
+          className={cn("pt-0.5", i > 0 && "mt-2.5 border-t border-border/70 pt-2")}
+        >
+          {/* 🔴 O `before:` não é enfeite. O scrollport do Radix é o Viewport, que
+              tem `p-1` — e `top-0` prende no PADDING box, não na borda onde o
+              conteúdo é cortado. Sobra uma faixa de ~4px em que o item escorre
+              POR CIMA do rótulo grudado, meio cortado (visto no app antes disto).
+              A faixa cobre pra cima em vez de casar o número do `p-1` daqui: um
+              `-top-1` seria uma 2ª afirmação sobre o padding do `select.tsx`, e
+              divergiria em silêncio se ele mudasse. */}
+          <SelectLabel className="sticky top-0 z-10 flex items-baseline justify-between gap-2 bg-popover px-2 pt-0.5 pb-1 text-[10px] font-semibold tracking-wider text-muted-foreground/70 uppercase before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-2 before:bg-popover">
+            <span>{group.label}</span>
+            {/* Contagem por grupo, no espírito do "19/28" do gatilho de colunas:
+                diz de antemão que "Atributos" são 9 e não uma lista sem fim. */}
+            <span className="text-[10px] font-medium tracking-normal tabular-nums opacity-70">
+              {group.fields.length}
+            </span>
+          </SelectLabel>
+          <div className="ml-1.5 border-l border-muted-foreground/20 pl-2">
+            {group.fields.map((f) => (
+              <SelectItem
+                key={f.value}
+                value={f.value}
+                className="text-[13px] data-[state=checked]:font-medium"
+              >
+                {f.label}
+              </SelectItem>
+            ))}
+          </div>
         </SelectGroup>
       ))}
     </>
