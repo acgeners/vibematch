@@ -14,8 +14,15 @@
  * submit), não uma superfície de sinal.
  */
 
-/** Abaixo (ou igual) disto o saldo pede atenção. Em dólares. */
-export const LOW_BALANCE_USD = 5
+/**
+ * Abaixo disto o saldo pede atenção. Em dólares.
+ *
+ * ⚠️ Era 5 até 2026-08-14 (escolha da Ana). Com $5 o ponto âmbar acendia com folga
+ * ainda suficiente pra dezenas de avaliações, e alarme que toca cedo demais ensina a
+ * ignorar o ponto — o mesmo motivo que fez o `db:health` calar sobre escrita de
+ * navegação e o painel "Estado da obra" só marcar o que é raro.
+ */
+export const LOW_BALANCE_USD = 2
 
 export type BalanceTone =
   /** Saldo nunca informado — não há o que alertar, e zero não é a resposta. */
@@ -30,7 +37,8 @@ export type BalanceTone =
 export function balanceTone(remainingUsd: number | null | undefined): BalanceTone {
   if (remainingUsd == null) return "unset"
   if (remainingUsd < 0) return "negative"
-  if (remainingUsd <= LOW_BALANCE_USD) return "low"
+  // `<`, não `<=`: o limiar é "abaixo de $2". Exatamente $2 ainda é folga.
+  if (remainingUsd < LOW_BALANCE_USD) return "low"
   return "ok"
 }
 

@@ -7,9 +7,12 @@ import { Wrench } from "lucide-react"
 import { getBalanceSummary } from "@/server/actions/account"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
 import { useChromeData } from "@/lib/use-refresh"
-import { balanceAlerting, balanceTone } from "@/lib/ai-usage/balance"
+import { alertDotTone, buildChromeAlerts } from "@/lib/curadoria/chrome-alerts"
+import type { ChromeAlert } from "@/lib/curadoria/chrome-alerts"
 import { totalPendingDecisions } from "@/lib/curadoria/decision-queues"
 import { useChromeBadges } from "@/components/layout/chrome-badges"
+import { NegativeBalanceDialog } from "@/components/layout/negative-balance-dialog"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 /**
@@ -52,6 +55,17 @@ const BALANCE_TTL_MS = 120_000
  * você". Se o tile de saldo sair da Visão geral, este ponto passa a apontar pro nada —
  * ver o cabeçalho de `app/curadoria/page.tsx`.
  *
+ * 🔴 **O ponto SOZINHO não funcionou** (2026-08-14). Um círculo de 8px sem rótulo
+ * provoca a pergunta "o que é isso?" e cobra uma navegação pra respondê-la; o
+ * `title=` nativo dizia a frase genérica que serve pros dois problemas e não nomeia
+ * nenhum. Hoje o tooltip nomeia cada um, com o número — e o texto e a COR saem da
+ * mesma lista (`buildChromeAlerts`), senão o ponto vermelho e a explicação âmbar
+ * discordariam sem nada acusar.
+ *
+ * ⚠️ **Saldo negativo não espera hover:** ver `NegativeBalanceDialog`, montado aqui
+ * porque é este componente que já busca o saldo. Um componente novo com fetch
+ * próprio duplicaria a chamada em toda navegação.
+ *
  * ⚠️ **O saldo continua sendo buscado aqui** mesmo sem ser exibido: o ponto depende do
  * tom. Trocar por "só busca dentro da console" apagaria o alerta justamente pra quem
  * está fora dela — que é o único momento em que ele serve.
@@ -70,18 +84,13 @@ export function CurationMenu() {
     )
   })
 
-  // Tom derivado do helper compartilhado: este ponto e o tile de saldo da Visão geral
-  // (pra onde o clique leva) TÊM que concordar. Dois `remaining <= 5` escritos em
-  // arquivos diferentes é como o botão alerta e a página mostra verde.
-  const tone = balanceTone(balance?.remainingUsd ?? null)
-  const sourcesDown = comixHealth === "down"
-  const sourcesShaky = sourcesDown || comixHealth === "degraded"
-
-  // `balanceAlerting`, não `tone === "low"`: os tons são exclusivos entre si, então um
-  // saldo NEGATIVO não é "low". Enumerar apagaria o ponto no pior caso — o único em
-  // que ele mais importa.
+  // Uma lista só, que responde ao mesmo tempo "acende?", "de que cor?" e "dizendo o
+  // quê?". O tile de saldo da Visão geral (pra onde o clique leva) deriva o tom da
+  // mesma expressão — dois `remaining < 2` escritos em arquivos diferentes é como o
+  // botão alerta e a página mostra verde.
+  const alerts = buildChromeAlerts({ remainingUsd: balance?.remainingUsd, comixHealth })
+  const dotTone = alertDotTone(alerts)
   const pending = totalPendingDecisions({ curadoria, requests })
-  const alerting = balanceAlerting(tone) || sourcesShaky
 
   // Ativo em toda rota membro da console: o botão é a porta do MODO, então ele fica
   // aceso enquanto se está lá dentro — mesmo em `/settings`, que não tem "curadoria"
@@ -94,40 +103,84 @@ export function CurationMenu() {
     pathname.startsWith("/admin/model-metrics")
 
   return (
-    <Link
-      href="/curadoria"
-      // `aria-current="page"` só na PRÓPRIA `/curadoria`. O destaque visual é largo de
-      // propósito (o botão é a porta do modo, fica aceso lá dentro), mas anunciar
-      // "página atual" em `/settings` num link que leva pra outro lugar é mentira pra
-      // quem navega por leitor de tela.
-      aria-current={pathname === "/curadoria" ? "page" : undefined}
-      title={label(pending, alerting)}
-      aria-label={label(pending, alerting)}
-      className={cn(
-        "relative inline-flex h-10 items-center gap-2 rounded-lg px-2.5 text-sm font-medium outline-none transition-colors",
-        "text-violet-600 hover:bg-violet-500/10 dark:text-violet-300",
-        active && "bg-violet-500/10",
-      )}
-    >
-      <Wrench className="size-[18px]" />
-      <span className="hidden xl:inline">Curadoria</span>
-      {pending > 0 && (
-        <span className="absolute -right-1 -top-1 inline-flex min-w-[17px] items-center justify-center rounded-full bg-violet-500 px-1 text-[10px] font-bold leading-[17px] text-white shadow-sm">
-          {pending > 99 ? "99+" : pending}
-        </span>
-      )}
-      {/* Estado que não é fila não vira número: um ponto basta pra trazer o olho, e o
-          valor exato ("$3,10", "Comix instável") espera na Visão geral. */}
-      {alerting && (
-        <span
-          aria-hidden
-          className={cn(
-            "absolute bottom-0.5 right-0.5 size-2 rounded-full ring-2 ring-background",
-            tone === "negative" || sourcesDown ? "bg-rose-500" : "bg-amber-500",
-          )}
-        />
-      )}
-    </Link>
+    <>
+      <TooltipProvider delayDuration={150}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Link
+              href="/curadoria"
+              // `aria-current="page"` só na PRÓPRIA `/curadoria`. O destaque visual é largo de
+              // propósito (o botão é a porta do modo, fica aceso lá dentro), mas anunciar
+              // "página atual" em `/settings` num link que leva pra outro lugar é mentira pra
+              // quem navega por leitor de tela.
+              aria-current={pathname === "/curadoria" ? "page" : undefined}
+              // Sem `title=`: o nativo abriria um SEGUNDO balão por cima do tooltip, com
+              // o texto achatado numa linha só. O `aria-label` continua carregando tudo
+              // pra leitor de tela, que não recebe o conteúdo do tooltip do Radix.
+              aria-label={label(pending, alerts)}
+              className={cn(
+                "relative inline-flex h-10 items-center gap-2 rounded-lg px-2.5 text-sm font-medium outline-none transition-colors",
+                "text-violet-600 hover:bg-violet-500/10 dark:text-violet-300",
+                active && "bg-violet-500/10",
+              )}
+            >
+              <Wrench className="size-[18px]" />
+              <span className="hidden xl:inline">Curadoria</span>
+              {pending > 0 && (
+                <span className="absolute -right-1 -top-1 inline-flex min-w-[17px] items-center justify-center rounded-full bg-violet-500 px-1 text-[10px] font-bold leading-[17px] text-white shadow-sm">
+                  {pending > 99 ? "99+" : pending}
+                </span>
+              )}
+              {/* Estado que não é fila não vira número: um ponto basta pra trazer o olho,
+                  e o QUE ele quer dizer está no tooltip logo abaixo. */}
+              {dotTone && (
+                <span
+                  aria-hidden
+                  className={cn(
+                    "absolute bottom-0.5 right-0.5 size-2 rounded-full ring-2 ring-background",
+                    dotTone === "rose" ? "bg-rose-500" : "bg-amber-500",
+                  )}
+                />
+              )}
+            </Link>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-[280px] px-3 py-2.5">
+            <p className="font-semibold">
+              Curadoria do catálogo
+              {pending > 0 && (
+                // `text-background/70` e NUNCA `text-muted-foreground`: o tooltip é
+                // invertido (`bg-foreground`), e o token de página some no tema claro.
+                <span className="font-normal text-background/70">
+                  {" "}
+                  · {pending} esperando decisão
+                </span>
+              )}
+            </p>
+            {alerts.map((alert) => (
+              <div
+                key={alert.key}
+                className="mt-2 flex items-start gap-2 border-t border-background/20 pt-2"
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "mt-1.5 size-1.5 shrink-0 rounded-full",
+                    alert.severity === "critical" ? "bg-rose-400" : "bg-amber-400",
+                  )}
+                />
+                <span>
+                  <span className="font-semibold">{alert.title}</span>
+                  <br />
+                  <span className="text-background/70">{alert.detail}</span>
+                </span>
+              </div>
+            ))}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+
+      <NegativeBalanceDialog balance={balance} />
+    </>
   )
 }
 
@@ -136,10 +189,15 @@ export function CurationMenu() {
  *
  * Sem isto, o alerta de saldo/fonte seria puramente visual — invisível pra leitor de
  * tela, que é justamente quem não tem como perceber "um pontinho âmbar apareceu".
+ *
+ * ⚠️ Ele NOMEIA os alertas, com o mesmo texto do tooltip. A versão antiga dizia
+ * "saldo ou fonte externa precisando de atenção" — uma frase que serve pros dois
+ * problemas e não identifica nenhum, deixando quem usa leitor de tela exatamente
+ * onde o ponto mudo deixava todo mundo.
  */
-function label(pending: number, alerting: boolean): string {
+function label(pending: number, alerts: readonly ChromeAlert[]): string {
   const parts = ["Curadoria do catálogo"]
   if (pending > 0) parts.push(`${pending} esperando decisão`)
-  if (alerting) parts.push("saldo ou fonte externa precisando de atenção")
+  for (const alert of alerts) parts.push(alert.title)
   return parts.join(" — ")
 }

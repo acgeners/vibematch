@@ -5,7 +5,45 @@ import { predictSynopsisQualityForWorkAction } from "@/server/actions/synopsis-q
 import type { PredictWorkOpts } from "@/lib/orchestration/integrations/interest-ui"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { previewCost } from "@/lib/cost-preview/catalog"
+import { runTask } from "@/lib/tasks-store"
 import type { ConfirmFn } from "@/components/cost/cost-confirm"
+
+/**
+ * Dispara a previsão JÁ CONFIRMADA como tarefa durável (indicador azul).
+ *
+ * 🔴 **Só depois da confirmação, nunca em volta da chamada inteira.** A primeira
+ * chamada de `predictInterestWithToast` pode voltar `blocked_cost_confirmation` e
+ * abrir um modal: uma tarefa em volta dela anunciaria "rodando" enquanto o modal
+ * espera um clique — pior que indicador nenhum, porque afirma trabalho que não
+ * começou. Era essa recursão que mantinha a previsão POR OBRA sem indicador
+ * enquanto o LOTE já tinha o dele.
+ *
+ * Azul (durável) e não âmbar: as duas etapas GRAVAM — a cascata persiste uma versão
+ * nova de `taste_profile` e a previsão persiste em `synopsis_quality_predictions`.
+ * Pela régua do projeto, quem grava sobrevive à navegação e o indicador tem que
+ * dizer isso ("pode sair da página").
+ *
+ * ⚠️ O `id` é por OBRA: duas obras previstas em paralelo aparecem como duas tarefas,
+ * e o mesmo botão clicado duas vezes é deduplicado pelo store em vez de cobrar duas
+ * chamadas pagas.
+ *
+ * ⚠️ `successToast: () => null` — os desfechos (estimado / processando / falhou)
+ * já saem tipados no `switch` abaixo. O toast genérico do store diria "pronto"
+ * inclusive quando a previsão voltou `failed`.
+ */
+function runPredictAsTask(
+  workId: string,
+  label: string,
+  run: () => Promise<void>,
+): void {
+  runTask({
+    id: `interest:${workId}`,
+    kind: "interest",
+    label,
+    run,
+    successToast: () => null,
+  })
+}
 
 /**
  * Chama a previsão individual (passo 4) e traduz o estado TIPADO em toast.
@@ -85,12 +123,24 @@ export async function predictInterestWithToast(
             label: "Prever com o perfil atual",
             likelyUsd: predict.likelyUsd,
             onSelect: () => {
-              void predictInterestWithToast(workId, refresh, { ...opts, acceptStaleProfile: true, confirmCascade: true }, confirmCost)
+              runPredictAsTask(workId, "Prevendo Interesse", () =>
+                predictInterestWithToast(
+                  workId,
+                  refresh,
+                  { ...opts, acceptStaleProfile: true, confirmCascade: true },
+                  confirmCost,
+                ),
+              )
             },
           },
         })
         if (proceed) {
-          void predictInterestWithToast(workId, refresh, { ...opts, confirmCascade: true }, confirmCost)
+          // O caminho longo: ~35s destilando o perfil + ~5s prevendo. Sem indicador,
+          // o modal fechava e a tela ficava 40s idêntica ao estado anterior — o
+          // desfecho aparecia num toast que já não tinha ligação com o clique.
+          runPredictAsTask(workId, "Atualizando perfil e prevendo Interesse", () =>
+            predictInterestWithToast(workId, refresh, { ...opts, confirmCascade: true }, confirmCost),
+          )
         }
         break
       }
@@ -115,7 +165,9 @@ export async function predictInterestWithToast(
         confirmLabel: "Prever",
       })
       if (proceed) {
-        void predictInterestWithToast(workId, refresh, { ...opts, confirmCascade: true }, confirmCost)
+        runPredictAsTask(workId, "Prevendo Interesse", () =>
+          predictInterestWithToast(workId, refresh, { ...opts, confirmCascade: true }, confirmCost),
+        )
       }
       break
     }
