@@ -1,6 +1,12 @@
 "use client"
 
-/* eslint-disable @next/next/no-img-element -- avatar pequeno com URL do usuário (própria ou colada) + fallback próprio; next/image não cabe (sem images config). */
+/* eslint-disable @next/next/no-img-element -- avatar pequeno com URL do usuário + fallback próprio; next/image não cabe (sem images config). */
+
+// O `avatarUrl` daqui tem três formas, e as três são só uma URL pro `<img>`:
+// vazio (cai no ícone), `/avatar.svg?…` (montado em /conta, desenhado pela rota a
+// partir da query string) ou a URL do upload no bucket `avatars`. Guardar a
+// configuração numa coluna à parte obrigaria este componente a saber montar avatar —
+// hoje ele não sabe, e é isso que o mantém trivial. Ver `lib/avatar/url.ts`.
 
 import { useState, useTransition } from "react"
 import Link from "next/link"
