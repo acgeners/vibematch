@@ -30,6 +30,8 @@
 import { writeFileSync, mkdirSync } from "node:fs"
 import { execFileSync } from "node:child_process"
 import { exigeAlvoNuvem } from "./lib/exige-alvo-nuvem"
+// O dono da retenção é ÚNICO de propósito — ver scripts/lib/backups-retencao.mjs
+import { podar } from "./lib/backups-retencao.mjs"
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -139,8 +141,12 @@ async function main() {
   }
 
   if (EXECUTE) {
-    mkdirSync(".backups/push-opening-structure", { recursive: true })
-    const arq = `.backups/push-opening-structure/${new Date().toISOString().replace(/[:.]/g, "-")}.json`
+    // Diretório datado + poda ANTES de gravar: execução interrompida deixa lixo igual ao de
+    // uma completa, e é `podar` quem denuncia entrada de família nenhuma em .backups.
+    podar("push-opening-structure")
+    const dir = `.backups/push-opening-structure-${new Date().toISOString().replace(/[:.]/g, "-")}`
+    mkdirSync(dir, { recursive: true })
+    const arq = `${dir}/snapshot.json`
     writeFileSync(arq, JSON.stringify(snapshot, null, 2))
     console.log(`snapshot do estado ANTERIOR da nuvem: ${arq}`)
     console.log(`\n${subiu} obra(s) subiram. O \`npm run db:pull\` agora é seguro.`)

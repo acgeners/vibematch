@@ -21,6 +21,8 @@ import type { ExternalSourceId } from "@/lib/external/types"
 import { slugifyTagName } from "@/lib/utils"
 import { normalizeTagKey, SOURCE_TAG_DENYLIST } from "@/lib/tags/source-tag-filter"
 import { GENRE_PROPOSAL_MIN_OCCURRENCES } from "@/lib/tags/genre-proposals"
+// O dono da retenção de `.backups` é ÚNICO — ver scripts/lib/backups-retencao.mjs.
+import { podar } from "./lib/backups-retencao.mjs"
 
 const arg = (k: string) => process.argv.find((a) => a.startsWith(k + "="))?.split("=")[1]
 const LIMIT = Number(arg("--limit") ?? "0") || 0
@@ -155,6 +157,11 @@ async function main() {
     (c) => c >= GENRE_PROPOSAL_MIN_OCCURRENCES,
   ).length
   const stamp = new Date().toISOString().replace(/[:.]/g, "-")
+  // Declara a família antes de gravar. Este script escapou da varredura por escrever
+  // `".backups/backfill-tags"` — caminho embutido no literal, que o teste antigo não
+  // reconhecia. Aqui a poda não remove nada (o diretório é único); o que ela faz é impedir
+  // que a pasta volte a crescer sem dono, e denunciar o PRÓXIMO prefixo que aparecer.
+  podar("backfill-tags")
   const outDir = path.resolve(process.cwd(), ".backups/backfill-tags")
   fs.mkdirSync(outDir, { recursive: true })
   const outPath = path.join(outDir, `map-${stamp}.json`)
