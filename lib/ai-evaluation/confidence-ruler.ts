@@ -146,3 +146,27 @@ export function describeCrossRuler(
       current.confidence > suggestedCeiling.max,
   }
 }
+
+/**
+ * Os DOIS cortes que separam confiança alta / média / baixa na tela.
+ *
+ * 🔴 Dono único, e não estilo: até 2026-08-14 os mesmos `0.75` e `0.5` estavam
+ * escritos à mão em `ai-evaluation-review-form.tsx` e em `ai-evaluation-compare.tsx`,
+ * e o card do `/ai-evaluation` ia virar a terceira cópia. É a família de erro que o
+ * CLAUDE.md chama de "dois critérios pro mesmo fato": duas telas passam a discordar
+ * sobre a mesma avaliação ser verde ou âmbar, e nada acusa — o resultado é plausível
+ * dos dois lados.
+ *
+ * ⚠️ Isto colore, NÃO julga acerto. A confiança mede volume de evidência (rho 0,44
+ * com nº de reviews) e não é comparável entre modelos — é o assunto do resto deste
+ * arquivo. Verde aqui quer dizer "a IA tinha material", nunca "a nota está certa".
+ */
+export const CONFIDENCE_CUTOFFS = { alta: 0.75, media: 0.5 } as const
+
+export type ConfidenceBand = "alta" | "media" | "baixa"
+
+export function confidenceBand(confidence: number): ConfidenceBand {
+  if (confidence >= CONFIDENCE_CUTOFFS.alta) return "alta"
+  if (confidence >= CONFIDENCE_CUTOFFS.media) return "media"
+  return "baixa"
+}

@@ -2,15 +2,20 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { CalendarDays, Cpu, ExternalLink, ListChecks, Loader2, Sparkles, SkipForward, X } from "lucide-react"
+import { CalendarDays, ClipboardCheck, Cpu, ExternalLink, Gauge, ListChecks, Loader2, Sparkles, SkipForward, X } from "lucide-react"
 import { toast } from "sonner"
-import { triggerAiEvaluation, skipAiEvaluation, prewarmEvaluationContext } from "@/server/actions/ai"
+import {
+  triggerAiEvaluation,
+  skipAiEvaluation,
+  prewarmEvaluationContext,
+  loadAiEvaluationForReview,
+} from "@/server/actions/ai"
 import { getComixHealthStatus } from "@/server/actions/comix-resolver"
 import { useRefresh } from "@/lib/use-refresh"
 import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { previewCascade } from "@/lib/cost-preview/catalog"
 import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
-import { AiEvaluationReviewForm } from "./ai-evaluation-review-form"
+import { AiEvaluationReviewForm, confidenceTextClass } from "./ai-evaluation-review-form"
 import type { CurrentEvaluationMeta } from "./ai-evaluation-review-form"
 import { AiEvaluationCompare } from "./ai-evaluation-compare"
 import { Button } from "@/components/ui/button"
@@ -50,6 +55,12 @@ interface PendingWork {
   tagCount?: number | null
   reviewCount?: number | null
   matchedFilters?: Array<"pending" | "review-pending" | "low-confidence" | "outdated-model" | "outdated-reviews">
+  /**
+   * `works.ai_eval_status`. É daqui que sai o "Revisar" — ver o comentário do
+   * `WorkRow` em `app/ai-evaluation/page.tsx`: `matchedFilters` responde "por que
+   * ela apareceu", que é outra pergunta e depende de quais filtros estão ligados.
+   */
+  aiEvalStatus?: string | null
   evaluation?: {
     confidence: number | null
     modelName: string | null
@@ -127,6 +138,9 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
   const { isRead, unmark } = useToggleRead("attr", readIds)
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null)
   const [skippingId, setSkippingId] = useState<string | null>(null)
+  /** Só a leitura da avaliação existente ("Revisar") — separado de `evaluatingId`,
+   *  que destaca e escurece a linha porque ali algo está sendo GERADO. */
+  const [loadingReviewId, setLoadingReviewId] = useState<string | null>(null)
   const [reviewData, setReviewData] = useState<ReviewData | null>(null)
   // Guarda o fechamento acidental do popup de revisão (clique fora / Esc / X): descartar aqui
   // cancela a fila inteira de revisão, então confirma antes.
@@ -298,6 +312,31 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
     else if (outcome.kind === "needs-confirm") {
       setNoReviewConfirm({ work, noReviewsReason: outcome.noReviewsReason })
     }
+  }
+
+  /**
+   * Abre o modal com a avaliação QUE JÁ EXISTE. Sem LLM, sem custo — por isso não
+   * passa pelo `confirmCost`: pedir confirmação de gasto para uma leitura ensina a
+   * clicar "ok" sem ler, e é justamente esse popup que precisa ser levado a sério
+   * no botão ao lado.
+   */
+  const handleReview = async (work: PendingWork) => {
+    setLoadingReviewId(work.id)
+    const result = await loadAiEvaluationForReview(work.id)
+    setLoadingReviewId(null)
+    if ("error" in result && result.error) {
+      toast.error(`Não deu pra abrir a revisão de "${work.title}": ${result.error}`)
+      return
+    }
+    if (!("data" in result) || !result.data) return
+    setReviewData({
+      evaluation: result.data.evaluation,
+      workId: work.id,
+      workTitle: work.title,
+      coverUrl: work.cover_url ?? null,
+      currentScores: result.data.currentScores ?? {},
+      currentEvaluation: result.data.currentEvaluation ?? null,
+    })
   }
 
   // Confirma seguir uma avaliação single mesmo sem reviews externas.
@@ -678,8 +717,11 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
             ? { label: "Modelo antigo", tone: "rose" }
             : isOutdatedReviews
               ? { label: "Reviews novas", tone: "orange" }
+              // ⚠️ Sem o número: ele agora vive na linha de procedência, para TODA obra
+              // avaliada. Repeti-lo aqui poria a mesma confiança em dois lugares do mesmo
+              // card — e a versão que sobrasse num futuro ajuste seria sorte, não escolha.
               : isLowConf
-                ? { label: `Confiança ${Math.round((work.evaluation?.confidence ?? 0) * 100)}%`, tone: "amber" }
+                ? { label: "Confiança baixa", tone: "amber" }
                 : isReview
                   ? { label: "Aguardando revisão", tone: "sky" }
                   : isPending
@@ -700,17 +742,60 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
                   </span>
                 </span>
               )}
+              {/* 🔴 Confiança: sumiu do card em 73a9510, quando as ações viraram pilha
+                  vertical e a `ConfidencePill` foi apagada sem substituto. Ficou visível
+                  só dentro do chip de confiança baixa — ou seja, some justamente na obra
+                  que está esperando revisão, que é quando o número decide se dá pra
+                  aceitar a nota. E o seletor "Ordenar" seguiu oferecendo "Confiança IA":
+                  dava pra ordenar por um número que o card não mostrava.
+                  Aqui, e não num chip: data, modelo/prompt e confiança são três fatos
+                  sobre a MESMA avaliação. */}
+              {work.evaluation.confidence != null && (
+                <span
+                  className={`inline-flex items-center gap-1 ${confidenceTextClass(work.evaluation.confidence)}`}
+                  title="Confiança declarada pela IA nesta avaliação"
+                >
+                  <Gauge className="h-3 w-3" />
+                  {Math.round(work.evaluation.confidence * 100)}%
+                </span>
+              )}
             </div>
           ) : null
 
+          // 🔴 Sai do ESTADO da obra, não de `matchedFilters`: uma obra em
+          // review_pending que apareça pelo filtro de confiança baixa vem com
+          // matchedFilters=["low-confidence"], e o botão sumiria justamente de
+          // quem está esperando revisão.
+          const awaitsReview = work.aiEvalStatus === "review_pending"
+          const busy = !!evaluatingId || !!skippingId || isInQueue
+
           const actions = (
             <>
+              {/* A avaliação JÁ existe: este botão só a abre, e é a ação que o chip
+                  "Aguardando revisão" nomeia. Primário porque é o que a fila pede —
+                  deixar a ação PAGA em destaque aqui convida a repagar o que está
+                  pronto. Ver `loadAiEvaluationForReview`. */}
+              {awaitsReview && (
+                <Button
+                  size="sm"
+                  onClick={() => handleReview(work)}
+                  disabled={busy || loadingReviewId === work.id}
+                >
+                  {loadingReviewId === work.id ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                  ) : (
+                    <ClipboardCheck className="h-3.5 w-3.5 mr-1" />
+                  )}
+                  {loadingReviewId === work.id ? "Abrindo..." : "Revisar"}
+                </Button>
+              )}
               <Button
                 size="sm"
+                variant={awaitsReview ? "outline" : "default"}
                 onClick={() => handleEvaluate(work)}
                 onMouseEnter={() => prewarm(work)}
                 onFocus={() => prewarm(work)}
-                disabled={!!evaluatingId || !!skippingId || isInQueue}
+                disabled={busy}
               >
                 <Sparkles className="h-3.5 w-3.5 mr-1" />
                 {evaluatingId === work.id
@@ -723,7 +808,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
                 size="sm"
                 variant="outline"
                 onClick={() => handleSkip(work.id)}
-                disabled={!!evaluatingId || !!skippingId || isInQueue}
+                disabled={busy}
                 title="Marcar para pular avaliação IA"
               >
                 <SkipForward className="h-3.5 w-3.5 mr-1" />
