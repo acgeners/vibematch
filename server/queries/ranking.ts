@@ -136,6 +136,7 @@ export interface RankingEntry {
 
 export type RankingSortBy =
   | "expected_score"
+  | "user_score"
   | "decision"
   | "recommended"
   | "platform_avg"
@@ -978,6 +979,12 @@ export async function getRanking(
       // agrupada em tiers e diferenciada DENTRO do tier por tag overlap
       // (reorderTiersByFit no cliente). Mesmo eixo → mesmo arredondamento de exibição.
       return m * (displayScore(a.expectedScore) - displayScore(b.expectedScore))
+    // Sua nota (Real). Pelo valor EXIBIDO, como a Prevista: a badge mostra 1 casa, então
+    // 8,44 e 8,37 aparecem iguais e têm que EMPATAR — senão o desempate seguinte nunca
+    // entra. Não vai em PERSONAL_SORT_FIELDS de propósito: quem não avaliou nada não
+    // recebe uma ordenação de outro eixo com cara de "Minha nota" — as vazias vão pro fim
+    // (-Infinity) e o desempate final (overlap de tags, título) decide o resto.
+    if (field === "user_score") return m * (displayScore(a.userScore) - displayScore(b.userScore))
     if (field === "platform_avg") return m * (rawScore(a.platformAvg) - rawScore(b.platformAvg))
     if (field === "personal_fit") {
       const av = a.personalFit ?? -Infinity

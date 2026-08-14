@@ -52,12 +52,15 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
   // Whitelist espelha `RankingSortBy` em server/queries/ranking.ts.
   const validSortFields = new Set<string>([
     // Notas (novo pipeline)
+    "decision",
     "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
+    // Sua nota (Real) — a coluna `user_score` da WorkTable ordena por este campo.
+    "user_score",
     "alignment_score",
     // Plataforma
     "platform_avg", "total_votes",
     // Metadata
-    "title", "year", "synopsis_q",
+    "title", "year", "synopsis_q", "synopsis_pred",
     "chapters", "chapters_total", "chapters_read",
     "publication_status", "personal_status", "ai_eval_status",
     "updated_at", "last_read_at",

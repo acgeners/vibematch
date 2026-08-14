@@ -952,6 +952,7 @@ function WorkListView({
     synopsis_pred: { field: "synopsis_pred", label: "Interesse IA (previsão)" },
     decision: { field: "decision", label: "Prioridade" },
     expected_score: { field: "expected_score", label: LABELS.expected_score.full },
+    user_score: { field: "user_score", label: "Minha nota (Real)" },
     personal_fit: { field: "personal_fit", label: "Alinhamento" },
     platform_avg: { field: "platform_avg", label: "Nota.M" },
     total_votes: { field: "total_votes", label: "Votos" },
@@ -1088,6 +1089,10 @@ function WorkListView({
         thresholds={scoreThresholds?.expected}
       />
     ),
+    // Sua nota (Real) — MESMA badge sem `thresholds` que a prévia de hover e o card da
+    // fila usam pra este número. Passar `scoreThresholds?.expected` aqui coloriria a nota
+    // pela distribuição da PREVISTA: duas grandezas, uma régua só.
+    user_score: (work) => <ScoreBadge score={work.user_score ?? null} size="sm" />,
     personal_fit: (work) => (
       <AlignmentCell
         value={work.calculated_scores?.personal_fit ?? null}

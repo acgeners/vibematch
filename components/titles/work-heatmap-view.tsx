@@ -218,6 +218,12 @@ function getValueForKey(work: WorkWithRelations, key: string): number | null {
     const v = work.calculated_scores?.platform_avg
     return v == null ? null : Number(v)
   }
+  // Sua nota (Real). Mora no espelho de quem olha, não em `calculated_scores` — e cai no
+  // bloco colorido padrão lá embaixo, igual à Prevista.
+  if (key === "user_score") {
+    const v = work.user_score
+    return v == null ? null : Number(v)
+  }
   if (key === "total_votes") {
     const v = work.calculated_scores?.total_votes
     // total_votes=0 é dado real ("sem votos contabilizados"), mantém o 0.

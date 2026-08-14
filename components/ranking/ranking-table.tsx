@@ -118,6 +118,7 @@ const COLUMN_TO_SORT_FIELD: Record<string, string> = {
   total_votes: "total_votes",
   decision: "decision",
   expected_score: "expected_score",
+  user_score: "user_score",
   personal_fit: "personal_fit",
   alignment_score: "alignment_score",
 }
@@ -566,6 +567,9 @@ function renderCell(
       </span>
     )
   }
+  // Sua nota (Real) — sem `thresholds`, como as demais superfícies deste número (a régua
+  // de cor da Prevista é da distribuição DELA). Coluna oculta por padrão neste namespace.
+  if (col.key === "user_score") return <ScoreBadge score={entry.userScore} size="sm" />
   if (col.key === "personal_fit")
     return <AlignmentCell value={entry.personalFit} percentile={entry.personalFitPercentile} showBar={false} />
   if (col.key === "alignment_score")
