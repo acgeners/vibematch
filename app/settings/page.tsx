@@ -24,7 +24,6 @@ import { getAdultBoundsDriftQueue } from "@/server/queries/adult-audit"
 import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
 import { SynopsisConsolidationPanel } from "@/components/settings/synopsis-consolidation-panel"
 import { ReviewSummaryPanel } from "@/components/settings/review-summary-panel"
-import { ReviewDigestPanel } from "@/components/settings/review-digest-panel"
 import { ResolveComixPanel, CoberturaInfoTooltip } from "@/components/settings/resolve-comix-panel"
 import { ItemHelpPopover } from "@/components/settings/item-help-popover"
 import { ComixHealthPanel } from "@/components/settings/comix-health-panel"
@@ -56,7 +55,6 @@ import {
   countMissingEmbeddings,
   countPendingCanonicalSynopses,
   countPendingReviewSummaries,
-  countReviewDigestCoverage,
   getSettingsItemPending,
 } from "@/server/queries/settings-pending"
 import {
@@ -370,25 +368,19 @@ async function ItemBody({
     }
 
     case "review-synthesis": {
-      const [worksCount, pendingCount, digest] = await Promise.all([
+      // 🔴 A metade do DIGEST saiu daqui em 2026-08-14 → aba "Digests" de
+      // /ai-evaluation. Não foi arrumação: o painel era cego (sabia dizer "125
+      // pendentes" e processava 10 que ninguém escolhia nem via), e digest é
+      // curadoria de catálogo — a mesma pergunta das outras filas de lá.
+      //
+      // ⚠️ O RESUMO fica. Ele é Haiku (~0,2¢), roda sozinho na cascata e vive em
+      // 100% de cobertura: é manutenção, não fila de decisão. Levá-lo junto
+      // colocaria na console de curadoria um painel permanentemente zerado.
+      const [worksCount, pendingCount] = await Promise.all([
         activeWorksCount(),
         countPendingReviewSummaries(),
-        countReviewDigestCoverage(),
       ])
-      return (
-        <div className="space-y-4">
-          <div>
-            <p className="mb-2 text-sm font-semibold text-foreground">Resumo · exibido no app</p>
-            <ReviewSummaryPanel accent={accent} pendingCount={pendingCount} totalCount={worksCount} />
-          </div>
-          <div className="border-t border-border/60 pt-4">
-            <p className="mb-2 text-sm font-semibold text-foreground">
-              Digest estruturado · consumido pela IA
-            </p>
-            <ReviewDigestPanel accent={accent} pendingCount={digest.pending} totalCount={digest.total} />
-          </div>
-        </div>
-      )
+      return <ReviewSummaryPanel accent={accent} pendingCount={pendingCount} totalCount={worksCount} />
     }
 
     case "cloudflare-sources": {

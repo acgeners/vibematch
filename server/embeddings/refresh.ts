@@ -20,8 +20,15 @@ import {
 import { pickPrimarySynopsis } from "@/lib/work-derived"
 import { buildReviewContext } from "@/lib/tags/infer-from-text"
 import { ensureAdmin } from "@/server/queries/current-user"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 
-const QUERY_LIMIT = 2000
+/**
+ * Tamanho da PÁGINA das duas leituras, não um teto de resultado.
+ *
+ * 🔴 Era `QUERY_LIMIT = 2000` aplicado numa requisição só, e isso causava dois
+ * problemas de naturezas opostas — ver `loadEmbeddingCandidates`.
+ */
+const PAGE_SIZE = 200
 
 export interface RefreshEmbeddingsResult {
   totalWorks: number
@@ -94,6 +101,66 @@ function buildWorkFromRow(row: Record<string, unknown>): WorkForEmbedding {
 
 type Candidate = WorkForEmbedding & { hash: string; text: string }
 
+const EXISTING_COLS = "work_id, input_hash, model_name"
+
+/**
+ * Envolve uma leitura com o NOME do passo — e traduz a falha de transporte.
+ *
+ * 🔴 `fetchAllRows` rotula só o erro que o PostgREST DEVOLVE (`{ error }`). Um
+ * corte de conexão não é isso: o `fetch` do Node LANÇA, e a exceção sobe crua até
+ * o toast, que exibia exatamente `TypeError: terminated` — uma mensagem que não
+ * diz nem o que estava sendo lido, nem que a causa é transporte e não código. Foi
+ * o que a Ana viu no painel de embeddings.
+ */
+async function comContexto<T>(rotulo: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    // `terminated` é o erro do undici pra "o corpo da resposta morreu no meio".
+    const dica = /terminated|socket|ECONNRESET|fetch failed|aborted/i.test(msg)
+      ? " (a resposta foi cortada no meio — timeout do PostgREST ou queda de conexão, não erro de código; rode de novo)"
+      : ""
+    throw new Error(`${rotulo} falhou: ${msg}${dica}`)
+  }
+}
+
+/** O caminho de UMA obra não pagina — mas tem que falhar igual ao paginado. */
+async function fetchOne<T>(
+  query: () => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  label: string,
+): Promise<T[]> {
+  const { data, error } = await query()
+  if (error) throw new Error(`${label}: ${error.message}`)
+  return data ?? []
+}
+
+/**
+ * Carrega o catálogo e os hashes já persistidos, em PÁGINAS.
+ *
+ * 🔴 **Duas leituras, dois problemas opostos, os dois silenciosos** (2026-08-14):
+ *
+ * 1. **`works` vinha numa requisição só** — `.limit(2000)` sobre o catálogo com
+ *    quatro joins embutidos e as colunas mais gordas da tabela (`review_digest`,
+ *    `review_summary`). Medido: **8,6 MB crus em 978 linhas**. É a maior resposta
+ *    única do app, e ela é o suspeito do `TypeError: terminated` que o painel de
+ *    embeddings mostrou: undici lança isso quando o CORPO da resposta morre no
+ *    meio — o que acontece se o PostgREST estourar o `statement_timeout` DEPOIS de
+ *    já ter mandado os headers. ⚠️ Isso é a hipótese mais provável, não uma causa
+ *    confirmada: a falha não foi reproduzida, e um corte de rede dá a mesma
+ *    mensagem. A paginação vale de qualquer forma — cada página fica bem abaixo de
+ *    qualquer timeout, e o erro passa a dizer QUAL página caiu.
+ *
+ * 2. **`work_embeddings` não paginava NEM tinha limite** ⇒ o corte default de
+ *    1000 linhas do PostgREST, o erro que este projeto mais paga. Medido no mesmo
+ *    dia: **985 linhas — 15 do estouro.** A partir de 1001, as linhas cortadas
+ *    sumiriam do mapa de hashes, as obras correspondentes passariam por "nunca
+ *    embedadas" e seriam **re-embedadas e re-pagas a cada execução**, com o painel
+ *    dizendo "N atualizados" e nada acusando. Erro que produz resultado.
+ *
+ * ⚠️ Página de 200 e não 1000: o peso aqui é BYTE, não linha — 1000 linhas desta
+ * projeção são os mesmos 8,6 MB de antes, só que com `.range()` em volta.
+ */
 async function loadEmbeddingCandidates(workId?: string): Promise<{
   totalWorks: number
   skipped: number
@@ -101,32 +168,45 @@ async function loadEmbeddingCandidates(workId?: string): Promise<{
 }> {
   const supabase = createAdminClient()
 
-  const worksBase = supabase
-    .from("works")
-    .select(
-      `id, title, review_digest, review_summary,
+  const WORK_COLS = `id, title, review_digest, review_summary,
        category_scores(criterion_slug, score),
        work_tags(tags(name, tag_group_id)),
-       work_synopses(text, is_primary, position)`,
-    )
-    .eq("is_archived", false)
-  const existingBase = supabase
-    .from("work_embeddings")
-    .select("work_id, input_hash, model_name")
+       work_synopses(text, is_primary, position)`
 
-  const [worksRes, existingRes] = await Promise.all([
-    workId ? worksBase.eq("id", workId) : worksBase.limit(QUERY_LIMIT),
-    workId ? existingBase.eq("work_id", workId) : existingBase,
+  const [workRows, existingRows] = await Promise.all([
+    workId
+      ? fetchOne(() => supabase.from("works").select(WORK_COLS).eq("id", workId), "works")
+      : comContexto("Leitura do catálogo", () =>
+          fetchAllRows<Record<string, unknown>>(
+            (from, to) =>
+              supabase
+                .from("works")
+                .select(WORK_COLS)
+                .eq("is_archived", false)
+                .range(from, to),
+            "loadEmbeddingCandidates(works)",
+            PAGE_SIZE,
+          ),
+        ),
+    workId
+      ? fetchOne(
+          () => supabase.from("work_embeddings").select(EXISTING_COLS).eq("work_id", workId),
+          "work_embeddings",
+        )
+      : comContexto("Leitura dos embeddings já salvos", () =>
+          fetchAllRows<ExistingHashRow>(
+            (from, to) => supabase.from("work_embeddings").select(EXISTING_COLS).range(from, to),
+            "loadEmbeddingCandidates(work_embeddings)",
+            PAGE_SIZE,
+          ),
+        ),
   ])
 
-  if (worksRes.error) throw new Error(worksRes.error.message)
-  if (existingRes.error) throw new Error(existingRes.error.message)
-
   const existingByWork = new Map<string, ExistingHashRow>(
-    (existingRes.data as ExistingHashRow[] | null ?? []).map((r) => [r.work_id, r]),
+    (existingRows as ExistingHashRow[]).map((r) => [r.work_id, r]),
   )
 
-  const works = (worksRes.data as Array<Record<string, unknown>>).map(buildWorkFromRow)
+  const works = (workRows as Array<Record<string, unknown>>).map(buildWorkFromRow)
   const totalWorks = works.length
 
   const candidates: Candidate[] = []

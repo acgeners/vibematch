@@ -5,7 +5,7 @@ import { useRefresh } from "@/lib/use-refresh"
 import { useState, useTransition } from "react"
 import { setAnthropicBalance } from "@/server/actions/account"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
-import { LOW_BALANCE_USD } from "@/lib/ai-usage/balance"
+import { balanceTone } from "@/lib/ai-usage/balance"
 import { makeUsdScale } from "@/lib/format/money"
 import { cn } from "@/lib/utils"
 
@@ -36,8 +36,13 @@ export function BalanceCard({ status }: { status: BalanceStatus }) {
 
   const hasBalance = status.balanceUsd != null
   const remaining = status.remainingUsd
-  const isLow = remaining != null && remaining <= LOW_BALANCE_USD
-  const isNegative = remaining != null && remaining < 0
+  // Do `balanceTone`, não de um `remaining <= LOW_BALANCE_USD` escrito aqui: o número
+  // já era compartilhado, mas a COMPARAÇÃO não era — e foi ela que mudou (`<=` virou
+  // `<` quando o limiar caiu pra $2). Duas comparações sobre o mesmo limiar é como
+  // este card pinta de âmbar um saldo que o ponto da barra considera folgado.
+  const tone = balanceTone(remaining)
+  const isLow = tone === "low"
+  const isNegative = tone === "negative"
 
   // Os três números são termos da MESMA conta (informado − gasto = restante) e
   // aparecem colados, então são uma régua só. Com `formatUsd` por valor, o dia em

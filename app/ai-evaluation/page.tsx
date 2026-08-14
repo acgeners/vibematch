@@ -19,6 +19,8 @@ import { unstable_cache } from "next/cache"
 import type { ReactNode } from "react"
 import { EvalTabLink } from "@/components/ai-evaluation/eval-tab-link"
 import { TagsReviewsTab } from "@/components/ai-evaluation/tags-reviews-tab"
+import { DigestsTab } from "@/components/ai-evaluation/digests-tab"
+import { getReviewDigestQueue } from "@/server/queries/review-digest-queue"
 import type { TagsReviewsWork } from "@/components/ai-evaluation/tags-reviews-tab"
 import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
 import { getWorksWithoutTags } from "@/server/queries/works-without-tags"
@@ -506,6 +508,7 @@ function IaAttributesTab({
 interface TabHrefs {
   attr: string
   tagsReviews: string
+  digests: string
 }
 
 /** Barra de abas. `counts=null` (fallback do Suspense) mostra "(…)" enquanto os
@@ -524,6 +527,10 @@ function EvalTabBar({
     <div className="flex items-center gap-1 border-b border-border/60">
       <EvalTabLink href={hrefs.attr} active={activeTab === "atributos"} dot={(counts?.attr ?? 0) > 0}>IA Atributos{n(counts?.attr)}</EvalTabLink>
       <EvalTabLink href={hrefs.tagsReviews} active={activeTab === "tags-reviews"}>Tags &amp; Reviews{n(counts?.tagsReviews)}</EvalTabLink>
+      {/* Sem `dot`: o digest é backfill pago e opt-in, então NÃO soma no badge da
+          barra superior — um contador de 100+ ali faria o badge viver cheio e parar
+          de significar "decisão esperando". O número da aba basta. */}
+      <EvalTabLink href={hrefs.digests} active={activeTab === "digests"}>Digests{n(counts?.digests)}</EvalTabLink>
     </div>
   )
 }
@@ -544,6 +551,8 @@ interface CountArgs {
 interface TabCounts {
   attr: number
   tagsReviews: number
+  /** Só as ELEGÍVEIS (passam no piso de reviews) — é o que dá pra rodar. */
+  digests: number
 }
 
 /**
@@ -556,11 +565,16 @@ interface TabCounts {
  */
 const getCuradoriaTabCounts = unstable_cache(
   async (args: CountArgs): Promise<TabCounts> => {
-    const [attr, revC, tagsC, ackSets] = await Promise.all([
+    const [attr, revC, tagsC, ackSets, digestQueue] = await Promise.all([
       getEligibleWorks(args.activeFilters, args.pubStatusIds, args.personalStatusIds, [], args.toleranceOverride),
       getWorksWithoutReviews({ pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, minReviews: args.minReviews, maxReviews: args.maxReviews }, { countOnly: true }),
       getWorksWithoutTags({ pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, minTags: args.minTags, maxTags: args.maxTags }, { countOnly: true }),
       getReadAckSets(),
+      // A fila do digest NÃO responde aos filtros das outras abas (status pessoal,
+      // qualidade de sinopse): nenhum deles diz nada sobre digest pendente. Fica
+      // fora de `args` de propósito — entrar ali só faria o cache fragmentar por
+      // combinação de filtro sem mudar o número.
+      getReviewDigestQueue(),
     ])
     const ackAttr = ackSets.get("attr")!
     const ackTR = ackSets.get("tags_reviews")!
@@ -573,6 +587,9 @@ const getCuradoriaTabCounts = unstable_cache(
     return {
       attr: attrIds.filter((id) => keepAttr.has(id) && !ackAttr.has(id)).length,
       tagsReviews: trIds.filter((id) => keepTR.has(id) && !ackTR.has(id)).length,
+      // Só as elegíveis: o contador da aba promete o que dá pra rodar, não o
+      // tamanho da lista (que inclui as barradas pelo piso de reviews).
+      digests: digestQueue.eligibleCount,
     }
   },
   ["curadoria-tab-counts-v1"],
@@ -582,6 +599,7 @@ const getCuradoriaTabCounts = unstable_cache(
 const ACTIVE_TAB_COUNT_KEY: Record<string, keyof TabCounts> = {
   atributos: "attr",
   "tags-reviews": "tagsReviews",
+  digests: "digests",
 }
 
 /**
@@ -656,9 +674,10 @@ export default async function CuradoriaDaObraPage({
 }) {
   const params = await searchParams
   const tabRaw = Array.isArray(params.tab) ? params.tab[0] : params.tab
-  const activeTab: "atributos" | "tags-reviews" =
+  const activeTab: "atributos" | "tags-reviews" | "digests" =
     // "sem-reviews"/"sem-tags" (URLs antigas) redirecionam pra aba unificada.
     tabRaw === "tags-reviews" || tabRaw === "sem-reviews" || tabRaw === "sem-tags" ? "tags-reviews"
+    : tabRaw === "digests" ? "digests"
     : "atributos"
 
   const parseMax = (v: string | string[] | undefined): number => {
@@ -765,6 +784,20 @@ export default async function CuradoriaDaObraPage({
         maxTags={maxTags}
       />
     )
+  } else if (activeTab === "digests") {
+    const queue = await getReviewDigestQueue()
+    // O contador da aba conta o que dá pra RODAR, não o tamanho da lista — as
+    // barradas pelo piso de reviews aparecem na tela mas não são trabalho
+    // disponível, e prometê-las no número faria a aba nunca zerar.
+    activeCount = queue.eligibleCount
+    activeContent = (
+      <DigestsTab
+        works={queue.works}
+        eligibleCount={queue.eligibleCount}
+        blockedCount={queue.blockedCount}
+        doneCount={queue.doneCount}
+      />
+    )
   } else {
     // Interesse (manual + Previsão da IA) filtrado uniformemente pós-fetch (não no
     // getEligibleWorks) — cobre ♥/none/unknown + previsão em todas as abas.
@@ -819,7 +852,9 @@ export default async function CuradoriaDaObraPage({
   if (maxTags > 0) tagsReviewsParams.set("maxtags", String(maxTags))
   const tagsReviewsHref = `/ai-evaluation?${tagsReviewsParams}`
 
-  const hrefs: TabHrefs = { attr: attrHref, tagsReviews: tagsReviewsHref }
+  // A aba de digests não carrega filtro nenhum na URL — ver o comentário no
+  // contador: os filtros das outras abas não descrevem digest pendente.
+  const hrefs: TabHrefs = { attr: attrHref, tagsReviews: tagsReviewsHref, digests: "/ai-evaluation?tab=digests" }
   const countArgs: CountArgs = {
     activeFilters,
     pubStatusIds,

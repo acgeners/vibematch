@@ -39,6 +39,7 @@ import type { ReviewDigest } from "@/lib/ai-recommendation/types"
 import { DEFAULT_MICRO_THRESHOLD_USD, gateActionCost } from "../cost"
 import { getJobStore, runOrchestratedJob, type JobStore } from "../jobs"
 import { isUsefulReviewText } from "@/lib/reviews/useful-review"
+import { MIN_USEFUL_REVIEWS_FOR_DIGEST, hasEnoughReviewsForDigest } from "@/lib/reviews/digest-gate"
 
 /** Teto de amostragem das reviews (MAX_REVIEWS / DIGEST_TOTAL_CAP no summarizer). */
 const REVIEW_SAMPLE_CAP = 40
@@ -48,7 +49,9 @@ type AdminClient = ReturnType<typeof createAdminClient>
 // ---- Readiness (puro, espelha os gates existentes) -------------------------
 
 export type ArtifactReadiness =
-  | { state: "not_applicable"; reason: "no_reviews" }
+  // `few_reviews` só existe para o DIGEST: o resumo (Haiku, ~0,2¢) continua valendo
+  // com uma review só — é texto pra ler, não consenso destilado.
+  | { state: "not_applicable"; reason: "no_reviews" | "few_reviews" }
   | { state: "absent" }
   | { state: "fresh" }
   | { state: "immaterial" }
@@ -100,6 +103,13 @@ export function classifyDigestReadiness(args: {
   force?: boolean
 }): ArtifactReadiness {
   if (args.reviewCount === 0) return { state: "not_applicable", reason: "no_reviews" }
+  // Piso MEDIDO (ver `lib/reviews/digest-gate.ts`): abaixo de 4 reviews úteis o
+  // modelo não alcança os 3 traços que o próprio prompt exige em 25-75% dos casos,
+  // e o digest magro é consumido pelo consultor IA como se fosse sinal.
+  // ⚠️ Vem ANTES do `force`: forçar não cria consenso que as reviews não têm.
+  if (!hasEnoughReviewsForDigest(args.reviewCount)) {
+    return { state: "not_applicable", reason: "few_reviews" }
+  }
   if (args.storedDigest == null) return { state: "absent" }
   if (args.storedVersion !== REVIEW_DIGEST_VERSION) return { state: "stale", reason: "version" }
   if (args.force) return { state: "stale", reason: "forced" }
@@ -199,7 +209,7 @@ export class SupabaseDigestGateway implements DigestGateway {
 // ---- Resultado + opções ----------------------------------------------------
 
 export type EnsureReviewOutcome =
-  | { status: "not_ready"; reason: "no_reviews"; message: string }
+  | { status: "not_ready"; reason: "no_reviews" | "few_reviews"; message: string }
   | { status: "skipped"; reason: "fresh" | "immaterial" }
   | { status: "succeeded"; ranLlm: boolean; costUsd: number }
   | { status: "processing" }
@@ -241,6 +251,13 @@ export interface EnsureDigestDeps extends CommonDeps {
 }
 
 const NO_REVIEWS_MSG = "Obra sem reviews úteis — busque/adicione reviews (Atualizar dados / Revalidar fontes) antes."
+
+/** Distinto do "sem reviews": aqui existe material, só não o suficiente pra destilar
+ *  consenso. A ação é a mesma (buscar mais), mas a causa não — e uma mensagem que
+ *  diz "sem reviews" sobre uma obra que tem 3 manda procurar o que já está lá. */
+const FEW_REVIEWS_MSG =
+  `Reviews de menos pra um digest (mínimo ${MIN_USEFUL_REVIEWS_FOR_DIGEST} úteis) — ` +
+  "com menos que isso o modelo não tem consenso pra destilar. Busque mais reviews antes."
 
 // ---- generate_review_summary ----------------------------------------------
 
@@ -349,7 +366,13 @@ export async function ensureReviewDigest(
     force: deps.force,
   })
 
-  if (readiness.state === "not_applicable") return { status: "not_ready", reason: "no_reviews", message: NO_REVIEWS_MSG }
+  if (readiness.state === "not_applicable") {
+    // Duas causas, duas mensagens: "sem reviews" dito a uma obra que tem 3 manda
+    // procurar o que já está lá.
+    return readiness.reason === "few_reviews"
+      ? { status: "not_ready", reason: "few_reviews", message: FEW_REVIEWS_MSG }
+      : { status: "not_ready", reason: "no_reviews", message: NO_REVIEWS_MSG }
+  }
   if (readiness.state === "fresh") return { status: "skipped", reason: "fresh" }
   if (readiness.state === "immaterial") return { status: "skipped", reason: "immaterial" }
 

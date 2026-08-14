@@ -142,16 +142,18 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
       },
       {
         id: "review-synthesis",
-        title: "Síntese de reviews",
-        panelTitle: "Síntese de reviews",
+        title: "Resumo de reviews",
+        panelTitle: "Resumo de reviews",
         description:
-          "Transforma as reviews externas de cada obra em dois artefatos: um resumo curto (exibido no app) e um digest estruturado (consumido pela IA).",
-        help: "Duas destilações das mesmas reviews externas. O Resumo (Haiku) é um parágrafo de consenso mostrado pra você na aba Notas & Avaliações. O Digest (Sonnet) é estruturado — consenso, divergências, traços salientes e alertas — e serve de insumo pro consultor de IA (Recomendar, Veredito IA, Deep Dive e Chat).",
+          "Resume as reviews externas de cada obra num parágrafo de consenso, exibido na aba Notas & Avaliações.",
+        // O DIGEST estruturado (Sonnet) saiu daqui em 2026-08-14 — virou a aba
+        // "Digests" de /ai-evaluation, onde dá pra ver quais obras estão na fila e
+        // quantas reviews cada uma tem. O chip "Sonnet $$" saiu junto: esta seção
+        // não gasta mais Sonnet, e chip de custo que não corresponde a gasto é a
+        // pior espécie de rótulo.
+        help: "Um parágrafo de consenso por obra (Haiku), a partir das reviews externas, mostrado na aba Notas & Avaliações. A destilação ESTRUTURADA das mesmas reviews — o digest que alimenta Recomendar, Veredito IA, Deep Dive e Chat — virou a aba Digests da Curadoria da Obra.",
         icon: MessageSquareText,
-        chips: [
-          { kind: "cost", tier: "low", label: "Haiku $" },
-          { kind: "cost", tier: "high", label: "Sonnet $$" },
-        ],
+        chips: [{ kind: "cost", tier: "low", label: "Haiku $" }],
       },
     ],
   },

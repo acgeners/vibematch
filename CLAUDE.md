@@ -703,6 +703,38 @@ pedidos, ponto âmbar para saldo/fonte) e a fila de recomendação no avatar. **
 — e é teste de RENDER de propósito: a primeira versão varria o source atrás de `recQueue > 0` e
 passava com o badge desligado, satisfeita pela mesma expressão no `title` do botão.
 
+🔴 **O ponto SOZINHO não funcionou, e o conserto foi dar-lhe voz** (2026-08-14). Um círculo de
+8px provoca "o que é isso?" e cobrava uma navegação até `/curadoria` pra responder; o `title=`
+nativo dizia *"saldo ou fonte externa precisando de atenção"* — uma frase que serve pros dois
+problemas e não identifica nenhum. Hoje um tooltip nomeia cada alerta **com o número**
+(`Saldo da Anthropic: −$11,10`), e o `aria-label` carrega o mesmo texto.
+
+⚠️ **A COR e o TEXTO saem da mesma lista** (`lib/curadoria/chrome-alerts.ts`): `alertDotTone`
+reduz exatamente os alertas que o tooltip imprime. Um `if` de cor escrito à parte no JSX é como
+o ponto fica vermelho e a explicação fala do problema âmbar — a família "dois critérios pro
+mesmo fato", aqui a dois centímetros um do outro.
+
+⚠️ **A lista é COMPLETA, nunca "o pior".** Saldo negativo E Comix fora do ar dividem um ponto
+só; mostrar apenas o mais grave faria resolver aquele apagar o alerta do outro. Guardado por
+`tests/unit/ui/ponto-de-alerta-curadoria.test.tsx` (RENDER, porque o que regride é o componente
+deixar de consumir a lista — um teste da função pura passa verde com o `if` paralelo no JSX).
+
+🔴 **Saldo NEGATIVO não espera hover: abre modal** (`components/layout/negative-balance-dialog.tsx`),
+**1× por sessão do browser** (`sessionStorage`), com os dois destinos que resolvem — créditos na
+Anthropic e reinformar em `/ai-usage`. Saldo BAIXO **não** abre: âmbar informa, vermelho
+interrompe; um modal por sessão enquanto o saldo acaba é o alarme que se aprende a fechar sem
+ler, e aí ele também não funciona no dia do negativo.
+
+⚠️ **O modal não afirma que a conta zerou** — o app não consulta a Anthropic, ele subtrai o
+gasto do último valor digitado. "Negativo" pode significar "você recarregou e não avisou o app",
+e o texto diz isso; sem essa frase o aviso manda recarregar uma conta que talvez já tenha saldo.
+
+⚠️ **`LOW_BALANCE_USD` caiu de 5 para 2** na mesma leva (escolha da Ana), e a comparação virou
+`<` — exatamente $2 ainda é folga. O limiar é dono único, então o ponto, o tile da Visão geral e
+o card de `/ai-usage` mudaram juntos; o `balance-card.tsx` passou a derivar de `balanceTone` em
+vez de reescrever `remaining <= LOW_BALANCE_USD`, porque o NÚMERO já era compartilhado mas a
+COMPARAÇÃO não era — e foi ela que mudou.
+
 ⚠️ **Curadoria é MODO, não ação pontual — e por isso o `CurationMenu` deixou de ser menu**
 (2026-08-07). Hoje é um **botão-link** pra `/curadoria`: badge + ponto colorido, sem dropdown.
 Três coisas convergiram:
@@ -886,10 +918,17 @@ recomendação (UI própria) · resolvedor Comix (job com painel de polling).
 🔴 **Pendências conhecidas, não escondidas:**
 1. **Reload zera o indicador azul** (store em memória). A ação continua e persiste; só o
    desenho some. Reconstruir pede ler `ai_evaluations.status='processing'` no load.
-2. **Previsão de Interesse POR OBRA continua sem indicador.** `predictInterestWithToast` tem
-   confirmação de custo **recursiva** (a 1ª chamada volta `blocked_cost_confirmation`, abre
-   modal e re-chama a si mesma); uma tarefa em volta disso diria "rodando" enquanto um modal
-   espera clique. Precisa do helper refatorado antes. O LOTE já está ligado.
+2. ✅ **Previsão de Interesse POR OBRA ganhou indicador (2026-08-14).** O bloqueio era real e
+   a saída não exigiu refatorar o helper: a confirmação de custo é **recursiva** (a 1ª chamada
+   volta `blocked_cost_confirmation`, abre modal e re-chama a si mesma), então a tarefa envolve
+   só a chamada **de dentro** — a que já passou pelo modal. Em volta da chamada inteira, o
+   indicador anunciaria "rodando" enquanto o modal espera clique, afirmando trabalho que pode
+   nem começar. Azul (grava `taste_profile` + `synopsis_quality_predictions`), `id` por obra,
+   e cobre os TRÊS caminhos: cascata confirmada, "prever com o perfil atual" e a confirmação
+   simples. Sintoma que existia: confirmar "Atualizar perfil e prever" fechava o modal e
+   deixava a tela ~40s idêntica (perfil 33,4s + previsão 4,9s). Guardado por
+   `tests/unit/ui/interesse-por-obra-tem-indicador.test.ts`, que testa os dois lados — que a
+   tarefa aparece depois da confirmação **e** que ela NÃO aparece enquanto o modal decide.
 3. **Latências medidas** (`ai_api_calls.latency_ms`, p50): perfil de gosto **33,4s** ·
    ranking **14,0s** (p90 47,9s) · digest 13,4s · avaliação IA 17,5s · tags 7,6s · Interesse
    4,9s. Deep dive **sem medição** (zero linhas locais).
@@ -1744,6 +1783,28 @@ terminado "com sucesso" tendo processado 6% do trabalho. É o padrão mais perig
 **um erro que produz resultado**. Ao contar qualquer coisa acima de ~1k linhas, confirme com
 `count: "exact"` antes de confiar no `select`.
 
+🔴 **O caso mais próximo de disparar, achado em 2026-08-14 e corrigido:** a leitura de
+`work_embeddings` em `loadEmbeddingCandidates` não tinha `.range()` NEM `.limit()`. Medido no
+mesmo dia: **985 linhas — 15 do corte.** Passando de 1000, as linhas truncadas sumiriam do mapa
+de hashes, as obras correspondentes pareceriam "nunca embedadas" e seriam **re-embedadas e
+re-pagas a cada execução**, com o painel dizendo "N atualizados" e nada acusando.
+
+⚠️ **A tabela vizinha tinha o problema INVERSO, e o mesmo dono.** `works` era lida com
+`.limit(2000)` — opt-out explícito do corte — numa requisição só, com quatro joins e as colunas
+mais gordas da tabela: **8,6 MB crus em 978 linhas**, a maior resposta única do app. É a
+suspeita do `TypeError: terminated` que o painel de embeddings exibia (undici lança isso quando
+o CORPO da resposta morre no meio, o que acontece se o PostgREST estourar o `statement_timeout`
+DEPOIS de mandar os headers). ⚠️ Hipótese, não causa confirmada — a falha não foi reproduzida e
+um corte de rede dá a mesma mensagem.
+
+Hoje as duas paginam em faixas de **200** (o peso ali é BYTE, não linha: 1000 linhas dessa
+projeção são os mesmos 8,6 MB). Medido depois: carga a quente da página de `/settings` em
+**0,3s** — a paginação não custou latência. E a falha de transporte passou a ganhar contexto
+(`comContexto`): `fetchAllRows` rotula só o erro que o PostgREST DEVOLVE, enquanto queda de
+conexão é exceção LANÇADA pelo `fetch` e subia crua até o toast. Guardado por
+`tests/unit/orchestration/embeddings-leitura-paginada.test.ts`, conferido reprovando a versão
+antiga.
+
 ## Constants generated from DB
 
 These files are **fully overwritten** by `npm run sync-constants` and must not be edited by hand:
@@ -1849,7 +1910,55 @@ Two distinct paths both ultimately call `requestAiEvaluation()` in `lib/ai-evalu
 
 ⚠️ A página virou **duas** em 2026-08-02: `/ai-evaluation` ficou só com a fila de **atributos**
 (curadoria do catálogo — do dono), e as filas de **Veredito IA / IA-Rk / Interesse / Sinopse**
-foram pra **`/fila-recomendacao`** (qualquer logado). O badge da barra também se dividiu:
+foram pra **`/fila-recomendacao`** (qualquer logado).
+
+🔴 **A terceira aba de `/ai-evaluation` é "Digests" (2026-08-14)** — a fila do digest
+estruturado, que era um painel CEGO em `/settings?g=ia`: sabia dizer "125 pendentes" e
+processava 10 obras que ninguém escolhia nem via. Digest é curadoria de CATÁLOGO (pago,
+compartilhado, do curador), que é o critério da página; `/fila-recomendacao` seria errado, é
+per-user. O **resumo** (Haiku, ~0,2¢, automático, 979/979) FICOU no `/settings`: é manutenção,
+não fila de decisão, e levá-lo junto poria na console um painel permanentemente zerado.
+
+🔴 **A aba tem um PISO de reviews, e ele é medido: 4 reviews úteis**
+(`lib/reviews/digest-gate.ts`). Com 1-2 reviews o modelo não tem consenso pra destilar e
+produz um digest que PARECE um digest — e o consultor IA o consome como sinal. Medido sobre
+os 846 digests da versão vigente, pela taxa de "digest magro" (o modelo não alcançar os 3
+traços que o próprio prompt exige, que é estrutural e não interpretação de prosa):
+**1 review 75% · 2 → 50% · 3 → 25% · 4 → 0% · 5-19 → 0% · 20+ → 1-4%**.
+
+⚠️ **A contagem é a ÚTIL (≥40 chars), não a crua** — e trocar as duas MUDA o limiar: o corte
+"<3" pega 8 obras contando cru e 18 contando útil. O digest descarta review curta antes do
+prompt (`isUsefulReviewText`), então a régua da tela tem que ser a régua do gate.
+
+⚠️ **As faixas baixas têm 4 obras cada** — "25%" é UMA obra. O que os dados sustentam é que
+**≥4 é limpo** (200+ obras, ~0%) e **≤2 é ruim**; o 3 é indistinguível dos dois. 5 e 10 foram
+considerados e não têm apoio: nada muda de 4 a 19. Arredondar pra cima é a escolha defensável
+pela assimetria (digest ruim mente, digest ausente só falta).
+
+⚠️ **O piso vem ANTES do `force`** em `classifyDigestReadiness`: forçar não cria consenso que
+as reviews não têm. E o RESUMO **não** herda o piso — é Haiku, é texto pra ler, e uma review só
+já vale um parágrafo.
+
+🔴 **O lote antigo (`consolidatePendingReviewDigests`) foi APOSENTADO, não corrigido.** Ele
+chamava `consolidateReviewsDigestDetailed` DIRETO: corpus próprio (só `work_reviews`, sem as
+reviews manuais externas que o caminho por obra inclui), zero gate de readiness, zero dedup de
+job. Eram dois caminhos para o mesmo artefato divergindo em silêncio, e o piso teria que ser
+escrito duas vezes. O lote novo (`generateDigestsForWorks`) itera `ensureReviewDigest` — o
+mesmo caminho do botão da página da obra. Guardado por `tests/unit/reviews/digest-gate.test.ts`.
+
+⚠️ **A aba NÃO soma no badge violeta do topo** (escolha da Ana): é backfill pago e opt-in, e um
+contador de 100+ ali faria o badge viver cheio e parar de significar "decisão esperando". O
+número da aba conta só as **elegíveis** — prometer as bloqueadas faria a aba nunca zerar.
+
+⚠️ **As bloqueadas ficam na lista, não somem.** Elas respondem "por que essa obra nunca sai da
+fila?"; sem checkbox, sem botão, com o chip dizendo o que falta.
+
+🔴 **Dois defeitos desta leva passaram por `tsc` E pela suíte, e só a página os pegou:**
+`export const` num arquivo `"use server"` derruba o MÓDULO INTEIRO em runtime (só função async
+pode ser exportada) e `works.cover_url` não existe — capa mora em `work_covers`. Nenhum dos
+dois é erro de tipo. O primeiro virou
+`tests/unit/orchestration/use-server-so-exporta-async.test.ts`, que **deriva a lista do
+filesystem** e foi conferido reprovando o código quebrado. O badge da barra também se dividiu:
 `curadoria` e `rec-queue`. `/ranking/desatualizados` segue como redirect pra aba nova.
 `triggerAiEvaluation(workId)` → `fetchExternalEvaluationContextForWork()` → `requestAiEvaluation()`
 - Uses saved work data (**ALL persisted synopses**, genres, grouped tags, cover). The primary synopsis is the prompt's main reference; every other persisted synopsis enters as `[S1]…[Sn]` blocks (`splitSynopsesForEvaluation` in `lib/work-derived.ts`), with `source = "manual"` ones labeled as user-written/high-authority. Fresh external `[C]` blocks that duplicate a persisted synopsis are filtered out (`isSameSynopsis`) — but only when additional synopses exist, so single-synopsis works keep a byte-identical input and preserve the eval cache `input_hash` (the `additionalSynopses` field is omitted from both hash versions when empty). If the work has accepted `work_external_ids`, reviews/context are fetched from those confirmed source IDs; otherwise it falls back to title search.

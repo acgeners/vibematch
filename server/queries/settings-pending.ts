@@ -1,6 +1,5 @@
 import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { fetchAllRows } from "@/lib/supabase/paginate"
 import { countStaleEmbeddings } from "@/server/embeddings/refresh"
 import { countPendingSuggestions } from "@/server/queries/calibration"
 import { getWorksMissingComixHid } from "@/server/queries/comix-coverage"
@@ -72,55 +71,6 @@ export async function countPendingReviewSummaries(): Promise<number> {
   return pending
 }
 
-/**
- * Cobertura do DIGEST estruturado de reviews (Sonnet). Espelha o filtro da action
- * `consolidatePendingReviewDigests`: universo = obras com ≥1 review; pendente =
- * `review_digest` nulo OU de versão antiga (`review_digest_version !==
- * REVIEW_DIGEST_VERSION`). NÃO filtra arquivadas (a action também não), pra a
- * contagem bater com o que o botão processa (evita "badge preso"). Leve: um
- * `work_reviews(count)` embutido por obra, sem paginar as ~14k reviews. Tolera a
- * migration 103 ausente (degrada pra 0/0). NÃO entra no badge (digest é opt-in).
- */
-export async function countReviewDigestCoverage(): Promise<{ pending: number; total: number }> {
-  try {
-    const { REVIEW_DIGEST_VERSION } = await import("@/lib/ai-recommendation/review-summarizer")
-    const supabase = createAdminClient()
-    const rows = await fetchAllRows<{
-      review_digest: unknown
-      review_digest_version: string | null
-      work_reviews: Array<{ count: number }>
-    }>(
-      (from, to) =>
-        supabase
-          .from("works")
-          .select("review_digest, review_digest_version, work_reviews(count)")
-          .range(from, to),
-      "countReviewDigestCoverage",
-    )
-    let total = 0
-    let pending = 0
-    for (const w of rows) {
-      if ((w.work_reviews?.[0]?.count ?? 0) === 0) continue
-      total += 1
-      if (w.review_digest == null || w.review_digest_version !== REVIEW_DIGEST_VERSION) pending += 1
-    }
-    return { pending, total }
-  } catch (err) {
-    console.warn(
-      "[countReviewDigestCoverage] falhou (migration 103 aplicada?):",
-      err instanceof Error ? err.message : err,
-    )
-    return { pending: 0, total: 0 }
-  }
-}
-
-/**
- * Obras (não arquivadas) SEM linha em `work_embeddings` — i.e. nunca embedadas.
- * Sinal leve pro badge (só ids dos dois lados, sem o join de conteúdo do
- * hashing). NÃO detecta embedding com hash desatualizado (conteúdo editado) —
- * isso a página exibe via `countStaleEmbeddings`. Pro badge, "nunca embedada" é
- * o sinal dominante (obra recém-adicionada).
- */
 export async function countMissingEmbeddings(): Promise<number> {
   const supabase = createAdminClient()
   const [works, emb] = await Promise.all([
