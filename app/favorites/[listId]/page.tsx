@@ -29,6 +29,8 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import { readStatusFilter } from "@/lib/status-filter-toggle"
+import { parseArtFilter } from "@/lib/arte/url"
+import { getScoresReader } from "@/server/queries/user-scores"
 
 interface FavoritesListPageProps {
   params: Promise<{ listId: string }>
@@ -130,6 +132,13 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
   const adultParam = str("adult")
   const adultFilter = adultParam === "hide" || adultParam === "only" ? adultParam : undefined
 
+  // Estimativa de arte (?art=forte|sem_fraca). Faixa, nunca pontos — ver lib/arte/url.ts.
+  const artFilter = parseArtFilter(str("art"))
+  // 🔴 Quem NÃO é o dono não tem estimativa de arte (o overlay a anula), então o controle
+  // não pode aparecer: "Forte" devolveria vazio, indistinguível de "não há obra com arte
+  // forte". `cache()` no reader ⇒ sem round-trip extra.
+  const artScoresReader = await getScoresReader()
+
   const filters: RankingFilters = {
     search: str("search"),
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
@@ -174,6 +183,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     onlyWorkIds: isAll ? undefined : isUngrouped ? ungrouped!.workIds : listDetail!.workIds,
     includeFinishedDropped: true,
     adultFilter,
+    artFilter,
     sortLevels,
   }
 
@@ -315,6 +325,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         showTopN={false}
         showTierBand={false}
         showHideAvoided
+        showArtFilter={artScoresReader.isOwner}
         showAdultFilter
       />
 

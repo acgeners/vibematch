@@ -2362,6 +2362,7 @@ Quatro ocorrências MEDIDAS em 2026-08-13/14, todas com suíte verde:
 | teste de `.backups` | a string literal `".backups"` | o filesystem, no `podar()` | 3 escritores gravando sem família, invisíveis por escreverem `".backups/x"` |
 | dono de um id externo | o texto de uma review | o slug da URL da fonte | hid removido da obra ERRADA, e o resolvedor o recriou 2h37 depois |
 | `deep-dive.ts` × RPC | um `as SimilarRow[]` em TS | o `RETURNS TABLE` em SQL | a migration 151 tirou `user_score`; "obras similares na biblioteca" saiu VAZIA por um mês |
+| banda dos tiers | `DEFAULT_TIER_BAND_WIDTH` = 0,25 (medido) | `formula_config.tier_band_width` = 0,5 | a constante é só FALLBACK e a coluna é NOT NULL ⇒ o valor medido **nunca esteve em vigor**; o /ranking agrupou uma semana na largura que a medição reprovou, e a UI mostrava "0,5 (Padrão)" |
 
 🔴 **A régua: quando duas coisas afirmam o mesmo fato, uma tem que ser DERIVADA da outra.**
 É o que já vale para `LOW_BALANCE_USD`, `STRONG_TAG_WEIGHT`, `CRITERIA_SCALE_LEGEND` e
@@ -2374,6 +2375,14 @@ completa.** `countStaleEmbeddings()` puxaria o catálogo inteiro a cada visita a
 manter o contador barato foi certo. Errado foi `disabled={pendingCount === 0}`, que deu a uma
 medida incompleta poder de veto sobre a completa. Hoje o botão só apaga o TOM quando o
 contador é zero, e o `title` explica a assimetria.
+
+🔴 **Constante de código que é FALLBACK de um valor no banco não muda nada sozinha — e
+mensagem de commit não é prova de escrita.** O commit da banda dos tiers anunciava
+*"formula_config.tier_band_width, atualizado junto"*; o `updated_at` da linha era de **duas
+semanas antes** dele. A prova barata é ler a linha nos DOIS bancos, com o carimbo. E a correção
+é migration, não UPDATE à mão: a **190** mexe nos dois lados (`SET DEFAULT` para banco novo +
+`UPDATE … WHERE` para o que já existe), e `tests/unit/ranking/tier-config.test.ts` **deriva** o
+default da migration mais recente que define a coluna ([[gotcha-constante-de-fallback-nao-poe-nada-em-vigor]]).
 
 ⚠️ **`as X[]` sobre resposta de RPC é a versão SILENCIOSA disto.** O tipo é uma AFIRMAÇÃO
 sobre um contrato que mora em SQL, e o compilador não a verifica. Quando a migration 151

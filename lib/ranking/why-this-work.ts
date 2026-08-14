@@ -93,6 +93,41 @@ export interface WorkSeparator {
  * ⚠️ Calibrar contra o tier ERRADO muda o número: uma primeira medição bandou pela
  * nota CRUA (tiers 4/33/8) e deu 62% em vez de 73%. A chave do tier tem que ser a
  * mesma da ordenação — é a invariante que o próprio `build-tiers.ts` documenta.
+ *
+ * 🔴 **A calibração acima é de BANDA 0,5, e a banda virou 0,25 (migration 190,
+ * 2026-08-13). Os 73% não valem mais.** Remedido no clone local no mesmo dia, com os
+ * módulos de produção (`.local-experiments/diag-separador-vs-banda.ts`):
+ *
+ *   recorte             banda 0,5   banda 0,25
+ *   topo-45 (calibração)   62,2%       53,3%
+ *   topo-40 (o default)    57,5%       47,5%   ← o que a pessoa vê
+ *   catálogo (981)         44,2%       43,3%
+ *
+ * ⚠️ Duas coisas se somaram, e separá-las importa: **os 73% já estavam velhos antes
+ * da banda** — na mesma banda 0,5 o topo-45 de hoje dá 62,2%, porque o catálogo se
+ * moveu (a composição medida em 06/08 era T1=7 · T2=38; hoje o topo-45 em 0,5 dá 2
+ * tiers, o maior com 23). A banda tirou outros ~9 p.p. do recorte exibido, e quase
+ * nada do catálogo inteiro.
+ *
+ * ⚠️ **Isto NÃO autoriza baixar o limiar.** `SEPARATOR_MIN_SIGMA` é deliberadamente o
+ * mesmo `HIGHLIGHT_SIGMA_THRESHOLD` para "1σ" querer dizer a mesma coisa nas duas
+ * telas que falam em σ; mexer aqui sem mexer lá cria a segunda régua. E cobertura
+ * BAIXA não é defeito por si — o defeito documentado é a alta (rotular todo mundo).
+ *
+ * 🔴 **O suspeito não é o limiar: é a MÉDIA INCLUSIVA.** `mean` é a média do grupo
+ * COM a própria obra dentro, então o desvio sai encolhido pelo fator exato
+ * `(k−1)/k`, onde k é quantas obras do tier **têm aquela força** (não o tamanho do
+ * tier: nulos saem de `peers`). Num par, ×0,50 — ou seja, a coluna é mais fraca
+ * justamente no empate de duas obras, que é o caso que ela existe para resolver. E
+ * estreitar a banda cria mais tiers pequenos, então o encolhimento cresce junto.
+ *
+ * Medido no topo-40 do clone local (banda 0,5, tiers de 22 e 18): média inclusiva
+ * rotula **23 de 40**; média das OUTRAS (leave-one-out) rotula **31 de 40**. Os 23
+ * foram conferidos por duas implementações independentes, que batem exatamente.
+ *
+ * ⚠️ **Trocar por leave-one-out é candidato, NÃO conclusão** — 31/40 é 77,5%, e a
+ * própria calibração acima trata cobertura alta como o defeito a evitar. Quem decide
+ * é uma medição do par (média × limiar) junto, não um patch de um lado só.
  */
 export const SEPARATOR_MIN_SIGMA = 1
 

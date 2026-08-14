@@ -19,6 +19,7 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { readCanonicalReviewCorpus, readSummaryReviewInputs } from "@/lib/synopsis-interest/digest-corpus"
+import { refreshArtSignalForWork } from "@/lib/arte/refresh"
 import { computeCostUsd } from "@/lib/ai/pricing"
 import {
   consolidateReviewsDetailed,
@@ -189,6 +190,9 @@ export class SupabaseDigestGateway implements DigestGateway {
       .from("works")
       .update({ review_digest: v.digest, review_digest_at: v.at, review_digest_n: v.n, review_digest_version: REVIEW_DIGEST_VERSION })
       .eq("id", workId)
+    // O eixo "arte" do digest alimenta 17,5% do peso do estimador — digest novo, sinal novo.
+    // Não lança (o helper engole e loga com prefixo `[arte-signal]`).
+    await refreshArtSignalForWork(workId)
   }
 }
 

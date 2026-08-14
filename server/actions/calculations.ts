@@ -56,6 +56,9 @@ import {
 } from "@/lib/ai-recommendation/taste-profile-heuristic"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import type { DeclaredTagPref } from "@/server/queries/tag-preferences"
+import { loadArtLabels } from "@/server/queries/pilot-taste"
+import { computeArtForCatalog } from "@/lib/arte/model"
+import { parseArtSignal } from "@/lib/arte/signal"
 import type { TasteProfilePayload } from "@/lib/ai-recommendation/types"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import {
@@ -115,6 +118,11 @@ export interface RawWork {
   platform_ratings: any[]
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   work_tags?: any[]
+  /**
+   * `works.art_signal` cru (jsonb). NÃO entra em nenhum cálculo de nota — alimenta só o
+   * estimador de arte, que é critério de ordenação/filtro. Ver `lib/arte/`.
+   */
+  art_signal?: unknown
 }
 
 interface WorkComputed {
@@ -502,16 +510,17 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   //
   // `loadOwnerLabels` falha alto se os rótulos sumirem — porque um Ridge sem rótulos não
   // reclama: ele cai na média do treino e devolve 878 notas plausíveis e erradas.
-  const [worksRes, weightsRes, configRes, tasteProfile, declaredTagPrefs, ownerLabels] =
+  const [worksRes, weightsRes, configRes, tasteProfile, declaredTagPrefs, ownerLabels, artLabels] =
     await Promise.all([
       supabase
         .from("works")
         .select(
           `id, publication_status_id, total_chapters, is_archived,
          year, year_end, original_title,
+         art_signal,
          category_scores(criterion_slug, score, source),
          platform_ratings(id, platform, rating, vote_count),
-         work_tags(tags(name, tag_group_id))`
+         work_tags(tags(name, slug, tag_group_id))`
         )
         .eq("is_archived", false)
         .limit(2000),
@@ -524,6 +533,9 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
       getOwnerUserId().then((id) => loadCurrentTasteProfile(id)),
       getDeclaredTagPreferences(supabase, { headless }),
       loadOwnerLabels(),
+      // Rótulos de arte DO DONO — mesmo motivo do `getOwnerUserId` acima: sem sessão, resolver
+      // pelo usuário corrente treinaria o estimador do catálogo no gosto de outra pessoa.
+      getOwnerUserId().then((id) => loadArtLabels(id, supabase)),
     ])
 
   if (worksRes.error) throw new Error(worksRes.error.message)
@@ -617,9 +629,34 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
     cvSig, oofBucketBreakdown,
   } = computeRecalc({ works, weights, config, tasteProfile, declaredTagPrefs, includeQuality, aiQualityByWork, effectiveInterestByWork })
 
+  // ---------- 6b) Estimativa de arte ----------
+  // 🔴 FORA do `computeRecalc` de propósito: a arte NÃO entra em nenhuma nota (plugada no
+  // Ridge dá ΔMAE −0,005, com IC excluindo o +0,007 teórico — ela é 1/7 do `user_score`, logo
+  // entra com a variância dividida por 49). O que ela é: critério de ORDENAÇÃO e FILTRO, e
+  // `computeRecalc` tem 14 chamadores que não têm por que carregar este passo.
+  //
+  // Barato aqui porque a metade cara já foi paga na escrita: `works.art_signal` traz 6 números
+  // por obra, e o digest — que é parte do que torna `works` cara de ler — fica fora do select.
+  const artResult = computeArtForCatalog(
+    rawWorks.map((raw) => ({
+      id: raw.id,
+      signal: parseArtSignal(raw.art_signal),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tagSlugs: (raw.work_tags ?? []).map((wt: any) => wt?.tags?.slug).filter(Boolean) as string[],
+      label: artLabels.get(raw.id) ?? null,
+    })),
+  )
+  // Linha NOVA em vez de mutação: `rows` segue indo intacta pro espelho per-user, que tem
+  // allowlist própria de colunas — e a arte é catálogo, não estado pessoal.
+  const rowsComArte = rows.map((row) => ({
+    ...row,
+    art_estimate: artResult.get(row.work_id as string)?.estimate ?? null,
+    art_percentile: artResult.get(row.work_id as string)?.percentile ?? null,
+  }))
+
   const { error: upsertErr } = await supabase
     .from("calculated_scores")
-    .upsert(rows, { onConflict: "work_id" })
+    .upsert(rowsComArte, { onConflict: "work_id" })
   if (upsertErr) throw new Error(upsertErr.message)
 
   // FATIA 2b — os scores DERIVADOS ganham dono. `calculated_scores` não tem `user_id`, então a

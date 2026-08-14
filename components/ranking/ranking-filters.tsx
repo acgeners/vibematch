@@ -41,9 +41,11 @@ import { TERMINAL_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 import { STATUS_FILTER_PARAMS, setStatusRule } from "@/lib/status-filter-toggle"
 import type { StatusFilterKind, StatusRule } from "@/lib/status-filter-toggle"
+import { DEFAULT_TIER_BAND_WIDTH } from "@/lib/ranking/tier-config"
 import { ActiveFilterChips } from "@/components/ranking/active-filter-chips"
 import { CollapseIconTrigger, CollapseTitleTrigger } from "@/components/ui/collapse-trigger"
 import type { ActiveFilterChip, ActiveFilterValue } from "@/components/ranking/active-filter-chips"
+import { ART_FILTER_CHIP_LABELS, ART_FILTER_PARAM, parseArtFilter } from "@/lib/arte/url"
 
 interface SavedFilterPreset {
   id: string
@@ -90,6 +92,9 @@ const SORTABLE_FIELD_GROUPS: Array<{ label: string; fields: Array<{ value: strin
       { value: "total_votes", label: LABELS.total_votes.short },
       { value: "synopsis_q", label: LABELS.synopsis_q.short },
       { value: "synopsis_pred", label: LABELS.synopsis_pred.short },
+      // Ordena pelo PERCENTIL da estimativa. "(est.)" no rótulo é obrigatório: sem ele, a
+      // opção promete uma nota de arte que não existe.
+      { value: "art", label: "Arte (est.)" },
     ],
   },
   {
@@ -459,6 +464,18 @@ interface RankingFiltersProps {
    *  um controle que marca e não filtra, sem erro nenhum.
    *  (Esta linha já disse "só /ranking"; o /favorites passou a parsear e ela ficou
    *  para trás — confira na página antes de confiar.) */
+  /**
+   * Mostra o segmentado "Arte (estimada)" (?art=forte|sem_fraca).
+   *
+   * 🔴 Gate por DONO, e não por preferência: a estimativa de arte é treinada nos rótulos
+   * `like_art_score` DELE, então `art_percentile` chega null pelo overlay para todo mundo
+   * mais. Sem o gate, um visitante veria o controle e o "Forte" devolveria lista vazia — que
+   * é indistinguível de "não existe obra com arte forte".
+   *
+   * ⚠️ `isOwner` é o proxy CERTO hoje e ERRADO amanhã: quando o recalc per-user aprender a
+   * estimar arte, isto vira "tem modelo de arte", como `PERSONAL_SORT_FIELDS` já faz.
+   */
+  showArtFilter?: boolean
   showAdultFilter?: boolean
 }
 
@@ -655,6 +672,27 @@ function InterestModeToggle({
   )
 }
 
+/**
+ * As larguras oferecidas são as que foram MEDIDAS, e o número medido vai no `title`.
+ *
+ * A régua é a honestidade pairwise: dos pares que a banda declara equivalentes, quantos
+ * a Nota Prevista teria ordenado corretamente? ~50% = agrupar é honesto; muito acima =
+ * a banda joga fora sinal que existia (medição de 2026-08-06 sobre as 206 obras com
+ * nota do usuário — ver `lib/ranking/tier-config.ts`).
+ *
+ * ⚠️ A lista anterior era `0,3 · 0,4 · 0,6 · 0,8`, simétrica em torno do padrão de
+ * então (0,5). Com o padrão no valor medido (0,25), metade dela ficava ACIMA da faixa
+ * honesta — e 0,6/0,8 nem chegaram a ser medidos: o pior valor da tabela é 0,73, já
+ * "claramente errado". Oferecer um degrau é recomendá-lo; recomendar só o que tem
+ * número atrás.
+ */
+const TIER_BAND_OPTIONS: ReadonlyArray<{ band: number; medido: string }> = [
+  { band: 0.2, medido: "52,7% dos pares ordenáveis (honesto, mas começa a estilhaçar)" },
+  { band: 0.3, medido: "53,8% dos pares ordenáveis (honesto)" },
+  { band: 0.35, medido: "55,0% dos pares ordenáveis (limítrofe)" },
+  { band: 0.5, medido: "57,9% dos pares ordenáveis — jogava fora sinal (padrão antigo)" },
+]
+
 /** Largura dos tiers — movido pra dentro do filtro (draft; aplica com "Aplicar filtros"). */
 function TierBandSection({
   searchParams,
@@ -713,19 +751,19 @@ function TierBandSection({
         <div className="w-px bg-border/60" />
         <div className="flex items-center justify-center">
           <div className="grid grid-cols-2 gap-1.5">
-            {[0.3, 0.4, 0.6, 0.8]
+            {TIER_BAND_OPTIONS
               // Sem repetir o chip do próprio padrão: com defaultBand = 0,3 haveria "0,3"
               // dos dois lados da divisória, um deles gravando ?band= e o outro limpando.
-              .filter((b) => b !== defaultBand)
-              .map((b) => (
+              .filter((o) => o.band !== defaultBand)
+              .map((o) => (
                 <button
-                  key={b}
+                  key={o.band}
                   type="button"
-                  onClick={() => updateParams({ band: String(b) })}
-                  className={chip(active === String(b))}
-                  title={`Agrupa no mesmo tier obras a até ${fmt(b)} de distância na nota`}
+                  onClick={() => updateParams({ band: String(o.band) })}
+                  className={chip(active === String(o.band))}
+                  title={`Agrupa no mesmo tier obras a até ${fmt(o.band)} de distância na nota — ${o.medido}`}
                 >
-                  {fmt(b)}
+                  {fmt(o.band)}
                 </button>
               ))}
           </div>
@@ -1380,6 +1418,61 @@ function StatusButton({
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
+  )
+}
+
+/**
+ * Interruptor do MODO de exclusão de um card de status.
+ *
+ * A zona `−` deixou de ser desenhada por padrão: ela custa ~22px por pill (ver a nota
+ * de largura em `--l1cols2xl`) e cobra esse preço em toda visita, enquanto excluir é
+ * uso ocasional. Aqui ele é ligado sob demanda, um por card — cada card já tem o seu
+ * "Todos" e o seu contador "(exceto N)", então o controle mora ao lado do que muda.
+ *
+ * 🔴 **Desligar LIMPA as exclusões, e isso não é conveniência.** Se o modo pudesse ser
+ * desligado com `pub_status_exclude` de pé, existiria filtro ativo sem nenhum controle
+ * na tela que o explique — o mesmo filtro fantasma que o badge "Todos" já é obrigado a
+ * evitar (ele zera os DOIS params de propósito). Pela mesma razão o modo é DERIVADO:
+ * `ligado = escolha manual OU já há exclusão`, então preset salvo, link colado e o
+ * voltar do browser acendem o controle sozinhos, em vez de esconder o que aplicaram.
+ */
+function ExcludeModeToggle({
+  on,
+  onToggle,
+  dimension,
+  activeCount,
+}: {
+  on: boolean
+  onToggle: () => void
+  /** "de publicação" / "pessoal" — entra no rótulo acessível. */
+  dimension: string
+  activeCount: number
+}) {
+  // ⚠️ A dimensão entra nos DOIS estados: os dois cards desenham este botão lado a
+  // lado, e rótulo acessível idêntico deixa quem navega por leitor de tela (e o
+  // `getByRole` do teste) sem saber qual é qual.
+  const title = on
+    ? activeCount
+      ? `Sair do modo excluir status ${dimension} (remove ${activeCount === 1 ? "a exclusão" : `as ${activeCount} exclusões`})`
+      : `Sair do modo excluir status ${dimension}`
+    : `Excluir status ${dimension} em vez de selecionar`
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={on}
+      aria-label={title}
+      title={title}
+      className={cn(
+        "inline-flex h-6 items-center gap-1 rounded-full border px-2 text-[11px] font-medium transition-colors",
+        on
+          ? "border-primary/45 bg-primary/10 text-primary"
+          : "border-border/70 text-muted-foreground hover:border-border hover:text-foreground",
+      )}
+    >
+      <Minus className="h-3 w-3" />
+      Excluir
+    </button>
   )
 }
 
@@ -2339,13 +2432,19 @@ export function RankingFilters({
   basePath = "/ranking",
   defaultSort,
   savedPresets = [],
-  defaultBand = 0.5,
+  // 🔴 Nunca um literal aqui: este default é a MESMA afirmação que a constante medida
+  // e que o DEFAULT da coluna. Ele ficou em `0.5` depois que os outros dois foram para
+  // 0,25, e só não apareceu na tela porque o único consumidor que mostra a seção
+  // (`/ranking`) passa a prop — `/favorites` desliga com `showTierBand={false}`. O
+  // próximo consumidor que a mostrasse veria "0,5 (Padrão)" contra o 0,25 do /ranking.
+  defaultBand = DEFAULT_TIER_BAND_WIDTH,
   criterionPresets,
   criterionMoments,
   criterionRanges,
   confidenceVotes,
   showTopN = true,
   showTierBand = true,
+  showArtFilter = false,
   showAdultFilter = false,
 }: RankingFiltersProps) {
   /**
@@ -2358,6 +2457,18 @@ export function RankingFilters({
    * pequeno, e mais respiro dentro dos cards que ficam largos.
    */
   const roomy = !showTopN && !showTierBand
+  /**
+   * Colunas da LINHA 1 (Publicação · Status pessoal · Critérios gerais). O mínimo em px
+   * do 3º card é o que impede a trilha enxuta de esmagar Caps/Ano (194px de conteúdo +
+   * 40 de padding) em telas médias: com minmax(0,…) o card estourava 11px em 1280.
+   * A variante `ExcludeMode` é a compensação da zona "−" — ver a nota em `--l1cols2xl`.
+   */
+  const l1ColsBase = roomy
+    ? "minmax(0,1.2fr) minmax(0,2.15fr) minmax(240px,0.75fr)"
+    : "minmax(0,1.25fr) minmax(0,2.25fr) minmax(0,1.3fr)"
+  const l1ColsExcludeMode = roomy
+    ? "minmax(0,1.35fr) minmax(0,2fr) minmax(240px,0.75fr)"
+    : "minmax(0,1.4fr) minmax(0,2.1fr) minmax(0,1.3fr)"
   const router = useRouter()
   const appliedSearchParams = useSearchParams()
   const appliedSearchString = appliedSearchParams.toString()
@@ -2444,6 +2555,10 @@ export function RankingFilters({
   const hideAvoidedRaw = searchParams.get("hide_avoided")
   const hideAvoidedMode: "off" | "strong" | "all" =
     hideAvoidedRaw === "strong" || hideAvoidedRaw === "all" ? hideAvoidedRaw : "off"
+
+  // Estimativa de arte: lê do RASCUNHO como todo o resto do painel — navegar por fora dele
+  // apagaria a escolha no Aplicar seguinte.
+  const artMode = parseArtFilter(searchParams.get(ART_FILTER_PARAM)) ?? "off"
 
   // Top N (URL pode sobrescrever a preferência do DB). Alimenta o campo "Obras exibidas".
   const urlTopN = num(searchParams.get("top_n"))
@@ -2632,6 +2747,25 @@ export function RankingFilters({
   const setPersonalRule = (status: string, rule: StatusRule) =>
     applyStatusRule("personal", status, rule, allPersonalStatuses, perStatusDefaults)
 
+  /**
+   * Modo de exclusão, por card. Só a escolha MANUAL mora em state; o modo em vigor é
+   * derivado (`manual || já há exclusão`) para que exclusão vinda de fora — preset
+   * salvo, link colado, voltar do browser — nunca fique valendo com o controle
+   * apagado. Ver `ExcludeModeToggle`.
+   */
+  const [pubExcludeManual, setPubExcludeManual] = useState(false)
+  const [perExcludeManual, setPerExcludeManual] = useState(false)
+  const pubExcludeOn = pubExcludeManual || pubExcluded.size > 0
+  const perExcludeOn = perExcludeManual || perExcluded.size > 0
+  const toggleExcludeMode = (kind: StatusFilterKind) => {
+    const on = kind === "publication" ? pubExcludeOn : perExcludeOn
+    const setManual = kind === "publication" ? setPubExcludeManual : setPerExcludeManual
+    setManual(!on)
+    // Desligando: as exclusões saem junto — modo fechado com filtro de pé é filtro
+    // sem controle na tela.
+    if (on) updateParams({ [STATUS_FILTER_PARAMS[kind].exclude]: null })
+  }
+
   // O contador do cabeçalho conta só os status VISÍVEIS: a seleção pode carregar os
   // terminais (que não têm chip), e "(11)" com 10 chips na tela é contador fantasma.
   const selectedVisiblePerCount = visiblePersonalStatuses.filter((s) =>
@@ -2713,6 +2847,16 @@ export function RankingFilters({
       label: "Top N",
       values: [{ text: searchParams.get("top_n") as string }],
       onClear: () => updateParams({ top_n: null }),
+    })
+  }
+  if (showArtFilter && artMode !== "off") {
+    // Chip com o rótulo CURTO e o "(est.)" preservado: sem ele, a barra de filtros ativos
+    // afirmaria "Arte forte" como fato, que é a única leitura que a medição não sustenta.
+    activeFilterChips.push({
+      key: "art",
+      label: "Arte (estimada)",
+      values: [{ text: ART_FILTER_CHIP_LABELS[artMode] }],
+      onClear: () => updateParams({ [ART_FILTER_PARAM]: null }),
     })
   }
   pushRangeChip("chapters", LABELS.chapters_total.short, "min_chapters", "max_chapters")
@@ -3017,18 +3161,17 @@ export function RankingFilters({
               className="grid gap-3 lg:[grid-template-columns:var(--l1cols)] 2xl:[grid-template-columns:var(--l1cols2xl)]"
               style={
                 {
-                  // O mínimo em px é o que impede a trilha enxuta de esmagar
-                  // Caps/Ano (194px de conteúdo + 40 de padding) em telas médias:
-                  // com minmax(0,…) o card estourava 11px em 1280.
-                  ["--l1cols"]: roomy
-                    ? "minmax(0,1.2fr) minmax(0,2.15fr) minmax(240px,0.75fr)"
-                    : "minmax(0,1.25fr) minmax(0,2.25fr) minmax(0,1.3fr)",
+                  ["--l1cols"]: l1ColsBase,
                   /**
-                   * ⚠️ A partir de `2xl` Publicação ganha 0,15fr do Status pessoal.
+                   * ⚠️ A partir de `2xl` Publicação ganha 0,15fr do Status pessoal —
+                   * mas SÓ com o modo de exclusão ligado.
                    *
-                   * A zona "−" da exclusão engordou cada pill em ~22px, e Publicação (o
-                   * card mais estreito) caiu de 3 pills por linha para 2 — 3 linhas onde
-                   * a calibragem original previa 2.
+                   * A zona "−" engorda cada pill em ~22px, e Publicação (o card mais
+                   * estreito) cai de 3 pills por linha para 2 — 3 linhas onde a
+                   * calibragem original previa 2. Esta transferência existe para pagar
+                   * exatamente esses 22px: com a zona desligada ela não tem o que
+                   * compensar e passa a tirar largura do card de 10 pills à toa. Por
+                   * isso é DERIVADA do modo, e não uma segunda calibragem fixa.
                    *
                    * 🔴 Por que só em `2xl`, e não sempre: medido nas quatro larguras, a
                    * transferência é de graça em 1600+ (Publicação 3→2 linhas, altura da
@@ -3038,9 +3181,8 @@ export function RankingFilters({
                    * valor único que ganhe nos dois: em 1280 o Status pessoal já está no
                    * limite. Daí o breakpoint, em vez de escolher qual largura sacrificar.
                    */
-                  ["--l1cols2xl"]: roomy
-                    ? "minmax(0,1.35fr) minmax(0,2fr) minmax(240px,0.75fr)"
-                    : "minmax(0,1.4fr) minmax(0,2.1fr) minmax(0,1.3fr)",
+                  ["--l1cols2xl"]:
+                    pubExcludeOn || perExcludeOn ? l1ColsExcludeMode : l1ColsBase,
                 } as CSSProperties
               }
             >
@@ -3055,24 +3197,32 @@ export function RankingFilters({
                       : ""
               }`}
               headerAction={
-                <button
-                  type="button"
-                  // "Todos" tem que zerar os DOIS params: só apagar o positivo deixaria
-                  // a exclusão de pé por baixo de um badge que promete o catálogo todo.
-                  onClick={() =>
-                    updateParams({
-                      pub_status: isAllPublication ? null : "all",
-                      pub_status_exclude: null,
-                    })
-                  }
-                >
-                  <Badge
-                    variant={isAllPublication ? "default" : "outline"}
-                    className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
+                <div className="flex items-center gap-1.5">
+                  <ExcludeModeToggle
+                    on={pubExcludeOn}
+                    onToggle={() => toggleExcludeMode("publication")}
+                    dimension="de publicação"
+                    activeCount={pubExcluded.size}
+                  />
+                  <button
+                    type="button"
+                    // "Todos" tem que zerar os DOIS params: só apagar o positivo deixaria
+                    // a exclusão de pé por baixo de um badge que promete o catálogo todo.
+                    onClick={() =>
+                      updateParams({
+                        pub_status: isAllPublication ? null : "all",
+                        pub_status_exclude: null,
+                      })
+                    }
                   >
-                    Todos
-                  </Badge>
-                </button>
+                    <Badge
+                      variant={isAllPublication ? "default" : "outline"}
+                      className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
+                    >
+                      Todos
+                    </Badge>
+                  </button>
+                </div>
               }
             >
               {/* gap-1.5: cada 2px entre pills vale ~14px de linha nos 10 status pessoais. */}
@@ -3087,7 +3237,11 @@ export function RankingFilters({
                       active={on}
                       excluded={off}
                       onClick={() => setPublicationRule(s.status, on ? null : "include")}
-                      onExclude={() => setPublicationRule(s.status, off ? null : "exclude")}
+                      onExclude={
+                        pubExcludeOn
+                          ? () => setPublicationRule(s.status, off ? null : "exclude")
+                          : undefined
+                      }
                     />
                   )
                 })}
@@ -3105,22 +3259,30 @@ export function RankingFilters({
                       : ""
               }`}
               headerAction={
-                <button
-                  type="button"
-                  onClick={() =>
-                    updateParams({
-                      per_status: isAllPersonal ? null : "all",
-                      per_status_exclude: null,
-                    })
-                  }
-                >
-                  <Badge
-                    variant={isAllPersonal ? "default" : "outline"}
-                    className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
+                <div className="flex items-center gap-1.5">
+                  <ExcludeModeToggle
+                    on={perExcludeOn}
+                    onToggle={() => toggleExcludeMode("personal")}
+                    dimension="pessoais"
+                    activeCount={perExcluded.size}
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateParams({
+                        per_status: isAllPersonal ? null : "all",
+                        per_status_exclude: null,
+                      })
+                    }
                   >
-                    Todos
-                  </Badge>
-                </button>
+                    <Badge
+                      variant={isAllPersonal ? "default" : "outline"}
+                      className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
+                    >
+                      Todos
+                    </Badge>
+                  </button>
+                </div>
               }
             >
               <div className="flex flex-wrap gap-1.5">
@@ -3135,7 +3297,11 @@ export function RankingFilters({
                       excluded={off}
                       tooltip={getPersonalStatusDescription(s.status, s.comment)}
                       onClick={() => setPersonalRule(s.status, on ? null : "include")}
-                      onExclude={() => setPersonalRule(s.status, off ? null : "exclude")}
+                      onExclude={
+                        perExcludeOn
+                          ? () => setPersonalRule(s.status, off ? null : "exclude")
+                          : undefined
+                      }
                     />
                   )
                 })}
@@ -3266,7 +3432,7 @@ export function RankingFilters({
                   // isto (medido nas duas versões) — não foi introduzido aqui.
                   ["--l2cols"]: [
                     roomy ? "minmax(410px,1.15fr)" : "minmax(318px,1.6fr)",
-                    showHideAvoided || showAdultFilter
+                    showHideAvoided || showArtFilter || showAdultFilter
                       ? roomy
                         ? "minmax(350px,1fr)"
                         : "minmax(0,1.3fr)"
@@ -3362,7 +3528,7 @@ export function RankingFilters({
               </FilterSection>
 
               {/* Conteúdo exibido — filtros que escondem/mostram obras (tags evitadas + 18+) */}
-              {(showHideAvoided || showAdultFilter) && (
+              {(showHideAvoided || showArtFilter || showAdultFilter) && (
                 <FilterSection
                   title="Conteúdo exibido"
                   className="flex flex-col"
@@ -3408,6 +3574,48 @@ export function RankingFilters({
                           </div>
                         </TooltipProvider>
                       </div>
+                    )}
+
+                    {/*
+                      Arte ESTIMADA. É estimativa a partir de tags, reviews e do eixo "arte" do
+                      digest — nunca a arte olhada. Por isso o controle é de FAIXA e não de
+                      número: a estimativa é comprimida a ~0,49x a escala do rótulo, e um
+                      limiar em pontos devolveria 56% do catálogo onde a taxa real é 75%.
+
+                      🔴 Os dois lados tratam "sem estimativa" ao contrário — está nos tooltips
+                      porque é a diferença que a pessoa não tem como deduzir da tela.
+                    */}
+                    {showArtFilter && (
+                    <div className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 ${roomy ? "justify-between" : ""}`}>
+                      <Label
+                        className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground leading-tight"
+                        title="Estimativa de quanto você tende a gostar da arte, inferida de tags, reviews e do resumo de reviews. Não é uma avaliação da arte — e obra sem sinal fica sem estimativa."
+                      >
+                        Arte<br />(estimada)
+                      </Label>
+                      <TooltipProvider delayDuration={150} disableHoverableContent>
+                        <div className="inline-flex rounded-md border border-border/70 bg-background/60 p-0.5">
+                          <HideAvoidedSegment
+                            onSelect={() => updateParams({ [ART_FILTER_PARAM]: null })}
+                            active={artMode === "off"}
+                            label="Tudo"
+                            tooltip="Não filtra por arte."
+                          />
+                          <HideAvoidedSegment
+                            onSelect={() => updateParams({ [ART_FILTER_PARAM]: "forte" })}
+                            active={artMode === "forte"}
+                            label="Forte"
+                            tooltip="Só o topo 20% da estimativa. Obra SEM estimativa fica de fora — ninguém apurou que a arte dela é forte."
+                          />
+                          <HideAvoidedSegment
+                            onSelect={() => updateParams({ [ART_FILTER_PARAM]: "sem_fraca" })}
+                            active={artMode === "sem_fraca"}
+                            label="Sem fraca"
+                            tooltip="Esconde o fundo 20% da estimativa. Obra SEM estimativa CONTINUA aparecendo — esconder o que nunca foi medido tiraria obra da lista sem motivo."
+                          />
+                        </div>
+                      </TooltipProvider>
+                    </div>
                     )}
 
                     {showAdultFilter && (

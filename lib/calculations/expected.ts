@@ -108,9 +108,9 @@ const CATEGORICAL_FEATURE_NAMES = ["Status", "Origin"] as const
 const MIN_TRAIN = 20
 
 // Quais índices do feature vector pertencem a cada grupo (pra decomposição).
-// Categorical (Status one-hot) é considerado baseline. O número de quality
-// features é dinâmico por treino (includeQuality) — ver trainExpectedPredictor.
-const BASELINE_COUNT = BASELINE_NUMERIC_FEATURES.length
+// Categorical (Status one-hot) é considerado baseline. O tamanho dos blocos
+// baseline e quality é dinâmico por treino (includeArt / includeQuality) — a
+// contagem vive dentro de `trainExpectedPredictor`.
 
 export interface ExpectedScoreInput {
   // Baseline / perfil
@@ -133,6 +133,16 @@ export interface ExpectedScoreInput {
   origin: string
   // Quality (8 granulares; null pra obras não lidas → imputado pela mediana)
   postScores: Partial<Record<PostScoreField, number | null>>
+  /**
+   * EXPERIMENTAL — estimativa 0–10 da nota de arte, produzida por um modelo barato
+   * (tags + digest + léxico). Só entra no Ridge quando `includeArt` é ligado; sem o flag
+   * o campo é ignorado e o vetor de features é byte-idêntico ao de produção.
+   *
+   * 🔴 Quem preencher isto TEM que usar estimativa OUT-OF-FOLD. O rótulo de arte
+   * (`like_art_score`) é 1/7 do `user_score` que o Ridge prevê, nas MESMAS obras —
+   * uma estimativa in-sample põe 1/7 do alvo dentro das features e infla o ganho.
+   */
+  artEstimate?: number | null
 }
 
 export interface ExpectedDecomposition {
@@ -173,7 +183,11 @@ export interface TrainedExpectedPredictor {
   isStub: boolean
 }
 
-function buildNumericRow(input: ExpectedScoreInput, includeQuality = false): NumericRow {
+function buildNumericRow(
+  input: ExpectedScoreInput,
+  includeQuality = false,
+  includeArt = false,
+): NumericRow {
   const row: (number | null)[] = []
   for (const slug of CRITERION_SLUGS) {
     const v = input.categoryScores[slug as CriterionSlug]
@@ -190,6 +204,12 @@ function buildNumericRow(input: ExpectedScoreInput, includeQuality = false): Num
   row.push(input.criterionFitScore ?? null)
   row.push(input.releaseAge ?? null)
   row.push(input.runLength ?? null)
+  // ArtEstimate entra no BLOCO BASELINE (logo após RunLength) pra não deslocar os
+  // índices de quality/one-hot da decomposição. Ver `artEstimate` no input.
+  if (includeArt) {
+    const a = input.artEstimate
+    row.push(a == null || !Number.isFinite(a) ? null : a)
+  }
   // post_*_score (8 quality) — só entram no Ridge no plano Pago (L0+), quando
   // existem pra TODA obra (user pós-leitura OU estimativa IA pras não-lidas).
   // No Free ficam de fora (imputação→colapso nas não-lidas). Ver doc-comment.
@@ -218,6 +238,7 @@ export function trainExpectedPredictor(
   trainInputs: ExpectedScoreInput[],
   trainTargets: number[],
   includeQuality = false,
+  includeArt = false,
 ): TrainedExpectedPredictor {
   if (trainInputs.length !== trainTargets.length) {
     throw new Error("trainExpectedPredictor: inputs and targets length mismatch")
@@ -225,8 +246,12 @@ export function trainExpectedPredictor(
 
   // Feature set numérico depende do plano: Pago (includeQuality) adiciona os
   // 8 quality granulares; Free fica só nos 14 baseline.
+  const baselineFeatureNames: readonly string[] = includeArt
+    ? [...BASELINE_NUMERIC_FEATURES, "ArtEstimate"]
+    : BASELINE_NUMERIC_FEATURES
+  const baselineCount = baselineFeatureNames.length
   const qualityFeatureNames: readonly string[] = includeQuality ? POST_SCORE_FIELDS : []
-  const numericFeatureNames = [...BASELINE_NUMERIC_FEATURES, ...qualityFeatureNames]
+  const numericFeatureNames = [...baselineFeatureNames, ...qualityFeatureNames]
   const qualityCount = qualityFeatureNames.length
 
   // Stub fallback
@@ -262,7 +287,7 @@ export function trainExpectedPredictor(
     }
   }
 
-  const numericRows = trainInputs.map((inp) => buildNumericRow(inp, includeQuality))
+  const numericRows = trainInputs.map((inp) => buildNumericRow(inp, includeQuality, includeArt))
   const categoricalRows = trainInputs.map(buildCategoricalRow)
 
   const numImputer = new MedianImputer().fit(numericRows)
@@ -291,10 +316,10 @@ export function trainExpectedPredictor(
   //   [BASELINE_COUNT + QUALITY_COUNT .. featureDim)                 → Status one-hot (baseline)
   const featureDim = Xtrain[0]?.length ?? 0
   const baselineIndices: number[] = []
-  for (let i = 0; i < BASELINE_COUNT; i++) baselineIndices.push(i)
-  for (let i = BASELINE_COUNT + qualityCount; i < featureDim; i++) baselineIndices.push(i)
+  for (let i = 0; i < baselineCount; i++) baselineIndices.push(i)
+  for (let i = baselineCount + qualityCount; i < featureDim; i++) baselineIndices.push(i)
   const qualityIndices: number[] = []
-  for (let i = BASELINE_COUNT; i < BASELINE_COUNT + qualityCount; i++) qualityIndices.push(i)
+  for (let i = baselineCount; i < baselineCount + qualityCount; i++) qualityIndices.push(i)
 
   // Centróide do treino pra distance factor
   const centroid = new Array<number>(featureDim).fill(0)
@@ -314,7 +339,7 @@ export function trainExpectedPredictor(
   }
 
   function transform(inputs: ExpectedScoreInput[]): number[][] {
-    const numRows = inputs.map((inp) => buildNumericRow(inp, includeQuality))
+    const numRows = inputs.map((inp) => buildNumericRow(inp, includeQuality, includeArt))
     const catRows = inputs.map(buildCategoricalRow)
     const numImp = numImputer.transform(numRows)
     const numSc = numScaler.transform(numImp)
@@ -415,6 +440,7 @@ export function expectedOutOfFoldPredictions(
   targets: number[],
   includeQuality = false,
   kFolds = 5,
+  includeArt = false,
 ): number[] | null {
   if (inputs.length !== targets.length) {
     throw new Error("expectedOutOfFoldPredictions: inputs/targets length mismatch")
@@ -455,7 +481,7 @@ export function expectedOutOfFoldPredictions(
       }
     }
     if (trIn.length === 0 || teIn.length === 0) continue
-    const predictor = trainExpectedPredictor(trIn, trTg, includeQuality)
+    const predictor = trainExpectedPredictor(trIn, trTg, includeQuality, includeArt)
     if (predictor.isStub) {
       const fallback = trTg.length > 0 ? trTg.reduce((a, b) => a + b, 0) / trTg.length : 7.0
       for (const idx of teOrder) preds[idx] = fallback

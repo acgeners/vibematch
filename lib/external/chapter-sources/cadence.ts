@@ -71,7 +71,7 @@ export function predictNextFromAnchor(
 
 /**
  * Conveniência: âncora vinda de string relativa (comix "4d ago") + cadência do MangaDex.
- * Para âncora absoluta (coffeemanga), use `predictNextFromAnchor` direto.
+ * Para âncora absoluta (mangago), use `predictNextFromAnchor` direto.
  */
 export function predictNextRelease(opts: {
   anchorLabel: string | null | undefined

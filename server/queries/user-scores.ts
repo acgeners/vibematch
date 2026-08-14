@@ -55,6 +55,18 @@ export const PERSONAL_SCORE_FIELDS = [
   "mae_calc",
   "rmse_calc",
   "confidence",
+  /**
+   * 🔴 A estimativa de arte é PESSOAL, apesar de morar em `calculated_scores`: ela é treinada
+   * nos `like_art_score` DO DONO. Deixá-la passar pelo overlay publicaria o gosto dele por
+   * arte com cara de fato do catálogo — exatamente o que o doc-comment acima descreve.
+   *
+   * ⚠️ Não está no select de `loadUserScores` de propósito: `user_calculated_scores` ainda não
+   * tem a coluna. O efeito é o certo pro estado de hoje — pra quem não é o dono ela vira NULL
+   * e NÃO é restaurada, então a pessoa simplesmente não tem estimativa de arte, em vez de ter
+   * a de outra pessoa. Quando o recalc per-user aprender a estimar arte, a coluna entra lá e
+   * este campo passa a ser lido como os demais.
+   */
+  "art_percentile",
 ] as const
 
 export type PersonalScoreField = (typeof PERSONAL_SCORE_FIELDS)[number]

@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, it, expect, vi, afterEach } from "vitest"
 import {
   DEFAULT_TIER_BAND_WIDTH,
@@ -28,6 +30,68 @@ describe("DEFAULT_TIER_BAND_WIDTH", () => {
     // Com Δ 0,7 a Prevista já ordena 61% dos pares certo: usar o MAE como banda
     // agruparia obras que o modelo sabe separar. Ver o docstring do módulo.
     expect(DEFAULT_TIER_BAND_WIDTH).toBeLessThan(0.69)
+  })
+})
+
+/**
+ * 🔴 O código e o BANCO afirmam a mesma coisa, e quem vence é o banco.
+ *
+ * `resolveTierBandWidth` só usa a constante quando o valor persistido é ausente — e a
+ * coluna é NOT NULL. Então a constante sozinha não põe nada em vigor: quem manda é o
+ * DEFAULT da coluna (para banco novo) mais a linha existente.
+ *
+ * Foi exatamente aqui que a medição de 2026-08-06 se perdeu. A constante foi para 0,25,
+ * a mensagem do commit anunciou o UPDATE, e o UPDATE nunca rodou: uma semana depois
+ * LOCAL e NUVEM ainda estavam em 0,5 — o valor que a própria medição havia reprovado —
+ * com a suíte verde e nada acusando, porque nenhum teste olhava o outro lado do par.
+ *
+ * Este teste DERIVA o default do banco da migration mais recente que o define, em vez
+ * de repetir o número: migration nova que mexa na coluna entra na checagem sozinha.
+ */
+describe("o DEFAULT da coluna e a constante do código são o mesmo número", () => {
+  const dir = join(process.cwd(), "supabase/migrations")
+
+  /** A migration de maior número que define um DEFAULT para `tier_band_width`. */
+  function defaultVigenteNaMigration(): { arquivo: string; valor: number } {
+    const encontrados = readdirSync(dir)
+      .filter((f) => f.endsWith(".sql"))
+      .map((arquivo) => {
+        const sql = readFileSync(join(dir, arquivo), "utf8")
+        // Pega tanto `ADD COLUMN tier_band_width numeric NOT NULL DEFAULT x` quanto
+        // `ALTER COLUMN tier_band_width SET DEFAULT x`. Comentários com "DEFAULT" no
+        // meio da prosa não casam: exige o nome da coluna antes, na mesma statement.
+        const stmt = sql
+          .split(";")
+          .map((s) => s.replace(/^\s*--.*$/gm, ""))
+          .find((s) => /tier_band_width/.test(s) && /\bdefault\s+[\d.]+/i.test(s))
+        if (!stmt) return null
+        const valor = Number(/\bdefault\s+([\d.]+)/i.exec(stmt)?.[1])
+        const num = Number(arquivo.split("_")[0])
+        return Number.isFinite(valor) && Number.isFinite(num) ? { arquivo, valor, num } : null
+      })
+      .filter((x): x is { arquivo: string; valor: number; num: number } => x != null)
+      .sort((a, b) => a.num - b.num)
+
+    const ultima = encontrados.at(-1)
+    if (!ultima) throw new Error("nenhuma migration define DEFAULT para tier_band_width")
+    return { arquivo: ultima.arquivo, valor: ultima.valor }
+  }
+
+  it("um banco criado do zero nasce com a banda medida", () => {
+    const { arquivo, valor } = defaultVigenteNaMigration()
+    expect(
+      valor,
+      `${arquivo} deixa a coluna em ${valor}, mas DEFAULT_TIER_BAND_WIDTH é ${DEFAULT_TIER_BAND_WIDTH}`
+    ).toBe(DEFAULT_TIER_BAND_WIDTH)
+  })
+
+  it("a migration que troca o DEFAULT também corrige a linha existente", () => {
+    // Trocar só o DEFAULT não move o banco que já existe — e é o banco que já existe
+    // que serve o /ranking hoje.
+    const { arquivo } = defaultVigenteNaMigration()
+    const sql = readFileSync(join(dir, arquivo), "utf8")
+    if (!/set\s+default/i.test(sql)) return // a 104 cria a coluna; nada a atualizar
+    expect(sql).toMatch(/update\s+formula_config[\s\S]*tier_band_width\s*=/i)
   })
 })
 

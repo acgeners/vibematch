@@ -34,6 +34,8 @@ import { after } from "next/server"
 import { recordRankingSnapshots } from "@/lib/server/predictions/record-prediction"
 import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 import { readStatusFilter } from "@/lib/status-filter-toggle"
+import { parseArtFilter } from "@/lib/arte/url"
+import { getScoresReader } from "@/server/queries/user-scores"
 
 interface RankingPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -146,6 +148,8 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     "decision", "recommended",
     "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
     "alignment_score",
+    // Estimativa de arte — ordena pelo PERCENTIL (o valor cru nem chega ao cliente).
+    "art",
     // Plataforma
     "platform_avg", "total_votes",
     // Metadata
@@ -228,6 +232,13 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   const adultParam = str("adult")
   const adultFilter = adultParam === "hide" || adultParam === "only" ? adultParam : undefined
 
+  // Estimativa de arte (?art=forte|sem_fraca). Faixa, nunca pontos — ver lib/arte/url.ts.
+  const artFilter = parseArtFilter(str("art"))
+  // 🔴 Quem NÃO é o dono não tem estimativa de arte (o overlay a anula), então o controle
+  // não pode aparecer: "Forte" devolveria vazio, indistinguível de "não há obra com arte
+  // forte". `cache()` no reader ⇒ sem round-trip extra.
+  const artScoresReader = await getScoresReader()
+
   const filters: RankingFilters = {
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
     criterionMax: Object.keys(criterionMax).length ? criterionMax : undefined,
@@ -269,6 +280,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     onlyFavorites: str("fav") === "1",
     onlyRated,
     adultFilter,
+    artFilter,
     sortLevels,
   }
 
@@ -361,6 +373,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         availableGenres={allGenres}
         genreCatTypes={genreCatTypes}
         showHideAvoided
+        showArtFilter={artScoresReader.isOwner}
         availableTags={allTags}
         publicationStatuses={statusOptions.publicationStatuses}
         personalStatuses={statusOptions.personalStatuses}

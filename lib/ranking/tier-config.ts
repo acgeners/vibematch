@@ -60,6 +60,19 @@ import { z } from "zod"
  * 40 obras ocupam 1,27 ponto de amplitude. A banda controla se o agrupamento é
  * honesto; ela não cria separação que a nota não tem. Ver `why-this-work.ts`.
  *
+ * 🔴 **Esta constante sozinha NÃO põe nada em vigor, e por uma semana não pôs.** Ela é
+ * fallback: `resolveTierBandWidth` só a usa quando o valor persistido é ausente, e a
+ * coluna é `NOT NULL`. A medição acima entrou aqui em 2026-08-06 e o commit anunciou o
+ * `UPDATE` — que nunca rodou. Conferido em 2026-08-13: LOCAL e NUVEM ainda em **0,5**,
+ * com `updated_at` de 2026-07-23, ou seja duas semanas ANTES do commit. O /ranking
+ * agrupou o tempo todo na largura que a medição havia reprovado, com a suíte verde.
+ * Fechado pela **migration 190** (linha existente + DEFAULT da coluna) e guardado por
+ * `tests/unit/ranking/tier-config.test.ts`, que DERIVA o default da migration vigente.
+ *
+ * ⚠️ Ao mexer nesta constante, o par tem que andar junto: constante, DEFAULT da coluna
+ * e a linha que já existe nos dois bancos. Mudar só um lado é indistinguível de não
+ * mudar nada — o banco vence e nada acusa.
+ *
  * Remedir quando o número de obras avaliadas crescer bastante (hoje 206).
  */
 export const DEFAULT_TIER_BAND_WIDTH = 0.25

@@ -119,6 +119,41 @@ export async function getTasteScoresForWork(
   return { scores, endingNa: Boolean((data as Record<string, unknown> | null)?.ending_na) }
 }
 
+/**
+ * Os rótulos de ARTE de um usuário — as notas que treinam o estimador de arte.
+ *
+ * 🔴 `userId` EXPLÍCITO, nunca "o corrente". Isto roda dentro do `recalculateAll`, que é
+ * background sem sessão: resolver pelo usuário corrente cairia no singleton por fallback e o
+ * catálogo inteiro ganharia estimativas treinadas no gosto de outra pessoa — sem erro e sem
+ * log ([[gotcha-anonimo-vira-dono]]). Mesma exigência de `loadOwnerLabels` e `getBiasMap`.
+ *
+ * ⚠️ Paginado: o `select` do PostgREST corta em 1000 linhas sem avisar, e um treino
+ * silenciosamente truncado é indistinguível de "essa pessoa rotulou menos".
+ */
+export async function loadArtLabels(
+  userId: string,
+  client?: ReturnType<typeof createAdminClient>,
+): Promise<Map<string, number>> {
+  const sb = client ?? createAdminClient()
+  const out = new Map<string, number>()
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb
+      .from("pilot_taste_scores")
+      .select("work_id, like_art_score")
+      .eq("user_id", userId)
+      .not("like_art_score", "is", null)
+      .range(from, from + 999)
+    if (error) throw new Error(`loadArtLabels: ${error.message}`)
+    if (!data?.length) break
+    for (const r of data) {
+      const v = Number((r as { like_art_score?: unknown }).like_art_score)
+      if (Number.isFinite(v)) out.set((r as { work_id: string }).work_id, v)
+    }
+    if (data.length < 1000) break
+  }
+  return out
+}
+
 /** Todas as chaves presentes e nulas — a forma que o form espera quando não há nota. */
 function emptyTasteScores(): Record<TasteScoreKey, number | null> {
   return Object.fromEntries(TASTE_SCORE_KEYS.map((k) => [k, null])) as Record<
