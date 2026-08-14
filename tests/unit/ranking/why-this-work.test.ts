@@ -191,9 +191,9 @@ describe("whyThisWork — limiar", () => {
 
   it("corta logo abaixo do limiar e passa logo acima", () => {
     const moments: ForceMoments = { chance: { mean: 0, sd: 10 } }
-    // grupo de 2: média = (v + 50)/2, então z = (v − 50)/20
-    const abaixo = work({ chanceScore: 68, platformAvg: null, totalVotes: 0 }) // z = 0,9
-    const acima = work({ chanceScore: 72, platformAvg: null, totalVotes: 0 }) // z = 1,1
+    // grupo de 2: a média é a da OUTRA obra (50), então z = (v − 50)/10
+    const abaixo = work({ chanceScore: 59, platformAvg: null, totalVotes: 0 }) // z = 0,9
+    const acima = work({ chanceScore: 61, platformAvg: null, totalVotes: 0 }) // z = 1,1
     const base = work({ chanceScore: 50, platformAvg: null, totalVotes: 0 })
     expect(whyThisWork(abaixo, [abaixo, base], moments)).toBeNull()
     expect(whyThisWork(acima, [acima, base], moments)).not.toBeNull()
@@ -201,10 +201,55 @@ describe("whyThisWork — limiar", () => {
 
   it("aceita limiar customizado", () => {
     const moments: ForceMoments = { chance: { mean: 0, sd: 10 } }
-    const a = work({ chanceScore: 68, platformAvg: null, totalVotes: 0 })
+    const a = work({ chanceScore: 59, platformAvg: null, totalVotes: 0 }) // z = 0,9
     const b = work({ chanceScore: 50, platformAvg: null, totalVotes: 0 })
     expect(whyThisWork(a, [a, b], moments)).toBeNull()
     expect(whyThisWork(a, [a, b], moments, { threshold: 0.5 })).not.toBeNull()
+  })
+})
+
+describe("whyThisWork — a média é a das OUTRAS, não a do grupo", () => {
+  const moments: ForceMoments = { chance: { mean: 0, sd: 10 } }
+
+  /**
+   * 🔴 A regressão que este bloco existe para impedir.
+   *
+   * Com a média INCLUSIVA o desvio saía encolhido por `(k−1)/k` — ×0,50 num par. A
+   * obra abaixo está a **exatamente 1σ** da única companheira de tier, e mesmo assim
+   * ficava sem separador, porque a média contra a qual ela era medida já continha
+   * metade dela. O empate de duas é o caso que a coluna existe para resolver.
+   */
+  it("num par, 1σ de distância da outra obra JÁ separa (antes precisava de 2σ)", () => {
+    const alta = work({ chanceScore: 60, platformAvg: null, totalVotes: 0 })
+    const baixa = work({ chanceScore: 50, platformAvg: null, totalVotes: 0 })
+    const sep = whyThisWork(alta, [alta, baixa], moments)
+    expect(sep).not.toBeNull()
+    expect(sep?.z).toBeCloseTo(1, 6) // com a média inclusiva daria 0,5 → null
+  })
+
+  it("o encolhimento sumiu: o mesmo par dá o mesmo z em grupos de tamanhos diferentes", () => {
+    // Média das outras = 50 nos dois casos, então z = 1 nos dois. Com a média
+    // inclusiva daria 0,50 no par e 0,67 no trio — o mesmo fato, dois números.
+    const alta = work({ chanceScore: 60, platformAvg: null, totalVotes: 0 })
+    const b = work({ chanceScore: 50, platformAvg: null, totalVotes: 0 })
+    const c = work({ chanceScore: 50, platformAvg: null, totalVotes: 0 })
+    expect(whyThisWork(alta, [alta, b], moments)?.z).toBeCloseTo(1, 6)
+    expect(whyThisWork(alta, [alta, b, c], moments)?.z).toBeCloseTo(1, 6)
+  })
+
+  /**
+   * ⚠️ O `rank` continua olhando o grupo INTEIRO. Tirar a obra da base do máximo
+   * faria toda obra ser o próprio máximo, e "a mais alta do grupo" viraria sempre
+   * verdade — a afirmação mais forte da coluna, sempre impressa.
+   */
+  it("'a mais alta' segue exigindo ser o máximo ÚNICO do grupo", () => {
+    const a = work({ chanceScore: 60, platformAvg: null, totalVotes: 0 })
+    const empatada = work({ chanceScore: 60, platformAvg: null, totalVotes: 0 })
+    const baixa = work({ chanceScore: 30, platformAvg: null, totalVotes: 0 })
+    // a e empatada dividem o topo → nenhuma pode dizer "a mais alta"
+    expect(whyThisWork(a, [a, empatada, baixa], moments)?.rank).toBe("above")
+    // sozinha no topo → pode
+    expect(whyThisWork(a, [a, baixa], moments)?.rank).toBe("max")
   })
 })
 
