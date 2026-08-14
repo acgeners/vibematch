@@ -17,6 +17,8 @@ import { selectByIdsInChunks, fetchAllRows } from "@/lib/supabase/paginate"
 import { titleTokens, workMatchesQuery } from "@/lib/title-match"
 import { roundToDisplayScore } from "@/lib/score-rounding"
 import { compareWithinTierTieBreak } from "@/lib/ranking/build-tiers"
+import { artBandFromPercentile, type ArtBand } from "@/lib/arte/model"
+import { artFilterMatches } from "@/lib/arte/url"
 import { INTEREST_NONE, matchesManualInterest, matchesPredictedInterest } from "@/lib/interest-sentinels"
 import { isTerminalPersonalStatus } from "@/lib/constants/status-lookups"
 import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
@@ -67,6 +69,18 @@ export interface RankingEntry {
    * loved/avoided ou pré-migration 116.
    */
   tagOverlapNet: number | null
+  /**
+   * Posição da estimativa de arte no catálogo (0–1). É esta a grandeza que ordena e filtra —
+   * a estimativa em PONTOS não vem no select de propósito: ela é comprimida a ~0,49× a escala
+   * do rótulo, e um limiar em pontos devolve 56% do catálogo onde a taxa real é 75%. Não
+   * trazer o valor cru é o que impede alguém de exibi-lo como se fosse nota.
+   *
+   * NULL = sem estimativa (obra sem sinal de arte, modelo abaixo do piso, ou quem está olhando
+   * não é o dono). Terceiro estado, nunca "média".
+   */
+  artPercentile: number | null
+  /** Faixa derivada do percentil (20/60/20). NULL quando não há estimativa. */
+  artBand: ArtBand | null
   alignmentScore: number | null
   alignmentJustification: string | null
   alignmentAt: string | null
@@ -140,6 +154,7 @@ export type RankingSortBy =
   | "last_read_at"
   | "personal_fit"
   | "alignment_score"
+  | "art"
   | `crit_${string}`
 
 export interface SortLevel {
@@ -242,6 +257,19 @@ export interface RankingFilters {
    *  Default false (mantém semântica de "ranking de o que ler"). Páginas tipo
    *  /titles e /favorites devem passar true. */
   includeFinishedDropped?: boolean
+  /**
+   * Filtro por ESTIMATIVA DE ARTE (?art=). Nunca em pontos — a estimativa é comprimida a
+   * ~0,49x a escala do rótulo, e um limiar em pontos devolve 56% do catálogo onde a taxa real
+   * é 75%. Por isso o valor é a FAIXA (percentil 20/60/20), e por isso não usa a família
+   * `min_<slug>`/`max_<slug>`, que é contrato em pontos dos 9 atributos.
+   *
+   * 🔴 Os dois tratam "sem estimativa" de forma OPOSTA, e é de propósito:
+   * - "forte": só a faixa de cima. Obra sem estimativa NÃO passa — ninguém apurou que ela é
+   *   forte, e um filtro positivo que aceita desconhecido devolve o que não foi pedido.
+   * - "sem_fraca": esconde só a faixa de baixo. Obra sem estimativa PASSA — esconder o que
+   *   nunca foi medido apagaria 2,4% do catálogo em silêncio (e 100% antes da semente).
+   */
+  artFilter?: "forte" | "sem_fraca"
   sortBy?: RankingSortBy
   sortDir?: "asc" | "desc"
   sortLevels?: SortLevel[]
@@ -553,7 +581,7 @@ export async function getRanking(
         hiatus_kind, hiatus_kind_confidence, publication_status_note,
         total_chapters, is_archived, is_adult,
         canonical_synopsis, year, updated_at,
-        calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, chance_score, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
+        calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, chance_score, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, art_percentile, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
         category_scores(criterion_slug, score),
         work_covers(url, is_primary, position)
       `)
@@ -674,6 +702,8 @@ export async function getRanking(
       personalFit: w.calculated_scores?.personal_fit ?? null,
       personalFitPercentile: w.calculated_scores?.personal_fit_percentile ?? null,
       tagOverlapNet: w.calculated_scores?.tag_overlap_net ?? null,
+      artPercentile: w.calculated_scores?.art_percentile ?? null,
+      artBand: artBandFromPercentile(w.calculated_scores?.art_percentile ?? null),
       alignmentScore: w.calculated_scores?.alignment_score ?? null,
       alignmentJustification: w.calculated_scores?.alignment_justification ?? null,
       alignmentAt: w.calculated_scores?.alignment_at ?? null,
@@ -860,6 +890,13 @@ export async function getRanking(
     const max = filters.maxAlignment
     entries = entries.filter((e) => e.alignmentScore == null || e.alignmentScore <= max)
   }
+  // Arte: a regra (inclusive o que fazer com "sem estimativa") mora em `artFilterMatches`,
+  // que é o dono único e o que os testes exercitam. Reescrevê-la aqui é como as duas metades
+  // da assimetria acabam trocadas.
+  if (filters.artFilter) {
+    const f = filters.artFilter
+    entries = entries.filter((e) => artFilterMatches(e.artBand, f))
+  }
   if (filters.minPlatformAvg != null) {
     const min = filters.minPlatformAvg
     entries = entries.filter((e) => e.platformAvg != null && e.platformAvg >= min)
@@ -899,6 +936,10 @@ export async function getRanking(
     "recommended",
     "decision",
     "personal_fit",
+    // A arte é estimada a partir dos rótulos DO DONO: para quem não é ele, `artPercentile`
+    // vem null pelo overlay, e ordenar por um campo todo-null devolveria o catálogo em ordem
+    // arbitrária com cara de "ordenado por arte".
+    "art",
     "alignment_score",
     "chance_score",
   ])
@@ -947,6 +988,12 @@ export async function getRanking(
       const av = a.alignmentScore ?? -Infinity
       const bv = b.alignmentScore ?? -Infinity
       return m * (av - bv)
+    }
+    // Arte ordena pelo PERCENTIL, nunca pela estimativa em pontos — que nem chega aqui, por
+    // não vir no select. Sem estimativa vai pro fim em `desc` (o -Infinity), que é o certo:
+    // "não sei" não disputa as primeiras posições com "provavelmente forte".
+    if (field === "art") {
+      return m * ((a.artPercentile ?? -Infinity) - (b.artPercentile ?? -Infinity))
     }
     if (field === "total_votes") return m * (a.totalVotes - b.totalVotes)
     if (field === "chapters_total" || field === "chapters")

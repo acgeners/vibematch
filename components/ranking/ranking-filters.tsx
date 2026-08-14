@@ -44,6 +44,7 @@ import type { StatusFilterKind, StatusRule } from "@/lib/status-filter-toggle"
 import { ActiveFilterChips } from "@/components/ranking/active-filter-chips"
 import { CollapseIconTrigger, CollapseTitleTrigger } from "@/components/ui/collapse-trigger"
 import type { ActiveFilterChip, ActiveFilterValue } from "@/components/ranking/active-filter-chips"
+import { ART_FILTER_CHIP_LABELS, ART_FILTER_PARAM, parseArtFilter } from "@/lib/arte/url"
 
 interface SavedFilterPreset {
   id: string
@@ -90,6 +91,9 @@ const SORTABLE_FIELD_GROUPS: Array<{ label: string; fields: Array<{ value: strin
       { value: "total_votes", label: LABELS.total_votes.short },
       { value: "synopsis_q", label: LABELS.synopsis_q.short },
       { value: "synopsis_pred", label: LABELS.synopsis_pred.short },
+      // Ordena pelo PERCENTIL da estimativa. "(est.)" no rótulo é obrigatório: sem ele, a
+      // opção promete uma nota de arte que não existe.
+      { value: "art", label: "Arte (est.)" },
     ],
   },
   {
@@ -459,6 +463,18 @@ interface RankingFiltersProps {
    *  um controle que marca e não filtra, sem erro nenhum.
    *  (Esta linha já disse "só /ranking"; o /favorites passou a parsear e ela ficou
    *  para trás — confira na página antes de confiar.) */
+  /**
+   * Mostra o segmentado "Arte (estimada)" (?art=forte|sem_fraca).
+   *
+   * 🔴 Gate por DONO, e não por preferência: a estimativa de arte é treinada nos rótulos
+   * `like_art_score` DELE, então `art_percentile` chega null pelo overlay para todo mundo
+   * mais. Sem o gate, um visitante veria o controle e o "Forte" devolveria lista vazia — que
+   * é indistinguível de "não existe obra com arte forte".
+   *
+   * ⚠️ `isOwner` é o proxy CERTO hoje e ERRADO amanhã: quando o recalc per-user aprender a
+   * estimar arte, isto vira "tem modelo de arte", como `PERSONAL_SORT_FIELDS` já faz.
+   */
+  showArtFilter?: boolean
   showAdultFilter?: boolean
 }
 
@@ -2346,6 +2362,7 @@ export function RankingFilters({
   confidenceVotes,
   showTopN = true,
   showTierBand = true,
+  showArtFilter = false,
   showAdultFilter = false,
 }: RankingFiltersProps) {
   /**
@@ -2444,6 +2461,10 @@ export function RankingFilters({
   const hideAvoidedRaw = searchParams.get("hide_avoided")
   const hideAvoidedMode: "off" | "strong" | "all" =
     hideAvoidedRaw === "strong" || hideAvoidedRaw === "all" ? hideAvoidedRaw : "off"
+
+  // Estimativa de arte: lê do RASCUNHO como todo o resto do painel — navegar por fora dele
+  // apagaria a escolha no Aplicar seguinte.
+  const artMode = parseArtFilter(searchParams.get(ART_FILTER_PARAM)) ?? "off"
 
   // Top N (URL pode sobrescrever a preferência do DB). Alimenta o campo "Obras exibidas".
   const urlTopN = num(searchParams.get("top_n"))
@@ -2713,6 +2734,16 @@ export function RankingFilters({
       label: "Top N",
       values: [{ text: searchParams.get("top_n") as string }],
       onClear: () => updateParams({ top_n: null }),
+    })
+  }
+  if (showArtFilter && artMode !== "off") {
+    // Chip com o rótulo CURTO e o "(est.)" preservado: sem ele, a barra de filtros ativos
+    // afirmaria "Arte forte" como fato, que é a única leitura que a medição não sustenta.
+    activeFilterChips.push({
+      key: "art",
+      label: "Arte (estimada)",
+      values: [{ text: ART_FILTER_CHIP_LABELS[artMode] }],
+      onClear: () => updateParams({ [ART_FILTER_PARAM]: null }),
     })
   }
   pushRangeChip("chapters", LABELS.chapters_total.short, "min_chapters", "max_chapters")
@@ -3266,7 +3297,7 @@ export function RankingFilters({
                   // isto (medido nas duas versões) — não foi introduzido aqui.
                   ["--l2cols"]: [
                     roomy ? "minmax(410px,1.15fr)" : "minmax(318px,1.6fr)",
-                    showHideAvoided || showAdultFilter
+                    showHideAvoided || showArtFilter || showAdultFilter
                       ? roomy
                         ? "minmax(350px,1fr)"
                         : "minmax(0,1.3fr)"
@@ -3362,7 +3393,7 @@ export function RankingFilters({
               </FilterSection>
 
               {/* Conteúdo exibido — filtros que escondem/mostram obras (tags evitadas + 18+) */}
-              {(showHideAvoided || showAdultFilter) && (
+              {(showHideAvoided || showArtFilter || showAdultFilter) && (
                 <FilterSection
                   title="Conteúdo exibido"
                   className="flex flex-col"
@@ -3408,6 +3439,48 @@ export function RankingFilters({
                           </div>
                         </TooltipProvider>
                       </div>
+                    )}
+
+                    {/*
+                      Arte ESTIMADA. É estimativa a partir de tags, reviews e do eixo "arte" do
+                      digest — nunca a arte olhada. Por isso o controle é de FAIXA e não de
+                      número: a estimativa é comprimida a ~0,49x a escala do rótulo, e um
+                      limiar em pontos devolveria 56% do catálogo onde a taxa real é 75%.
+
+                      🔴 Os dois lados tratam "sem estimativa" ao contrário — está nos tooltips
+                      porque é a diferença que a pessoa não tem como deduzir da tela.
+                    */}
+                    {showArtFilter && (
+                    <div className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 ${roomy ? "justify-between" : ""}`}>
+                      <Label
+                        className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground leading-tight"
+                        title="Estimativa de quanto você tende a gostar da arte, inferida de tags, reviews e do resumo de reviews. Não é uma avaliação da arte — e obra sem sinal fica sem estimativa."
+                      >
+                        Arte<br />(estimada)
+                      </Label>
+                      <TooltipProvider delayDuration={150} disableHoverableContent>
+                        <div className="inline-flex rounded-md border border-border/70 bg-background/60 p-0.5">
+                          <HideAvoidedSegment
+                            onSelect={() => updateParams({ [ART_FILTER_PARAM]: null })}
+                            active={artMode === "off"}
+                            label="Tudo"
+                            tooltip="Não filtra por arte."
+                          />
+                          <HideAvoidedSegment
+                            onSelect={() => updateParams({ [ART_FILTER_PARAM]: "forte" })}
+                            active={artMode === "forte"}
+                            label="Forte"
+                            tooltip="Só o topo 20% da estimativa. Obra SEM estimativa fica de fora — ninguém apurou que a arte dela é forte."
+                          />
+                          <HideAvoidedSegment
+                            onSelect={() => updateParams({ [ART_FILTER_PARAM]: "sem_fraca" })}
+                            active={artMode === "sem_fraca"}
+                            label="Sem fraca"
+                            tooltip="Esconde o fundo 20% da estimativa. Obra SEM estimativa CONTINUA aparecendo — esconder o que nunca foi medido tiraria obra da lista sem motivo."
+                          />
+                        </div>
+                      </TooltipProvider>
+                    </div>
                     )}
 
                     {showAdultFilter && (

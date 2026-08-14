@@ -3,6 +3,8 @@
 import { useState, useMemo, useTransition, useEffect, useRef } from "react"
 import { useRefresh } from "@/lib/use-refresh"
 import { toast } from "sonner"
+import { runTask, setTaskProgress } from "@/lib/tasks-store"
+import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import {
   RefreshCw,
   Loader2,
@@ -52,6 +54,31 @@ import type { ReadingWork } from "@/server/queries/reading"
 
 type SortKey = "last_read" | "released" | "predicted" | "progress"
 type SectionKey = "ongoing" | "others"
+
+/**
+ * "Verificar atualizações" é tarefa DURÁVEL: ela grava `total_chapters`, o status de
+ * publicação e as datas de capítulo enquanto roda. Pela régua das duas cores, isso é
+ * AZUL — indicador global, "pode navegar" — e não um spinner preso no botão. Estava
+ * num `useTransition` local, que some na navegação e não conta nada; com ~40s de
+ * duração, isso é justamente a informação que falta.
+ *
+ * ⚠️ O que sobrevive à navegação é o que foi PERSISTIDO (capítulos, status, datas), não
+ * o realce de "capítulo novo" desta sessão — esse mora em `results`, que é estado de
+ * componente. Sair e voltar mostra os totais atualizados sem os anéis; é aceito, e é a
+ * razão de a faixa do topo não ser a única forma de ver a novidade.
+ */
+const CHECK_TASK_ID = "reading-check"
+
+/**
+ * Obras por rodada. O contador do card precisa de alguém que ITERE — o `runTask` não
+ * conta sozinho —, então a checagem vai em fatias e cada uma reporta o andamento.
+ *
+ * ⚠️ Múltiplo do teto do servidor (`CHECK_CONCURRENCY = 3` em `server/actions/reading.ts`):
+ * fatia menor deixa slot ocioso e fatia quebrada termina cada rodada com o pool pela
+ * metade. Duas rodadas por fatia dão passo de ~5–7s — fino o bastante pra barra andar,
+ * grosso o bastante pra não pagar ida-e-volta de server action por obra.
+ */
+const CHECK_CHUNK = 6
 
 // Rótulo PT curto pros status que a checagem pode APLICAR (transições de fim/hiato).
 const APPLIED_STATUS_LABEL: Record<string, string> = {
@@ -110,7 +137,7 @@ function newChapterCount(result: ReadingUpdateResult | undefined): number {
 
 /**
  * Quantos capítulos lançados ainda não foram lidos. Preferência: contagem EXATA da
- * lista real (coffeemanga, pós-check), mas só enquanto `read` for o valor salvo — depois
+ * lista real (mangago, pós-check), mas só enquanto `read` for o valor salvo — depois
  * de uma edição in-loco ela fica velha e recomputamos por `lançado − lido`. `null` quando
  * não dá pra saber.
  */
@@ -406,7 +433,8 @@ export function ReadingList({
 }) {
   const refresh = useRefresh()
   const [results, setResults] = useState<Record<string, ReadingUpdateResult>>({})
-  const [checking, startCheck] = useTransition()
+  const tasks = useAppTasks()
+  const checking = tasks.some((t) => t.id === CHECK_TASK_ID && t.status === "running")
   const [readFilter, setReadFilter] = useState<string>("all")
   const [sortBy, setSortBy] = useState<SortKey>("last_read")
   // Otimista: marca "agora" assim que a checagem termina (antes do refresh trazer o persistido).
@@ -537,32 +565,59 @@ export function ReadingList({
   }
 
   const handleCheckAll = () => {
-    startCheck(async () => {
-      try {
-        const res = await checkReadingUpdates(works.map((w) => w.id))
-        const map: Record<string, ReadingUpdateResult> = {}
-        for (const r of res) map[r.workId] = r
-        setResults(map)
+    const ids = works.map((w) => w.id)
+    const total = ids.length
+    const chunks: string[][] = []
+    for (let i = 0; i < ids.length; i += CHECK_CHUNK) chunks.push(ids.slice(i, i + CHECK_CHUNK))
+
+    // Nomeia as OBRAS nos toasts (novidade e falha): até 3 títulos + "e mais N". O toast
+    // é global; sem os nomes ele só dava a contagem — "2 obras com capítulo novo" sem
+    // dizer quais — e "N não verificadas" parecia uma fonte externa fora do ar (a falha
+    // é por OBRA: nenhuma fonte de capítulo respondeu por ela).
+    const titleById = new Map(works.map((w) => [w.id, w.title]))
+    const formatNames = (rows: ReadingUpdateResult[]): string => {
+      const names = rows.map((r) => titleById.get(r.workId)).filter((t): t is string => !!t)
+      if (names.length === 0) return ""
+      const shown = names.slice(0, 3).join(", ")
+      return names.length > 3 ? `${shown} e mais ${names.length - 3}` : shown
+    }
+
+    runTask({
+      id: CHECK_TASK_ID,
+      kind: "reading-check",
+      label: `Verificando capítulos: ${total} obra${total !== 1 ? "s" : ""}`,
+      run: async () => {
+        setResults({})
+        setTaskProgress(CHECK_TASK_ID, 0, total)
+        const all: ReadingUpdateResult[] = []
+        for (const [i, chunk] of chunks.entries()) {
+          const res = await checkReadingUpdates(chunk)
+          // 🔴 A action devolve `[]` sem lançar quando o gate de admin recusa. Sem este
+          // throw, o indicador anunciaria "pronto" pra uma checagem que não aconteceu —
+          // plausível, errado e sem log.
+          if (res.length === 0) {
+            throw new Error("nenhuma obra foi verificada (sem permissão ou sessão expirada)")
+          }
+          all.push(...res)
+          // Mescla por fatia: os cards acendem enquanto o resto ainda roda, em vez de a
+          // lista ficar 40s parada e mudar tudo de uma vez no fim.
+          setResults((prev) => {
+            const next = { ...prev }
+            for (const r of res) next[r.workId] = r
+            return next
+          })
+          setTaskProgress(CHECK_TASK_ID, Math.min((i + 1) * CHECK_CHUNK, total), total)
+        }
+        return all
+      },
+      onDone: (res) => {
         setJustCheckedAt(new Date().toISOString())
-        const newWorks = res.filter((r) => r.hasNew)
         const failedWorks = res.filter((r) => r.failed)
-        const news = newWorks.length
-        const statusChanges = res.filter((r) => r.statusApplied).length
         setLastCheckFailed(failedWorks.length > 0)
 
-        // Nomeia as OBRAS nos toasts (novidade e falha): até 3 títulos + "e mais N". O toast
-        // é global; sem os nomes ele só dava a contagem — "2 obras com capítulo novo" sem
-        // dizer quais — e "N não verificadas" parecia uma fonte externa fora do ar (a falha
-        // é por OBRA: nenhuma fonte de capítulo respondeu por ela).
-        const titleById = new Map(works.map((w) => [w.id, w.title]))
-        const formatNames = (rows: ReadingUpdateResult[]): string => {
-          const names = rows
-            .map((r) => titleById.get(r.workId))
-            .filter((t): t is string => !!t)
-          if (names.length === 0) return ""
-          const shown = names.slice(0, 3).join(", ")
-          return names.length > 3 ? `${shown} e mais ${names.length - 3}` : shown
-        }
+        const newWorks = res.filter((r) => r.hasNew)
+        const news = newWorks.length
+        const statusChanges = res.filter((r) => r.statusApplied).length
 
         const descParts: string[] = []
         const newNames = formatNames(newWorks)
@@ -577,9 +632,8 @@ export function ReadingList({
           )
         }
 
-        // Verde só quando houve novidade; caiu em aviso quando o único destaque é falha.
-        const notify =
-          news === 0 && failedWorks.length > 0 ? toast.warning : toast.success
+        // Verde só quando houve novidade; cai em aviso quando o único destaque é falha.
+        const notify = news === 0 && failedWorks.length > 0 ? toast.warning : toast.success
         notify(
           news > 0
             ? `${news} obra${news !== 1 ? "s" : ""} com capítulo novo`
@@ -587,15 +641,18 @@ export function ReadingList({
           descParts.length > 0 ? { description: descParts.join(" · ") } : undefined,
         )
         refresh() // traz hids recém-persistidos pra próxima carga
-      } catch (err) {
-        // Falha total (nada verificado): marca "agora" como a última tentativa e pinta
-        // de vermelho — foi uma verificação, e ela deu erro.
+      },
+      onError: () => {
+        // Falha no meio: marca "agora" como a última tentativa e pinta de vermelho — foi
+        // uma verificação, e ela deu erro. As fatias que passaram já estão persistidas.
         setJustCheckedAt(new Date().toISOString())
         setLastCheckFailed(true)
-        toast.error("Falha ao verificar atualizações", {
-          description: err instanceof Error ? err.message : undefined,
-        })
-      }
+        refresh()
+      },
+      // ⚠️ O desfecho tem TRÊS tons (novidade / nada / parcial com falhas) e o toast padrão
+      // do store é sempre `success` — ele achataria "29 não verificadas" em verde. Quem
+      // emite é o `onDone` acima, que roda antes desta linha.
+      successToast: () => null,
     })
   }
 
@@ -1173,7 +1230,7 @@ function ReadingCard({
 
   // "Continuar lendo" → fonte com o cap mais recente (pós-check); senão comix por hid (load).
   const readUrl = result?.latestUrl ?? (work.comixHid ? comixUrlFor(work.comixHid) : null)
-  // Data do último cap: absoluta da fonte (coffeemanga) ou relativa da comix pós-check;
+  // Data do último cap: absoluta da fonte (mangago) ou relativa da comix pós-check;
   // senão a cacheada no DB (load).
   const releasedAge = result?.releasedAt
     ? formatRelativeDate(result.releasedAt)

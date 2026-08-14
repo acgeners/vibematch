@@ -2,7 +2,7 @@ import type { PublicationStatus } from "@/types/domain"
 
 // As fontes de capítulo são um registro próprio (checadoras de release),
 // desacoplado do `ExternalSourceId` (gerado por DB pro pipeline de metadata/IA).
-export type ChapterSourceId = "comix" | "coffeemanga" | "mangago"
+export type ChapterSourceId = "comix" | "mangago"
 
 /** IDs cross-source salvos da obra, usados pra confirmar o match do comix por igualdade. */
 export interface ChapterCrossIds {
@@ -34,11 +34,11 @@ export type ChapterLookup = {
   resolvedHid?: string | null
   /** Data relativa do último capítulo (string pré-formatada da fonte, ex.: "8mos ago"). */
   releasedLabel?: string | null
-  /** Data absoluta (ISO) do último capítulo, quando a fonte fornece (ex.: coffeemanga). */
+  /** Data absoluta (ISO) do último capítulo, quando a fonte fornece (hoje só o mangago). */
   releasedAt?: string | null
-  /** Datas absolutas (ISO, desc) dos caps recentes — pra cadência (ex.: coffeemanga). */
+  /** Datas absolutas (ISO, desc) dos caps recentes — pra cadência (hoje só o mangago). */
   cadenceDates?: string[]
-  /** Lista completa de números de capítulo (desc) — pra CONTAR caps de verdade (só coffeemanga fornece). */
+  /** Lista completa de números de capítulo (desc) — pra CONTAR caps de verdade (só o mangago fornece). */
   chapterNumbers?: number[]
   /** Status de publicação declarado pela fonte (só o comix fornece). */
   status?: PublicationStatus | null

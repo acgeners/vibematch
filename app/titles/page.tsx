@@ -13,6 +13,7 @@ import { TitleFilters } from "@/components/titles/title-filters"
 import { WorkTable } from "@/components/titles/work-table"
 import { Button } from "@/components/ui/button"
 import { CRITERION_SLUGS } from "@/types/domain"
+import { parseArtFilter } from "@/lib/arte/url"
 
 interface TitlesPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -90,12 +91,16 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
   const adultParam = str("adult")
   const adultFilter = adultParam === "hide" || adultParam === "only" ? adultParam : undefined
 
+  // Estimativa de arte (?art=forte|sem_fraca). Faixa, nunca pontos — ver lib/arte/url.ts.
+  const artFilter = parseArtFilter(str("art"))
+
   const filters: RankingFilters = {
     search: str("search"),
     includeArchived: str("archived") === "1",
     // "Só avaliadas" (?rated=1): obras com nota pessoal.
     onlyRated: str("rated") === "1",
     adultFilter,
+    artFilter,
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
     criterionMax: Object.keys(criterionMax).length ? criterionMax : undefined,
     publicationStatus,

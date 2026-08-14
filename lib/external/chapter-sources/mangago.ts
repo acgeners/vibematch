@@ -11,7 +11,7 @@ import type { ChapterCheckInput, ChapterLookup } from "./types"
  * confirme a fonte Mangago na seleção de fontes — aí o slug fica salvo e vira match exato.
  *
  * Traz a lista real de capítulos (`chapterNumbers`) → contagem exata quando o Mangago é
- * a fonte vencedora (obra que não está no comix/coffeemanga).
+ * a fonte vencedora (obra que não está no comix).
  */
 export async function getMangagoLatestChapter(
   input: ChapterCheckInput,

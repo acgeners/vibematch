@@ -7,6 +7,7 @@ import { comixWorkUrl } from "@/lib/external/comix"
 import { fetchMangaDexChapterDates } from "@/lib/external/mangadex"
 import { fetchMangaUpdatesStatus } from "@/lib/external/mangaupdates"
 import { withTimeout } from "@/lib/external/with-timeout"
+import { mapWithConcurrency } from "@/lib/external/map-with-concurrency"
 import { markRecalcPending } from "@/server/recalc/queue"
 import { ensureAdmin } from "@/server/queries/current-user"
 import { persistComixHid } from "@/server/actions/comix-hid"
@@ -14,6 +15,30 @@ import {
   getPublicationStatusIdByName,
   getPublicationStatusNameById,
 } from "@/lib/constants/status-lookups"
+
+/**
+ * Quantas obras em voo por vez na checagem de capítulos.
+ *
+ * 🔴 **Não é ajuste de performance — é o que faz o timeout de 25s do agregador
+ * significar alguma coisa.** As fontes de capítulo passam por um bypass de
+ * Cloudflare ESTREITO: o sidecar atende 3 por vez (`MAX_CONCURRENCY`) e o
+ * FlareSolverr atende **1 por vez por sessão nomeada** (a fila do `withSessionLock`,
+ * que existe pra não corromper resultado entre buscas). Num `Promise.all` sobre a
+ * lista inteira, o cronômetro de TODAS as obras começa junto enquanto o bypass as
+ * atende em fila — então o "teto por fonte" vira orçamento de relógio pro LOTE, e
+ * tudo que não couber nele falha de uma vez.
+ *
+ * Medido em 2026-08-12: 38 obras disparadas juntas ⇒ **29 reprovadas**. No log do
+ * sidecar, 74 renders completaram e só **27** chegaram dentro dos 25s; os demais
+ * encontraram o timeout já disparado. O lote fechava em 25,0s **exatos** — o teto,
+ * não o trabalho.
+ *
+ * O valor casa com os 3 slots do sidecar: mais que isso só engorda a fila (e vira
+ * `busy`, que empurra a chamada pro FlareSolverr serializado, que é o caminho lento).
+ * O preço é wall-clock honesto — o lote passa de "25s com 76% de falha" pra ~40–60s
+ * verificando tudo. Quem sente isso é a faixa de tarefa da barra, que já existe.
+ */
+const CHECK_CONCURRENCY = 3
 
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean }
 
@@ -47,13 +72,13 @@ export interface ReadingUpdateResult {
   hasNew: boolean
   /** Quantos capítulos a mais que o salvo; `null` quando o total era desconhecido. */
   delta: number | null
-  /** Contagem EXATA de capítulos lançados não lidos, da lista real (coffeemanga). `null` = sem lista (cai na estimativa). */
+  /** Contagem EXATA de capítulos lançados não lidos, da lista real (mangago). `null` = sem lista (cai na estimativa). */
   unreadCount: number | null
   /** `true` quando nenhuma fonte retornou capítulo (timeout/Cloudflare/sem match). */
   failed: boolean
   /** Data relativa do último capítulo (string pré-formatada da fonte, ex.: "8mos ago"). */
   releasedLabel: string | null
-  /** Data absoluta (ISO) do último cap, quando a fonte fornece (coffeemanga). */
+  /** Data absoluta (ISO) do último cap, quando a fonte fornece (mangago). */
   releasedAt: string | null
   /** URL de "Continuar lendo": comix quando há hid (leitura preferida); senão a fonte que achou. `null` se não há link. */
   latestUrl: string | null
@@ -105,8 +130,10 @@ export async function checkReadingUpdates(
     work_external_ids?: ExternalIdRow[] | null
   }>
 
-  return Promise.all(
-    works.map(async (w): Promise<ReadingUpdateResult> => {
+  return mapWithConcurrency(
+    works,
+    CHECK_CONCURRENCY,
+    async (w): Promise<ReadingUpdateResult> => {
       try {
         // Obra com publicação já CONCLUÍDA não terá capítulos novos → pula o fetch
         // externo (o mais caro, via FlareSolverr). O contador de pendentes continua
@@ -117,7 +144,7 @@ export async function checkReadingUpdates(
 
         const { comixHid, comixRejected, mangagoSlug, crossIds } = readExternalIds(w.work_external_ids)
         // Respeita rejeição explícita do comix: não busca nem persiste. (Nota: por ora
-        // isto também pula coffeemanga/mangago da obra — comix-rejeitada é caso raro.)
+        // isto também pula o mangago da obra — comix-rejeitada é caso raro.)
         if (comixRejected && !comixHid) {
           return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null, skipped: false }
         }
@@ -147,13 +174,13 @@ export async function checkReadingUpdates(
           await persistComixHid(supabase, w.id, resolvedComixHid)
         }
 
-        // Âncora do último cap: data absoluta da fonte (coffeemanga) tem prioridade
+        // Âncora do último cap: data absoluta da fonte (mangago) tem prioridade
         // sobre a relativa do comix ("4d ago").
         const anchor = releasedAt ? new Date(releasedAt) : parseRelativeAgeToDate(releasedLabel)
         const lastReleasedIso =
           anchor && Number.isFinite(anchor.getTime()) ? anchor.toISOString() : null
 
-        // Cadência: datas absolutas da própria fonte (coffeemanga); na falta, MangaDex.
+        // Cadência: datas absolutas da própria fonte (mangago); na falta, MangaDex.
         let cadence = cadenceDates ?? []
         if (cadence.length < 3 && crossIds.mangadex) {
           cadence = await withTimeout(
@@ -173,12 +200,12 @@ export async function checkReadingUpdates(
         const total = w.total_chapters ?? null
         const hasNew = latest != null && (total == null || latest > total)
         const delta = latest != null && total != null ? latest - total : null
-        // Contagem exata: capítulos da lista real (coffeemanga) com nº > lido.
+        // Contagem exata: capítulos da lista real (mangago) com nº > lido.
         const unreadCount = chapterNumbers
           ? chapterNumbers.filter((n) => n > (w.chapters_read ?? 0)).length
           : null
 
-        // Sincroniza total_chapters com o cap da fonte autoritativa (coffeemanga quando
+        // Sincroniza total_chapters com o cap da fonte autoritativa (mangago quando
         // achou; senão comix) e recalcula. `ceil` porque um cap decimal é 1 cap inteiro
         // e mantém total ≥ latest (não re-detecta o mesmo decimal como "novo"). Ajusta
         // pra cima OU pra baixo — corrige totais antigos inflados (ex.: 130 do round(129.7)).
@@ -210,7 +237,7 @@ export async function checkReadingUpdates(
           releasedLabel: releasedLabel ?? null,
           releasedAt: lastReleasedIso,
           // "Continuar lendo" sempre no comix quando há hid (leitura preferida); só cai
-          // na fonte que achou (coffeemanga) quando a obra não está no comix.
+          // na fonte que achou (mangago) quando a obra não está no comix.
           latestUrl: hid ? comixWorkUrl(hid) : (winnerUrl ?? null),
           nextPredictedAt,
           statusExternal: statusExternal ?? null,
@@ -220,7 +247,7 @@ export async function checkReadingUpdates(
       } catch {
         return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null, skipped: false }
       }
-    }),
+    },
   )
 }
 

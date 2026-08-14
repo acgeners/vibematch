@@ -1,6 +1,28 @@
+"use client"
+
+/**
+ * 🔴 O `"use client"` acima NÃO é decoração — sem ele o badge com tooltip QUEBRA A HIDRATAÇÃO,
+ * e o sintoma não aponta para cá.
+ *
+ * Medido no app rodando (2026-08-12): enquanto este arquivo era compartilhado, os consumidores
+ * SERVER (vitrine `/`, hero do `/login`) emitiam a árvore do Radix **só no payload RSC** e
+ * **zero** no HTML do SSR — `/` 0 × 2, `/login` 0 × 12. Na hidratação o cliente montava o
+ * `<span>` gatilho que o servidor não tinha, todos os irmãos deslizavam uma posição, e o React
+ * acabava comparando o gatilho do tooltip com o badge de status PESSOAL do mesmo card: o diff
+ * saía incompreensível (`data-variant` secondary × outline, ⭐️ fora de lugar) apontando um
+ * `<span aria-hidden>` inocente. Com a diretiva: HTML 2 e 12, payload 0.
+ *
+ * ⚠️ Consumidor CLIENT nunca teve o problema (`/titles`: 88 gatilhos no HTML) — é por isso que
+ * o defeito sobreviveu. Ele só existe nas telas onde o badge é renderizado pelo SERVIDOR, que
+ * são justamente as que ninguém associa a "componente interativo".
+ *
+ * ⚠️ Custo ≈ zero: 9+ componentes `"use client"` já importavam este arquivo, então
+ * `lib/constants/criteria` (20 KB) já estava no bundle do cliente de qualquer forma.
+ */
+
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { hiatusDisplay, hiatusSinceLabel, hiatusTooltip } from "@/lib/works/hiatus-display"
+import { hasHiatusSince, hiatusDisplay, hiatusSinceLabel, hiatusTooltip } from "@/lib/works/hiatus-display"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { cn } from "@/lib/utils"
 import {
@@ -89,6 +111,20 @@ interface PublicationStatusBadgeProps {
   publicationStatusNote?: string | null
 }
 
+/**
+ * "Parada desde agosto de 2022 · há 4 anos" — e o único ponto do badge que lê o relógio.
+ *
+ * 🔴 Mora aqui, e não no corpo do badge, porque o `TooltipContent` do Radix só MONTA quando o
+ * tooltip abre (sem `forceMount`, o `Portal` desmonta fechado): o `new Date()` roda no browser,
+ * depois da hidratação, e este texto nunca chega ao HTML do SSR — então não há o que divergir.
+ * No corpo do badge ele rodaria em TODO render, nas ~20 telas que usam o componente.
+ */
+function HiatusSinceLine({ note }: { note: string }) {
+  const label = hiatusSinceLabel(note, new Date())
+  if (!label) return null
+  return <p className="mt-1 font-medium text-background/90">{label}</p>
+}
+
 export function PublicationStatusBadge({
   statusId,
   status,
@@ -111,7 +147,11 @@ export function PublicationStatusBadge({
   // "Parada desde agosto de 2022 · há 4 anos". Só dentro do hiato, e derivada da nota — a
   // classe sozinha engana: 13 das 85 obras em hiato estão paradas há 2+ anos, e boa parte
   // delas classifica como "entre temporadas", que é estruturalmente certo e soa transitório.
-  const desde = isHiatus ? hiatusSinceLabel(publicationStatusNote, new Date()) : null
+  //
+  // 🔴 Aqui vai só a PERGUNTA ("há data?"), que é pura. O rótulo lê o relógio dentro do
+  // tooltip (`HiatusSinceLine`) — no corpo do badge, o `new Date()` decidiria a FORMA da
+  // árvore a cada render, que é o que o docblock de `hiatusSinceLabel` proíbe.
+  const temDesde = isHiatus && hasHiatusSince(publicationStatusNote)
 
   const badge = (
     <Badge
@@ -137,7 +177,7 @@ export function PublicationStatusBadge({
   // ⚠️ A data sozinha JÁ justifica o tooltip. Exigir `tip` esconderia "parada desde 2022" nas
   // obras cujo texto não decide o tipo — exatamente aquelas em que a idade é o único sinal
   // que sobra.
-  if (!tip && !desde) return badge
+  if (!tip && !temDesde) return badge
 
   // 🔴 O `TooltipProvider` mora AQUI porque este app não tem um no layout raiz, e a falta dele
   // não degrada o tooltip: o Radix LANÇA no render e derrruba a árvore inteira que o contém.
@@ -159,7 +199,7 @@ export function PublicationStatusBadge({
           ) : (
             <p className="font-semibold">Em hiato</p>
           )}
-          {desde && <p className="mt-1 font-medium text-background/90">{desde}</p>}
+          {temDesde && publicationStatusNote && <HiatusSinceLine note={publicationStatusNote} />}
           {publicationStatusNote && (
             <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-background/15 p-1.5 font-mono text-[10px] leading-relaxed text-background/80">
               {publicationStatusNote}

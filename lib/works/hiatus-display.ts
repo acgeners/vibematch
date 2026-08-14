@@ -120,6 +120,20 @@ export function hiatusSinceLabel(
 }
 
 /**
+ * Existe data para mostrar? A pergunta é **pura** — e é essa separação que mantém a FORMA da
+ * árvore independente do relógio.
+ *
+ * 🔴 Quem consome decide a ESTRUTURA por aqui e lê o relógio só onde o texto de fato aparece. O
+ * badge de publicação troca `<Badge>` sozinho por `Tooltip > Trigger > span > Badge` conforme
+ * houver data: com o `new Date()` decidindo isso no render, servidor e cliente podem montar
+ * árvores de formas diferentes, os irmãos deslizam uma posição e o React descarta a subárvore
+ * inteira ("Hydration failed"). A IDADE continua precisando de "agora"; a decisão, não.
+ */
+export function hasHiatusSince(note: string | null | undefined): boolean {
+  return parseHiatusSince(note) !== null
+}
+
+/**
  * A leitura da regra mesmo quando ela é fraca — só para o tooltip, nunca para o badge.
  * Devolve `null` só quando não há tipo nenhum.
  */

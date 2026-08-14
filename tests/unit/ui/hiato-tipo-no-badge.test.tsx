@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { PublicationStatusBadge } from "@/components/ui/status-badge"
@@ -135,5 +137,54 @@ describe("PublicationStatusBadge: desde quando está parada", () => {
   it("singular no primeiro ano completo", () => {
     expect(hiatusSinceLabel("40 Chapters (Hiatus) since 06.2025", new Date("2026-08-12")))
       .toBe("Parada desde junho de 2025 · há 1 ano")
+  })
+
+  /**
+   * 🔴 O corpo do badge não pode LER O RELÓGIO — ele decide a FORMA da árvore (`<Badge>` sozinho
+   * × `Tooltip > Trigger > span > Badge`), e ~20 telas o renderizam. Render impuro ali é o
+   * caminho para o "Hydration failed", que não quebra teste nem build: o React só descarta a
+   * subárvore em silêncio.
+   *
+   * ⚠️ Teste de SOURCE de propósito. Um teste de render passaria verde com o `new Date()` no
+   * lugar — o texto mora dentro do `TooltipContent`, que fica desmontado enquanto fechado, então
+   * a impureza não aparece na árvore desenhada. É a versão anterior deste arquivo que ele
+   * reprova.
+   */
+  /**
+   * 🔴 O badge monta um `Tooltip` do Radix, e por isso o arquivo TEM que ser client component.
+   *
+   * Medido no app rodando (2026-08-12): compartilhado, os consumidores SERVER (`/` e `/login`)
+   * emitiam a árvore do Radix só no payload RSC e ZERO no HTML do SSR (0 × 2 e 0 × 12) — o
+   * cliente montava na hidratação um `<span>` gatilho que o servidor não tinha, os irmãos
+   * deslizavam e o React reprovava a subárvore inteira ("Hydration failed"). Com a diretiva:
+   * HTML 2 e 12, payload 0.
+   *
+   * ⚠️ Nada mais acusa isso: `tsc`, `eslint`, `next build` e os testes de render passam verdes
+   * nos dois casos — a divergência só existe entre o HTML do SSR e o payload, em runtime.
+   */
+  it("é client component — o tooltip precisa existir no HTML do SSR", () => {
+    const src = readFileSync(resolve(process.cwd(), "components/ui/status-badge.tsx"), "utf8")
+    expect(src.split("\n")[0].trim()).toBe('"use client"')
+  })
+
+  it("só o `HiatusSinceLine` lê o relógio — nunca o corpo do badge", () => {
+    const src = readFileSync(resolve(process.cwd(), "components/ui/status-badge.tsx"), "utf8")
+    // ⚠️ Sem tirar os comentários, o próprio aviso que explica a regra ("no corpo do badge, o
+    // `new Date()` decidiria a FORMA…") reprova o arquivo consertado.
+    const semComentarios = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")
+    const corpo = semComentarios(
+      src.slice(
+        src.indexOf("export function PublicationStatusBadge"),
+        src.indexOf("interface PersonalStatusBadgeProps"),
+      ),
+    )
+    expect(corpo).not.toBe("")
+    expect(corpo).not.toMatch(/new Date\(/)
+
+    // Contraprova: o relógio existe, e existe no único lugar que só monta com o tooltip aberto.
+    const linha = semComentarios(
+      src.slice(src.indexOf("function HiatusSinceLine"), src.indexOf("export function PublicationStatusBadge")),
+    )
+    expect(linha).toMatch(/new Date\(/)
   })
 })

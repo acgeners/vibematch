@@ -42,6 +42,7 @@ import {
   ensureSignedIn,
   ensurePermission,
   ensureAdmin,
+  getOwnerUserId,
 } from "@/server/queries/current-user"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
@@ -49,6 +50,8 @@ import { getWorkReviews } from "@/server/queries/work-reviews"
 import { getLastDeepDive } from "@/server/queries/deep-dive"
 import { getOpeningStructure } from "@/server/queries/opening-structure"
 import { OpeningStructureCard } from "@/components/titles/opening-structure-card"
+import { ArtEstimateCard } from "@/components/titles/art-estimate-card"
+import { getArtEvidenceForWork } from "@/server/queries/art-evidence"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getGenerationReadinessMany } from "@/server/queries/generation-readiness"
 import { getWorkAiCost, getFromScratchBaselineCost } from "@/server/queries/ai-usage"
@@ -689,6 +692,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   // pro "Regerar" da sinopse e pro "Editar capas" da galeria.
   const isAdmin = (await ensureAdmin()).ok
 
+  // Piloto da estimativa de arte: só para quem cura. A estimativa é treinada nos rótulos DELA
+  // — servi-la a outra pessoa seria o gosto do dono com cara de fato do catálogo.
+  const artEvidence = isAdmin
+    ? await getArtEvidenceForWork(work.id as string, await getOwnerUserId())
+    : null
+
   const statusInitial: WorkStatusValues = {
     personal_status:
       personalStatusNameOrDefault(work.personal_status_id) as PersonalStatus,
@@ -1321,6 +1330,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           summaryModel: aiProvenance.review_summarizer?.model ?? null,
         }}
       />
+              {/* Estimativa de arte (piloto) — fica na VISÃO GERAL, e depois das sinopses, porque
+                  é EVIDÊNCIA sobre a obra e não nota: as notas moram na aba "Notas & Avaliações",
+                  e pôr um número de 0–10 lá dentro convidaria a comparar com os 9 atributos, numa
+                  escala comprimida a ~0,49× que não é comparável. Coluna principal, não sidebar,
+                  pelo mesmo motivo do card abaixo: as frases dos leitores são a prova, e em 240px
+                  elas virariam tooltip. */}
+              {artEvidence && <ArtEstimateCard data={artEvidence} />}
 
       {/* Consultor IA — Deep Dive (entre as notas e o detalhamento por critério).
           Em obra de leitura ENCERRADA não cabe rodar NOVA análise, mas se já existe uma
