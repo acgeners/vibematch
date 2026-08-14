@@ -1495,6 +1495,78 @@ A página inteira é saída de LLM: reusa `AiProvenanceSeal` (não faça outro s
 fora da tela, o tema com forma de tag e o mesmo número impresso duas vezes passariam verdes num
 teste que lesse o objeto do perfil.
 
+## No comparador, o CABEÇALHO identifica e as LINHAS comparam
+
+`components/titles/work-compare-drawer.tsx` (2026-08-14). A régua responde a uma pergunta só:
+*isto compara obras entre si?* Se sim, é linha — ordenável, ocultável no seletor "Linhas", e
+sujeita ao "só diferenças". Se só identifica a obra, fica no cabeçalho da coluna.
+
+O que a ausência dela produzia, medido no mockup que replica o CSS antigo:
+
+| sintoma | medida |
+|---|---|
+| vão entre título e Sinopse | **24px e 8px alternando** entre colunas vizinhas (`justify-between` + título de 1 ou 2 linhas) |
+| altura do cabeçalho | 137px, com capa de 78px |
+| depois | **118px** de altura, capa **94px**, botão Sinopse a 83px do topo em TODAS as colunas (medido no app) |
+
+O que mudou de lugar: **Interesse** (♥♥♥) saiu de dentro do botão de Sinopse e virou linha —
+era a única medida da tela fora de uma linha, logo a única que não dava pra ordenar nem
+esconder. **Publicação** e **Meu status** viraram duas linhas (dimensões diferentes: uma é da
+obra, a outra é sua; juntas, o `flex-wrap` quebrava em coluna estreita e esticava a altura de
+todas as colunas). **18+ e ano** subiram pro cabeçalho, e a linha "Ano" passou a nascer oculta —
+some do padrão, continua no seletor porque é o único jeito de ORDENAR por ano.
+
+🔴 **Dois defeitos que a tela escondia, os dois da família "dois critérios pro mesmo fato":**
+
+- **"Só diferenças" media Capítulos por `lidos/total` e a célula imprimia só o total.** Duas
+  obras com 45 capítulos e leituras diferentes sobreviviam ao filtro e apareciam como `45` e
+  `45` — o filtro parecendo quebrado. Hoje `chaptersCellText()` é dona das duas pontas.
+- **Cores claras fixas sem variante `dark:`** — `text-rose-600` no ♥ e `bg-rose-50
+  text-rose-700` no popover da sinopse: no tema escuro, ♥ vermelho sobre fundo escuro e um
+  bloco quase branco.
+
+⚠️ **`is_adult` e `isFavorite` já vinham do banco e eram descartados** (`getWorksByIds` é
+`select *`). Exibi-los custou uma linha no tipo e uma no mapeamento — zero query, zero egress.
+
+⚠️ **Célula é CENTRALIZADA por padrão** (`CompareCell`), porque cada linha é lida na horizontal
+e alinhamento misto faz o olho reancorar. A exceção é Gêneros·Tags, texto corrido em muitos
+chips, onde a borda esquerda é o que dá o que ler.
+
+⚠️ **Mudar CHAVE de linha exige bump do `ROWS_CONFIG_STORAGE_KEY`** (hoje `v6`).
+`normalizeRowsConfig` descarta chave desconhecida: sem o bump, quem tinha "status" escondido
+veria as duas linhas novas VISÍVEIS — a escolha da pessoa invertida em silêncio.
+
+Guardado por `tests/unit/ui/comparador-linhas-e-cabecalho.test.ts`.
+
+## Três controles do painel de filtros que mentiam pelo desenho
+
+Todos de 2026-08-14, em `components/ranking/ranking-filters.tsx` (`/ranking` e `/favorites`):
+
+🔴 **O "Todos" de status não fazia nada quando já estava marcado.** Ele gravava `null`, e em
+`/favorites` — onde a ausência do parâmetro JÁ significa "sem filtro" — o painel relia o mesmo
+estado e redesenhava tudo marcado. Chegar a "só Completed" custava desmarcar os outros quatro a
+dedo. Hoje ele volta ao PADRÃO (`Completed` · `Want to Read + Untracked`), e o padrão sai de
+`BASELINE_PUBLICATION_STATUSES`/`BASELINE_PERSONAL_STATUSES` — as mesmas constantes que a página
+já usava como filtro implícito. Escrever a lista no `onClick` levaria a um estado que a página
+não reconhece como padrão, e o "Todos" reacenderia no render seguinte.
+
+🔴 **O filtro de arte tinha o mais restritivo no MEIO**: `Tudo · Forte · Sem fraca`, sendo que
+"Forte" é o topo 20% e "Sem fraca" corta só o fundo 20%. Segmentado é lido como escala. Hoje é
+`Tudo · Sem os 20% piores · Top 20%`, com ordem em `ART_FILTER_ORDER` e o "20%" **derivado de
+`ART_BAND_CUTOFFS`** — o número no botão e o que corta a faixa são o mesmo fato.
+
+⚠️ Havia uma 2ª cópia dos rótulos (`ART_FILTER_LABELS`) que **ninguém lia**: repetia palavra por
+palavra o texto de `ART_BAND_LABELS` (o do card da obra) e só era exercitada por um teste que
+lia o objeto, não a tela. Foi apagada; o tooltip do controle deriva de `ART_BAND_LABELS`.
+⚠️ Os cortes saíram de `lib/arte/model.ts` para **`lib/arte/bands.ts`** por peso de bundle: o
+painel é `"use client"` e importar o modelo levaria `lib/ml/{ridge,logistic,preprocessing}` junto.
+
+⚠️ **O chip de ordenação escala com a quantidade de níveis** (`SORT_CHIP_SCALE`): 1 nível ocupa
+a linha (36px/14px), 5 ficam compactos (26px/12px). Duas armadilhas medidas: `SelectTrigger` traz
+`data-[size=sm]:h-8` e **seletor de atributo vence classe** — sem `!` na altura, o trigger fica
+em 32px sempre (a `h-6` original já era letra morta); e `flex-1` com `flex-wrap` estica o ÚLTIMO
+chip da última linha (medido: 329px contra 157px), por isso o `grow` vale só no nível único.
+
 ## Inline type imports and Turbopack
 
 Turbopack (Next.js 16) fails to parse `import { type Foo }` inline syntax when a client component is traversed from a server context. Always use separate `import type` statements:
@@ -2502,10 +2574,11 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.753 passando (+24 pulados) em 258 arquivos** (253 passando + 5 pulados;
-re-medido em 2026-08-14). A linha já disse "~1.780 em ~157", "~2.353 em 218", "2.386 em
-221", "2.408 em 225", "2.428 em 228", "2.433 em 228", "2.440 em 229", "2.717 em 255" e
-"2.727 em 255", todas envelhecendo sem nada acusar — **re-meça antes de editar este número**,
+`npm run test` → **2.807 passando (+24 pulados) em 266 arquivos** (261 passando + 5 pulados;
+re-medido em 2026-08-14, depois do redesenho do comparador e dos filtros). A linha já disse "~1.780 em
+~157", "~2.353 em 218", "2.386 em 221", "2.408 em 225", "2.428 em 228", "2.433 em 228",
+"2.440 em 229", "2.717 em 255", "2.727 em 255", "2.753 em 258", "2.776 em 261", "2.784 em 263" e "2.788 em 264", todas envelhecendo sem nada
+acusar — **re-meça antes de editar este número**,
 não incremente de cabeça. ⚠️ O "2.717" durou menos de um dia: dois PRs do mesmo dia somaram 10
 testes e nenhum dos dois tocou nesta linha. Envelhecer aqui é o normal, não a exceção. Vitest, jsdom, alias `@` → raiz. A
 descrição antiga ("só `tests/unit/calculations/`, sem teste de componente") estava desatualizada

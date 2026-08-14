@@ -45,7 +45,14 @@ import { DEFAULT_TIER_BAND_WIDTH } from "@/lib/ranking/tier-config"
 import { ActiveFilterChips } from "@/components/ranking/active-filter-chips"
 import { CollapseIconTrigger, CollapseTitleTrigger } from "@/components/ui/collapse-trigger"
 import type { ActiveFilterChip, ActiveFilterValue } from "@/components/ranking/active-filter-chips"
-import { ART_FILTER_CHIP_LABELS, ART_FILTER_PARAM, parseArtFilter } from "@/lib/arte/url"
+import {
+  ART_FILTER_CHIP_LABELS,
+  ART_FILTER_ORDER,
+  ART_FILTER_PARAM,
+  ART_FILTER_SEGMENT_LABELS,
+  ART_FILTER_TOOLTIPS,
+  parseArtFilter,
+} from "@/lib/arte/url"
 
 interface SavedFilterPreset {
   id: string
@@ -156,10 +163,106 @@ interface SortLevelsSectionProps {
   searchParams: Pick<URLSearchParams, "get">
   updateParams: (updates: Record<string, string | null>) => void
   className?: string
+  contentClassName?: string
   defaultSort?: string
 }
 
-function SortLevelsSection({ searchParams, updateParams, className, defaultSort }: SortLevelsSectionProps) {
+/**
+ * O ponto de partida de cada dimensão de status — o que o painel mostra quando ninguém
+ * escolheu nada, e para onde o "Todos" VOLTA quando é clicado já marcado.
+ *
+ * 🔴 Os dois usos são o MESMO fato e por isso saem daqui: o /ranking já tratava esta lista
+ * como o filtro implícito da página (parâmetro ausente = `Completed`), e o botão precisava
+ * concordar com ela. Escrever a lista no `onClick` faria o botão levar a um estado que a
+ * página não reconhece como padrão — e aí o "Todos" acenderia de novo no próximo render.
+ *
+ * ⚠️ O /favorites passa `defaultPublicationStatus="all"`, então lá a ausência significa
+ * outra coisa (sem filtro). O botão continua escrevendo ESTA lista na URL, explicitamente:
+ * é escolha do usuário, não default de página, e sem valor na URL não haveria como
+ * distinguir "voltei ao padrão" de "nunca filtrei".
+ */
+const BASELINE_PUBLICATION_STATUSES = ["Completed"] as const
+const BASELINE_PERSONAL_STATUSES = UNREAD_PERSONAL_STATUSES
+
+/**
+ * O chip de ordenação ENCOLHE conforme a trilha cresce — e as classes ficam num mapa
+ * literal, nunca montadas por interpolação: o Tailwind varre o source em busca da string
+ * completa, e `h-${n}` some do CSS sem nada acusar.
+ *
+ * Motivo: com um nível só (o caso comum) o chip usava 1/4 da linha e o resto do card ficava
+ * vazio; com cinco, a trilha precisa do espaço todo. Cada faixa cede altura e corpo de letra
+ * na medida em que ganha vizinhos — 4 e 5 são iguais porque abaixo de `h-6` o alvo de clique
+ * das setas fica menor que o mínimo confortável.
+ *
+ * ⚠️ O `!` do `trigger` NÃO é gosto: `SelectTrigger` traz `data-[size=sm]:h-8` embutido, e
+ * seletor de atributo ganha de classe por especificidade — sem o `!`, a altura fica em 32px
+ * SEMPRE. Medido no app: com 5 níveis o chip ia a 26px e o trigger seguia em 32, transbordando
+ * a borda arredondada. (A classe `h-6` original já era letra morta pelo mesmo motivo.)
+ *
+ * ⚠️ O preenchimento da linha (`grow`) vale só para UM nível. Com dois ou mais a trilha quebra
+ * em linhas — a coluna do painel mede ~338px e cabem dois chips por linha —, e aí `flex-1`
+ * esticava o ÚLTIMO da última linha para o dobro dos outros (medido: 329px contra 157px). Um
+ * chip solto com o dobro da largura lê como "este é diferente", que é o oposto do que a trilha
+ * quer dizer.
+ */
+const SORT_CHIP_SCALE: Record<number, {
+  chip: string
+  trigger: string
+  iconBtn: string
+  icon: string
+  add: string
+  minWidth: string
+  /** Esticar até preencher a linha. Só no nível único — ver o ⚠️ do wrap acima. */
+  grow: boolean
+}> = {
+  1: {
+    chip: "h-9 pl-3 pr-1.5 gap-1",
+    trigger: "!h-7 text-sm [&_svg]:size-4",
+    iconBtn: "size-7",
+    icon: "h-4 w-4",
+    add: "h-8 px-3 text-sm",
+    minWidth: "min-w-[11rem]",
+    grow: true,
+  },
+  2: {
+    chip: "h-8 pl-2.5 pr-1 gap-1",
+    trigger: "!h-6 text-[13px] [&_svg]:size-3.5",
+    iconBtn: "size-6",
+    icon: "h-3.5 w-3.5",
+    add: "h-7 px-2.5 text-[13px]",
+    minWidth: "min-w-[9rem]",
+    grow: false,
+  },
+  3: {
+    chip: "h-7 pl-2 pr-1 gap-0.5",
+    trigger: "!h-5.5 text-xs [&_svg]:size-3",
+    iconBtn: "size-5",
+    icon: "h-3 w-3",
+    add: "h-6 px-2.5 text-xs",
+    minWidth: "min-w-[8rem]",
+    grow: false,
+  },
+  4: {
+    chip: "h-6.5 pl-2 pr-1 gap-0.5",
+    trigger: "!h-5 text-xs [&_svg]:size-3",
+    iconBtn: "size-5",
+    icon: "h-3 w-3",
+    add: "h-6 px-2.5 text-xs",
+    minWidth: "min-w-[7.5rem]",
+    grow: false,
+  },
+  5: {
+    chip: "h-6.5 pl-2 pr-1 gap-0.5",
+    trigger: "!h-5 text-xs [&_svg]:size-3",
+    iconBtn: "size-5",
+    icon: "h-3 w-3",
+    add: "h-6 px-2.5 text-xs",
+    minWidth: "min-w-[7rem]",
+    grow: false,
+  },
+}
+
+function SortLevelsSection({ searchParams, updateParams, className, contentClassName, defaultSort }: SortLevelsSectionProps) {
   const rawSort = searchParams.get("sort")
   const levels = parseSortLevels(rawSort, defaultSort)
 
@@ -189,10 +292,14 @@ function SortLevelsSection({ searchParams, updateParams, className, defaultSort 
     setLevels([...levels, { field: next?.value ?? "calc_score", dir: "desc" }])
   }
 
+  // `parseSortLevels` já limita a 5; o clamp aqui é contra chave ausente no mapa.
+  const scale = SORT_CHIP_SCALE[Math.min(Math.max(levels.length, 1), 5)]
+
   return (
     <FilterSection
       title="Ordenação"
       className={className}
+      contentClassName={contentClassName}
       headerAction={
         <span className="text-xs font-normal normal-case tracking-normal text-muted-foreground">
           {levels.length} {levels.length === 1 ? "nível" : "níveis"}
@@ -206,15 +313,18 @@ function SortLevelsSection({ searchParams, updateParams, className, defaultSort 
           linha só quando precisa. */}
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2">
         {levels.map((level, i) => (
-          <div key={i} className="flex items-center gap-1.5">
-            {i > 0 && (
-              <span aria-hidden className="text-[11px] leading-none text-muted-foreground/70">
-                ›
-              </span>
+          <div
+            key={i}
+            className={cn(
+              "flex min-w-0 items-center gap-1.5",
+              scale.grow ? cn("flex-1", scale.minWidth) : "max-w-full",
             )}
+          >
             <span
               className={cn(
-                "inline-flex items-center gap-0.5 rounded-full border py-0.5 pl-2 pr-1 transition-colors",
+                "inline-flex min-w-0 items-center rounded-full border transition-colors",
+                scale.grow ? "flex-1" : "",
+                scale.chip,
                 // O nível 1 é o que de fato ordena; os demais só desempatam.
                 i === 0
                   ? "border-primary/45 bg-primary/10"
@@ -225,7 +335,15 @@ function SortLevelsSection({ searchParams, updateParams, className, defaultSort 
                 <SelectTrigger
                   size="sm"
                   aria-label={`Nível ${i + 1} de ordenação`}
-                  className="h-6 w-fit gap-1 border-0 bg-transparent px-1 text-xs shadow-none hover:bg-transparent focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent [&_svg]:size-3"
+                  className={cn(
+                    "min-w-0 flex-1 gap-1 border-0 bg-transparent px-1 shadow-none hover:bg-transparent focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent [&>span]:truncate",
+                    // `SelectTrigger` é `justify-between`: esticado, isso joga a setinha do
+                    // select para o outro extremo do chip, a um pixel do botão de direção —
+                    // duas setas grudadas, cada uma fazendo uma coisa. Ancorada no rótulo,
+                    // ela continua sendo "abre a lista" e a folga fica no meio.
+                    scale.grow ? "w-full justify-start" : "w-fit",
+                    scale.trigger,
+                  )}
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -243,13 +361,16 @@ function SortLevelsSection({ searchParams, updateParams, className, defaultSort 
               <button
                 type="button"
                 onClick={() => toggleDir(i)}
-                className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className={cn(
+                  "flex shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                  scale.iconBtn,
+                )}
                 title={level.dir === "desc" ? "Decrescente" : "Crescente"}
                 aria-label={`${SORT_FIELD_LABEL[level.field] ?? level.field}: ordem ${level.dir === "desc" ? "decrescente" : "crescente"}`}
               >
                 {level.dir === "desc"
-                  ? <ArrowDown className="h-3 w-3" />
-                  : <ArrowUp className="h-3 w-3" />}
+                  ? <ArrowDown className={scale.icon} />
+                  : <ArrowUp className={scale.icon} />}
               </button>
               {/* Some quando é o último nível — botão que não pode agir lê como
                   quebrado, e "remover o único critério de ordem" não existe. */}
@@ -257,20 +378,34 @@ function SortLevelsSection({ searchParams, updateParams, className, defaultSort 
                 <button
                   type="button"
                   onClick={() => remove(i)}
-                  className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  className={cn(
+                    "flex shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive",
+                    scale.iconBtn,
+                  )}
                   aria-label={`Remover ordenação por ${SORT_FIELD_LABEL[level.field] ?? level.field}`}
                 >
-                  <X className="h-3 w-3" />
+                  <X className={scale.icon} />
                 </button>
               )}
             </span>
+            {/* O "›" vem DEPOIS do chip, não antes do próximo: a trilha quebra linha, e
+                separador que abre linha fica órfão na margem. No fim da linha ele lê como
+                "continua abaixo", que é o que a quebra significa. */}
+            {i < levels.length - 1 && (
+              <span aria-hidden className="shrink-0 text-[11px] leading-none text-muted-foreground/70">
+                ›
+              </span>
+            )}
           </div>
         ))}
         {levels.length < 5 && (
-          <button type="button" onClick={add}>
+          <button type="button" onClick={add} className="shrink-0">
             <Badge
               variant="outline"
-              className="cursor-pointer rounded-full border-dashed px-2.5 py-0.5 text-xs font-normal text-muted-foreground transition-colors hover:border-solid hover:text-foreground"
+              className={cn(
+                "flex cursor-pointer items-center rounded-full border-dashed font-normal text-muted-foreground transition-colors hover:border-solid hover:text-foreground",
+                scale.add,
+              )}
             >
               + nível
             </Badge>
@@ -2727,13 +2862,13 @@ export function RankingFilters({
     ? defaultPublicationStatus
     : pubStatusDefaultsAll
       ? allPublicationStatuses.map((o) => o.status)
-      : ["Completed"]
+      : [...BASELINE_PUBLICATION_STATUSES]
   const perStatusDefaultsAll = defaultPersonalStatus === "all"
   const perStatusDefaults = Array.isArray(defaultPersonalStatus)
     ? defaultPersonalStatus
     : perStatusDefaultsAll
       ? allPersonalStatuses.map((o) => o.status)
-      : [...UNREAD_PERSONAL_STATUSES]
+      : [...BASELINE_PERSONAL_STATUSES]
 
   /**
    * Põe um status na regra pedida. A regra inteira (exclusividade entre incluir e
@@ -3260,11 +3395,23 @@ export function RankingFilters({
                     type="button"
                     // "Todos" tem que zerar os DOIS params: só apagar o positivo deixaria
                     // a exclusão de pé por baixo de um badge que promete o catálogo todo.
+                    //
+                    // 🔴 Clicado JÁ marcado, ele volta ao padrão em vez de gravar `null`.
+                    // Com `null` o /favorites (onde ausente = "all") relia o mesmo estado e
+                    // redesenhava tudo marcado: o clique não fazia NADA, e chegar a "só
+                    // Completed" custava desmarcar os outros quatro a dedo.
                     onClick={() =>
                       updateParams({
-                        pub_status: isAllPublication ? null : "all",
+                        pub_status: isAllPublication
+                          ? BASELINE_PUBLICATION_STATUSES.join(",")
+                          : "all",
                         pub_status_exclude: null,
                       })
+                    }
+                    title={
+                      isAllPublication
+                        ? `Voltar ao padrão (${BASELINE_PUBLICATION_STATUSES.join(", ")})`
+                        : "Marcar todos os status de publicação"
                     }
                   >
                     <Badge
@@ -3320,11 +3467,19 @@ export function RankingFilters({
                   />
                   <button
                     type="button"
+                    // Ver o "Todos" de Publicação: marcado, este volta ao padrão.
                     onClick={() =>
                       updateParams({
-                        per_status: isAllPersonal ? null : "all",
+                        per_status: isAllPersonal
+                          ? BASELINE_PERSONAL_STATUSES.join(",")
+                          : "all",
                         per_status_exclude: null,
                       })
+                    }
+                    title={
+                      isAllPersonal
+                        ? `Voltar ao padrão (${BASELINE_PERSONAL_STATUSES.join(", ")})`
+                        : "Marcar todos os status pessoais"
                     }
                   >
                     <Badge
@@ -3645,26 +3800,23 @@ export function RankingFilters({
                       >
                         Arte<br />(estimada)
                       </Label>
+                      {/* A ORDEM vem de `ART_FILTER_ORDER` (exigência crescente) e os RÓTULOS
+                          de `ART_FILTER_SEGMENT_LABELS`, que derivam o "%" dos cortes de faixa.
+                          Enumerar os três botões à mão aqui foi o que deixou o mais restritivo
+                          no meio e o texto divergindo do card da obra. */}
                       <TooltipProvider delayDuration={150} disableHoverableContent>
                         <div className="inline-flex rounded-md border border-border/70 bg-background/60 p-0.5">
-                          <HideAvoidedSegment
-                            onSelect={() => updateParams({ [ART_FILTER_PARAM]: null })}
-                            active={artMode === "off"}
-                            label="Tudo"
-                            tooltip="Não filtra por arte."
-                          />
-                          <HideAvoidedSegment
-                            onSelect={() => updateParams({ [ART_FILTER_PARAM]: "forte" })}
-                            active={artMode === "forte"}
-                            label="Forte"
-                            tooltip="Só o topo 20% da estimativa. Obra SEM estimativa fica de fora — ninguém apurou que a arte dela é forte."
-                          />
-                          <HideAvoidedSegment
-                            onSelect={() => updateParams({ [ART_FILTER_PARAM]: "sem_fraca" })}
-                            active={artMode === "sem_fraca"}
-                            label="Sem fraca"
-                            tooltip="Esconde o fundo 20% da estimativa. Obra SEM estimativa CONTINUA aparecendo — esconder o que nunca foi medido tiraria obra da lista sem motivo."
-                          />
+                          {ART_FILTER_ORDER.map((value) => (
+                            <HideAvoidedSegment
+                              key={value ?? "off"}
+                              onSelect={() => updateParams({ [ART_FILTER_PARAM]: value ?? null })}
+                              active={artMode === (value ?? "off")}
+                              label={value ? ART_FILTER_SEGMENT_LABELS[value] : "Tudo"}
+                              tooltip={
+                                value ? ART_FILTER_TOOLTIPS[value] : "Não filtra por arte."
+                              }
+                            />
+                          ))}
                         </div>
                       </TooltipProvider>
                     </div>
@@ -3706,10 +3858,15 @@ export function RankingFilters({
                 />
               )}
 
+              {/* `flex flex-col` + `flex-1` no conteúdo: o card estica junto com a linha do
+                  grid, e a trilha fica no MEIO em vez de encostada no topo com um vão
+                  embaixo — mesmo tratamento que a largura dos tiers já recebia. */}
               <SortLevelsSection
                 searchParams={searchParams}
                 updateParams={updateParams}
                 defaultSort={defaultSort}
+                className="flex flex-col"
+                contentClassName="flex-1 flex flex-col justify-center"
               />
             </div>
           </div>
