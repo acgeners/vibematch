@@ -158,6 +158,23 @@ body::after {
   color: hsl(var(--foreground));
 }
 
+/* ----------------------------------------------------------------------------
+   O "✕" nativo do `type="search"` some — quem limpa é sempre o botão do app.
+   Blink/WebKit desenham `::-webkit-search-cancel-button` DENTRO da content box,
+   ou seja, à ESQUERDA do botão de limpar do app (que fica no padding `pr-8`):
+   dois ✕ lado a lado, com pesos diferentes, fazendo a mesma coisa. E ele só
+   aparece com o campo FOCADO — isto é, exatamente enquanto se digita.
+   O nativo não é a afordância a preservar: o Firefox não desenha nenhum, então
+   todo campo de busca daqui já traz o seu próprio botão (`aria-label="Limpar…"`).
+   ⚠️ Corolário: campo `type="search"` novo precisa desenhar o botão dele — sem
+   isso, fica sem como limpar no clique.
+--------------------------------------------------------------------------- */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+          appearance: none;
+}
+
 /* Barra de progresso indeterminada — tarefas em segundo plano (sem % conhecido). */
 @keyframes task-indeterminate {
   0%   { left: -45%; }
