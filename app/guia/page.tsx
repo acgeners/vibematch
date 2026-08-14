@@ -3,7 +3,7 @@ import { Header } from "@/components/layout/header"
 import { canConsumeAi } from "@/server/queries/current-user"
 
 export const dynamic = "force-dynamic"
-export const metadata = { title: "Guia — SatorIA" }
+export const metadata = { title: "Guia" }
 
 interface GuideCard {
   tier: string

@@ -10,6 +10,8 @@ interface BatchReviewPageProps {
   searchParams: Promise<{ ids?: string }>
 }
 
+export const metadata = { title: "Revisão de lote" }
+
 export default async function BatchReviewPage({ searchParams }: BatchReviewPageProps) {
   const { ids: rawIds } = await searchParams
   const ids = (rawIds ?? "")

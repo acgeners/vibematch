@@ -11,6 +11,8 @@ interface NewTitlePageProps {
   }>
 }
 
+export const metadata = { title: "Nova obra" }
+
 export default async function NewTitlePage({ searchParams }: NewTitlePageProps) {
   const params = await searchParams
   const [pendingBatchCount, aiEvalOnCreate] = await Promise.all([

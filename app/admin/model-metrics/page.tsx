@@ -44,6 +44,8 @@ const STATUS_BANNER: Record<CollectionStatus, { tone: "ok" | "warn" | "err"; tex
   unexpected_error: { tone: "err", text: "Coleta indisponível: erro inesperado ao ler os snapshots." },
 }
 
+export const metadata = { title: "Métricas do modelo" }
+
 export default async function ModelMetricsPage() {
   const d = await getModelMetricsDashboard()
 

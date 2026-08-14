@@ -99,6 +99,8 @@ function activeWorksCount() {
 const firstParam = (v: string | string[] | undefined): string | undefined =>
   Array.isArray(v) ? v[0] : v
 
+export const metadata = { title: "Configurações" }
+
 export default async function SettingsPage({
   searchParams,
 }: {

@@ -11,6 +11,8 @@ import { getListsWithSummary, getUngroupedFavorites, getWorksLiteForPicker } fro
 
 // Índice de /favorites: grupos (recortes) + card fixo "Todos os favoritos" + card derivado
 // "Sem grupo". O detalhe (tabela/filtros clássicos) vive em /favorites/[listId].
+export const metadata = { title: "Favoritos" }
+
 export default async function FavoritesPage() {
   const [lists, summary, ungrouped, catalog, scoreThresholds, canAi] = await Promise.all([
     getListsWithSummary(),

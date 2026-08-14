@@ -9,7 +9,7 @@ import { ProfileSummary } from "@/components/dashboard/profile-summary"
 import { Header } from "@/components/layout/header"
 import { Button } from "@/components/ui/button"
 
-export const metadata = { title: "Painel — SatorIA" }
+export const metadata = { title: "Painel" }
 
 /**
  * O painel — **a SUA biblioteca**. Tudo aqui é de quem olha; nada é do catálogo.

@@ -12,6 +12,8 @@ const READ_RAIL = 6
 /** Próximas leituras: 2 páginas de 6 — a paginação vive no cliente. */
 const UNREAD_RAIL = 12
 
+export const metadata = { title: "Perfil de gosto" }
+
 export default async function ContaPerfilPage() {
   const [status, aligned, drivers, declared] = await Promise.all([
     getTasteProfileStatusAction(),

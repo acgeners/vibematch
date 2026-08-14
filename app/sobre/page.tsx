@@ -2,7 +2,7 @@ import Link from "next/link"
 import styles from "./sobre.module.css"
 
 export const metadata = {
-  title: "Sobre — SatorIA",
+  title: "Sobre",
   description:
     "SatorIA (satori 悟り + IA): o catálogo de mangás e manhwas com uma IA que aprende o seu gosto.",
 }

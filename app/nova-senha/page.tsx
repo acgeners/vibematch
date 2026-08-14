@@ -4,7 +4,7 @@ import { NewPasswordForm } from "@/components/auth/new-password-form"
 import { Wordmark } from "@/components/auth/wordmark"
 import { createClient } from "@/lib/supabase/server"
 
-export const metadata = { title: "Nova senha — SatorIA" }
+export const metadata = { title: "Nova senha" }
 
 export default async function NovaSenhaPage() {
   // O link do email passa pelo /auth/callback, que troca o `code` por sessão. Sem sessão aqui,

@@ -8,6 +8,8 @@ import { READING_VIEW_COOKIE, normalizeReadingView } from "@/lib/reading-view-pr
 
 export const dynamic = "force-dynamic"
 
+export const metadata = { title: "Acompanhamento" }
+
 export default async function ReadingPage() {
   // Lista ÚNICA: tudo que você acompanha (em leitura + em hiatus pessoal). A divisão
   // que importa na tela é por status de PUBLICAÇÃO (em andamento × concluída/outras),

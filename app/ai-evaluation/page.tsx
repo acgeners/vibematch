@@ -655,6 +655,8 @@ async function AiEvalSettingsControl() {
   )
 }
 
+export const metadata = { title: "Curadoria da Obra" }
+
 export default async function CuradoriaDaObraPage({
   searchParams,
 }: {

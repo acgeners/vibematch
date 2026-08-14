@@ -115,7 +115,7 @@ function workToFormValues(work: WorkWithRelations): Partial<WorkFormValues> {
 export async function generateMetadata({ params }: EditPageProps): Promise<Metadata> {
   const { id } = await params
   const title = await getWorkTitleByIdOrSlug(id)
-  return { title: title ? `Editar: ${title} · SatorIA` : "Editar · SatorIA" }
+  return { title: title ? `Editar: ${title}` : "Editar" }
 }
 
 export default async function EditTitlePage({ params, searchParams }: EditPageProps) {

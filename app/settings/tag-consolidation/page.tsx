@@ -11,6 +11,8 @@ interface PageProps {
 // Rota dedicada da Consolidação de tags — mantida como deep-link estável (a
 // navegação de filtros usa `basePath` default). A mesma ferramenta também roda
 // inline (expandida) na pilha do tópico "Avançado" em /settings.
+export const metadata = { title: "Consolidação de tags" }
+
 export default async function TagConsolidationPage({ searchParams }: PageProps) {
   const params = await searchParams
   return (

@@ -9,7 +9,7 @@ import {
   persistFromCookieValue,
 } from "@/lib/auth-preference"
 
-export const metadata = { title: "Entrar — SatorIA" }
+export const metadata = { title: "Entrar" }
 
 export default async function LoginPage() {
   // Lido no SERVIDOR e passado como prop: é o padrão de `lib/sidebar-preference.ts`. Vindo de

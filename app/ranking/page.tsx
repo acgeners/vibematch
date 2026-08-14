@@ -78,6 +78,8 @@ const getPreferences = unstable_cache(async (): Promise<{
   }
 }, ["ranking-preferences"], { revalidate: 300, tags: ["ranking-preferences"] })
 
+export const metadata = { title: "Ranking" }
+
 export default async function RankingPage({ searchParams }: RankingPageProps) {
   const params = await searchParams
 

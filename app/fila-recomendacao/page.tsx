@@ -386,6 +386,8 @@ async function MarkReadControl() {
   return <MarkReadButton allRead={summary.allRead} queues={RECOMENDACAO_QUEUES} badgeKey="recQueue" />
 }
 
+export const metadata = { title: "Fila de recomendação" }
+
 export default async function FilaRecomendacaoPage({
   searchParams,
 }: {
