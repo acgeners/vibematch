@@ -27,6 +27,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { AdultBadge } from "@/components/ui/adult-badge"
 import { AiProvenanceSeal } from "@/components/ui/ai-provenance"
 import { PublicationStatusBadge } from "@/components/ui/status-badge"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
@@ -863,6 +864,10 @@ function ReadWorkCard({ work, rank }: { work: AlignedWork; rank: number }) {
           workId={work.id}
           className="line-clamp-2 min-h-[2rem] text-xs font-medium leading-snug hover:underline"
         />
+        {/* Linha PRÓPRIA, não ao lado do nome: o card tem ~150px em `lg:grid-cols-6` e o
+            título já usa duas linhas cheias. A caixa de notas segue colada na base
+            (`mt-auto`), então em card de título curto isto ocupa folga que já existia. */}
+        {work.isAdult && <AdultBadge className="w-fit px-1.5 py-0 text-[10px]" />}
         {/* ⚠️ Aro e separador precisam de UMA cor por tema: um fio branco a 4% é
             invisível sobre o `muted` claro, e um preto a 6% some no escuro. Visto na
             tela — no claro a caixa ficava sem contorno e sem divisória. */}
@@ -1536,6 +1541,9 @@ function UnreadWorkCard({ work, rank }: { work: AlignedWork; rank: number }) {
               compact
               className="px-1.5 py-0 text-[10px] leading-[1.5]"
             />
+            {/* Aqui o 18+ entra na fileira de pastilhas que já existe — é a mesma
+                categoria de fato (o que a obra É) que estado e tamanho. */}
+            {work.isAdult && <AdultBadge className="px-1.5 py-0 text-[10px] leading-[1.5]" />}
             {work.totalChapters ? (
               <span
                 title="capítulos publicados"

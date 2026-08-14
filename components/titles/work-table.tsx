@@ -1004,12 +1004,16 @@ function WorkListView({
       />
     ),
     title: (work) => (
-      <span onClick={(e) => e.stopPropagation()} className="block max-w-[420px]">
+      // O 18+ vai NESTA célula, não numa coluna própria: coluna acenderia 24 linhas
+      // de vazio pra marcar as ~4 adultas da página, e a classificação é sobre a
+      // obra — pertence ao nome dela, como já acontece nos Cards e na prévia.
+      <span onClick={(e) => e.stopPropagation()} className="flex max-w-[420px] items-center gap-1.5">
         <WorkTitleLink
           title={work.title}
           workId={work.id}
-          className="text-sm font-semibold leading-snug text-foreground line-clamp-2 hover:underline"
+          className="min-w-0 text-sm font-semibold leading-snug text-foreground line-clamp-2 hover:underline"
         />
+        {work.is_adult && <AdultBadge className="shrink-0 px-1.5 py-0 text-[10px]" />}
       </span>
     ),
     publication_status: (work) => <PublicationStatusBadge statusId={work.publication_status_id} compact hiatusKind={work.hiatus_kind ?? null} hiatusKindConfidence={work.hiatus_kind_confidence ?? null} publicationStatusNote={work.publication_status_note ?? null} />,

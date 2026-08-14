@@ -5,6 +5,7 @@ import Link from "next/link"
 import { ChevronDown, HelpCircle } from "lucide-react"
 import { cn, titleToSlug } from "@/lib/utils"
 import { CoverImage } from "@/components/ui/cover-image"
+import { AdultBadge } from "@/components/ui/adult-badge"
 import { ForceMeters } from "@/components/ranking/force-meters"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
@@ -46,6 +47,13 @@ export interface BussolaDatum {
   title: string
   coverUrl: string | null
   year: number | null
+  /**
+   * Classificação da obra (`works.is_adult`). OBRIGATÓRIO de propósito: opcional,
+   * um consumidor novo esqueceria de mapear e a Bússola dele ficaria sem o selo
+   * **sem erro nenhum** — como já aconteceu com o `WorkCompareDrawer`, que só
+   * ganhou o campo quando o `tsc` reprovou.
+   */
+  isAdult: boolean
   publicationStatus?: string | null
   publicationStatusShort?: string | null
   publicationStatusColor?: string | null
@@ -941,6 +949,7 @@ function DotTooltip({
                 {d.e.publicationStatusShort ?? d.e.publicationStatus}
               </span>
             )}
+            {d.e.isAdult && <AdultBadge className="px-1.5 py-0 text-[10px] font-sans" />}
           </div>
           <span
             className={cn(
@@ -1113,7 +1122,12 @@ function PairedRow({
     >
       <span className={cn("size-[7px] flex-none rounded-full", ARCHETYPE_STYLE[d.arch].dot)} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[11.5px] font-medium leading-tight">{d.e.title}</span>
+        {/* A lista pareada é a única leitura da Bússola que não exige passar o mouse ponto
+            a ponto — sem o selo aqui, a classificação só existiria no hover. */}
+        <span className="flex items-center gap-1.5 text-[11.5px] font-medium leading-tight">
+          <span className="truncate">{d.e.title}</span>
+          {d.e.isAdult && <AdultBadge className="shrink-0 px-1.5 py-0 text-[9.5px] leading-tight" />}
+        </span>
         <span className="block truncate text-[9.5px] text-muted-foreground">
           {d.e.year ?? "—"}
           {d.forces.alcance != null && ` · alcance ${d.forces.alcance}`}

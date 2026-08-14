@@ -2701,16 +2701,21 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.813 passando (+24 pulados) em 267 arquivos** (262 passando + 5 pulados;
-re-medido em 2026-08-14, depois do redesenho do comparador e dos filtros).
+`npm run test` → **2.783 passando (+24 pulados) em 262 arquivos** (257 passando + 5 pulados;
+medido em 2026-08-14 com árvore limpa, na branch do selo 18+ das views densas).
 
-🔴 **Medir isto numa árvore SUJA conta o que não está no commit.** O número anterior ("2.807 em
-266") foi medido com 6 arquivos de teste ainda **não commitados** por outra sessão, e entrou no
-PR #402 sem eles: a linha ficou 35 testes e 6 arquivos adiantada em relação à `main` real, que
-tinha 2.772 em 260. Rode `git status` antes de re-medir — árvore limpa, ou desconte o que ainda
-não está no índice. A linha já disse "~1.780 em
+🔴 **Medir isto numa árvore SUJA conta o que não está no commit — e a correção de 14/08 CAIU NA
+MESMA armadilha.** O "2.807 em 266" saiu de 6 arquivos ainda **não commitados** por outra sessão;
+o "2.813 em 267" que o substituiu foi medido na mesma árvore e herdou os mesmos 6. Conferido com
+`git ls-tree`: `main` tem **260** arquivos de teste e a branch tinha **261** — nunca 267. Não
+basta re-rodar: rode `git status` **e** confira o total contra
+`find tests -name '*.test.ts*' | wc -l`, que é o número que existe no disco. ⚠️ E confira
+também os ARQUIVOS executados: sob carga o Vitest deixa arquivo de fora e ainda diz "0 failed"
+(ver o aviso abaixo) — total executado menor que o do `find` é execução incompleta, não queda de
+teste. A linha já disse "~1.780 em
 ~157", "~2.353 em 218", "2.386 em 221", "2.408 em 225", "2.428 em 228", "2.433 em 228",
-"2.440 em 229", "2.717 em 255", "2.727 em 255", "2.753 em 258", "2.776 em 261", "2.784 em 263" e "2.788 em 264", todas envelhecendo sem nada
+"2.440 em 229", "2.717 em 255", "2.727 em 255", "2.753 em 258", "2.776 em 261", "2.784 em 263",
+"2.788 em 264", "2.807 em 266" e "2.813 em 267", todas envelhecendo sem nada
 acusar — **re-meça antes de editar este número**,
 não incremente de cabeça. ⚠️ O "2.717" durou menos de um dia: dois PRs do mesmo dia somaram 10
 testes e nenhum dos dois tocou nesta linha. Envelhecer aqui é o normal, não a exceção. Vitest, jsdom, alias `@` → raiz. A

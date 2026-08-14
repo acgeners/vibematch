@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
+import { AdultBadge } from "@/components/ui/adult-badge"
 import { ResponsiveHeaderLabel, headerFormsFor } from "@/components/titles/responsive-header-label"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
 import { AlignmentCell, AlignmentScoreCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
@@ -537,6 +538,11 @@ export function WorkHeatmapView({
                           {work.title}
                         </span>
                       </WorkTitleLink>
+                      {/* 18+ FORA do link (como nos cards): o selo é um fato sobre a obra, não
+                          parte do rótulo do link. Aqui é a única marca de classificação da
+                          matriz — a coluna 🔞 desta view é a NOTA de `adult_content` (0–10,
+                          quanto a obra mostra), que é outro fato. */}
+                      {work.is_adult && <AdultBadge className="shrink-0 px-1.5 py-0 text-[10px]" />}
                     </div>
                   </td>
                   {visibleScoreColumns.map((col) => {
