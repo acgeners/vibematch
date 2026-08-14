@@ -126,14 +126,31 @@ describe("opções agrupadas", () => {
     // nomes de aba/coluna na mesma tela, e um `getAllByText` solto passaria com o
     // seletor voltando à lista corrida — que é justamente a regressão.
     const listbox = screen.getByRole("listbox")
-    const groupLabels = Array.from(listbox.querySelectorAll('[data-slot="select-label"]')).map(
-      (n) => n.textContent?.trim(),
-    )
+    const labels = Array.from(listbox.querySelectorAll('[data-slot="select-label"]'))
+    // O rótulo tem NOME + contagem em spans separados — pegar o `textContent` do
+    // rótulo inteiro colava os dois ("Notas8").
+    const groupLabels = labels.map((n) => n.querySelector("span")?.textContent?.trim())
     // Os três últimos grupos são os MESMOS do seletor de colunas — quem aprendeu
     // onde está "Veredito" ali acha aqui no mesmo lugar.
     expect(groupLabels).toEqual(["Recomendação", "Notas", "Básico", "Atributos"])
 
-    // E os campos caem no grupo certo (o listbox lista os 26 numa ordem só).
+    // 🔴 A contagem impressa e as opções do grupo afirmam o MESMO fato, então uma
+    // tem que sair da outra. Aqui a checagem é DERIVADA em vez de fixar "2 · 8 · 8 · 9":
+    // grupo novo (ou campo movido de grupo) entra na conferência sozinho, e um número
+    // escrito à mão passa a reprovar em vez de mentir na tela.
+    const contagens = labels.map((n) => {
+      const spans = n.querySelectorAll("span")
+      const grupo = n.closest('[role="group"]')
+      return {
+        nome: spans[0]?.textContent?.trim(),
+        impresso: Number(spans[spans.length - 1]?.textContent?.trim()),
+        real: grupo?.querySelectorAll('[role="option"]').length ?? -1,
+      }
+    })
+    expect(contagens.every((c) => c.real > 0)).toBe(true)
+    for (const c of contagens) expect([c.nome, c.impresso]).toEqual([c.nome, c.real])
+
+    // E os campos caem no grupo certo (o listbox lista os 27 numa ordem só).
     const optionNames = within(listbox)
       .getAllByRole("option")
       .map((o) => o.textContent?.trim())
