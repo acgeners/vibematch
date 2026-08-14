@@ -261,34 +261,91 @@ try {
                  order by column_name`
   const aqui = local(qcols).split("\n").filter(Boolean)
   const la = new Set((await nuvem(qcols)).map((r) => r.column_name))
-  const todas = aqui.filter((c) => la.has(c))
-  const estruturais = todas.filter((c) => !WORKS_SO_CAPITULO.includes(c))
+  const cols = aqui.filter((c) => la.has(c))
 
-  /** Ids cujo conteúdo diverge, para um conjunto de colunas. */
-  async function divergentes(cols) {
-    const expr = cols.map((c) => `coalesce("${c}"::text, chr(1))`).join(" || chr(2) || ")
-    const q = `select "id"::text as k, md5(${expr}) as h from public.works`
-    const A = new Map(local(q).split("\n").filter(Boolean).map((l) => l.split("|")))
-    const B = new Map((await nuvem(q)).map((r) => [String(r.k), r.h]))
-    return new Set([...A.keys()].filter((k) => B.has(k) && B.get(k) !== A.get(k)))
+  /**
+   * Por obra, um TOKEN por coluna: `N` quando nula, senão 8 dígitos do md5 do valor.
+   *
+   * 🔴 É isto que permite ver a DIREÇÃO da diferença, e a direção é a única coisa que
+   * importa aqui. Um md5 da linha inteira só responde "igual ou diferente" — e foi por isso
+   * que este check disparou por `art_signal`, uma coluna que a NUVEM tem preenchida em 978
+   * obras e o local não. Aquilo é o app trabalhando no lugar certo, não curadoria em risco.
+   *
+   * Só a nulidade não bastaria: duas colunas preenchidas dos dois lados com valores
+   * diferentes são conflito de verdade, e um bitmap de nulos não enxerga isso.
+   */
+  const expr = cols
+    .map((c) => `case when "${c}" is null then 'N' else left(md5("${c}"::text), 8) end`)
+    .join(` || '|' || `)
+  // Além dos tokens, o carimbo mais RECENTE da linha. Sem ele, uma obra cuja nuvem acabou de
+  // regenerar digest/sinopse entra como "conflito" — os dois lados têm valor e diferem — e o
+  // alarme volta a misturar rotina com risco. Medido: 3 dos 5 primeiros achados eram isso.
+  const colsAt = cols.filter((c) => c.endsWith("_at"))
+  const maxAt = colsAt.length
+    ? `greatest(${colsAt.map((c) => `coalesce("${c}", 'epoch')`).join(", ")})::text`
+    : `''`
+  const qtok = `select "id"::text as k, ${maxAt} as m, ${expr} as t from public.works`
+
+  const A = new Map(local(qtok).split("\n").filter(Boolean).map((l) => {
+    const [k, m, ...resto] = l.split("|")
+    return [k, { at: m, tok: resto }]
+  }))
+  const B = new Map(
+    (await nuvem(qtok)).map((r) => [String(r.k), { at: String(r.m), tok: String(r.t).split("|") }]),
+  )
+
+  // ⚠️ A Management API já devolveu página incompleta SEM erro em consulta larga. Conferir
+  // o tamanho é barato e evita um "0 divergentes" que seria lido como "está tudo certo".
+  if (B.size !== A.size) {
+    throw new Error(`a nuvem devolveu ${B.size} obras de ${A.size} — consulta incompleta`)
   }
 
-  const comCap = await divergentes(todas)
-  const semCap = await divergentes(estruturais)
-  // Diverge com `total_chapters` mas não sem ele ⇒ o capítulo é a única diferença.
-  const soCapitulo = [...comCap].filter((id) => !semCap.has(id)).length
+  const iCap = cols.indexOf("total_chapters")
+  const soLocal = []   // dado que existe SÓ no local  → curadoria em risco
+  const conflito = []  // preenchido dos dois lados, valores diferentes
+  let soNuvem = 0      // a nuvem está à frente → rotina
+  let soCapitulo = 0
 
-  editadas = { n: semCap.size, soCapitulo, cols: estruturais.length }
-  if (semCap.size > 0) disparou++
+  for (const [id, ra] of A) {
+    const rb = B.get(id)
+    if (!rb) continue
+    const a = ra.tok
+    const b = rb.tok
+    const difs = []
+    for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) difs.push(k)
+    if (difs.length === 0) continue
+
+    // `total_chapters` sozinho é o agregador de capítulos, não curadoria (ver acima).
+    if (difs.length === 1 && difs[0] === iCap) { soCapitulo++; continue }
+
+    const perdeLocal = difs.filter((k) => a[k] !== "N" && b[k] === "N")
+    const conflita = difs.filter((k) => a[k] !== "N" && b[k] !== "N" && k !== iCap)
+
+    // Dado que só existe no local é sempre risco — nenhuma data desfaz isso.
+    if (perdeLocal.length) soLocal.push({ id, cols: perdeLocal.map((k) => cols[k]) })
+    // Os dois lados preenchidos e diferentes: só é conflito se o LOCAL for o mais recente.
+    // Nuvem na frente é o app trabalhando onde deve.
+    else if (conflita.length && ra.at > rb.at) conflito.push({ id, cols: conflita.map((k) => cols[k]) })
+    else soNuvem++
+  }
+
+  const emRisco = soLocal.length + conflito.length
+  editadas = { emRisco, soLocal, conflito, soNuvem, soCapitulo, cols: cols.length }
+  if (emRisco > 0) disparou++
   reporta(
     "obra editada?",
-    semCap.size ? `${semCap.size} obra(s) divergem` : "não",
-    semCap.size ? 1 : 0,
-    `${estruturais.length} colunas comparadas, carimbos fora`,
+    emRisco ? `${emRisco} obra(s) em risco` : "não",
+    emRisco ? 1 : 0,
+    emRisco
+      ? "dado que só existe no local"
+      : soNuvem
+        ? `${soNuvem} obra(s) só com a nuvem à frente — rotina`
+        : `${cols.length} colunas comparadas, carimbos fora`,
   )
 } catch (e) {
   reporta("obra editada?", "não deu para checar", null, String(e.message ?? e).split("\n")[0].slice(0, 60))
 }
+
 
 // ── slug duplicado ─────────────────────────────────────────────────────────────────────
 // 🔴 Desde 2026-08-12 os links internos de obra apontam para o SLUG, não para o UUID (PR
@@ -399,10 +456,17 @@ if (escritaLocal.achados?.length) {
   console.log(`     Confira o alvo do app com \`npm run db:target\`.`)
 }
 
-if (editadas?.n > 0) {
-  console.log(`\n  🔴 ${editadas.n} obra(s) com CONTEÚDO diferente entre local e nuvem.`)
-  console.log(`     Carimbos e caches já estão fora da comparação, então isto é edição de verdade.`)
-  console.log(`     Veja quais: \`node scripts/db-diff.mjs works\``)
+if (editadas?.emRisco > 0) {
+  console.log(`\n  🔴 ${editadas.emRisco} obra(s) com dado que a nuvem NÃO tem.`)
+  if (editadas.soLocal.length) {
+    const cols = [...new Set(editadas.soLocal.flatMap((o) => o.cols))].slice(0, 6)
+    console.log(`       ${pad(editadas.soLocal.length + " obra(s)", 14)} preenchidas só no local: ${cols.join(", ")}`)
+  }
+  if (editadas.conflito.length) {
+    const cols = [...new Set(editadas.conflito.flatMap((o) => o.cols))].slice(0, 6)
+    console.log(`       ${pad(editadas.conflito.length + " obra(s)", 14)} valores diferentes dos dois lados: ${cols.join(", ")}`)
+  }
+  console.log(`     Isto some no próximo db:pull. Veja quais: \`node scripts/db-diff.mjs works\``)
 }
 
 if (idsCompartilhados?.idErrado || idsCompartilhados?.duplicataAtiva) {
@@ -416,6 +480,14 @@ if (idsCompartilhados?.idErrado || idsCompartilhados?.duplicataAtiva) {
   }
   console.log(`     Reviews e capítulos de uma estão indo para as duas.`)
   console.log(`     Veja quais: \`npx tsx --env-file=.env.local scripts/diag-external-ids-compartilhados.ts\``)
+}
+
+// A nuvem estar à frente é o REGIME NORMAL — o app roda contra ela, então artefato novo
+// (review_summary, art_signal, digest) nasce lá e o local só o vê no próximo db:pull.
+// Vira nota justamente para o alarme acima significar uma coisa só: dado preso no local.
+if (editadas?.soNuvem) {
+  console.log(`\n  ⓘ  ${editadas.soNuvem} obra(s) em que a NUVEM está à frente — rotina, não é problema.`)
+  console.log(`     O app grava na nuvem; o local alcança no próximo \`npm run db:pull\`.`)
 }
 
 if (escritaLocal.navegacao?.length || editadas?.soCapitulo) {
