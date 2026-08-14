@@ -34,6 +34,9 @@ export interface CompareWork extends HiatusFields {
   chaptersRead: number | null
   totalChapters: number | null
   isFavorite: boolean
+  /** Classificação da OBRA (o mesmo selo 🔞 da página), não das tags. Vai no cabeçalho da
+   *  coluna: é o que muda a decisão antes de qualquer nota, e não é comparável em linha. */
+  isAdult: boolean
   expectedScore: number | null
   /** Prioridade (0–10) — âncora na Prevista + IA Rk quando há (ver lib/calculations/decision.ts). */
   decisionScore: number | null
@@ -165,6 +168,9 @@ function mapWorkToCompare(
     chaptersRead: work.chapters_read != null ? Number(work.chapters_read) : null,
     totalChapters: work.total_chapters != null ? Number(work.total_chapters) : null,
     isFavorite: Boolean(work.is_favorite),
+    // Já vinha do banco (`WORK_WITH_RELATIONS_SELECT` é `select *`) e era descartado aqui —
+    // custo de exibir: esta linha. Nenhuma query nova, nenhum egress a mais.
+    isAdult: Boolean(work.is_adult),
     expectedScore: work.calculated_scores?.expected_score ?? null,
     decisionScore: computeDecisionScore({
       expected: work.calculated_scores?.expected_score ?? null,

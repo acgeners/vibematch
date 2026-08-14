@@ -53,7 +53,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { CRITERIA_INFO, PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
+import { CRITERIA_INFO, PERSONAL_STATUSES_BY_ID, PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug } from "@/types/domain"
 import { computeMoodAdjusted, isMoodActive, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
@@ -63,6 +63,8 @@ import { TagStanceMark, tagStanceTitle } from "@/components/ui/tag-stance-mark"
 import { cn } from "@/lib/utils"
 import { ScopedTaskStrip, useScopedGuard } from "@/components/tasks/scoped-task"
 import { CoverImage } from "@/components/ui/cover-image"
+import { QualityHearts } from "@/components/ui/quality-hearts"
+import { sortByTitleLanguage } from "@/lib/titles/title-language"
 import { fetchCompareWorks, type CompareWork } from "@/server/actions/compare"
 import { rerankClusterAction } from "@/server/actions/recommendations"
 import { BussolaPlane } from "@/components/ranking/bussola-plane"
@@ -80,7 +82,13 @@ const HIDDEN_ROWS_STORAGE_KEY = "compare_hidden_rows_v1"
 // v4 → v5: "Votos" sai de dentro da célula da Média externa e vira linha própria.
 // O bump é obrigatório: `normalizeRowsConfig` completa chave nova no FIM da ordem
 // salva, então sem ele quem já usou o drawer veria "Votos" depois de Gêneros·Tags.
-const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v5"
+// v5 → v6: "status" vira "status:publicacao" + "status:pessoal", entra "interesse" e
+// "ano" passa a nascer oculto (o cabeçalho o imprime).
+// 🔴 Sem o bump, quem tinha "status" ESCONDIDO veria as duas linhas novas VISÍVEIS:
+// `normalizeRowsConfig` descarta chave desconhecida, então o `hidden` salvo evaporava e
+// a escolha da pessoa se invertia em silêncio. O bump zera a personalização — que é
+// visível e reversível — em vez de contradizê-la sem avisar.
+const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v6"
 // Tabela (grid) ⇄ Bússola (plano 2D das 3 forças). Persistido entre aberturas.
 const COMPARE_VIEW_STORAGE_KEY = "compare_view_v1"
 type CompareView = "table" | "bussola"
@@ -101,7 +109,16 @@ const COMPARE_ROW_GROUPS: CompareRowGroup[] = [
     id: "basico",
     label: "Básico",
     rows: [
-      { key: "status", label: "Status" },
+      // 🔴 Publicação e Meu status eram UMA linha ("status") com os dois badges lado a lado.
+      // São dimensões diferentes — uma fala da obra, a outra de você —, e juntas não davam
+      // pra ordenar nem esconder separadamente. Pior: os dois badges numa coluna estreita
+      // quebravam linha e esticavam a altura de TODAS as colunas daquela linha do grid.
+      { key: "status:publicacao", label: "Publicação" },
+      { key: "status:pessoal", label: "Meu status" },
+      // O Interesse morava DENTRO do botão de Sinopse no cabeçalho: era a única medida da
+      // tela fora de uma linha, logo a única que não dava pra ordenar, esconder nem incluir
+      // no "só diferenças".
+      { key: "interesse", label: "Interesse" },
       { key: "chapters", label: "Capítulos" },
       { key: "ano", label: "Ano" },
     ],
@@ -144,12 +161,16 @@ const COMPARE_ROW_COLUMN_DEFS: ColumnPickerColumnDef[] = COMPARE_ROW_GROUPS.flat
   g.rows.map((r) => ({ key: r.key, label: r.label, group: g.id }))
 )
 
-// Default enxuto: visíveis = Capítulos, Ano, Nota Prevista, Veredito IA, Média externa,
-// Votos, todos os atributos e Gêneros/Tags. Escondidos por padrão: Status e Pessoal.
+// Default enxuto: visíveis = Publicação, Meu status, Interesse, Capítulos, Nota Prevista,
+// Veredito IA, Média externa, Votos, todos os atributos e Gêneros/Tags.
+//
+// ⚠️ "ano" nasce ESCONDIDO porque o cabeçalho passou a imprimir o ano ao lado do título —
+// mantê-lo aqui seria o mesmo fato dito duas vezes. A linha continua existindo, e não por
+// simetria: ela é o único jeito de ORDENAR as colunas por ano (o cabeçalho não ordena).
 const DEFAULT_ROWS_CONFIG: ColumnPickerConfig = {
   order: ALL_ROW_KEYS,
   hidden: [
-    "status",
+    "ano",
     "score:userScore",
   ],
 }
@@ -754,6 +775,61 @@ function VerdictCard({ item, position }: { item: VerdictItem; position: number }
  * comparadas. Útil pra um sumário "O que diferencia" no topo do drawer —
  * o usuário foca direto nos eixos onde as obras de fato divergem.
  */
+/**
+ * O tooltip do título da coluna: nome completo (que o `line-clamp-2` corta) + os alternativos.
+ *
+ * ⚠️ `alternativeTitles` já vinha carregado e era descartado. A ordem sai de
+ * `sortByTitleLanguage` — o mesmo dono que a página da obra usa —, senão o alternativo legível
+ * aparece em posição aleatória entre romanizações e alfabetos não-latinos (são 10.072 títulos
+ * no catálogo, 36% fora do alfabeto latino).
+ *
+ * ⚠️ Corta em 3: o tooltip é `title=` nativo, sem rolagem e sem largura máxima — obra com 20
+ * alternativos viraria uma coluna de texto atravessando a tela.
+ */
+const ALT_TITLES_NO_TOOLTIP = 3
+
+function titleTooltip(work: CompareWork): string {
+  const alt = sortByTitleLanguage(
+    work.alternativeTitles.filter((t) => t && t !== work.title),
+    (t) => t
+  )
+  const mostrados = alt.slice(0, ALT_TITLES_NO_TOOLTIP)
+  const resto = alt.length - mostrados.length
+  const linhas = [work.title]
+  if (mostrados.length) {
+    linhas.push(
+      "",
+      `Também conhecida como: ${mostrados.join(" · ")}${resto > 0 ? ` (+${resto})` : ""}`
+    )
+  }
+  linhas.push("", "Abre em nova aba")
+  return linhas.join("\n")
+}
+
+/**
+ * O texto da célula de Capítulos — `lidos / total` ou só o total.
+ *
+ * 🔴 A régua de mostrar progresso vem do BANCO (`personal_status.tracks_progress`), nunca de
+ * uma lista de nomes: hoje os quatro sem progresso são Want to Read, Untracked, Not Now e
+ * Not Interested, e em todos o "0 /" seria o default de quem nunca abriu a obra — desenhado
+ * como fração, lê como leitura ABANDONADA. Status novo no Supabase entra na régua sozinho.
+ * Mesma régua da faixa de stats da página da obra.
+ *
+ * ⚠️ É esta função que o "só diferenças" consulta. Um segundo critério para o mesmo fato foi
+ * exatamente o defeito anterior (o filtro comparava o par, a tela mostrava o total).
+ */
+function chaptersCellText(w: CompareWork): string {
+  const total = w.totalChapters ?? null
+  const tracks =
+    w.personalStatusId != null
+      ? (PERSONAL_STATUSES_BY_ID[w.personalStatusId]?.tracksProgress ?? false)
+      : false
+  if (tracks && w.chaptersRead != null) {
+    return `${w.chaptersRead} / ${total ?? "?"}`
+  }
+  return total != null ? String(total) : "—"
+}
+
 function getMaxAmplitudeCriteria(
   works: CompareWork[],
   threshold = 1.5
@@ -830,7 +906,9 @@ interface CompareGridProps {
   criterionPrefs?: Record<string, CriterionRange>
 }
 
-type SectionKey = "notas" | "criterios" | "tags-generos"
+// "basico" entrou quando o grupo passou de 3 para 5 linhas (Publicação e Meu status
+// separados + Interesse): era a única seção sem cabeçalho, e a que mais cresceu.
+type SectionKey = "basico" | "notas" | "criterios" | "tags-generos"
 
 /** Ordenação das COLUNAS (obras) por uma linha do grid. `null` = ordem manual
  *  (arrasto / ordem herdada da página de origem, incl. o refino por mood). */
@@ -957,12 +1035,19 @@ function CompareGrid({
     return true
   }
 
-  const statusVisible = isRowVisible(
-    "status",
-    () => allEqual((w) => w.publicationStatusId) && allEqual((w) => w.personalStatusId)
+  const pubStatusVisible = isRowVisible("status:publicacao", () =>
+    allEqual((w) => w.publicationStatusId)
   )
+  const perStatusVisible = isRowVisible("status:pessoal", () =>
+    allEqual((w) => w.personalStatusId)
+  )
+  const interestVisible = isRowVisible("interesse", () => allEqual((w) => w.synopsisQuality))
+  // 🔴 O "só diferenças" tem que comparar EXATAMENTE o que a célula imprime. Isto aqui
+  // comparava `lidos/total` enquanto a tela mostrava só o total: duas obras com 45 capítulos
+  // e leituras diferentes sobreviviam ao filtro e apareciam como "45" e "45" — o filtro
+  // parecendo quebrado. Hoje a célula mostra o mesmo texto que o `allEqual` avalia.
   const chaptersVisible = isRowVisible("chapters", () =>
-    allEqual((w) => `${w.chaptersRead ?? "?"}/${w.totalChapters ?? "?"}`)
+    allEqual((w) => chaptersCellText(w))
   )
   const yearVisible = isRowVisible("ano", () => allEqual((w) => w.year))
 
@@ -1077,6 +1162,8 @@ function CompareGrid({
   )
   const tagsGenresVisible = isRowVisible("tags-genres")
 
+  const showBasicoSection =
+    pubStatusVisible || perStatusVisible || interestVisible || chaptersVisible || yearVisible
   const showNotasSection = visibleNotasRows.length > 0
   const showCriteriosSection = visibleCritSlugs.length > 0
 
@@ -1200,42 +1287,87 @@ function CompareGrid({
           </div>
         ))}
 
-        {/* Status */}
-        {statusVisible && (
+        {/* Básico — ganhou cabeçalho quando virou 5 linhas. ⚠️ A condição é "existe ALGUMA
+            linha visível": um título de seção sobre nada é pior que título nenhum, e o
+            seletor de Linhas pode esconder as cinco. */}
+        {showBasicoSection && (
+          <SectionTitle
+            label="Básico"
+            collapsed={isCollapsed("basico")}
+            onToggle={() => toggleSection("basico")}
+          />
+        )}
+
+        {/* Publicação — o estado da OBRA */}
+        {showBasicoSection && !isCollapsed("basico") && pubStatusVisible && (
           <>
-            <SectionLabel label="Status" />
+            <SectionLabel label="Publicação" />
             {displayed.map((w) => (
-              <CompareCell key={w.id}>
-                <div className="flex flex-wrap items-center gap-1">
-                  <PublicationStatusBadge statusId={w.publicationStatusId ?? undefined} hiatusKind={w.hiatusKind} hiatusKindConfidence={w.hiatusKindConfidence} publicationStatusNote={w.publicationStatusNote} />
-                  <PersonalStatusBadge statusId={w.personalStatusId ?? undefined} />
-                </div>
+              <CompareCell key={w.id} horizontalAlign="center">
+                <PublicationStatusBadge statusId={w.publicationStatusId ?? undefined} hiatusKind={w.hiatusKind} hiatusKindConfidence={w.hiatusKindConfidence} publicationStatusNote={w.publicationStatusNote} />
+              </CompareCell>
+            ))}
+          </>
+        )}
+
+        {/* Meu status — o SEU estado com a obra */}
+        {showBasicoSection && !isCollapsed("basico") && perStatusVisible && (
+          <>
+            <SectionLabel label="Meu status" />
+            {displayed.map((w) => (
+              <CompareCell key={w.id} horizontalAlign="center">
+                <PersonalStatusBadge statusId={w.personalStatusId ?? undefined} />
+              </CompareCell>
+            ))}
+          </>
+        )}
+
+        {/* Interesse — a sua nota à sinopse (era um ♥ solto dentro do botão de Sinopse) */}
+        {showBasicoSection && !isCollapsed("basico") && interestVisible && (
+          <>
+            <SectionLabel label="Interesse" />
+            {displayed.map((w) => (
+              <CompareCell key={w.id} horizontalAlign="center">
+                {/* ⚠️ `QualityHearts` é o dono do desenho (glifo, tom manual × previsão, escala
+                    de 4) — a 1ª versão desta célula imprimia a string crua com um rosa escrito
+                    à mão, que é uma 2ª régua para a mesma coisa. `showEmpty` é o que dá a
+                    escala (♥♥♥ + ♡): numa comparação lado a lado, "3 de 4" só se lê se o teto
+                    estiver na tela. */}
+                {w.synopsisQuality ? (
+                  <QualityHearts
+                    quality={w.synopsisQuality}
+                    variant="manual"
+                    showEmpty
+                    className="text-[15px]"
+                  />
+                ) : (
+                  <span className="text-xs text-muted-foreground">—</span>
+                )}
               </CompareCell>
             ))}
           </>
         )}
 
         {/* Capítulos */}
-        {chaptersVisible && (
+        {showBasicoSection && !isCollapsed("basico") && chaptersVisible && (
           <>
             <SectionLabel label="Capítulos" sort={sortControl("chapters")} />
             {displayed.map((w) => (
               <CompareCell key={w.id} horizontalAlign="center">
-                <span className="font-mono text-sm">
-                  {w.totalChapters ?? "—"}
-                </span>
+                <span className="text-sm tabular-nums">{chaptersCellText(w)}</span>
               </CompareCell>
             ))}
           </>
         )}
 
-        {/* Ano */}
-        {yearVisible && (
+        {/* Ano — fora do padrão (o cabeçalho o imprime); segue no seletor de Linhas porque
+            é o único jeito de ORDENAR as colunas por ano. */}
+        {showBasicoSection && !isCollapsed("basico") && yearVisible && (
           <>
             <SectionLabel label="Ano" sort={sortControl("ano")} />
             {displayed.map((w) => (
               <CompareCell key={w.id} horizontalAlign="center">
-                <span className="tabular-nums text-xs text-muted-foreground">
+                <span className="text-sm tabular-nums text-muted-foreground">
                   {w.year ?? "—"}
                 </span>
               </CompareCell>
@@ -1332,7 +1464,7 @@ function CompareGrid({
           <>
             <SectionLabel label="" />
             {displayed.map((w) => (
-              <CompareCell key={w.id} verticalAlign="top">
+              <CompareCell key={w.id} verticalAlign="top" horizontalAlign="left">
                 <GenresTagsCell genres={w.genres} tags={w.tags} />
               </CompareCell>
             ))}
@@ -1393,43 +1525,13 @@ function CompareHeaderCell({
   onRemove: () => void
 }) {
   return (
-    <div className="relative flex flex-col gap-2.5 rounded-lg border border-border/80 bg-card/95 backdrop-blur-md p-2.5 shadow-sm transition-all hover:bg-card">
-      {/* Top Actions Row: Drag handle & Action buttons */}
-      <div className="flex items-center justify-between border-b border-border/40 pb-2 text-muted-foreground select-none">
-        {/* Drag handle */}
-        <div 
-          className="flex items-center gap-1 cursor-grab active:cursor-grabbing hover:text-foreground transition-colors"
-          title="Arraste para reordenar"
-        >
-          <GripVertical className="h-3.5 w-3.5" />
-          <span className="text-[10px] font-semibold uppercase tracking-wider">Mover</span>
-        </div>
-
-        {/* Action buttons (External link & Remove) */}
-        <div className="flex items-center gap-1">
-          <Link
-            href={`/titles/${work.slug}`}
-            target="_blank"
-            rel="noreferrer"
-            aria-label="Abrir página da obra"
-            className="flex h-6 w-6 items-center justify-center rounded-full border border-border/40 bg-background/50 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground hover:border-primary/40"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-          </Link>
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label="Remover da comparação"
-            className="flex h-6 w-6 items-center justify-center rounded-full border border-border/40 bg-background/50 text-muted-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-
-      {/* Details Row (Cover + Title + Synopsis) */}
+    <div className="relative flex flex-col rounded-lg border border-border/80 bg-card/95 p-2.5 shadow-sm backdrop-blur-md transition-all hover:bg-card">
+      {/* Capa + (título · ações · 18+/ano · sinopse).
+          Não há mais faixa "Mover" no topo: ela custava ~26px por coluna para rotular um
+          gesto cujo alvo real é o card inteiro (o wrapper do grid é que tem `draggable`).
+          O ⠿ ficou como affordance, agora na linha do título. */}
       <div className="flex gap-2.5">
-        <div className="relative h-20 w-14 shrink-0 overflow-hidden rounded-md border bg-muted/40">
+        <div className="relative h-24 w-[4.25rem] shrink-0 overflow-hidden rounded-md border bg-muted/40">
           {work.coverUrl ? (
             <CoverImage
               url={work.coverUrl}
@@ -1440,39 +1542,88 @@ function CompareHeaderCell({
               <ImageOff className="h-5 w-5 opacity-40" />
             </div>
           )}
+          {/* `isFavorite` já vinha carregado e não era exibido em lugar nenhum. */}
+          {work.isFavorite && (
+            <span
+              className="absolute right-1 top-1 text-[11px] leading-none text-rose-400 drop-shadow-[0_1px_2px_rgba(0,0,0,.8)]"
+              title="Nos seus favoritos"
+              aria-label="Nos seus favoritos"
+            >
+              ♥
+            </span>
+          )}
         </div>
-        <div className="min-w-0 flex-1 flex flex-col justify-between">
-          <Link
-            href={`/titles/${work.slug}`}
-            target="_blank"
-            rel="noreferrer"
-            className="block text-xs font-semibold leading-snug hover:underline text-foreground hover:text-primary"
-          >
-            <span className="line-clamp-2">{work.title}</span>
-          </Link>
-          <SynopsisButton
-            synopsis={work.synopsis}
-            synopsisQuality={work.synopsisQuality}
-          />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex items-start gap-1">
+            {/* 🔴 A altura de 2 linhas é RESERVADA (`min-h`), não consequência do texto.
+                Antes o bloco usava `justify-between`: com título de 1 linha sobrava um vão
+                de 24px entre o nome e a Sinopse, com 2 linhas sobravam 8px — medido, e as
+                colunas vizinhas nunca casavam. */}
+            <Link
+              href={`/titles/${work.slug}`}
+              target="_blank"
+              rel="noreferrer"
+              title={titleTooltip(work)}
+              className="block min-h-[2.25rem] min-w-0 flex-1 text-xs font-semibold leading-snug text-foreground hover:text-primary hover:underline"
+            >
+              <span className="line-clamp-2">{work.title}</span>
+            </Link>
+            {/* O ↗ saiu: o título já é um link `target="_blank"` — o ícone repetia a mesma
+                ação ocupando 22px de uma linha disputada. */}
+            <div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
+              <span
+                className="flex size-5 cursor-grab items-center justify-center rounded active:cursor-grabbing hover:bg-muted hover:text-foreground"
+                title="Arraste o card para reordenar"
+                aria-hidden
+              >
+                <GripVertical className="h-3.5 w-3.5" />
+              </span>
+              <button
+                type="button"
+                onClick={onRemove}
+                aria-label="Tirar da comparação"
+                title="Tirar da comparação"
+                className="flex size-5 items-center justify-center rounded transition-colors hover:bg-destructive/15 hover:text-destructive"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+          {/* Identidade da obra, não comparação: responde "que obra é essa?" a um palmo do
+              título. É este bloco que ocupa o vão que antes ficava vazio. */}
+          <div className="mt-0.5 flex items-center gap-1.5 text-[11px]">
+            {work.isAdult && (
+              <span
+                className="rounded border border-red-500/45 bg-red-500/10 px-1 py-px text-[10px] font-bold leading-none text-red-600 dark:text-red-300"
+                title="Conteúdo 18+"
+              >
+                18+
+              </span>
+            )}
+            <span className="tabular-nums text-muted-foreground">{work.year ?? "—"}</span>
+          </div>
+          <SynopsisButton synopsis={work.synopsis} />
         </div>
       </div>
     </div>
   )
 }
 
-function SynopsisButton({
-  synopsis,
-  synopsisQuality,
-}: {
-  synopsis: string | null
-  synopsisQuality: string | null
-}) {
+/**
+ * Só a AÇÃO de ler a sinopse. O Interesse (♥♥♥) morava aqui dentro e virou linha própria —
+ * medida não mora em botão: era o único número da tela que não dava pra ordenar nem esconder.
+ *
+ * ⚠️ As cores fixas do antigo selo (`text-rose-600` no gatilho, `bg-rose-50 text-rose-700` no
+ * popover) saíram junto: eram claras SEM variante escura, então no tema escuro o ♥ ficava
+ * vermelho sobre fundo escuro e o popover abria um bloco quase branco.
+ */
+function SynopsisButton({ synopsis }: { synopsis: string | null }) {
   if (!synopsis) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
           <span
-            className="mt-2 inline-flex h-6 cursor-not-allowed items-center gap-1 rounded-md border border-dashed bg-background/40 px-2 text-[11px] text-muted-foreground/60"
+            className="mt-auto inline-flex h-6 w-full cursor-not-allowed items-center justify-center gap-1 rounded-md border border-dashed bg-background/40 px-2 text-[11px] text-muted-foreground/60"
             aria-disabled="true"
           >
             <BookOpen className="h-3 w-3" />
@@ -1490,28 +1641,18 @@ function SynopsisButton({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="mt-2 inline-flex flex-col items-start gap-0 rounded-md border bg-background/60 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:bg-background hover:text-foreground"
+          className="mt-auto inline-flex h-6 w-full items-center justify-center gap-1 rounded-md border bg-background/60 px-2 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:bg-background hover:text-foreground"
         >
-          <span className="inline-flex items-center gap-1">
-            <BookOpen className="h-3 w-3" />
-            Sinopse
-          </span>
-          {synopsisQuality && (
-            <span className="text-rose-600 leading-tight">{synopsisQuality}</span>
-          )}
+          <BookOpen className="h-3 w-3" />
+          Sinopse
         </button>
       </PopoverTrigger>
       <PopoverContent
         side="bottom"
         align="start"
         portalled={false}
-        className="max-w-sm space-y-2 p-3 text-sm"
+        className="max-w-sm p-3 text-sm"
       >
-        {synopsisQuality && (
-          <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-1.5 text-[11px] font-semibold text-rose-700">
-            Interesse: {synopsisQuality}
-          </span>
-        )}
         <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
           {synopsis}
         </p>
@@ -1832,11 +1973,17 @@ interface CompareCellProps {
   horizontalAlign?: "center" | "left"
 }
 
+/**
+ * ⚠️ O padrão é CENTRALIZADO. Cada linha é uma medida lida na horizontal, e alinhamento
+ * misto (badge à esquerda, número no meio) faz o olho reancorar a cada linha. Quem precisa
+ * de `left` pede explicitamente — hoje só a nuvem de Gêneros·Tags, onde o conteúdo é texto
+ * corrido em muitos chips e a borda esquerda é o que dá o que ler.
+ */
 function CompareCell({
   children,
   highlightVariant,
   verticalAlign = "center",
-  horizontalAlign = "left",
+  horizontalAlign = "center",
 }: CompareCellProps) {
   return (
     <div
