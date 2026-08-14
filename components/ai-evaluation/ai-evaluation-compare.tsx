@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
-import { confidenceBand } from "@/lib/ai-evaluation/confidence-ruler"
+import { confidenceBadgeClass } from "@/lib/ai-evaluation/confidence-tone"
 import { CRITERION_SLUGS } from "@/types/domain"
 
 /**
@@ -33,36 +33,9 @@ function modelLabel(modelName: string | null): string {
   return modelName
 }
 
-/**
- * Cortes de `confidenceBand` (dono único) — as três superfícies que pintam
- * confiança precisam concordar sobre a mesma avaliação ser verde ou âmbar.
- *
- * 🔴 **Fundo em ALFA, não `bg-<cor>-50` + variante `dark:`.** A versão anterior era
- * clara e sem `dark:` nenhum (`bg-emerald-50 text-emerald-700`), e o app é escuro por
- * padrão e **não tem seletor de tema** — então a pílula saía branca sobre card escuro,
- * em toda visita. `bg-<cor>-500/15` compõe com o fundo e serve os dois temas com UMA
- * classe; só o texto precisa de `dark:`, porque contraste de texto não é composição.
- *
- * ⚠️ **`ring-1` e não `border-<cor>`:** `* { border-color }` no `globals.css` está FORA
- * de layer, e no Tailwind v4 CSS sem layer vence `@layer utilities` mesmo com
- * especificidade menor. O `border-emerald-300` daqui nunca pintou — medido no browser
- * com o CSS real: `border-color` computado dá **`rgb(49, 56, 68)`**, o neutro do tema,
- * igual nas três faixas. Era proteção de mentira, do mesmo tipo do `focus-visible:ring-2`
- * da Bússola.
- *
- * O fundo antigo também foi medido: luminosidade **~98%** em lab (branco), sobre card
- * escuro.
- *
- * ⚠️ Isto NÃO é `STATUS_TONE`, de propósito: aquela régua é de ESTADO, e confiança é
- * escala de VALOR (vem sempre com o número ao lado). A técnica é a mesma; o dono, não.
- */
-function confidenceBadgeClass(confidence: number | null): string {
-  if (confidence == null) return "ring-border bg-muted text-muted-foreground"
-  const band = confidenceBand(confidence)
-  if (band === "alta") return "ring-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-  if (band === "media") return "ring-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-400"
-  return "ring-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-300"
-}
+// A pílula vem inteira de `confidence-tone.ts` — ver lá por que a classe, e não só o
+// corte, precisa de dono: enquanto cada tela montava a própria string, some uma cópia e
+// nasce outra (esta era uma de QUATRO).
 
 interface ScoreCell {
   score: number | null

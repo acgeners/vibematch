@@ -1003,7 +1003,33 @@ meio da rampa. O que a régua proíbe é **chip de palavra** em âmbar que não 
 ⚠️ **Violeta fica FORA da régua**: `✨` é procedência ("quem escreveu isto"), não estado.
 
 ⚠️ **`border-<cor>` não pinta** (o `* { border-color }` do `globals.css` vence utilities no
-Tailwind v4) — por isso `box` usa `ring-*` e `outline` carrega `!`.
+Tailwind v4) — por isso `box` usa `ring-*` e `outline` carrega `!`. **Medido em 2026-08-14**
+no browser com o CSS real: `border-emerald-300` computa `rgb(49, 56, 68)`, o neutro do tema,
+igual em qualquer faixa. O mecanismo é o `*` estar **fora de layer** — CSS sem layer vence
+`@layer utilities` mesmo com especificidade menor. Não é bug do TW; é ordem de cascata.
+
+### Fundo colorido vai em ALFA, nunca `bg-<cor>-50` sem `dark:`
+
+🔴 O app é escuro por padrão e **não tem seletor de tema** ([[feedback-ver-a-tela-gateada-com-playwright]]),
+então fundo claro fixo não é "pior no escuro" — é **branco sobre card escuro em toda visita**.
+Medido: `bg-emerald-50` compõe luminosidade **~98%** em lab. Varridas em 2026-08-14 **22 linhas
+em 5 arquivos** (`ranking-filters`, `work-form`, `pending-batch-banner`, os dois de avaliação).
+
+A forma: **`bg-<cor>-500/15`** (ou `/20` em botão) compõe com o fundo e serve os dois temas com
+UMA classe; só o **texto** ganha `dark:`, porque contraste de texto não é composição. Contorno
+colorido usa `ring-1 ring-<cor>-500/40` pelo motivo do ⚠️ acima. É a técnica que `STATUS_TONE`
+já usava — o que faltava era aplicá-la fora dele.
+
+⚠️ **O heatmap (`work-heatmap-view.tsx`) fica FORA, de propósito.** Célula preenchida é o
+desenho de um heatmap, e a rampa lê bem sobre o escuro — conferido na tela. Alfa lavaria o
+gradiente. E a paleta dele tem **12** linhas, das quais um grep por `-50|-100` pega só 9: o
+tier `top` é `bg-green-300`. Converter "as que o grep achou" deixaria a rampa meio alfa e meio
+sólida, pior que não tocar.
+
+🔴 **Confiança da IA: as CLASSES têm dono, não só os cortes**
+(`lib/ai-evaluation/confidence-tone.ts`). Eram **quatro** cópias de `0,75/0,5`, não três — a
+quarta (`components/titles/work-form.tsx`) sobreviveu à unificação dos números e só apareceu
+nesta varredura. Enquanto cada tela montar a própria string, some uma cópia e nasce outra.
 
 Guardado por `tests/unit/ui/cores-de-estado.test.ts`, que **deriva os tons do próprio
 objeto** (papel novo entra na checagem sozinho) e reprova cor repetida entre papéis, e por

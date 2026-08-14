@@ -20,7 +20,8 @@ import {
 } from "@/lib/ai-evaluation/no-reviews"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import { SHOW_HAIKU_AB } from "@/lib/ai-evaluation/ab-config"
-import { confidenceBand, describeCrossRuler, formatRuler } from "@/lib/ai-evaluation/confidence-ruler"
+import { describeCrossRuler, formatRuler } from "@/lib/ai-evaluation/confidence-ruler"
+import { confidenceTextClass } from "@/lib/ai-evaluation/confidence-tone"
 import type { AiEvaluation } from "@/types/domain"
 
 // Limiar fixo de fricção no "Salvar" e no botão "Reavaliar com Opus".
@@ -80,16 +81,7 @@ type ReviewUsageState =
   | { kind: "declined"; available: number }    // reviews disponíveis mas modelo não citou nenhuma
   | { kind: "used"; count: number; available: number }
 
-/** Só a COR DO TEXTO da confiança — o fundo é do botão que a contém. Sem
- *  `border-<cor>`: `* { border-color }` em globals.css mata essas utilidades no TW v4.
- *  Os CORTES vêm de `confidenceBand` (dono único) — exportada porque o card da fila
- *  em `/ai-evaluation` mostra a mesma confiança e não pode discordar desta cor. */
-export function confidenceTextClass(confidence: number): string {
-  const band = confidenceBand(confidence)
-  if (band === "alta") return "text-emerald-600 dark:text-emerald-400"
-  if (band === "media") return "text-amber-600 dark:text-amber-400"
-  return "text-rose-600 dark:text-rose-400"
-}
+// `confidenceTextClass` mora em `lib/ai-evaluation/confidence-tone.ts` — ver lá.
 
 /** "2026-06-08" → "08/06". Só dia/mês: a coluna do botão é estreita e o ano só
  *  importa quando a avaliação é de outro ano — aí o rótulo cai pra dd/mm/aa. */
@@ -644,10 +636,12 @@ export function AiEvaluationReviewForm({
                   Sinopse{" "}
                   <span
                     className={
-                      "ml-1 rounded-full border px-1.5 py-0.5 text-[11px] font-medium " +
+                      // Fundo em alfa + `ring-1`: fundo claro fixo saía branco no tema
+                      // escuro, e `border-<cor>` não pinta (ver `confidence-tone.ts`).
+                      "ml-1 rounded-full ring-1 px-1.5 py-0.5 text-[11px] font-medium " +
                       (debugContext.synopsisIsManual
-                        ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                        : "border-amber-300 bg-amber-50 text-amber-700")
+                        ? "ring-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                        : "ring-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-400")
                     }
                   >
                     {debugContext.synopsisIsManual ? "manual" : "auto/externa"}
