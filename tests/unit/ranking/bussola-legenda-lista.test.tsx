@@ -25,11 +25,11 @@ if (typeof CSS === "undefined") {
 }
 
 const OBRAS: BussolaDatum[] = [
-  { workId: "a", title: "Chance média", coverUrl: null, year: 2021, chanceScore: 55, platformAvg: 8.2, totalVotes: 1200, expectedScore: 8.1 },
-  { workId: "b", title: "Chance alta", coverUrl: null, year: 2022, chanceScore: 78, platformAvg: 8.8, totalVotes: 23879, expectedScore: 8.4 },
-  { workId: "c", title: "Chance baixa", coverUrl: null, year: 2023, chanceScore: 21, platformAvg: 7.1, totalVotes: 90, expectedScore: 6.9 },
-  { workId: "d", title: "Sem chance", coverUrl: null, year: 2024, chanceScore: null, platformAvg: 7.6, totalVotes: 400, expectedScore: 7.2 },
-  { workId: "e", title: "Chance quase alta", coverUrl: null, year: 2020, chanceScore: 70, platformAvg: 7.9, totalVotes: 5000, expectedScore: 8.0 },
+  { workId: "a", title: "Chance média", coverUrl: null, isAdult: false, year: 2021, chanceScore: 55, platformAvg: 8.2, totalVotes: 1200, expectedScore: 8.1 },
+  { workId: "b", title: "Chance alta", coverUrl: null, isAdult: false, year: 2022, chanceScore: 78, platformAvg: 8.8, totalVotes: 23879, expectedScore: 8.4 },
+  { workId: "c", title: "Chance baixa", coverUrl: null, isAdult: false, year: 2023, chanceScore: 21, platformAvg: 7.1, totalVotes: 90, expectedScore: 6.9 },
+  { workId: "d", title: "Sem chance", coverUrl: null, isAdult: false, year: 2024, chanceScore: null, platformAvg: 7.6, totalVotes: 400, expectedScore: 7.2 },
+  { workId: "e", title: "Chance quase alta", coverUrl: null, isAdult: false, year: 2020, chanceScore: 70, platformAvg: 7.9, totalVotes: 5000, expectedScore: 8.0 },
 ]
 
 const linhas = (container: HTMLElement) =>
@@ -126,6 +126,34 @@ describe("BussolaPlane — tooltip com o número cru", () => {
     fireEvent.mouseOver(alvo)
     expect(container.textContent).toMatch(/sem votos/i)
     expect(container.textContent).not.toMatch(/\b0 votos\b/)
+    unmount()
+  })
+})
+
+describe("BussolaPlane — selo 18+", () => {
+  // A Bússola tem DUAS leituras, e o selo precisa das duas: o cartão de hover (a
+  // lupa) e a lista pareada, que é a única forma de ler as obras sem passar o mouse
+  // ponto a ponto. Só no cartão, a classificação existiria apenas sob o cursor.
+  const COM_ADULTA: BussolaDatum[] = [{ ...OBRAS[0], isAdult: true }, OBRAS[1], OBRAS[2]]
+  const selos = (container: HTMLElement) => [...container.querySelectorAll("[title='Conteúdo adulto (18+)']")]
+
+  it("marca a obra 18+ na lista pareada, e só ela", () => {
+    const { container, unmount } = render(<BussolaPlane entries={COM_ADULTA} />)
+    const naLista = selos(container).filter((el) => el.closest("[data-work]"))
+    expect(naLista).toHaveLength(1)
+    expect(naLista[0].closest("[data-work]")?.getAttribute("data-work")).toBe("a")
+    unmount()
+  })
+
+  it("marca também no cartão de hover, junto de ano e status", () => {
+    const { container, unmount } = render(<BussolaPlane entries={COM_ADULTA} />)
+    expect(selos(container).filter((el) => !el.closest("[data-work]"))).toHaveLength(0)
+
+    const alvo = [...container.querySelectorAll("a[aria-label*='alcance']")].find((el) =>
+      (el.getAttribute("aria-label") ?? "").startsWith("Chance média"),
+    )!
+    fireEvent.mouseOver(alvo)
+    expect(selos(container).filter((el) => !el.closest("[data-work]"))).toHaveLength(1)
     unmount()
   })
 })

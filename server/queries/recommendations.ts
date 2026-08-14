@@ -1574,6 +1574,8 @@ export interface AlignedWork {
    * regra do `/ranking`.
    */
   chanceScore: number | null
+  /** Classificação da obra (`works.is_adult`) — as duas trilhas mostram capa e título. */
+  isAdult: boolean
 }
 
 /**
@@ -1676,7 +1678,7 @@ export async function getAlignedWorkSplit(
       supabase
         .from("works")
         .select(
-          "id, title, total_chapters, publication_status_id, work_covers(url, is_primary, position), calculated_scores!inner(personal_fit, personal_fit_percentile, expected_score, chance_score, chance_is_stub)",
+          "id, title, is_adult, total_chapters, publication_status_id, work_covers(url, is_primary, position), calculated_scores!inner(personal_fit, personal_fit_percentile, expected_score, chance_score, chance_is_stub)",
         )
         .eq("is_archived", false)
         .not("calculated_scores.personal_fit", "is", null)
@@ -1713,6 +1715,7 @@ export async function getAlignedWorkSplit(
             position: c.position ?? null,
           })),
         ),
+        isAdult: Boolean(w.is_adult),
         personalFit: calc?.personal_fit != null ? Number(calc.personal_fit) : 0,
         personalFitPercentile:
           calc?.personal_fit_percentile != null ? Number(calc.personal_fit_percentile) : null,

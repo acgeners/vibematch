@@ -413,9 +413,13 @@ function TitleCell({ entry }: { entry: RankingEntry }) {
           preview={entryToPreview(entry)}
           className="font-medium hover:underline line-clamp-1 block"
         />
-        {entry.differentiators.length > 0 ? (
+        {/* A 2ª linha existe quando há diferenciadores OU quando a obra é 18+ — o selo
+            não pode depender de a obra ter chip de critério, senão some justo nas obras
+            medianas, que são a maioria. */}
+        {entry.isAdult || entry.differentiators.length > 0 ? (
           <TooltipProvider delayDuration={150}>
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-wrap items-center gap-1">
+              {entry.isAdult && <AdultBadge className="px-1.5 py-0 text-[10px]" />}
               {entry.differentiators.map((d) => {
                 const info = CRITERIA_INFO[d.slug]
                 if (!info) return null

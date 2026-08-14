@@ -311,6 +311,7 @@ export function WorkCompareDrawer({
           title: w.title,
           coverUrl: w.coverUrl,
           year: w.year,
+          isAdult: w.isAdult,
           publicationStatus: st?.status ?? null,
           publicationStatusShort: st?.short ?? null,
           publicationStatusColor: st?.color || null,

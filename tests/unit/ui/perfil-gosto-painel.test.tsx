@@ -90,6 +90,7 @@ const work = (
   id: `w${n}`,
   title: `Obra ${n}`,
   coverUrl: null,
+  isAdult: false,
   personalFit: 0.5,
   personalFitPercentile: 90,
   personalStatus: user == null ? "Want to Read" : "Finished",
@@ -405,5 +406,31 @@ describe("aba A prova", () => {
     expect(screen.getByRole("tab", { name: /Tags e temas/ }).getAttribute("aria-selected")).toBe(
       "true",
     )
+  })
+})
+
+describe("selo 18+ nas duas trilhas", () => {
+  // O painel mostra capa e NOME de obra em duas trilhas (a prova, com as lidas, e a
+  // fila das não lidas) e não dizia a classificação em nenhuma das duas — o dado nem
+  // chegava aqui: `AlignedWork` não tinha `isAdult`. Render, não leitura do objeto:
+  // um teste sobre o dado passaria verde com o selo fora da árvore.
+  it("marca a obra 18+ na trilha das lidas, e só ela", () => {
+    renderPanel({
+      aligned: { ...ALIGNED, read: [work(1, 9.1, 9.4, { isAdult: true }), work(2, 8.7, 8.3)] },
+    })
+    const adulta = screen.getByText("Obra 1").closest("li")!
+    const comum = screen.getByText("Obra 2").closest("li")!
+    expect(within(adulta).getByTitle("Conteúdo adulto (18+)").textContent).toContain("18+")
+    expect(within(comum).queryByTitle("Conteúdo adulto (18+)")).toBeNull()
+  })
+
+  it("marca também na fila das não lidas", () => {
+    renderPanel({
+      aligned: { ...ALIGNED, unread: [work(11, 8.7, null, { isAdult: true }), work(12, 8.6, null)] },
+    })
+    goTo(/O que isso muda/)
+    const adulta = screen.getByText("Obra 11").closest("li")!
+    expect(within(adulta).getByTitle("Conteúdo adulto (18+)")).toBeTruthy()
+    expect(within(screen.getByText("Obra 12").closest("li")!).queryByTitle("Conteúdo adulto (18+)")).toBeNull()
   })
 })

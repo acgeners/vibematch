@@ -24,7 +24,7 @@ function makeEntries(n: number): BussolaDatum[] {
   return Array.from({ length: n }, (_, i) => ({
     workId: `w${i}`,
     title: `Obra ${i}`,
-    coverUrl: null,
+    coverUrl: null, isAdult: false,
     year: 2020,
     chanceScore: 20 + ((i * 7) % 70),
     platformAvg: 7 + ((i * 3) % 25) / 10,
