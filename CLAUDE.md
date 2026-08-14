@@ -1586,6 +1586,67 @@ Renderize um estado de carregamento explícito e **nenhuma ação de auth/irreve
 chegar. Pra testar esse ramo, atrase a server action no Playwright (`page.route` + delay quando
 `headers()["next-action"]`) — em dev ela resolve rápido demais e o estado nunca aparece.
 
+## O avatar é DERIVADO da URL — não existe coluna de configuração
+
+`user_settings.avatar_url` é dona única, e guarda **uma string com três formas**: `""` (o chip cai
+no ícone), `/avatar.svg?estilo=…&cabelo=…` (montado em `/conta`) ou a URL de um upload no bucket
+público `avatars`. Quem consome — `components/layout/account-chip.tsx`, o card de `/conta`,
+qualquer `<img>` futuro — vê só uma URL comum e **não sabe montar avatar**. É isso que os mantém
+triviais.
+
+| peça | papel |
+|---|---|
+| `lib/avatar/render.ts` | renderizador ÚNICO: `config → SVG`. Paletas, 12 personagens + 12 símbolos |
+| `lib/avatar/url.ts` | fronteira de confiança: `sanitize`, `config ↔ URL`, `isValidAvatarUrl` |
+| `app/avatar.svg/route.ts` | redesenha a partir da query string, `immutable` por 1 ano |
+| `components/conta/avatar-picker.tsx` | o painel (estilo, cabelo, pele, olhos, fundo, sortear, upload) |
+
+🔴 **Preset É uma configuração — não um segundo conjunto de arquivos.** As miniaturas da grade são
+desenhadas com a config ATUAL do usuário, pelo mesmo `renderAvatar`. Se a galeria tivesse imagens
+próprias, ela e o resultado divergiriam no primeiro ajuste de paleta, em silêncio — a família
+"dois critérios pro mesmo fato" de novo. Guardado por `tests/unit/avatar/avatar-picker.test.tsx`,
+que é teste de **RENDER** de propósito: miniatura fixa passaria verde num teste de função pura.
+
+🔴 **`sanitizeAvatarConfig` é defesa contra INJEÇÃO, não higiene.** O renderizador interpola cor
+direto em atributo SVG e a rota responde `image/svg+xml` — documento **executável** se alguém
+navegar até ele. Cor só passa por `/^[0-9a-f]{6}$/i`; estilo só se existir em `ESTILO_POR_ID`.
+Valor fora da régua **vira o padrão em silêncio**, de propósito: URL antiga de uma paleta
+aposentada tem que continuar desenhando alguém, senão um rename esvazia o chip de todo mundo.
+
+⚠️ **O diretório chama-se `avatar.svg` e isso não é estética.** O matcher do `middleware.ts` exclui
+`.*\.(svg|png|…)$`, então a rota não paga refresh de sessão a cada carregamento do chip. Movê-la
+pra `/api/avatar` reintroduz esse custo em toda navegação, sem nada acusar.
+
+⚠️ **O preview do painel usa data URI, não a rota.** Mexer numa cor gera URL nova a cada clique, e
+cada uma seria uma requisição — o avatar piscaria enquanto a pessoa escolhe. Só o que vai pro banco
+é a URL.
+
+🔴 **Imagem que não carrega é ESTADO, e o `onError` calado já custou caro.** Até 2026-08-14 o
+`avatar_url` do dono apontava para `djbreiyzwoevbmoscqiq.supabase.co` — um projeto Supabase
+**extinto** (o host nem resolve). O `<img onError>` caía no ícone padrão e a tela afirmava "você
+não tem avatar"; o dado ficou meses inválido sem nada acusar. Hoje o painel diz que a imagem não
+carrega. **Foi pelo campo de texto "URL da imagem" que aquele ponteiro entrou** — ele SAIU: era a
+terceira forma de definir a mesma coisa.
+
+🔴 **O bucket `avatars` não existia neste projeto até a migration 191.** A metade de Storage da
+090 foi aplicada no projeto ANTERIOR; `storage.buckets` na nuvem tinha só `criteria-icons`, e o
+`uploadAvatar` — vivo no código desde a 090 — falhava em toda tentativa. ⚠️ `db:pull` dumpa só o
+schema `public`, então o stack local também não tem o bucket e **nunca vai ter por replicação**.
+
+⚠️ **Paletas e `CONFIG_PADRAO` em hex MINÚSCULO.** O sanitize normaliza pra minúsculo, então com
+paleta em maiúsculo a ida e volta `config → URL → config` deixa de ser identidade e a comparação
+"esta cor está selecionada?" passa a depender de `toLowerCase()` espalhado. Guardado no
+round-trip de `tests/unit/avatar/avatar-url.test.ts`.
+
+⚠️ **Controle sem efeito não fica na tela:** símbolo não tem pele nem olhos, e a máscara da
+Kitsune cobre o rosto (`substituiRosto`) — nesses casos os dois controles somem. O corte é por
+propriedade do estilo, nunca por uma lista de ids.
+
+⚠️ **Ao desenhar estilo novo, três armadilhas medidas no Chromium:** gradiente `objectBoundingBox`
+num traço VERTICAL não pinta (bbox de largura zero — a spec manda não renderizar), daí
+`userSpaceOnUse`; ponta de cabelo solta deixa o crânio à mostra e lê como coroa; e vale abaixo da
+linha da franja auto-intersecta o caminho e abre buraco no preenchimento. Confira a 36px, não a 120.
+
 ## Supabase: o `select` corta em 1000 linhas, sem avisar
 
 `supabase.from(x).select(...)` devolve **no máximo 1000 linhas** por padrão, **sem erro e sem
@@ -2441,12 +2502,12 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.727 passando (+24 pulados) em 255 arquivos** (250 passando + 5 pulados;
+`npm run test` → **2.753 passando (+24 pulados) em 258 arquivos** (253 passando + 5 pulados;
 re-medido em 2026-08-14). A linha já disse "~1.780 em ~157", "~2.353 em 218", "2.386 em
-221", "2.408 em 225", "2.428 em 228", "2.433 em 228", "2.440 em 229" e "2.717 em 255", todas
-envelhecendo sem nada acusar — **re-meça antes de editar este número**, não incremente de cabeça.
-⚠️ O "2.717" durou menos de um dia: dois PRs do mesmo dia somaram 10 testes e nenhum dos dois
-tocou nesta linha. Envelhecer aqui é o normal, não a exceção. Vitest, jsdom, alias `@` → raiz. A
+221", "2.408 em 225", "2.428 em 228", "2.433 em 228", "2.440 em 229", "2.717 em 255" e
+"2.727 em 255", todas envelhecendo sem nada acusar — **re-meça antes de editar este número**,
+não incremente de cabeça. ⚠️ O "2.717" durou menos de um dia: dois PRs do mesmo dia somaram 10
+testes e nenhum dos dois tocou nesta linha. Envelhecer aqui é o normal, não a exceção. Vitest, jsdom, alias `@` → raiz. A
 descrição antiga ("só `tests/unit/calculations/`, sem teste de componente") estava desatualizada
 havia muito: hoje `calculations` é a 4ª maior pasta, atrás de `synopsis-interest` (36),
 `external` (30) e `orchestration` (19), e há `.test.tsx` de componente.

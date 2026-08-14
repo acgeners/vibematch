@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { isValidAvatarUrl } from "@/lib/avatar/url"
 
 // Campos do perfil editável em /conta. Todos são strings no form (inputs de
 // texto): vazio é permitido; quando preenchido, email/URL precisam ser válidos.
@@ -10,11 +11,12 @@ export const accountProfileSchema = z.object({
     .trim()
     .max(254)
     .refine((v) => v === "" || z.string().email().safeParse(v).success, "Email inválido."),
-  avatarUrl: z
-    .string()
-    .trim()
-    .max(2048)
-    .refine((v) => v === "" || z.string().url().safeParse(v).success, "URL inválida."),
+  // ⚠️ Não é mais um campo digitável — quem escreve aqui é o painel de avatar ou o
+  // upload. A validação FICA porque toda export de um arquivo "use server" é endpoint
+  // HTTP público: tirar o input da tela não fecha a porta. `isValidAvatarUrl` é o dono
+  // único das três formas aceitas (vazio, `/avatar.svg?…`, URL absoluta) — checar
+  // "é URL?" aqui recusaria o avatar montado, que é um caminho relativo.
+  avatarUrl: z.string().trim().max(2048).refine(isValidAvatarUrl, "Avatar inválido."),
 })
 
 export type AccountProfileValues = z.infer<typeof accountProfileSchema>

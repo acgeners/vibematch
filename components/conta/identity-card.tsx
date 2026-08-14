@@ -1,12 +1,8 @@
 "use client"
 
-/* eslint-disable @next/next/no-img-element -- avatar com URLs externas variadas + fallback próprio; next/image não cabe (sem images config). */
-
-import { useRef, useState } from "react"
 import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
-import { UserCircle, Upload, Loader2 } from "lucide-react"
 import {
   Card,
   CardContent,
@@ -17,9 +13,11 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { AvatarPicker } from "@/components/conta/avatar-picker"
+import { refreshChrome } from "@/lib/chrome-refresh"
 import { accountProfileSchema } from "@/lib/validations/account.schema"
 import type { AccountProfileValues } from "@/lib/validations/account.schema"
-import { updateProfile, uploadAvatar } from "@/server/actions/account"
+import { updateProfile } from "@/server/actions/account"
 
 interface IdentityCardProps {
   userId: string
@@ -29,9 +27,6 @@ interface IdentityCardProps {
 }
 
 export function IdentityCard({ userId, displayName, email, avatarUrl }: IdentityCardProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [uploading, setUploading] = useState(false)
-
   const {
     register,
     handleSubmit,
@@ -48,8 +43,7 @@ export function IdentityCard({ userId, displayName, email, avatarUrl }: Identity
     },
   })
 
-  // Preview ao vivo: segue o campo de URL (colado ou preenchido pelo upload).
-  const previewUrl = (useWatch({ control, name: "avatarUrl" }) ?? "").trim()
+  const avatarUrlAtual = (useWatch({ control, name: "avatarUrl" }) ?? "").trim()
 
   const onSubmit = async (values: AccountProfileValues) => {
     const result = await updateProfile(values)
@@ -63,30 +57,11 @@ export function IdentityCard({ userId, displayName, email, avatarUrl }: Identity
       email: values.email ?? "",
       avatarUrl: values.avatarUrl ?? "",
     })
+    // O chip do topo busca o resumo no cliente (`useChromeData`), então `revalidatePath`
+    // sozinho não o atualiza — sem isto, o avatar novo só apareceria na navegação
+    // seguinte, e a pessoa acha que não salvou.
+    refreshChrome()
     toast.success("Perfil salvo.")
-  }
-
-  const onPickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = "" // permite reescolher o mesmo arquivo depois
-    if (!file) return
-
-    setUploading(true)
-    try {
-      const fd = new FormData()
-      fd.append("file", file)
-      const result = await uploadAvatar(fd)
-      if (result.error || !result.url) {
-        toast.error(`Erro no upload: ${result.error ?? "URL ausente"}`)
-        return
-      }
-      // O upload já gravou avatar_url no banco; refletimos no campo (marca dirty=false
-      // pra essa parte, mas Salvar continua disponível pra nome/email).
-      setValue("avatarUrl", result.url, { shouldDirty: true, shouldValidate: true })
-      toast.success("Imagem enviada.")
-    } finally {
-      setUploading(false)
-    }
   }
 
   return (
@@ -94,51 +69,20 @@ export function IdentityCard({ userId, displayName, email, avatarUrl }: Identity
       <CardHeader>
         <CardTitle className="text-base">Identidade</CardTitle>
         <CardDescription className="text-xs">
-          Nome, email e avatar. Enquanto o login não entra, ficam salvos no seu perfil.
+          Nome, email e avatar — o avatar é o que aparece no canto superior direito.
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-          {/* Avatar */}
-          <div className="flex items-center gap-4">
-            <div className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full bg-gradient-to-br from-primary/25 to-primary/5 text-primary ring-1 ring-primary/20 [&_svg]:size-8">
-              {previewUrl ? (
-                <img
-                  src={previewUrl}
-                  alt="Avatar"
-                  className="size-full object-cover"
-                  onError={(ev) => {
-                    // URL morta: esconde a img pra cair no fundo gradiente.
-                    ev.currentTarget.style.display = "none"
-                  }}
-                />
-              ) : (
-                <UserCircle />
-              )}
-            </div>
-            <div className="min-w-0 space-y-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif"
-                className="hidden"
-                onChange={onPickFile}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={uploading}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {uploading ? <Loader2 className="animate-spin" /> : <Upload />}
-                {uploading ? "Enviando..." : "Enviar imagem"}
-              </Button>
-              <p className="text-[11px] text-muted-foreground">
-                PNG, JPG, WEBP ou GIF até 2 MB — ou cole uma URL abaixo.
-              </p>
-            </div>
-          </div>
+          {/* O painel escreve no MESMO campo do form (`avatarUrl`) que o Salvar envia:
+              montado e enviado terminam numa string só, e não há um segundo lugar
+              guardando "qual era a configuração". */}
+          <AvatarPicker
+            value={avatarUrlAtual}
+            onChange={(url) =>
+              setValue("avatarUrl", url, { shouldDirty: true, shouldValidate: true })
+            }
+          />
 
           {/* Campos */}
           <div className="grid gap-4 sm:grid-cols-2">
@@ -169,18 +113,14 @@ export function IdentityCard({ userId, displayName, email, avatarUrl }: Identity
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="avatarUrl">URL da imagem</Label>
-            <Input
-              id="avatarUrl"
-              placeholder="https://..."
-              aria-invalid={!!errors.avatarUrl}
-              {...register("avatarUrl")}
-            />
-            {errors.avatarUrl && (
-              <p className="text-xs text-destructive">{errors.avatarUrl.message}</p>
-            )}
-          </div>
+          {/* 🔴 O campo de texto "URL da imagem" SAIU. Era a terceira forma de definir a
+              mesma coisa, e foi por ela que o avatar do dono virou um ponteiro para um
+              projeto Supabase extinto — sem nada acusando, porque o `onError` do `<img>`
+              caía no ícone padrão em silêncio. O erro do schema continua sendo exibido:
+              a action é endpoint público e pode recusar um valor que a tela não digitou. */}
+          {errors.avatarUrl && (
+            <p className="text-xs text-destructive">{errors.avatarUrl.message}</p>
+          )}
 
           <div className="flex items-center justify-between gap-3">
             <p className="break-all font-mono text-[11px] text-muted-foreground">
