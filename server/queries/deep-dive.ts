@@ -4,6 +4,7 @@ import { pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getCurrentUserId, getSessionUserId } from "@/server/queries/current-user"
+import { getPersonalStateReader } from "@/server/queries/user-work-state"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import { fetchReviewDigestsBatch } from "@/server/queries/recommendations"
 import {
@@ -230,11 +231,14 @@ async function fetchWorkBundle(workId: string): Promise<{
   return { work, coverUrl }
 }
 
+/**
+ * ⚠️ SEM `user_score`: a migration 151 o removeu do `RETURNS TABLE` de `find_similar_works`
+ * — era a nota do DONO, servida a qualquer usuário. A nota vem do espelho de quem olha.
+ */
 interface SimilarRow {
   id: string
   title: string
   similarity: number
-  user_score: number | null
   cover_url: string | null
   synopsis: string | null
 }
@@ -250,10 +254,22 @@ async function fetchSimilarsForWork(workId: string): Promise<DeepDiveSimilarsBun
     return { loved: [], avoided: [] }
   }
   const rows = (data ?? []) as SimilarRow[]
+
+  // 🔴 A nota sai do espelho per-user, NÃO da RPC. Ela devolvia `user_score` até a migration
+  // 151 (13/07/2026); depois disso este código lia um campo que não vem mais, `score` ficava
+  // sempre null e `loved`/`avoided` saíam SEMPRE VAZIOS — com o prompt imprimindo
+  // "(nenhuma obra similar suficientemente avaliada na biblioteca)" enquanto promete o
+  // contrário. Nada quebrou: a coluna some do payload e o TS não reclama de campo ausente
+  // num `as SimilarRow[]`. Mesma correção que `similar-works.ts` já aplica.
+  //
+  // ⚠️ E não é só consertar a leitura: o espelho é de QUEM OLHA. Ler a nota do dono aqui
+  // colocaria as obras amadas DELE no prompt de outra pessoa.
+  const personal = await getPersonalStateReader()
+
   const loved: DeepDiveSimilarsBundle["loved"] = []
   const avoided: DeepDiveSimilarsBundle["avoided"] = []
   for (const r of rows) {
-    const score = r.user_score != null ? Number(r.user_score) : null
+    const score = personal.get(r.id).userScore
     const entry = {
       id: r.id,
       title: r.title,
