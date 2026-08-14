@@ -47,6 +47,8 @@ async function getFormulaConfig(): Promise<FormulaConfig> {
 const firstParam = (v: string | string[] | undefined): string | undefined =>
   Array.isArray(v) ? v[0] : v
 
+export const metadata = { title: "Preferências" }
+
 export default async function PreferenciasPage({
   searchParams,
 }: {

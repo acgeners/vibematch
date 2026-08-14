@@ -37,6 +37,8 @@ function labelOf(op: string): string {
   return AI_OPERATIONS[op as keyof typeof AI_OPERATIONS]?.label ?? op
 }
 
+export const metadata = { title: "Uso da API IA" }
+
 export default async function AiUsagePage({
   searchParams,
 }: {

@@ -35,6 +35,8 @@ function parseIds(raw: string | undefined): string[] {
     .filter((s) => /^[0-9a-f-]{36}$/i.test(s))
 }
 
+export const metadata = { title: "Mais como estas" }
+
 export default async function DescobrirPage({ searchParams }: PageProps) {
   const params = await searchParams
   const seedIds = parseIds(params.seeds)

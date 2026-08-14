@@ -86,6 +86,11 @@ interface PageProps {
   params: Promise<{ slug: string }>
 }
 
+// Estático, e não o rótulo do modo: o modo só existe dentro de `getRecommendationRun`, que
+// carrega a rodada inteira (ranked + obras). `generateMetadata` roda em passada própria, então
+// derivar o nome da aba custaria a rodada duas vezes por visita.
+export const metadata = { title: "Execução de recomendação" }
+
 export default async function RunDetailPage({ params }: PageProps) {
   const { slug } = await params
   const run = await getRecommendationRun(slug)

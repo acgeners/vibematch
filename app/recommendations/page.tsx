@@ -20,6 +20,8 @@ import { formatRelativeDateTime } from "@/lib/date-utils"
 // force-dynamic passa a servir o histórico de UMA pessoa em cache para as próximas.
 // Ver [[gotcha-force-dynamic-per-user]].
 
+export const metadata = { title: "Recomendações" }
+
 export default async function RecommendationsPage() {
   const [status, runs, canAi, chats, deepDives, sessionUserId] = await Promise.all([
     getTasteProfileStatusAction(),

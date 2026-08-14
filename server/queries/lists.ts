@@ -275,6 +275,31 @@ export async function getListsWithSummary(): Promise<WorkListSummary[]> {
   })
 }
 
+/**
+ * Só o NOME do grupo — para o título da aba (`generateMetadata`).
+ *
+ * ⚠️ Não use `getListDetail` para isso: ele carrega as linhas de TODAS as obras membras, e o
+ * `generateMetadata` roda numa passada separada da página. Seria o custo do grupo inteiro pago
+ * duas vezes por visita, para escrever uma palavra na aba.
+ *
+ * Mesmo escopo por dono do `getListDetail`: um id não é segredo, e sem o `user_id` a aba
+ * revelaria o nome do grupo de outra pessoa.
+ */
+export async function getListName(id: string): Promise<string | null> {
+  const supabase = createAdminClient()
+  const viewerId = await getSessionUserId()
+  if (!viewerId) return null
+
+  const { data } = await supabase
+    .from("work_lists")
+    .select("name")
+    .eq("id", id)
+    .eq("user_id", viewerId)
+    .maybeSingle()
+
+  return (data?.name as string | undefined) ?? null
+}
+
 /** Detalhe de um grupo: metadados + IDs (escopo do ranking) + resumo escopado. */
 export async function getListDetail(id: string): Promise<WorkListDetail | null> {
   const supabase = createAdminClient()

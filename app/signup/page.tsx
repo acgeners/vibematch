@@ -2,7 +2,7 @@ import { AuthHero } from "@/components/auth/auth-hero"
 import { SignupForm } from "@/components/auth/signup-form"
 import { Wordmark } from "@/components/auth/wordmark"
 
-export const metadata = { title: "Criar conta — SatorIA" }
+export const metadata = { title: "Criar conta" }
 
 export default function SignupPage() {
   return (

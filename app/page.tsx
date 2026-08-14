@@ -29,6 +29,15 @@ import { WorkShelf } from "@/components/home/work-shelf"
  * vender nota externa como se fosse curadoria. Quem não tem sessão nem modelo continua vendo
  * o que é fato da obra — ver `getScoresReader`, que zera os campos pessoais nesse caso.
  */
+/**
+ * 🔴 `absolute` e não `"Início"` — a home é a ÚNICA rota em que o `template` do layout raiz não
+ * vale. O Next não aplica o template à página do MESMO segmento que o declara, só às filhas;
+ * medido no app rodando, `title: "Início"` aqui sai como `<title>Início</title>`, sem a marca,
+ * enquanto `/ranking` sai "Ranking · SatorIA". Por isso o sufixo aparece escrito aqui — é a
+ * exceção, e o teste de arquitetura a exige nesta forma em vez de simplesmente ignorar o arquivo.
+ */
+export const metadata = { title: { absolute: "Início · SatorIA" } }
+
 export default async function HomePage() {
   // Sem sessão a página é OUTRA, não a mesma com menos coisa. "Continue lendo" e "Pra você
   // hoje" dependem de estado e de modelo — sem usuário os dois voltam vazios (correto desde o

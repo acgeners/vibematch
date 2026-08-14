@@ -15,7 +15,7 @@ import { DECISION_QUEUES } from "@/lib/curadoria/decision-queues"
 import type { DecisionQueueKey } from "@/lib/curadoria/decision-queues"
 import { cn } from "@/lib/utils"
 
-export const metadata = { title: "Curadoria do catálogo — SatorIA" }
+export const metadata = { title: "Curadoria" }
 
 /**
  * A raiz da console — o estado do catálogo COMPARTILHADO.

@@ -3,7 +3,7 @@ import { getSessionUserId, getCurrentUserProfile } from "@/server/queries/curren
 import { WelcomeFlow } from "./welcome-flow"
 
 export const dynamic = "force-dynamic"
-export const metadata = { title: "Boas-vindas — SatorIA" }
+export const metadata = { title: "Boas-vindas" }
 
 /**
  * Onboarding pós-cadastro (7 telas; mockup aprovado = especificação de aceite).

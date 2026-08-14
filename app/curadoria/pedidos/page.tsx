@@ -40,6 +40,8 @@ function quando(iso: string): string {
   return `${dias} dias`
 }
 
+export const metadata = { title: "Pedidos" }
+
 export default async function PedidosPage() {
   const pedidos = await getCurationQueue()
 

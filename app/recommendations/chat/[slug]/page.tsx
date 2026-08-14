@@ -14,6 +14,10 @@ interface PageProps {
   params: Promise<{ slug: string }>
 }
 
+// Estático pelo mesmo motivo da rodada: o título da conversa só vem com `getChatAction`, que
+// traz o array JSONB de mensagens inteiro.
+export const metadata = { title: "Conversa" }
+
 export default async function RecommendationChatDetailPage({ params }: PageProps) {
   const { slug } = await params
   const [canAi, chat] = await Promise.all([canConsumeAi(), getChatAction(slug)])

@@ -7,6 +7,8 @@ import { canConsumeAi } from "@/server/queries/current-user"
 
 export const dynamic = "force-dynamic"
 
+export const metadata = { title: "Importar obras" }
+
 export default async function ImportPage() {
   const [pendingReviewWorks, history, stats, aiAvailable] = await Promise.all([
     getPendingReviewWorks(),

@@ -1,3 +1,4 @@
+import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 import { sanitizeInterestSelection } from "@/lib/interest-sentinels"
 import Link from "next/link"
@@ -17,7 +18,7 @@ import { getWorksByIds } from "@/server/queries/works"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
 import { getFavoritesSummary } from "@/server/queries/favorites"
-import { getListDetail, getUngroupedFavorites, getWorksLiteForPicker, getListRecommendations, getListsForPicker } from "@/server/queries/lists"
+import { getListDetail, getListName, getUngroupedFavorites, getWorksLiteForPicker, getListRecommendations, getListsForPicker } from "@/server/queries/lists"
 import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
@@ -40,6 +41,16 @@ interface FavoritesListPageProps {
 function toArray(value: string | string[] | undefined): string[] {
   if (!value) return []
   return Array.isArray(value) ? value : [value]
+}
+
+// Os mesmos três casos do `title` do Header abaixo (linha ~230): os dois ids reservados e o
+// nome do grupo. Grupo apagado ou de outra pessoa cai em "Favoritos" — a página redireciona
+// pro índice de qualquer jeito.
+export async function generateMetadata({ params }: FavoritesListPageProps): Promise<Metadata> {
+  const { listId } = await params
+  if (listId === "all") return { title: "Todos os favoritos" }
+  if (listId === "ungrouped") return { title: "Sem grupo" }
+  return { title: (await getListName(listId)) ?? "Favoritos" }
 }
 
 export default async function FavoritesListPage({ params, searchParams }: FavoritesListPageProps) {

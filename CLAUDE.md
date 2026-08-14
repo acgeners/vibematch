@@ -695,6 +695,38 @@ lugar: os papéis são em **português** (`"curador"`, não `"curator"`), e com 
 `roleAtLeast` compara `undefined >= undefined` → `false`, o índice fica vazio por motivo errado e
 "nenhum item na tela" vira tautologia. Daí o 2º caso, que digita e exige itens > 0.
 
+### A aba do browser diz o nome da PÁGINA, e o sufixo tem um dono só
+
+Até 2026-08-14, **18 das 30 rotas** não declaravam título nenhum e a aba dizia **"SatorIA"** nas
+18 — `/ranking`, `/favorites`, `/leitura`, `/titles`, `/conta/perfil`, `/settings`,
+`/curadoria/pedidos` e mais 11. Com três abas abertas (o caso normal aqui), as três eram
+indistinguíveis: só clicando pra descobrir qual era qual.
+
+Hoje o **`title.template` do `app/layout.tsx` é o dono do sufixo** (`"%s · SatorIA"`), e cada
+rota declara **só o próprio nome** (`export const metadata = { title: "Ranking" }`).
+
+🔴 **O sufixo era escrito à mão, em DUAS grafias** — `— SatorIA` nas 9 institucionais e
+`· SatorIA` na página da obra. Dois critérios pro mesmo fato, sem nada que os fizesse concordar.
+⚠️ Reescrever o sufixo numa página agora produz "Ranking · SatorIA · SatorIA"; quem precisar da
+aba sem ele usa `title: { absolute: "…" }`. E `generateMetadata` sem título resolvido devolve
+`{}` (herda o `default`) — devolver `"SatorIA"` passaria pelo template.
+
+⚠️ **Rota dinâmica só deriva o nome se a leitura for BARATA**, porque `generateMetadata` roda
+numa passada separada da página: o custo é pago duas vezes por visita. `/favorites/[listId]` usa
+`getListName` (1 linha, 1 coluna, escopada por dono) e **não** `getListDetail`, que carrega as
+obras membras; `/recommendations/[slug]` e `/recommendations/chat/[slug]` ficaram com nome
+ESTÁTICO em vez de repuxar a rodada inteira ou o JSONB de mensagens.
+
+⚠️ **Isto NÃO é derivado de `PAGES` (`search-index.ts`) nem do `NAV` (`top-nav.tsx`)**, de
+propósito: os rótulos de lá são de busca e de navegação, mais longos ("Importar minha lista",
+"Sobre a SatorIA"), e a aba trunca. As três superfícies já divergiam antes disto (a `/titles` é
+"Títulos" no Header e "Catálogo" no nav).
+
+Guardado por `tests/unit/orchestration/titulo-de-aba-por-rota.test.ts`, que **deriva as rotas do
+filesystem** — lista fixa não acha a página que alguém adicionar amanhã, que é justamente o caso
+— e reprova tanto rota sem título quanto sufixo reescrito à mão (conferido com uma sonda: os dois
+falham).
+
 🔴 **A regra "ícone e não item de menu, porque dentro de dropdown o número não é visto" continua
 verdadeira** — o que mudou é que agora o **contador vive no gatilho**. Foi isso que permitiu
 recolher fila de curadoria + saldo + alerta de fontes no `CurationMenu` (badge = curadoria +
@@ -2701,8 +2733,15 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.783 passando (+24 pulados) em 262 arquivos** (257 passando + 5 pulados;
-medido em 2026-08-14 com árvore limpa, na branch do selo 18+ das views densas).
+`npm run test` → **2.787 passando (+24 pulados) em 263 arquivos** (258 passando + 5 pulados;
+medido em 2026-08-14 com a árvore limpa exceto o próprio PR — `git status` conferido —, na branch
+do selo 18+ das views densas, com os títulos de aba por rota).
+
+⚠️ **Na medição de 14/08 dois arquivos falharam por `ENOSPC` (disco a 399 MB livres), não por
+teste.** Isolados, os dois passam (14 testes). Disco cheio aqui não é hipótese — o `.next` estava
+com 3,2 GB e `.backups` com 745 MB; ver `npm run clean`. Falha cujo texto é `no space left on
+device` não entra na contagem como queda de teste, mas **também não autoriza chamar de verde sem
+re-rodar os acusados**.
 
 🔴 **Medir isto numa árvore SUJA conta o que não está no commit — e a correção de 14/08 CAIU NA
 MESMA armadilha.** O "2.807 em 266" saiu de 6 arquivos ainda **não commitados** por outra sessão;

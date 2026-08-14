@@ -334,7 +334,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export async function generateMetadata({ params }: TitleDetailPageProps): Promise<Metadata> {
   const { id } = await params
   const title = await getWorkTitleByIdOrSlug(id)
-  return { title: title ? `${title} · SatorIA` : "SatorIA" }
+  // Sem título resolvido, devolver `{}` deixa o `title.default` do layout raiz valer ("SatorIA").
+  // Escrever "SatorIA" aqui passaria pelo template e sairia "SatorIA · SatorIA".
+  return title ? { title } : {}
 }
 
 export default async function TitleDetailPage({ params }: TitleDetailPageProps) {

@@ -4,7 +4,7 @@ import { ResetRequestForm } from "@/components/auth/reset-request-form"
 import { Wordmark } from "@/components/auth/wordmark"
 import { LAST_EMAIL_COOKIE } from "@/lib/auth-preference"
 
-export const metadata = { title: "Recuperar senha — SatorIA" }
+export const metadata = { title: "Recuperar senha" }
 
 export default async function RecuperarSenhaPage({
   searchParams,

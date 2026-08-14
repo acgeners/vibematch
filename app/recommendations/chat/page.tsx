@@ -10,6 +10,8 @@ import { formatRelativeDateTime } from "@/lib/date-utils"
 
 export const dynamic = "force-dynamic"
 
+export const metadata = { title: "Conversar com a IA" }
+
 export default async function RecommendationChatPage() {
   const canAi = await canConsumeAi()
   const isPaid = canAi

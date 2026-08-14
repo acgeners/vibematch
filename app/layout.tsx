@@ -45,8 +45,19 @@ const geistMono = Geist_Mono({
  */
 export const dynamic = "force-dynamic"
 
+/**
+ * `template` é o dono ÚNICO do sufixo da aba. Cada página declara só o próprio nome
+ * (`export const metadata = { title: "Ranking" }`) e o Next monta "Ranking · SatorIA".
+ *
+ * ⚠️ Antes disto o sufixo era escrito à mão em cada página, em duas grafias — "— SatorIA" nas
+ * institucionais e "· SatorIA" na página da obra —, e a maioria das rotas não declarava nada:
+ * com 3 abas abertas, as 3 diziam "SatorIA" e não dava pra saber qual era qual.
+ *
+ * ⚠️ Página que precise da aba SEM o sufixo usa `title: { absolute: "…" }`; string simples
+ * sempre passa pelo template.
+ */
 export const metadata: Metadata = {
-  title: "SatorIA",
+  title: { default: "SatorIA", template: "%s · SatorIA" },
   description: "Curadoria pessoal movida por IA: a SatorIA aprende o seu gosto e recomenda os próximos mangás e manhwas à altura dele.",
 }
 

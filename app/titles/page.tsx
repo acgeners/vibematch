@@ -19,6 +19,8 @@ interface TitlesPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }
 
+export const metadata = { title: "Catálogo" }
+
 export default async function TitlesPage({ searchParams }: TitlesPageProps) {
   const params = await searchParams
 
