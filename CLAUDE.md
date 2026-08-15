@@ -2350,10 +2350,34 @@ Quem o chama é `getCuradoriaTabCounts`, cujo cache é invalidado pela tag `ai-e
 dos cards contra a NUVEM. As colunas de status ficam fora da projeção porque são filtro `.in()`
 resolvido no SQL.
 
-⚠️ **ABERTO, conhecido:** não há marcação de "não existe nessa fonte" em LOTE. A maioria das
-1.424 lacunas se fecha declarando ausência, não achando vínculo — com Kitsu em 363 e MAL em
-338, é esse item que decide se a fila zera algum dia. Ficou de fora por escolha (fila em
-sequência × lote), não por esquecimento.
+✅ **O lote de "não existe nessa fonte" existe (2026-08-15)** — é ele que de fato esvazia a
+fila, porque a maioria das 1.424 lacunas se fecha declarando ausência, não achando vínculo.
+Dono único: **`markSourcesAbsent`** (`server/external-ids/absence.ts`), para o qual o
+`markComixAbsent` passou a DELEGAR — a guarda que impede o upsert de apagar vínculo válido
+mora lá, e duas cópias dela divergiriam.
+
+🔴 **O botão só existe com um chip de FONTE ativo.** "Marcar como ausente" sem dizer onde é
+afirmação sem sujeito: a obra tem lacuna em várias fontes e o lote gravaria na errada. Sem
+chip aparece a dica de como chegar lá, não um botão desabilitado.
+
+🔴 **E NÃO há varredura automática por trás — a decisão é medida, não gosto.** Testado contra
+verdade conhecida em 2026-08-15 (30 obras que comprovadamente ESTÃO no mangago, amostradas
+das 803 vinculadas): uma busca por título com o limiar de aceite (0,72) deixaria **7% delas
+abaixo do corte** ⇒ em 175 obras, **~12 declarações FALSAS** de "não existe" — e `absent` tira
+a obra da fila para sempre, então ninguém revisita. As duas que falharam não eram salváveis
+por variantes (0,00 e 0,50 mesmo com `original_title` e alternativos). ⚠️ A busca do mangago
+FUNCIONA (6/6 em ~1s, medido no mesmo dia); o que reprova a automação não é a fonte estar
+fora, é a taxa de erro do casamento por título.
+
+⚠️ **A guarda do servidor é obrigatória e tem teste com sonda:** o `onConflict:
+"work_id,source"` sobrescreveria um `external_id` ativo com NULL, e a lista da UI pode estar
+defasada (vínculo entra em background pelo resolve resiliente). Removê-la reprova
+`tests/unit/external/marcar-ausente-em-lote.test.ts` — conferido.
+
+⚠️ **A Comix não tem o que marcar: 976 vinculadas + 2 já declaradas ausentes = 978, lacuna
+ZERO.** O chip dela aparece apagado e o lote nunca é oferecido. Para "reverificar" uma obra da
+Comix o gesto é outro — marcar ausência SOBRE um vínculo existente, que a guarda recusa de
+propósito; ali o caminho é o diálogo por obra.
 `triggerAiEvaluation(workId)` → `fetchExternalEvaluationContextForWork()` → `requestAiEvaluation()`
 - Uses saved work data (**ALL persisted synopses**, genres, grouped tags, cover). The primary synopsis is the prompt's main reference; every other persisted synopsis enters as `[S1]…[Sn]` blocks (`splitSynopsesForEvaluation` in `lib/work-derived.ts`), with `source = "manual"` ones labeled as user-written/high-authority. Fresh external `[C]` blocks that duplicate a persisted synopsis are filtered out (`isSameSynopsis`) — but only when additional synopses exist, so single-synopsis works keep a byte-identical input and preserve the eval cache `input_hash` (the `additionalSynopses` field is omitted from both hash versions when empty). If the work has accepted `work_external_ids`, reviews/context are fetched from those confirmed source IDs; otherwise it falls back to title search.
 - Review sources (each only when the candidate has that source's ID): MangaUpdates + AniList + MyAnimeList + Kitsu (reactions) + AnimePlanet + MangaDex (forum comments) + ComicK (curated reviews + comments) + Comix (per-work comment thread, mini-reviews). Comix has no formal reviews API; `fetchComixReviews(hid)` walks detail `id` → `threads/lookup?page_identifier=manga{id}&page_url=/title/{hid}` → `threads/{threadId}/comments` (cursor-paginated). ⚠️ Este caminho é **TOKEN-FREE**: usa `fetchComixDetailRaw`/`fetchComixThreadJson`, **não** o `fetchComixJson` — então o circuito de auth aberto pela busca gateada **não** o bloqueia (medido 2026-08-04: circuito aberto e, na sequência, 52 e 57 reviews normais em ~1,3s). 🔴 **A previsão que estava escrita aqui — "se a Comix voltar a desafiar, ~30% do acervo de reviews passa a depender do bypass da noite pro dia" — SE REALIZOU em 2026-08-11.** O plain fetch morreu: `https://comix.to/` e o SSR de `/title/{hid}` respondem **403 + `cf-mitigated: challenge`**. Toda a cadeia (4 chamadas) passou a depender de bypass, e o **FlareSolverr é hoje a única camada que atravessa** — o sidecar não passa na Comix desde 29/07 (medido no log: **1.168 tentativas, ZERO sucessos**), embora siga atravessando mangago/anime-planet/comick em ~1s.
@@ -3096,10 +3120,9 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.935 passando (+24 pulados) em 280 arquivos** (275 passando + 5 pulados;
-medido em 2026-08-15 depois da aba "Fontes", que somou 3 arquivos e 22 testes — o núcleo puro
-(`source-gaps`), o dono da classificação (`source-link-state`) e o render da aba. Base:
-**2.913 em 277**.
+`npm run test` → **2.945 passando (+24 pulados) em 281 arquivos** (276 passando + 5 pulados;
+medido em 2026-08-15 depois do lote de ausência, que somou 1 arquivo (8 testes da guarda do
+upsert) e 2 casos de render do gating por fonte. Base: **2.935 em 280**, da aba "Fontes".
 
 ⚠️ A árvore tem um arquivo de teste NÃO COMMITADO de outra sessão
 (`tests/unit/ui/pendencias-ia-abrem-em-aba-nova.test.tsx`). A medição o excluiu de propósito
@@ -3107,7 +3130,7 @@ medido em 2026-08-15 depois da aba "Fontes", que somou 3 arquivos e 22 testes �
 trabalho de outra pessoa. Quando aquele PR entrar, este número sobe junto.
 
 ⚠️ **Confira o TOTAL EXECUTADO contra o disco, sempre.** Aqui: `find tests -name '*.test.ts*'`
-deu **281**, menos o arquivo alheio = **280**, e o Vitest executou **280** — é essa igualdade
+deu **282**, menos o arquivo alheio = **281**, e o Vitest executou **281** — é essa igualdade
 que descarta truncamento silencioso, não o "0 failed" do rodapé.
 
 ⚠️ **"Errors 1 error" no rodapé COM tudo passando é a flakiness de carga, não queda de teste** —
@@ -3138,7 +3161,7 @@ teste. A linha já disse "~1.780 em
 ~157", "~2.353 em 218", "2.386 em 221", "2.408 em 225", "2.428 em 228", "2.433 em 228",
 "2.440 em 229", "2.717 em 255", "2.727 em 255", "2.753 em 258", "2.776 em 261", "2.784 em 263",
 "2.788 em 264", "2.807 em 266", "2.813 em 267", "2.828 em 270", "2.833 em 271", "2.872 em 274"
-, "2.883 em 274", "2.891 em 275", "2.896 em 276" e "2.913 em 277", todas
+, "2.883 em 274", "2.891 em 275", "2.896 em 276", "2.913 em 277" e "2.935 em 280", todas
 envelhecendo sem nada acusar — **re-meça antes de editar este número**,
 não incremente de cabeça. ⚠️ O "2.717" durou menos de um dia: dois PRs do mesmo dia somaram 10
 testes e nenhum dos dois tocou nesta linha. Envelhecer aqui é o normal, não a exceção. Vitest, jsdom, alias `@` → raiz. A

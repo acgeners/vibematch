@@ -14,8 +14,12 @@ vi.mock("@/components/ai-evaluation/ai-evaluation-filters", () => ({
 vi.mock("@/components/ai-evaluation/source-link-dialog", () => ({
   SourceLinkDialog: () => null,
 }))
+vi.mock("@/server/actions/source-links", () => ({
+  markWorksAbsentFromSource: vi.fn(async () => ({ marked: 0, skipped: 0 })),
+  restoreWorkSourceGap: vi.fn(async () => ({ ok: true })),
+}))
 
-import { render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { SourcesTab } from "@/components/ai-evaluation/sources-tab"
 import { SELECTABLE_EXTERNAL_SOURCES } from "@/lib/external/source-order"
 import { sourceLabel } from "@/lib/external/source-labels"
@@ -142,6 +146,30 @@ describe("card da obra", () => {
     expect(screen.getByText(/1 sem a obra/)).toBeTruthy()
     // O chip de estado conta só as lacunas.
     expect(screen.getByText("2 a checar")).toBeTruthy()
+  })
+})
+
+/**
+ * 🔴 O lote de ausência só pode existir com uma FONTE escolhida. "Marcar como ausente"
+ * sem dizer onde é afirmação sem sujeito — a obra tem lacuna em várias fontes, e o lote
+ * gravaria na errada. Teste de RENDER porque o que regride é a condição no JSX.
+ */
+describe("marcar ausente em lote", () => {
+  const selecionarTudo = () => screen.getByLabelText("Selecionar tudo")
+
+  it("com fonte ativa, o botão nomeia a fonte e o número", async () => {
+    renderTab({ activeSource: S0, works: [work(), work({ id: "w2", title: "Zenith" })] })
+    fireEvent.click(selecionarTudo())
+    expect(
+      await screen.findByRole("button", { name: new RegExp(`Marcar ausente em ${sourceLabel(S0)} \\(2\\)`) }),
+    ).toBeTruthy()
+  })
+
+  it("SEM fonte ativa o botão não existe — e a tela diz como chegar lá", () => {
+    renderTab({ activeSource: null, works: [work()] })
+    fireEvent.click(selecionarTudo())
+    expect(screen.queryByRole("button", { name: /Marcar ausente/ })).toBeNull()
+    expect(screen.getByText(/escolha uma fonte acima/i)).toBeTruthy()
   })
 })
 
