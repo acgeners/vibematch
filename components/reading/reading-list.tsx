@@ -36,7 +36,7 @@ import { CoverImage } from "@/components/ui/cover-image"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { PublicationStatusBadge } from "@/components/ui/status-badge"
 import { AdultBadge } from "@/components/ui/adult-badge"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, selectedOptionLabel } from "@/components/ui/select"
 import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
 import { cn } from "@/lib/utils"
@@ -764,7 +764,12 @@ export function ReadingList({
                 <Select value={readFilter} onValueChange={setReadFilter}>
                   <SelectTrigger size="sm" className="w-auto min-w-28 gap-1.5 text-xs">
                     <BookOpenCheck className="size-3.5 text-muted-foreground" />
-                    <SelectValue />
+                    <SelectValue>
+                      {selectedOptionLabel(
+                        READ_FILTER_OPTIONS.map(([value, label]) => ({ value, label })),
+                        readFilter,
+                      )}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {READ_FILTER_OPTIONS.map(([value, label]) => (
@@ -777,7 +782,15 @@ export function ReadingList({
                 <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortKey)}>
                   <SelectTrigger size="sm" className="w-auto min-w-36 gap-1.5 text-xs">
                     <ArrowDownUp className="size-3.5 text-muted-foreground" />
-                    <SelectValue />
+                    <SelectValue>
+                      {selectedOptionLabel(
+                        (Object.keys(SORT_LABELS) as SortKey[]).map((value) => ({
+                          value,
+                          label: SORT_LABELS[value],
+                        })),
+                        sortBy,
+                      )}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (

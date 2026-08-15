@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, selectedOptionLabel } from "@/components/ui/select"
 import { TagSubgroupsPanel } from "@/components/settings/tag-subgroups-panel"
 import { NewTagsPanel } from "@/components/settings/tag-consolidation/new-tags-panel"
 import { GenreProposalsPanel } from "@/components/settings/tag-consolidation/genre-proposals-panel"
@@ -552,7 +552,15 @@ export function TagConsolidationClient({
             onValueChange={(value) => updateQuery({ group: value })}
           >
             <SelectTrigger className="w-56">
-              <SelectValue />
+              <SelectValue>
+                {selectedOptionLabel(
+                  [
+                    { value: "all", label: "Todos os grupos" },
+                    ...groups.map((g) => ({ value: g.slug, label: g.label })),
+                  ],
+                  initialGroup ?? "all",
+                )}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos os grupos</SelectItem>

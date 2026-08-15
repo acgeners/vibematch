@@ -61,6 +61,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  selectedOptionLabel,
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -2129,7 +2130,12 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                       onValueChange={(v) => setValue("publication_status", v as WorkFormValues["publication_status"])}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue />
+                        <SelectValue>
+                          {selectedOptionLabel(
+                            PUBLICATION_STATUSES.map((s) => ({ value: s, label: PUBLICATION_STATUS_LABELS[s] })),
+                            pubStatus,
+                          )}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {PUBLICATION_STATUSES.map((s) => (
@@ -2289,7 +2295,12 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                     onValueChange={(v) => setValue("personal_status", v as WorkFormValues["personal_status"])}
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue />
+                      <SelectValue>
+                        {selectedOptionLabel(
+                          PERSONAL_STATUSES.map((s) => ({ value: s, label: PERSONAL_STATUS_LABELS[s] })),
+                          personalStatus,
+                        )}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {PERSONAL_STATUSES.map((s) => (
@@ -2311,7 +2322,18 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                     }
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Não avaliada" />
+                      <SelectValue placeholder="Não avaliada">
+                        {selectedOptionLabel(
+                          [
+                            { value: "none", label: "Não avaliada" },
+                            ...SYNOPSIS_QUALITIES.map((q) => ({
+                              value: q,
+                              label: `${q} — ${SYNOPSIS_QUALITY_LABELS[q]}`,
+                            })),
+                          ],
+                          synopsisQualityValue ?? "none",
+                        )}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Não avaliada</SelectItem>

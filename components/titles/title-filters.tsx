@@ -15,6 +15,7 @@ import {
   SelectLabel,
   SelectTrigger,
   SelectValue,
+  selectedOptionLabel,
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -1141,7 +1142,9 @@ export function TitleFilters({
           <div className="flex items-center gap-2">
             <Select value={sortField} onValueChange={(v) => setSort(v, sortDir)}>
               <SelectTrigger className="h-9 flex-1 text-sm">
-                <SelectValue />
+                <SelectValue>
+                  {selectedOptionLabel([...SORTABLE_FIELDS, ...CRITERION_SORT_FIELDS], sortField)}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>

@@ -27,6 +27,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  selectedOptionLabel,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { analyzeExternalListImport, commitExternalListImport } from "@/server/actions/external-list-import"
@@ -296,7 +297,15 @@ export function ExternalListImport({
                 <span className="text-xs text-muted-foreground">Formato</span>
                 <Select value={sourceOverride} onValueChange={(v) => setSourceOverride(v as ExternalListSource | "auto")}>
                   <SelectTrigger className="w-56">
-                    <SelectValue />
+                    <SelectValue>
+                      {selectedOptionLabel(
+                        [
+                          { value: "auto", label: "Detectar automaticamente" },
+                          ...SOURCES.map((s) => ({ value: s, label: EXTERNAL_LIST_SOURCE_LABELS[s] })),
+                        ],
+                        sourceOverride,
+                      )}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="auto">Detectar automaticamente</SelectItem>
