@@ -2,10 +2,18 @@
  * Conteúdo COMPARTILHADO dos tooltips de Alinhamento e Veredito IA.
  *
  * Fonte única pra que o /ranking (cells compactas) e a aba "Notas e avaliações"
- * da obra (cards grandes) mostrem exatamente o MESMO texto ao passar o mouse.
- * Cada consumidor fornece seu próprio <TooltipContent> (side/largura variam por
- * layout); aqui vai só o corpo (os <p>). Sem "use client" de propósito: renderiza
- * tanto no server component da obra quanto nas cells client do ranking.
+ * da obra (cards grandes) mostrem o MESMO texto ao passar o mouse. Cada consumidor
+ * fornece seu próprio <TooltipContent> (side/largura variam por layout); aqui vai
+ * só o corpo (os <p>). Sem "use client" de propósito: renderiza tanto no server
+ * component da obra quanto nas cells client do ranking.
+ *
+ * ⚠️ **Uma linha do Alinhamento é condicional ao DADO, e isso não quebra a fonte
+ * única.** O nº de tags (e a ressalva que depende dele) só sai onde `tagCount`
+ * chega: página da obra, /titles e o heatmap. O /ranking não embute `work_tags` no
+ * payload de propósito — corte de egress —, então lá a linha some. É a MESMA função
+ * decidindo com menos entrada, não um segundo texto escrito à parte; se um dia
+ * alguém redigir a explicação de novo no consumidor, aí sim vira a família "dois
+ * critérios pro mesmo fato" que este arquivo existe pra evitar.
  */
 
 import { LABELS } from "@/lib/constants/ui-labels"
@@ -21,16 +29,57 @@ export interface AlignmentPayload {
 }
 
 /**
+ * Abaixo disto a obra está SUB-TAGUEADA e o Alinhamento dela mede menos do que
+ * parece. 25 é o p25 do catálogo (medido em 15/08/2026 nas 988 obras: p10 19 ·
+ * p25 26 · mediana 35 · p90 74 · máx 261) — arredondado pra baixo porque o corte
+ * exato do percentil anda a cada obra nova e o número aqui não.
+ */
+export const SPARSE_TAGS_AT = 25
+
+/**
+ * Abaixo disto o Alinhamento é "baixo" pra efeito da ressalva. Mesma faixa da
+ * cor slate/laranja da célula.
+ */
+export const LOW_ALIGNMENT_AT = 30
+
+/**
  * Corpo do tooltip do Alinhamento. Assume `value` != null (o consumidor só
  * renderiza quando há valor). Mostra o percentil como sinal principal ("Top X%")
  * e o bruto ao lado; cai num texto explicativo quando não há percentil.
+ *
+ * 🔴 **A explicação da fórmula aqui já mentiu por ~2 meses.** O texto dizia
+ * "tags amadas/evitadas (40%), faixas ideais de critério (30%) e consistência
+ * geral (30%)" — que era `computePersonalFit`, aposentada em 2026-06-27 e REMOVIDA
+ * em 15/08/2026 (nunca teve caller fora do teste dela). O que roda é
+ * `netNameOverlap` (`server/actions/calculations.ts`, bloco 5): soma da força
+ * das tags amadas presentes menos 1,5× as evitadas, min-max sobre o catálogo e
+ * depois percentil. Critério NÃO entra — `criterionAlignment` virou feature do
+ * Ridge da Nota Prevista, não do Alinhamento.
+ *
+ * ⚠️ **A ressalva de matéria-prima é DIRECIONAL, e isso é medido.** `netName` é
+ * soma sem denominador, então o nº de tags é o teto de quantas amadas a obra
+ * pode encostar: poucas tags só conseguem empurrar o valor pra BAIXO. Medido em
+ * 15/08/2026 nas 988 obras: Alinhamento ≥75 com <25 tags são **3 obras (0,3%)**,
+ * enquanto <30 com <25 tags são **139 (14,1%)**. Por isso a ressalva só aparece
+ * no valor baixo — num valor alto ela estaria desmentindo um número correto.
+ *
+ * ⚠️ **Ela não vira chip em lista**, pelos mesmos 14,1%: 1 em 7 linhas é o
+ * alarme que sempre toca. O tooltip é opt-in (exige hover), então a frequência
+ * não pesa aqui.
  */
 export function AlignmentTooltipContent({
   value,
   percentile,
+  tagCount,
 }: {
   value: number
   percentile?: number | null
+  /**
+   * Quantas tags a obra tem — a matéria-prima EXCLUSIVA deste número. Opcional
+   * porque o payload do `/ranking` não embute `work_tags` de propósito (corte de
+   * egress: `tags(*)` era 85% do payload); ausente → a linha some.
+   */
+  tagCount?: number | null
 }) {
   const displayPct = percentile != null ? Math.round(percentile) : Math.round(value * 100)
   const rawPct = Math.round(value * 100)
@@ -43,21 +92,61 @@ export function AlignmentTooltipContent({
     : percentile >= 25 ? "Abaixo da mediana"
     : "Bottom 25%"
 
-  return percentile != null ? (
+  // A ressalva de matéria-prima: só quando o valor é baixo E a obra é sub-tagueada
+  // (ver o ⚠️ direcional no docstring — no valor alto ela desmentiria um número certo).
+  //
+  // 🔴 **O limiar é do PERCENTIL, então exige percentil.** `displayPct` cai no cru×100
+  // quando não há percentil, e as duas escalas não são comparáveis: o `personal_fit` cru
+  // tem teto ~0,55 (é a razão de o percentil existir), então "< 30" corta perto da MEDIANA
+  // lá e perto do fundo aqui. Aplicar o mesmo número às duas é a família "dois critérios
+  // pro mesmo fato" — a mesma que o percentil do /descobrir já cobrou. Sem percentil a
+  // ressalva não sai; o nº de tags continua saindo, que é o fato bruto e não depende de
+  // régua nenhuma.
+  const sparse =
+    percentile != null && tagCount != null && tagCount < SPARSE_TAGS_AT && percentile < LOW_ALIGNMENT_AT
+
+  return (
     <>
-      <p className="text-xs font-semibold">{topLabel} da sua biblioteca</p>
-      <p className="text-[11px] text-muted-foreground">
-        Bruto <span className="font-mono font-semibold">{rawPct}%</span> ·
-        Percentil <span className="font-mono font-semibold">{displayPct}%</span>
+      {percentile != null ? (
+        <p className="text-xs font-semibold">{topLabel} da sua biblioteca</p>
+      ) : (
+        <p className="text-xs font-semibold">Alinhamento com seu perfil de gosto</p>
+      )}
+      {/* ⚠️ Tom secundário é `text-background/<alfa>`, NUNCA `text-muted-foreground`: o
+          `TooltipContent` é invertido (`bg-foreground` + `text-background`), então token de
+          página aqui dentro passa no escuro e desaba pra ~3:1 no claro. */}
+      <p className="text-[11px] text-background/70">
+        Bruto <span className="font-mono font-semibold">{rawPct}%</span>
+        {percentile != null && (
+          <>
+            {" · "}Percentil <span className="font-mono font-semibold">{displayPct}%</span>
+          </>
+        )}
+        {tagCount != null && (
+          <>
+            {" · "}
+            <span className="font-mono font-semibold">{tagCount}</span>{" "}
+            {tagCount === 1 ? "tag" : "tags"}
+          </>
+        )}
       </p>
-    </>
-  ) : (
-    <>
-      <p className="text-xs">Alinhamento determinístico com seu perfil de gosto.</p>
-      <p className="text-[11px] text-muted-foreground">
-        Combina tags amadas/evitadas (40%), faixas ideais de critério (30%) e consistência
-        geral (30%). Re-rode o cálculo pra ganhar a versão percentil (Top X%).
+      <p className="text-[11px] text-background/70">
+        Soma da força das suas tags amadas presentes na obra, menos 1,5× as evitadas —
+        comparada com o resto do catálogo.
+        {percentile == null && " Re-rode o cálculo pra ganhar a versão percentil (Top X%)."}
       </p>
+      {sparse && (
+        // 🔴 SEM cor de estado, e são dois motivos independentes. (1) A régua do
+        // `STATUS_TONE`: âmbar quer dizer "desatualizado", e isto não é — é confiança do
+        // INPUT, que o projeto já decidiu não deixar disputar cor (ver o
+        // `InputConfidenceSeal`, onde o nível virou FORMA). (2) A superfície é invertida,
+        // então `text-amber-600 dark:text-amber-400` sai claro-sobre-claro no tema escuro
+        // e escuro-sobre-escuro no claro — o `dark:` fica ao contrário do que se lê.
+        // O contraste PLENO (sem alfa) já é a ênfase, contra o /70 das linhas acima.
+        <p className="text-[11px] font-medium text-background">
+          Obra com poucas tags: um valor baixo aqui pode ser tag faltando, não desalinhamento.
+        </p>
+      )}
     </>
   )
 }

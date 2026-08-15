@@ -381,12 +381,22 @@ export function DecisionCell({
 export function AlignmentCell({
   value,
   percentile,
+  tagCount,
   showBar = true,
   showTooltip = true,
 }: {
   value: number | null
   /** Percentil (0-100) dentro da biblioteca. Quando presente, usado como display. */
   percentile?: number | null
+  /**
+   * Nº de tags da obra — a matéria-prima do número, exibida no tooltip. Só passe
+   * onde as tags JÁ viajam no payload (`WORK_LIST_SELECT` embute `work_tags`):
+   * o `/ranking` não embute de propósito (`server/queries/ranking.ts` devolve
+   * `tags: []`, corte de egress), e ali a ausência é a escolha certa — medido em
+   * 15/08/2026, o top 50 por Nota Prevista não tem NENHUMA obra abaixo de 25
+   * tags, então é justo onde a ressalva menos serve.
+   */
+  tagCount?: number | null
   /** Quando false, mostra só o número colorido por faixa (sem a barra). */
   showBar?: boolean
   /** Quando false, exibe só o valor sem a tooltip (ex.: /favorites, texto redundante). */
@@ -445,7 +455,7 @@ export function AlignmentCell({
           <span className="cursor-help">{trigger}</span>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[280px] space-y-1">
-          <AlignmentTooltipContent value={value} percentile={percentile} />
+          <AlignmentTooltipContent value={value} percentile={percentile} tagCount={tagCount} />
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

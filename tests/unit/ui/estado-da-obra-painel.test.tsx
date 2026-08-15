@@ -25,6 +25,7 @@ const BASE: WorkStatePanelProps = {
     digest: "2026-07-14T12:00:00Z",
     tags: null,
   },
+  tagCount: 98,
   externalIds: { mangaupdates: "1", anilist: "2" },
   pending: { verdictStale: false, reviewPending: false, neverEvaluated: false, noDigest: false },
 }
@@ -53,6 +54,21 @@ describe("painel Estado da obra", () => {
     expect(screen.getByText("155 de 196")).toBeTruthy()
     expect(container.textContent).toContain("criada")
     expect(container.textContent).toContain("avaliada")
+  })
+
+  it("conta TAGS na matéria-prima — é a única entrada do Alinhamento", () => {
+    // Reviews e fontes já estavam aqui; tags não, e são a matéria-prima EXCLUSIVA do
+    // Alinhamento (percentil médio 8,5 em obras com ≤10 tags contra 80,8 em 100+).
+    const { container } = renderPainel({ tagCount: 14 })
+    expect(screen.getByText(/14 tags/)).toBeTruthy()
+    // NÚMERO, nunca chip: 21% do catálogo está abaixo de 25 tags.
+    expect(container.textContent).toContain("Nada pendente")
+    expect(screen.getByText(/14 tags/).className).not.toMatch(/amber/)
+  })
+
+  it("singular de tag não sai como '1 tags'", () => {
+    renderPainel({ tagCount: 1 })
+    expect(screen.getByText(/1 tag(?!s)/)).toBeTruthy()
   })
 
   it("o que vale pra maioria do catálogo é NÚMERO, não alerta", () => {

@@ -1097,6 +1097,10 @@ function WorkListView({
       <AlignmentCell
         value={work.calculated_scores?.personal_fit ?? null}
         percentile={work.calculated_scores?.personal_fit_percentile ?? null}
+        // `work.tags` é `work_tags` inteiro (o `WORK_LIST_SELECT` já embute), que é
+        // exatamente o conjunto que o `netNameOverlap` itera — zero query a mais.
+        // ⚠️ `work.genres` NÃO entra: é outra tabela e o recalc não a lê.
+        tagCount={work.tags?.length ?? null}
         showBar={false}
         // /favorites esconde a tooltip do Alinhamento (texto redundante p/ toda obra).
         showTooltip={namespace !== "favorites"}
