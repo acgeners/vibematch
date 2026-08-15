@@ -3247,19 +3247,18 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.971 passando (+24 pulados) em 285 arquivos** (280 passando + 5 pulados;
-medido em 2026-08-15 depois da recorrência nos grupos de favoritos (3 arquivos, 22 casos).
-Base: **2.948 em 282**, do DESFAZER da ausência.
+`npm run test` → **2.973 passando (+24 pulados) em 286 arquivos** (281 passando + 5 pulados);
+medido em 2026-08-15 na `main` **depois** do merge do PR #426, em árvore limpa e sem carga.
+Base: **2.971 em 285**, da recorrência nos grupos de favoritos.
 
-⚠️ O arquivo de teste que estava NÃO COMMITADO na árvore
-(`tests/unit/ui/pendencias-ia-abrem-em-aba-nova.test.tsx`) virou o **PR #426** em 2026-08-15 —
-a medição acima o excluiu de propósito (`--exclude`), porque contá-lo seria a armadilha da
-árvore suja descrita logo abaixo. **Quando o #426 mergear, RE-MEÇA**; não some 2 de cabeça,
-que é como esta linha envelheceu todas as outras vezes.
+✅ **Este número foi RE-MEDIDO, não incrementado.** A linha anterior avisava que o arquivo
+`tests/unit/ui/pendencias-ia-abrem-em-aba-nova.test.tsx` estava fora da conta por não estar
+commitado, e mandava re-medir quando o #426 entrasse. Somar "+2 de cabeça" teria acertado o
+número por sorte desta vez e é como esta linha envelheceu todas as outras.
 
 ⚠️ **Confira o TOTAL EXECUTADO contra o disco, sempre.** Aqui: `find tests -name '*.test.ts*'`
-deu **286**, menos o arquivo alheio = **285**, e o Vitest executou **285** — é essa igualdade
-que descarta truncamento silencioso, não o "0 failed" do rodapé.
+deu **286** e o Vitest executou **286** — é essa igualdade que descarta truncamento silencioso,
+não o "0 failed" do rodapé.
 
 🔴 **E confira o DIFF antes de acreditar num verde.** Em 2026-08-15 três edições já aplicadas
 e testadas (o `showGroupsSort` do painel, o `defaultSort` da página) **sumiram do disco no meio
@@ -3296,7 +3295,8 @@ teste. A linha já disse "~1.780 em
 ~157", "~2.353 em 218", "2.386 em 221", "2.408 em 225", "2.428 em 228", "2.433 em 228",
 "2.440 em 229", "2.717 em 255", "2.727 em 255", "2.753 em 258", "2.776 em 261", "2.784 em 263",
 "2.788 em 264", "2.807 em 266", "2.813 em 267", "2.828 em 270", "2.833 em 271", "2.872 em 274"
-, "2.883 em 274", "2.891 em 275", "2.896 em 276", "2.913 em 277", "2.935 em 280" e "2.945 em 281", todas
+, "2.883 em 274", "2.891 em 275", "2.896 em 276", "2.913 em 277", "2.935 em 280", "2.945 em 281"
+e "2.971 em 285", todas
 envelhecendo sem nada acusar — **re-meça antes de editar este número**,
 não incremente de cabeça. ⚠️ O "2.717" durou menos de um dia: dois PRs do mesmo dia somaram 10
 testes e nenhum dos dois tocou nesta linha. Envelhecer aqui é o normal, não a exceção. Vitest, jsdom, alias `@` → raiz. A
