@@ -2635,9 +2635,24 @@ npm run consistency -- --piloto=.pilot/piloto-v27-<ts>.json
 
 🔴 **Antes de reprovisionar qualquer medição paga, LISTE `.pilot/` e `.consistency/`.** O
 piloto da v27 (30 obras, **US$1,20**) foi gerado 55 minutos depois do commit que o exigia e
-ficou **4 dias em disco sem julgamento**, com quatro sessões tratando "falta o piloto" como
-pendência aberta enquanto o resultado esperava num arquivo. Julgar é **US$0**; o mesmo
-aconteceu com o gold da v25. A parte cara é a chamada ao modelo — e ela já foi paga.
+ficou 4 dias sem **julgamento formal**. Julgar é **US$0**; o mesmo aconteceu com o gold da
+v25, que ficou 5 dias em disco sem ninguém somar o MAE. A parte cara é a chamada ao modelo —
+e ela já foi paga.
+
+⚠️ **Esta seção já afirmou que "ninguém olhou o piloto por 4 dias", e é FALSO — o erro é
+mais interessante que a versão errada.** O achado central já estava numa memória de 11/08
+(`atributos-nao-chegam-na-nota-prevista`), em tabela: *"prompt novo (v27) — não descomprime
+— piloto US$1,20: `action_adventure` Δ 0,00"*. Alguém olhou, extraiu e gravou. O que falhou
+foi o **loop não fechar**: a branch seguiu dizendo "NÃO MERGEAR sem o piloto", este arquivo
+seguiu listando a v27 como pendência, e a memória que tinha a resposta não era consultada
+por quem lia o commit.
+
+🔴 **A lição, então, não é "olhe o disco antes de pagar" — é que uma conclusão registrada
+FORA do repositório não desarma a pendência que mora DENTRO dele.** É a família "dois
+critérios pro mesmo fato", com os dois lados em mídias diferentes: memória contra branch,
+e a que decide o gasto é sempre a que a próxima pessoa lê. Quando medir algo que uma branch
+ou uma seção daqui declara pendente, **feche nos dois lugares no mesmo dia** — o commit da
+medição e o texto que a pedia.
 
 ⚠️ **E comparar as obras do piloto CONTRA o retrato do catálogo é pior que não medir**: os
 estratos são deliberadamente não representativos (foram escolhidos para concentrar os
