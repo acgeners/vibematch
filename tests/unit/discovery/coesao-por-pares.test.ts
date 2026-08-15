@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
+  blendCandidates,
   cohesionOf,
   anchoredCohesionOf,
   weakestSeed,
@@ -128,6 +129,54 @@ describe("weakestSeed", () => {
     const p = weakestSeed(pouco, [A, B, C])!
     expect(p.after).toBeGreaterThan(p.before)
     expect(classifyCohesion(p.before)).toBe(classifyCohesion(p.after))
+  })
+})
+
+describe("percentileInputs", () => {
+  // O cliente recebe percentis prontos do servidor. Repercentilar sobre o pool exibível —
+  // que é um recorte JÁ selecionado, e portanto comprimido — muda o número E a ordem.
+  const pool: BlendCandidate[] = [
+    { workId: "a", simPos: 100, simNeg: 0, fitPercentile: 100 },
+    { workId: "b", simPos: 99, simNeg: 0, fitPercentile: 40 },
+    { workId: "c", simPos: 98, simNeg: 0, fitPercentile: 30 },
+  ]
+
+  it("🔴 com a flag, a combinação é a média das barras — sem ela, não é", () => {
+    const com = blendCandidates(pool, 0.5, { percentileInputs: true })
+    const a = com.find((x) => x.workId === "a")!
+    expect(a.simPercentile).toBe(100)
+    expect(a.score).toBeCloseTo(100, 6) // (100 + 100) / 2
+
+    // Sem a flag, o mesmo candidato é repercentilado sobre as 3 linhas do pool e o topo
+    // continua 100, mas os de baixo desabam: 99 vira 50 e 98 vira 0.
+    const sem = blendCandidates(pool, 0.5)
+    expect(sem.find((x) => x.workId === "b")!.simPercentile).toBe(50)
+    expect(sem.find((x) => x.workId === "c")!.simPercentile).toBe(0)
+    expect(com.find((x) => x.workId === "b")!.simPercentile).toBe(99)
+  })
+
+  it("🔴 e isso muda a ORDEM, não só o número exibido", () => {
+    // `b` tem similaridade alta e alinhamento baixo; `c` o contrário não é preciso — basta
+    // que a compressão do eixo de similaridade sobre 3 linhas inverta o desempate.
+    const p2: BlendCandidate[] = [
+      { workId: "x", simPos: 100, simNeg: 0, fitPercentile: 10 },
+      { workId: "y", simPos: 99, simNeg: 0, fitPercentile: 60 },
+    ]
+    const com = blendCandidates(p2, 0.5, { percentileInputs: true }).map((r) => r.workId)
+    const sem = blendCandidates(p2, 0.5).map((r) => r.workId)
+    expect(com).toEqual(["y", "x"]) // (99+60)/2 = 79,5 contra (100+10)/2 = 55
+    expect(sem).toEqual(["x", "y"]) // repercentilado: 100 vs 0 no eixo de similaridade
+    expect(com).not.toEqual(sem)
+  })
+
+  it("a anti-semente não é subtraída duas vezes", () => {
+    // O servidor já aplicou `simPos − 0,5×simNeg` ANTES de percentilar, então o cliente
+    // manda `simNeg: 0`. Se um dia mandar diferente, a conta continua coerente.
+    const r = blendCandidates([{ workId: "a", simPos: 80, simNeg: 0, fitPercentile: 80 }], 1, {
+      percentileInputs: true,
+    })
+    expect(r[0].simEffective).toBe(80)
+    expect(r[0].simPercentile).toBe(80)
   })
 })
 

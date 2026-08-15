@@ -145,7 +145,7 @@ export default async function RecommendationsPage() {
                   <h3 className="text-sm font-bold text-foreground">Mais como estas</h3>
                 </div>
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  Aponte de 2 a 5 obras e cruze a parecença com elas contra o alinhamento com
+                  Aponte de 2 a 5 obras e cruze a similaridade com elas contra o alinhamento com
                   o seu perfil — dois eixos independentes.
                 </p>
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">

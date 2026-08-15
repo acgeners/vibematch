@@ -358,9 +358,10 @@ export async function discoverBySeeds(opts: DiscoverBySeedsOptions): Promise<Dis
 
   const poolIds = top.map((t) => t.workId)
   // Metadados só do pool exibível — o conjunto avaliado tem ~1000 linhas.
-  const [meta, simMatrix] = await Promise.all([
+  const [meta, simMatrix, covers] = await Promise.all([
     loadMeta(supabase, poolIds),
     loadSimMatrix(supabase, poolIds),
+    loadCoverUrls(supabase, poolIds),
   ])
   const simByWork = new Map(simRows.map((r) => [r.id, r]))
 
@@ -378,7 +379,12 @@ export async function discoverBySeeds(opts: DiscoverBySeedsOptions): Promise<Dis
       publicationStatusId: m?.publication_status_id ?? null,
       personalStatusId: state.personalStatusId,
       isAdult: Boolean(m?.is_adult),
-      coverUrl: seedMeta.get(b.workId)?.coverUrl ?? null,
+      // 🔴 `seedMeta` só contém SEMENTES e ANTI-SEMENTES: para uma obra do resultado o
+      // `get()` devolvia sempre `undefined`, então a lista NUNCA mostrou capa — todas as 24
+      // linhas caíam no placeholder cinza, que lê como "esta obra não tem capa". Medido na
+      // nuvem: 980 obras, ZERO sem capa. O fallback continua porque obra nova pode ainda
+      // não ter, mas agora ele é a exceção e não a regra.
+      coverUrl: covers.get(b.workId) ?? seedMeta.get(b.workId)?.coverUrl ?? null,
       synopsis: (m?.canonical_synopsis ?? "").trim() || null,
       simPercentile: b.simPercentile,
       simRaw: b.simPos,
@@ -621,6 +627,48 @@ async function loadSeedInfo(
     })
   }
 
+  return out
+}
+
+/**
+ * A capa de cada obra do pool exibível.
+ *
+ * Query própria porque `work_covers` tem VÁRIAS linhas por obra — um embed do PostgREST
+ * traria todas. A escolha (primária, depois posição) é a mesma de `loadSeedInfo`.
+ *
+ * ⚠️ ~50 obras × poucas capas fica muito abaixo do corte de 1000 linhas do PostgREST. Se um
+ * dia o pool crescer, isto precisa paginar como o resto do arquivo já faz.
+ */
+async function loadCoverUrls(
+  supabase: ReturnType<typeof createAdminClient>,
+  ids: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  if (ids.length === 0) return out
+
+  const { data, error } = await supabase
+    .from("work_covers")
+    .select("work_id, url, is_primary, position")
+    .in("work_id", ids)
+
+  if (error) {
+    console.warn("[seed-discovery] capas falharam:", error.message)
+    return out
+  }
+
+  const linhas = (data ?? []) as Array<{
+    work_id: string
+    url: string
+    is_primary: boolean | null
+    position: number | null
+  }>
+  for (const c of [...linhas].sort(
+    (a, b) =>
+      Number(Boolean(b.is_primary)) - Number(Boolean(a.is_primary)) ||
+      (a.position ?? 999) - (b.position ?? 999),
+  )) {
+    if (!out.has(c.work_id)) out.set(c.work_id, c.url)
+  }
   return out
 }
 

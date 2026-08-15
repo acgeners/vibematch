@@ -26,6 +26,8 @@ interface PageProps {
     lidas?: string
     /** Id da semente PRINCIPAL (peso 2×). Ausente = todas valem igual. */
     principal?: string
+    /** `cards` = grade; ausente ou qualquer outra coisa = lista. */
+    view?: string
   }>
 }
 
@@ -66,5 +68,10 @@ export default async function DescobrirPage({ searchParams }: PageProps) {
     limit: DEFAULT_RESULT_LIMIT,
   })
 
-  return <DiscoveryView result={result} onlyUnread={onlyUnread} />
+  // ⚠️ Na QUERY STRING, e não em estado do cliente: trocar de semente NAVEGA, e uma preferência
+  // guardada só na memória do componente voltaria pro padrão a cada troca. Nem em
+  // `localStorage`, que o servidor não enxerga e quebraria a hidratação.
+  const view = params.view === "cards" ? "cards" : "lista"
+
+  return <DiscoveryView result={result} onlyUnread={onlyUnread} view={view} />
 }
