@@ -21,6 +21,10 @@ import { EvalTabLink } from "@/components/ai-evaluation/eval-tab-link"
 import { TagsReviewsTab } from "@/components/ai-evaluation/tags-reviews-tab"
 import { DigestsTab } from "@/components/ai-evaluation/digests-tab"
 import { getReviewDigestQueue } from "@/server/queries/review-digest-queue"
+import { SourcesTab } from "@/components/ai-evaluation/sources-tab"
+import { getSourceGapQueue } from "@/server/queries/works-without-sources"
+import { SELECTABLE_EXTERNAL_SOURCES } from "@/lib/external/source-order"
+import type { ExternalSourceId } from "@/lib/external/types"
 import type { TagsReviewsWork } from "@/components/ai-evaluation/tags-reviews-tab"
 import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
 import { getWorksWithoutTags } from "@/server/queries/works-without-tags"
@@ -522,6 +526,7 @@ interface TabHrefs {
   attr: string
   tagsReviews: string
   digests: string
+  sources: string
 }
 
 /** Barra de abas. `counts=null` (fallback do Suspense) mostra "(…)" enquanto os
@@ -544,6 +549,11 @@ function EvalTabBar({
           barra superior — um contador de 100+ ali faria o badge viver cheio e parar
           de significar "decisão esperando". O número da aba basta. */}
       <EvalTabLink href={hrefs.digests} active={activeTab === "digests"}>Digests{n(counts?.digests)}</EvalTabLink>
+      {/* Sem `dot` pelo mesmo motivo do Digests, e aqui o número o justifica sozinho:
+          629 das 978 obras têm ≥1 lacuna (medido em 2026-08-15). Um ponto aceso em 64%
+          do catálogo faria o badge da barra superior viver cheio e parar de significar
+          "decisão esperando". */}
+      <EvalTabLink href={hrefs.sources} active={activeTab === "fontes"}>Fontes{n(counts?.sources)}</EvalTabLink>
     </div>
   )
 }
@@ -566,6 +576,8 @@ interface TabCounts {
   tagsReviews: number
   /** Só as ELEGÍVEIS (passam no piso de reviews) — é o que dá pra rodar. */
   digests: number
+  /** Obras com ≥1 fonte externa nunca avaliada. */
+  sources: number
 }
 
 /**
@@ -578,7 +590,7 @@ interface TabCounts {
  */
 const getCuradoriaTabCounts = unstable_cache(
   async (args: CountArgs): Promise<TabCounts> => {
-    const [attr, revC, tagsC, ackSets, digestQueue] = await Promise.all([
+    const [attr, revC, tagsC, ackSets, digestQueue, sourceQueue] = await Promise.all([
       getEligibleWorks(args.activeFilters, args.pubStatusIds, args.personalStatusIds, [], args.toleranceOverride),
       getWorksWithoutReviews({ pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, minReviews: args.minReviews, maxReviews: args.maxReviews }, { countOnly: true }),
       getWorksWithoutTags({ pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, minTags: args.minTags, maxTags: args.maxTags }, { countOnly: true }),
@@ -588,6 +600,10 @@ const getCuradoriaTabCounts = unstable_cache(
       // fora de `args` de propósito — entrar ali só faria o cache fragmentar por
       // combinação de filtro sem mudar o número.
       getReviewDigestQueue(),
+      // Mesma razão pra fila de Fontes: lacuna de vínculo externo não tem relação com
+      // status pessoal nem com interesse. O número global é o tamanho da fila; quando a
+      // aba está aberta, o `activeCount` o sobrescreve pelo que está na tela.
+      getSourceGapQueue({}, { countOnly: true }),
     ])
     const ackAttr = ackSets.get("attr")!
     const ackTR = ackSets.get("tags_reviews")!
@@ -603,9 +619,10 @@ const getCuradoriaTabCounts = unstable_cache(
       // Só as elegíveis: o contador da aba promete o que dá pra rodar, não o
       // tamanho da lista (que inclui as barradas pelo piso de reviews).
       digests: digestQueue.eligibleCount,
+      sources: sourceQueue.withGapsCount,
     }
   },
-  ["curadoria-tab-counts-v1"],
+  ["curadoria-tab-counts-v2"],
   { revalidate: 60, tags: ["ai-eval-tab-counts"] },
 )
 
@@ -613,6 +630,7 @@ const ACTIVE_TAB_COUNT_KEY: Record<string, keyof TabCounts> = {
   atributos: "attr",
   "tags-reviews": "tagsReviews",
   digests: "digests",
+  fontes: "sources",
 }
 
 /**
@@ -685,15 +703,26 @@ export default async function CuradoriaDaObraPage({
     maxtags?: string | string[]
     minrev?: string | string[]
     mintags?: string | string[]
+    source?: string | string[]
   }>
 }) {
   const params = await searchParams
   const tabRaw = Array.isArray(params.tab) ? params.tab[0] : params.tab
-  const activeTab: "atributos" | "tags-reviews" | "digests" =
+  const activeTab: "atributos" | "tags-reviews" | "digests" | "fontes" =
     // "sem-reviews"/"sem-tags" (URLs antigas) redirecionam pra aba unificada.
     tabRaw === "tags-reviews" || tabRaw === "sem-reviews" || tabRaw === "sem-tags" ? "tags-reviews"
     : tabRaw === "digests" ? "digests"
+    : tabRaw === "fontes" ? "fontes"
     : "atributos"
+
+  // Fonte do chip do mapa. Validada contra o universo DERIVADO do banco: um `?source=`
+  // inventado tem que virar "qualquer uma", não um filtro que não casa com nada e
+  // devolve uma lista vazia com cara de "não há trabalho aqui".
+  const sourceRaw = Array.isArray(params.source) ? params.source[0] : params.source
+  const activeSource: ExternalSourceId | null =
+    sourceRaw && (SELECTABLE_EXTERNAL_SOURCES as readonly string[]).includes(sourceRaw)
+      ? (sourceRaw as ExternalSourceId)
+      : null
 
   const parseMax = (v: string | string[] | undefined): number => {
     const raw = Array.isArray(v) ? v[0] : v
@@ -728,6 +757,22 @@ export default async function CuradoriaDaObraPage({
     const set = ackSets.get(queue)!
     return works.filter((w) => set.has(w.id)).map((w) => w.id)
   }
+
+  // Href da aba Fontes SEM o `source` — é a base a que os chips do mapa acrescentam a
+  // fonte. Fica aqui em cima porque o branch abaixo já o consome; os `hrefs` das outras
+  // abas continuam montados no fim (nada os usa antes).
+  const pubParam = toParam(params.pub)
+  const personalParam = toParam(params.personal)
+  const synqParam = toParam(params.synopsis_q)
+  const pqParam = toParam(params.pq)
+  const sourcesBaseParams = new URLSearchParams({ tab: "fontes" })
+  if (pubParam) sourcesBaseParams.set("pub", pubParam)
+  if (personalParam) sourcesBaseParams.set("personal", personalParam)
+  // Os chips de fonte são <Link>: precisam carregar os filtros ativos, senão clicar
+  // num deles descarta em silêncio o recorte que a pessoa acabou de aplicar.
+  if (synqParam) sourcesBaseParams.set("synopsis_q", synqParam)
+  if (pqParam) sourcesBaseParams.set("pq", pqParam)
+  const sourcesBaseHref = `/ai-evaluation?${sourcesBaseParams}`
 
   let activeContent: ReactNode = null
   // Contagem fresca da aba ativa — sobrescreve o valor cacheado no TabCountsBar
@@ -799,6 +844,34 @@ export default async function CuradoriaDaObraPage({
         maxTags={maxTags}
       />
     )
+  } else if (activeTab === "fontes") {
+    // ⚠️ Os MESMOS filtros que o painel desenha. O painel de filtros é compartilhado e
+    // exibe Interesse em toda aba — passá-los pela metade produziria um chip aceso que
+    // não filtra nada, que é pior do que não oferecer o controle.
+    const queue = await getSourceGapQueue({
+      pubStatusIds,
+      personalStatusIds,
+      synopsisQualities,
+      predictionQualities,
+      source: activeSource,
+    })
+    // O contador da aba bate com a LISTA EXIBIDA (mesma regra das outras abas), então
+    // filtrar por fonte muda o número — é o que se está pedindo pra ver.
+    activeCount = queue.works.length
+    activeContent = (
+      <SourcesTab
+        works={queue.works}
+        gapsBySource={queue.gapsBySource}
+        totalWorks={queue.totalWorks}
+        withGapsCount={queue.withGapsCount}
+        activeSource={activeSource}
+        activePubStatuses={pubStatusNames}
+        activePersonalStatuses={personalStatusNames}
+        activeInterest={synopsisQualities}
+        activePredictionQualities={predictionQualities}
+        baseHref={sourcesBaseHref}
+      />
+    )
   } else if (activeTab === "digests") {
     const queue = await getReviewDigestQueue()
     // O contador da aba conta o que dá pra RODAR, não o tamanho da lista — as
@@ -844,8 +917,8 @@ export default async function CuradoriaDaObraPage({
 
   // Preserva os filtros ao trocar de aba.
   const filter = toParam(params.filter)
-  const pub = toParam(params.pub)
-  const personal = toParam(params.personal)
+  const pub = pubParam
+  const personal = personalParam
   const tolerance = toParam(params.tolerance)
   const synq = toParam(params.synopsis_q)
 
@@ -869,7 +942,14 @@ export default async function CuradoriaDaObraPage({
 
   // A aba de digests não carrega filtro nenhum na URL — ver o comentário no
   // contador: os filtros das outras abas não descrevem digest pendente.
-  const hrefs: TabHrefs = { attr: attrHref, tagsReviews: tagsReviewsHref, digests: "/ai-evaluation?tab=digests" }
+  // A aba de Fontes CARREGA pub/personal (ela filtra por status como as outras), mas
+  // não o `source`: a aba é o mapa inteiro; o chip é que recorta.
+  const hrefs: TabHrefs = {
+    attr: attrHref,
+    tagsReviews: tagsReviewsHref,
+    digests: "/ai-evaluation?tab=digests",
+    sources: sourcesBaseHref,
+  }
   const countArgs: CountArgs = {
     activeFilters,
     pubStatusIds,
