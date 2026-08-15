@@ -27,8 +27,26 @@ export const MAX_SEEDS = 5
 
 export const MAX_ANTI_SEEDS = 3
 
+/**
+ * Quanto uma semente PRINCIPAL pesa a mais que as demais.
+ *
+ * 🔴 Quem aplica este número é o SQL (`find_similar_to_seeds`, migration 192) — aqui ele só
+ * existe para a tela escrever "peso 2×". Constante de TS que duplica valor em vigor no banco
+ * é a armadilha do `tier_band_width`, onde o código dizia 0,25, a coluna valia 0,5 e o valor
+ * medido nunca esteve em vigor. Por isso `tests/unit/discovery/semente-principal.test.ts`
+ * DERIVA o multiplicador do arquivo da migration e reprova se os dois divergirem.
+ *
+ * ⚠️ Binário de propósito, não um slider: cada regime de pesos desloca a distribuição de
+ * `sim_pos`, e os cortes que dependem dela (0,15/0,28 da coesão, λ=0,8 da diversificação)
+ * foram medidos com pesos iguais. "2× ou nada" é UM regime novo a remedir.
+ */
+export const PRIMARY_SEED_WEIGHT = 2
+
 /** Quantas obras a página lista. */
 export const DEFAULT_RESULT_LIMIT = 24
+
+/** Quantas substitutas o "Trocar por outra" oferece. */
+export const SEED_SUGGESTION_COUNT = 3
 
 /**
  * Quantas obras vão ao modelo no "Explicar".
