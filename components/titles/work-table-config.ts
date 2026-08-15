@@ -65,11 +65,17 @@ export const DEFAULT_WORK_COLUMN_NAMESPACE: WorkColumnNamespace = "titles"
 // visível por padrão, e é justamente isso que dispensa o bump — config salvo não menciona
 // coluna nova no `hidden`, então ela já apareceria. Bumpar ali só descartaria a ordem e as
 // larguras que a pessoa ajustou, em troca de nada.
+// Bump em titles/ranking/recommendations ao adicionar a coluna "Grupos de favoritos", que
+// nasce OCULTA nos três — sem o bump, config salvo (que obviamente não a menciona no
+// `hidden`) a exibiria, e ali ela sairia vazia em toda linha: só /favorites passa
+// `groupsByWorkId`. `favorites` NÃO é bumpado de propósito, pelo mesmo motivo que o
+// `user_score` não bumpou `titles`: lá ela nasce VISÍVEL, então config salvo já a mostra, e
+// bumpar só jogaria fora a ordem e as larguras que a pessoa ajustou.
 const NAMESPACE_STORAGE_VERSION: Record<WorkColumnNamespace, string> = {
-  titles: "v9",
+  titles: "v10",
   favorites: "v12",
-  ranking: "v11",
-  recommendations: "v8",
+  ranking: "v12",
+  recommendations: "v9",
 }
 
 function storageKeyFor(namespace: WorkColumnNamespace): string {
@@ -90,6 +96,21 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
   { key: "title", label: LABELS.title.abbrev, locked: true, group: "basico" },
   { key: "publication_status", label: LABELS.publication_status.abbrev, configLabel: LABELS.publication_status.short, description: LABELS.publication_status.tooltip_full, align: "center", group: "basico" },
   { key: "personal_status", label: LABELS.personal_status.abbrev, configLabel: LABELS.personal_status.full, description: LABELS.personal_status.tooltip_full, align: "center", group: "basico" },
+  // Recorrência: em quantos grupos de favoritos a obra está. Fica entre as colunas "suas"
+  // (favorito, status pessoal) porque é organização, não nota — e é NÚMERO, nunca chip
+  // aceso: 36% das favoritas estão em 2+ grupos, e destaque em 1 de cada 3 linhas é o
+  // alarme que ninguém lê. Só tem dado em /favorites, que é quem passa `groupsByWorkId`.
+  // Rótulo literal (como `separator` e `user_score`): sem linha em `ui_labels`.
+  {
+    key: "groups",
+    label: "Grupos",
+    headerForms: { full: "Grupos de favoritos", short: "Grupos", abbrev: "GRP" },
+    configLabel: "Grupos de favoritos",
+    description:
+      "Em quantos dos seus grupos de favoritos esta obra aparece. Passe o mouse para ver quais. Serve de desempate: entre obras de mesma Nota Prevista, é o sinal de que você já a fichou em mais de um recorte.",
+    align: "center",
+    group: "basico",
+  },
   { key: "chapters_total", label: LABELS.chapters_total.abbrev, configLabel: LABELS.chapters_total.full, description: LABELS.chapters_total.tooltip_full, align: "center", group: "basico" },
   { key: "chapters_read", label: LABELS.chapters_read.abbrev, configLabel: LABELS.chapters_read.full, description: LABELS.chapters_read.tooltip_full, align: "center", group: "basico" },
   { key: "chapters_progress", label: LABELS.chapters_progress.abbrev, configLabel: LABELS.chapters_progress.short, description: LABELS.chapters_progress.tooltip_full, align: "center", group: "basico" },
@@ -171,6 +192,8 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
   // dedicado por ai_eval_status); chapters_progress sai por redundância com
   // chapters_read+total.
   titles: [
+    // Só /favorites carrega a associação obra↔grupo; aqui sairia "—" em toda linha.
+    "groups",
     "separator",
     "fav",
     "decision",
@@ -204,6 +227,8 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
   // Ranking: foco em comparar notas; sinopse, ano e ai_status fora; critérios visíveis.
   // Veredito IA. visível — quem chega aqui geralmente quer ver o re-rank IA.
   ranking: [
+    // Só /favorites carrega a associação obra↔grupo; aqui sairia "—" em toda linha.
+    "groups",
     "decision",
     "user_score",
     "publication_status",
@@ -219,6 +244,8 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
   // Recomendações: 9 critérios em destaque; resto enxuto.
   // Veredito IA. visível — É a nota que ORDENA o próprio resultado da run.
   recommendations: [
+    // Só /favorites carrega a associação obra↔grupo; aqui sairia "—" em toda linha.
+    "groups",
     "separator",
     "decision",
     // Recomendação é sobre o que você AINDA NÃO leu — a coluna seria vazia por desenho.
@@ -298,6 +325,7 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   title: 360,
   publication_status: 130,
   personal_status: 110,
+  groups: 76,
   chapters_total: 70,
   chapters_read: 70,
   chapters_progress: 80,

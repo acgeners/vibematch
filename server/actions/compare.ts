@@ -10,6 +10,7 @@ import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 import { getAllTags } from "@/server/queries/tags"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
+import { getGroupMembership, type WorkGroupRef } from "@/server/queries/lists"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { buildTagStanceLookup, resolveTagStance } from "@/lib/tags/segment"
 import type { TagStanceInfo, TagStanceLookup } from "@/lib/tags/segment"
@@ -53,6 +54,9 @@ export interface CompareWork extends HiatusFields {
   alignmentJustification: string | null
   alignmentAt: string | null
   genres: string[]
+  /** Grupos de favoritos de QUEM COMPARA a que a obra pertence — a recorrência, que aqui é
+   *  LINHA e não cabeçalho: ela compara as obras entre si (ver a régua do comparador). */
+  groups: WorkGroupRef[]
   /** `stance` = amada/evitada pelo gosto do usuário (perfil ∪ preferências declaradas) + ênfase 2×. */
   tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null; subGroupName: string | null; stance: TagStanceInfo | null }>
   criteria: CompareCriterionEntry[]
@@ -73,7 +77,7 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
   if (unique.length === 0) return []
 
   const supabase = createAdminClient()
-  const [works, aiJustifications, tagCatalog, declaredPrefs, profileRow] = await Promise.all([
+  const [works, aiJustifications, tagCatalog, declaredPrefs, profileRow, membership] = await Promise.all([
     getWorksByIds(unique),
     supabase
       .from("ai_evaluations")
@@ -87,6 +91,10 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
     getAllTags(),
     getDeclaredTagPreferences(supabase),
     loadCurrentTasteProfile(),
+    // Mesma leitura que alimenta a coluna "Grupos" e a ordenação em /favorites — nunca uma
+    // contagem própria daqui. Sem sessão volta vazio, e a linha simplesmente não tem o que
+    // mostrar.
+    getGroupMembership(),
   ])
   const subGroupBySlug = new Map<string, string>()
   for (const t of tagCatalog) {
@@ -113,7 +121,15 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
     justificationByWork.set(row.work_id, map)
   }
 
-  return works.map((work) => mapWorkToCompare(work, justificationByWork.get(work.id), subGroupBySlug, stanceLookup))
+  return works.map((work) =>
+    mapWorkToCompare(
+      work,
+      justificationByWork.get(work.id),
+      subGroupBySlug,
+      stanceLookup,
+      membership.byWork[work.id] ?? [],
+    ),
+  )
 }
 
 function mapWorkToCompare(
@@ -121,6 +137,7 @@ function mapWorkToCompare(
   justifications: Map<string, string> | undefined,
   subGroupBySlug: Map<string, string>,
   stanceLookup: TagStanceLookup,
+  groups: WorkGroupRef[],
 ): CompareWork {
   const scoreByCrit: Record<string, number> = {}
   for (const cs of work.category_scores ?? []) {
@@ -190,6 +207,7 @@ function mapWorkToCompare(
     alignmentJustification: work.calculated_scores?.alignment_justification ?? null,
     alignmentAt: work.calculated_scores?.alignment_at ?? null,
     genres: work.genres ?? [],
+    groups,
     tags,
     criteria: CRITERION_SLUGS.map((slug) => ({
       slug,

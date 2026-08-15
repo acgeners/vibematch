@@ -7,21 +7,32 @@ import { ViewRecommendationsButton } from "@/components/recommendations/view-rec
 import { canConsumeAi } from "@/server/queries/current-user"
 import { getFavoritesSummary } from "@/server/queries/favorites"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
-import { getListsWithSummary, getUngroupedFavorites, getWorksLiteForPicker } from "@/server/queries/lists"
+import {
+  getGroupMembership,
+  getListsWithSummary,
+  getMultiGroupFavorites,
+  getUngroupedFavorites,
+  getWorksLiteForPicker,
+} from "@/server/queries/lists"
 
 // Índice de /favorites: grupos (recortes) + card fixo "Todos os favoritos" + card derivado
 // "Sem grupo". O detalhe (tabela/filtros clássicos) vive em /favorites/[listId].
 export const metadata = { title: "Favoritos" }
 
 export default async function FavoritesPage() {
-  const [lists, summary, ungrouped, catalog, scoreThresholds, canAi] = await Promise.all([
-    getListsWithSummary(),
-    getFavoritesSummary(),
-    getUngroupedFavorites(),
-    getWorksLiteForPicker(),
-    getScoreColorThresholds(),
-    canConsumeAi(),
-  ])
+  const [lists, summary, ungrouped, multi, membership, catalog, scoreThresholds, canAi] =
+    await Promise.all([
+      getListsWithSummary(),
+      getFavoritesSummary(),
+      getUngroupedFavorites(),
+      // Não paga leitura nova: `getGroupMembership` é `cache()` por requisição e o
+      // `getMultiGroupFavorites` consome dele.
+      getMultiGroupFavorites(),
+      getGroupMembership(),
+      getWorksLiteForPicker(),
+      getScoreColorThresholds(),
+      canConsumeAi(),
+    ])
   const isPaid = canAi
 
   return (
@@ -43,7 +54,14 @@ export default async function FavoritesPage() {
         }
       />
 
-      <GroupsIndex lists={lists} allSummary={summary} ungrouped={ungrouped} catalog={catalog} />
+      <GroupsIndex
+        lists={lists}
+        allSummary={summary}
+        ungrouped={ungrouped}
+        multi={multi}
+        nested={membership.nested}
+        catalog={catalog}
+      />
     </div>
   )
 }

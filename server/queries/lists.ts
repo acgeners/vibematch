@@ -1,3 +1,4 @@
+import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createUserClient } from "@/lib/supabase/user"
 import { fetchAllRows, selectByIdsInChunks } from "@/lib/supabase/paginate"
@@ -402,6 +403,211 @@ export async function getUngroupedFavorites(): Promise<UngroupedFavorites> {
     coverUrls: pickCoverUrls([], rows, byId),
     summary: summarizeWorks(rows, await getScoresReader()),
     groupCount,
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Recorrência — em quantos recortes a mesma obra aparece.
+//
+// Uma obra pode estar em vários grupos (a tabela é M-pra-N desde a migration 123), e
+// isso é sinal de CURADORIA: medido em 2026-08-15 sobre as 126 favoritas, a contagem
+// tem correlação 0,13 com a Nota Prevista e 0,11 com o Alinhamento — quase ortogonal a
+// ambos —, e separa 309 dos 481 pares empatados na Prevista exibida (64%). É por isso
+// que ela vale como nível de ordenação e como linha do comparador.
+//
+// ⚠️ O que ela NÃO é: convergência de GOSTO. Os grupos misturam duas naturezas — uns
+// descrevem a obra ("Spicy", "Fotos boas"), outros o estado dela no fluxo de quem
+// organiza ("Lendo agora", "Next", "Ongoing"). Medido no mesmo dia: das 46 obras em 2+
+// grupos, 8 são só-tema, 8 só-fluxo e 30 mistas — e a obra com mais grupos (5) tem
+// quatro deles de fluxo. Daí o texto da UI falar em "recortes", nunca em gosto: a
+// promessa maior seria falsa em 38 das 46. Separar as duas leituras exigiria marcar o
+// TIPO do grupo (coluna nova em `work_lists`) — decidido em 2026-08-15 NÃO fazer agora.
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Um grupo a que a obra pertence — o bastante para nomear e colorir no tooltip. */
+export interface WorkGroupRef {
+  id: string
+  name: string
+  color: string | null
+}
+
+/** Par de grupos em que o primeiro está INTEIRO dentro do segundo. */
+export interface NestedGroupPair {
+  innerId: string
+  innerName: string
+  innerCount: number
+  outerId: string
+  outerName: string
+}
+
+export interface GroupMembership {
+  /** work_id → grupos do dono a que ela pertence, na ordem do índice. Record (não Map)
+   *  porque atravessa a fronteira server→client até a célula da tabela. */
+  byWork: Record<string, WorkGroupRef[]>
+  /** Grupos 100% contidos em outro. Hoje 1 par em 33 (3%) — ver o aviso no card. */
+  nested: NestedGroupPair[]
+  /** Quantos grupos o dono tem. 0/1 desliga tudo que depende de recorrência. */
+  totalGroups: number
+}
+
+const EMPTY_MEMBERSHIP: GroupMembership = { byWork: {}, nested: [], totalGroups: 0 }
+
+/**
+ * DONO ÚNICO de "em quais grupos esta obra está".
+ *
+ * 🔴 Existe para que a contagem que ORDENA, a que a célula MOSTRA, a do card derivado e a
+ * do comparador saiam todas da mesma leitura. Quatro superfícies contando por conta
+ * própria é a classe de erro mais cara desta base (ver "DOIS critérios para o MESMO
+ * fato"): bastaria uma delas esquecer o filtro por dono, ou contar itens em vez de
+ * grupos distintos, para duas telas discordarem sobre a mesma obra.
+ *
+ * `cache()` por requisição: o índice de /favorites chama isto, o `getMultiGroupFavorites`
+ * consome daqui e a página de detalhe também — sem ele seriam três varreduras do mesmo
+ * `work_list_items` na mesma renderização.
+ *
+ * Custo: ZERO consulta nova no fluxo de /favorites — `getListsWithSummary` e
+ * `getListsForPicker` já paginavam esses mesmos itens e descartavam o vínculo.
+ */
+export const getGroupMembership = cache(async (): Promise<GroupMembership> => {
+  const supabase = createAdminClient()
+  // Mesmo gate do resto do arquivo: sem sessão não há grupos: `getCurrentUserId()` cairia
+  // no dono e a contagem da visitante seria a DELE ([[gotcha-anonimo-vira-dono]]).
+  const viewerId = await getSessionUserId()
+  if (!viewerId) return EMPTY_MEMBERSHIP
+
+  const listsRes = await supabase
+    .from("work_lists")
+    .select("id, name, color, position, created_at")
+    .eq("user_id", viewerId)
+    .order("position", { ascending: true })
+    .order("created_at", { ascending: false })
+
+  if (listsRes.error) {
+    console.error("[lists] erro lendo grupos (recorrência):", listsRes.error.message)
+    return EMPTY_MEMBERSHIP
+  }
+  const lists = (listsRes.data ?? []) as Array<{ id: string; name: string; color: string | null }>
+  if (lists.length === 0) return EMPTY_MEMBERSHIP
+
+  const items = await fetchListItems(supabase, lists.map((l) => l.id))
+
+  const byWork: Record<string, WorkGroupRef[]> = {}
+  const membersByList = new Map<string, Set<string>>()
+  const listById = new Map(lists.map((l) => [l.id, l]))
+
+  for (const it of items) {
+    const list = listById.get(it.list_id)
+    if (!list) continue
+    // A PK é (list_id, work_id), então não há repetição a deduplicar — mas a ordem sai
+    // do `fetchListItems`, que já vem ordenado por lista: o tooltip lista os grupos na
+    // mesma ordem do índice, e não na ordem em que a obra entrou em cada um.
+    ;(byWork[it.work_id] ??= []).push({ id: list.id, name: list.name, color: list.color })
+    let members = membersByList.get(it.list_id)
+    if (!members) {
+      members = new Set<string>()
+      membersByList.set(it.list_id, members)
+    }
+    members.add(it.work_id)
+  }
+
+  // Grupo contido em outro: para essas obras, "2 grupos" não é convergência nenhuma — é o
+  // mesmo recorte contado duas vezes. Medido na nuvem em 2026-08-15: `Best Spicy` (13) está
+  // 100% dentro de `Spicy` (53), e é o ÚNICO par assim em 33 pares possíveis.
+  const nested: NestedGroupPair[] = []
+  for (const inner of lists) {
+    const si = membersByList.get(inner.id)
+    if (!si || si.size === 0) continue
+    for (const outer of lists) {
+      if (inner.id === outer.id) continue
+      const so = membersByList.get(outer.id)
+      if (!so || si.size > so.size) continue
+      // Grupos de mesmo tamanho são iguais quando um contém o outro: reporta uma vez só,
+      // senão os dois cards acusariam um ao outro.
+      if (si.size === so.size && inner.id >= outer.id) continue
+      let contained = true
+      for (const w of si) {
+        if (!so.has(w)) {
+          contained = false
+          break
+        }
+      }
+      if (contained) {
+        nested.push({
+          innerId: inner.id,
+          innerName: inner.name,
+          innerCount: si.size,
+          outerId: outer.id,
+          outerName: outer.name,
+        })
+      }
+    }
+  }
+
+  return { byWork, nested, totalGroups: lists.length }
+})
+
+/** Só a contagem, na forma que o `getRanking` consegue ordenar (Record serializável).
+ *  DERIVADO do mapa acima, nunca contado de novo — é o que impede a coluna mostrar "3"
+ *  e a ordenação usar outro número. */
+export function groupCountsFrom(membership: GroupMembership): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const [workId, groups] of Object.entries(membership.byWork)) out[workId] = groups.length
+  return out
+}
+
+export interface MultiGroupFavorites {
+  /** IDs das obras em 2+ grupos, já ordenadas por recorrência desc (escopo do ranking). */
+  workIds: string[]
+  coverUrls: string[]
+  summary: FavoritesSummary
+  /** Maior nº de grupos de uma obra — só para o card dizer até onde vai. */
+  maxGroups: number
+}
+
+/**
+ * Visão DERIVADA "Em vários grupos": as favoritas que aparecem em 2+ recortes.
+ *
+ * Irmã de `getUngroupedFavorites` — as duas respondem perguntas opostas sobre a mesma
+ * coleção ("o que falta organizar" × "onde os recortes se cruzam") e nenhuma das duas tem
+ * linha em `work_lists`, então não há o que editar, comentar ou excluir.
+ *
+ * O corte é 2+, sem limiar inventado: quem destaca é a ORDENAÇÃO. Medido em 2026-08-15,
+ * 2+ são 46 obras (37% das favoritas) — é justamente por ser tão comum que a recorrência
+ * é número e não chip aceso na lista.
+ */
+export async function getMultiGroupFavorites(): Promise<MultiGroupFavorites> {
+  const empty: MultiGroupFavorites = {
+    workIds: [],
+    coverUrls: [],
+    summary: { total: 0, withExpectedScore: 0, avgExpectedScore: null, topCriteria: [] },
+    maxGroups: 0,
+  }
+
+  const membership = await getGroupMembership()
+  // Com um grupo só, "vários" não existe — e o card não deve aparecer.
+  if (membership.totalGroups < 2) return empty
+
+  const candidates = Object.entries(membership.byWork)
+    .filter(([, groups]) => groups.length >= 2)
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([workId]) => workId)
+  if (candidates.length === 0) return empty
+
+  const supabase = createAdminClient()
+  const byId = await loadWorkRows(supabase, candidates, await getHideAdultContent(), "vários grupos")
+  // Mesma disciplina do "Sem grupo": a contagem do card e o escopo do detalhe saem da MESMA
+  // lista filtrada, então não têm como divergir — o número no card é o que o clique abre.
+  const workIds = candidates.filter((id) => byId.has(id))
+  if (workIds.length === 0) return empty
+  const rows = workIds.map((id) => byId.get(id)!) as WorkRow[]
+
+  return {
+    workIds,
+    // Capas das MAIS recorrentes (workIds já vem nessa ordem), não das de maior nota: o card
+    // é sobre recorrência, e `pickCoverUrls` sem ids explícitos reordenaria por Prevista.
+    coverUrls: pickCoverUrls(workIds.slice(0, 3), rows, byId),
+    summary: summarizeWorks(rows, await getScoresReader()),
+    maxGroups: membership.byWork[workIds[0]]?.length ?? 0,
   }
 }
 

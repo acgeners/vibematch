@@ -126,10 +126,34 @@ const SORTABLE_FIELD_GROUPS: Array<{ label: string; fields: Array<{ value: strin
   },
 ]
 
+/**
+ * Ordenar pela recorrência nos grupos de favoritos. Fica FORA de `SORTABLE_FIELD_GROUPS`
+ * porque só existe onde o dado existe (/favorites): em /ranking a contagem não é carregada
+ * e a opção ordenaria por um campo que é 0 em toda linha.
+ *
+ * 🔴 E não basta esconder do `<Select>`: `parseSortLevels` troca campo desconhecido por
+ * `expected_score`, então sem isto o painel LERIA `sort=groups:desc` como "N. Prevista" e o
+ * "Aplicar filtros" seguinte reescreveria a URL — a ordenação da página sumiria por um
+ * clique num controle que fala de outra coisa. É o bug do rascunho (ver "O painel de
+ * filtros é RASCUNHO"), agora pela ordenação.
+ */
+const GROUPS_SORT_FIELD = { value: "groups", label: "Grupos" }
+
+function sortableFieldGroups(withGroups: boolean) {
+  if (!withGroups) return SORTABLE_FIELD_GROUPS
+  return SORTABLE_FIELD_GROUPS.map((g) =>
+    g.label === "Básico" ? { ...g, fields: [...g.fields, GROUPS_SORT_FIELD] } : g,
+  )
+}
+
 /** Achatado — o parse/validação da URL não conhece grupo, só o conjunto de campos.
  *  Derivado dos grupos (e não uma 2ª lista) pra um campo novo não poder existir
  *  num lugar e faltar no outro. */
-const SORTABLE_FIELDS: Array<{ value: string; label: string }> = SORTABLE_FIELD_GROUPS.flatMap((g) => g.fields)
+function sortableFields(withGroups: boolean): Array<{ value: string; label: string }> {
+  return sortableFieldGroups(withGroups).flatMap((g) => g.fields)
+}
+
+const SORTABLE_FIELDS: Array<{ value: string; label: string }> = sortableFields(true)
 
 const SORT_FIELD_LABEL: Record<string, string> = Object.fromEntries(
   SORTABLE_FIELDS.map((f) => [f.value, f.label]),
@@ -146,11 +170,15 @@ interface SortLevel {
 
 const DEFAULT_SORT = "expected_score:desc"
 
-function parseSortLevels(raw: string | null, defaultSort: string = DEFAULT_SORT): SortLevel[] {
+function parseSortLevels(
+  raw: string | null,
+  defaultSort: string = DEFAULT_SORT,
+  fields: Array<{ value: string }> = SORTABLE_FIELDS,
+): SortLevel[] {
   const src = raw ?? defaultSort
   return src.split(",").map((seg) => {
     const [field, dir] = seg.trim().split(":")
-    const validField = SORTABLE_FIELDS.some((f) => f.value === field) ? field : "expected_score"
+    const validField = fields.some((f) => f.value === field) ? field : "expected_score"
     return { field: validField, dir: dir === "asc" ? "asc" : "desc" }
   })
 }
@@ -165,6 +193,9 @@ interface SortLevelsSectionProps {
   className?: string
   contentClassName?: string
   defaultSort?: string
+  /** Habilita "Grupos" (recorrência) como campo de ordenação. Só onde a página carrega a
+   *  contagem — ver `GROUPS_SORT_FIELD`. */
+  withGroupsSort?: boolean
 }
 
 /**
@@ -262,9 +293,13 @@ const SORT_CHIP_SCALE: Record<number, {
   },
 }
 
-function SortLevelsSection({ searchParams, updateParams, className, contentClassName, defaultSort }: SortLevelsSectionProps) {
+function SortLevelsSection({ searchParams, updateParams, className, contentClassName, defaultSort, withGroupsSort = false }: SortLevelsSectionProps) {
+  // O MESMO conjunto valida a URL e desenha o <Select>: com duas listas, o painel aceitaria
+  // no rascunho um campo que não sabe oferecer (ou o contrário).
+  const campos = sortableFields(withGroupsSort)
+  const grupos = sortableFieldGroups(withGroupsSort)
   const rawSort = searchParams.get("sort")
-  const levels = parseSortLevels(rawSort, defaultSort)
+  const levels = parseSortLevels(rawSort, defaultSort, campos)
 
   const setLevels = (next: SortLevel[]) => {
     updateParams({ sort: encodeSortLevels(next) })
@@ -288,7 +323,7 @@ function SortLevelsSection({ searchParams, updateParams, className, contentClass
   const add = () => {
     if (levels.length >= 5) return
     const used = new Set(levels.map((l) => l.field))
-    const next = SORTABLE_FIELDS.find((f) => !used.has(f.value))
+    const next = campos.find((f) => !used.has(f.value))
     setLevels([...levels, { field: next?.value ?? "calc_score", dir: "desc" }])
   }
 
@@ -345,9 +380,9 @@ function SortLevelsSection({ searchParams, updateParams, className, contentClass
                     scale.trigger,
                   )}
                 >
-                  {/* `SORTABLE_FIELDS` é o flatMap dos MESMOS grupos que o
-                      `SortFieldOptions` desenha — sem isto o chip sai vazio no SSR. */}
-                  <SelectValue>{selectedOptionLabel(SORTABLE_FIELDS, level.field)}</SelectValue>
+                  {/* `campos` é o flatMap dos MESMOS grupos que o `SortFieldOptions`
+                      desenha — sem isto o chip sai vazio no SSR. */}
+                  <SelectValue>{selectedOptionLabel(campos, level.field)}</SelectValue>
                 </SelectTrigger>
                 {/* ⚠️ Não adianta pôr `max-h-*` aqui: em `position="item-aligned"` (o
                     default do nosso `SelectContent`) o Radix escreve `max-height: 100%`
@@ -357,7 +392,7 @@ function SortLevelsSection({ searchParams, updateParams, className, contentClass
                     Quem limita é a folga da janela, e é por isso que o rótulo de grupo
                     em `SortFieldOptions` é sticky: a lista é maior que o painel. */}
                 <SelectContent>
-                  <SortFieldOptions />
+                  <SortFieldOptions grupos={grupos} />
                 </SelectContent>
               </Select>
               <button
@@ -532,10 +567,14 @@ function MyRangeToggle({
  * typeahead seguem valendo — mas a ORDEM é a do DOM: um grupo novo entra no fim
  * da navegação por teclado, não onde o olho espera.
  */
-function SortFieldOptions() {
+function SortFieldOptions({
+  grupos = SORTABLE_FIELD_GROUPS,
+}: {
+  grupos?: Array<{ label: string; fields: Array<{ value: string; label: string }> }>
+}) {
   return (
     <>
-      {SORTABLE_FIELD_GROUPS.map((group, i) => (
+      {grupos.map((group, i) => (
         <SelectGroup
           key={group.label}
           className={cn("pt-0.5", i > 0 && "mt-2.5 border-t border-border/70 pt-2")}
@@ -665,6 +704,9 @@ interface RankingFiltersProps {
    * estimar arte, isto vira "tem modelo de arte", como `PERSONAL_SORT_FIELDS` já faz.
    */
   showArtFilter?: boolean
+  /** Oferece "Grupos" (recorrência nos grupos de favoritos) como nível de ordenação.
+   *  Só em /favorites: é a única tela que carrega a contagem. */
+  showGroupsSort?: boolean
   showAdultFilter?: boolean
 }
 
@@ -2634,6 +2676,7 @@ export function RankingFilters({
   showTopN = true,
   showTierBand = true,
   showArtFilter = false,
+  showGroupsSort = false,
   showAdultFilter = false,
 }: RankingFiltersProps) {
   /**
@@ -3867,6 +3910,7 @@ export function RankingFilters({
                 searchParams={searchParams}
                 updateParams={updateParams}
                 defaultSort={defaultSort}
+                withGroupsSort={showGroupsSort}
                 className="flex flex-col"
                 contentClassName="flex-1 flex flex-col justify-center"
               />
