@@ -2720,12 +2720,28 @@ Quatro ocorrências MEDIDAS em 2026-08-13/14, todas com suíte verde:
 | dono de um id externo | o texto de uma review | o slug da URL da fonte | hid removido da obra ERRADA, e o resolvedor o recriou 2h37 depois |
 | `deep-dive.ts` × RPC | um `as SimilarRow[]` em TS | o `RETURNS TABLE` em SQL | a migration 151 tirou `user_score`; "obras similares na biblioteca" saiu VAZIA por um mês |
 | banda dos tiers | `DEFAULT_TIER_BAND_WIDTH` = 0,25 (medido) | `formula_config.tier_band_width` = 0,5 | a constante é só FALLBACK e a coluna é NOT NULL ⇒ o valor medido **nunca esteve em vigor**; o /ranking agrupou uma semana na largura que a medição reprovou, e a UI mostrava "0,5 (Padrão)" |
+| lista do `/descobrir` | percentil sobre as **737 candidatas** (a barra `sim`) | percentil sobre o **pool de ~50** (o número que ORDENA) | a combinação exibia **97** onde as duas barras diziam 100, e 92 onde diziam 99 e 97; a ordem da lista saía diferente da do servidor |
 
 🔴 **A régua: quando duas coisas afirmam o mesmo fato, uma tem que ser DERIVADA da outra.**
 É o que já vale para `LOW_BALANCE_USD`, `STRONG_TAG_WEIGHT`, `CRITERIA_SCALE_LEGEND` e
 `decision-queues.ts` — e é a mesma régua, não uma parecida. Ao ver um contador ao lado de uma
 ação, a pergunta é: *os dois chamam a mesma função?* Se não, um vai mentir sobre o outro, e o
 que mente costuma ser o que decide se o botão fica clicável.
+
+⚠️ **"Chamam a mesma função?" NÃO BASTA — foi o que a lista do `/descobrir` mostrou (15/08/2026).**
+Ali os dois lados chamavam `blendCandidates`, na mesma unidade (percentil 0–100). O que diferia
+era o **universo** em que o percentil foi medido: 737 candidatas de um lado, o pool exibível de
+~50 do outro, porque a função **repercentila o que recebe** e quem chamava já passava um
+percentil pronto. Percentil, z-score, ranking e "top N%" só querem dizer alguma coisa junto do
+conjunto em que foram medidos — então a pergunta completa é *a mesma função, sobre o mesmo
+CONJUNTO?*
+
+🔴 **E o comentário no código afirmava que sim:** *"reusar o percentil aqui mantém a régua
+idêntica à do servidor em vez de recalcular sobre um subconjunto"*. Comentário que descreve a
+INTENÇÃO em vez do que o código faz passa a **defender** o defeito na revisão — quem lê confere
+a frase e não a chamada. Foi o que manteve este vivo, e o que o denunciou não foi leitura de
+código: foi a curadora olhando a tela e reparando que o número não era a média das duas barras
+ao lado dele.
 
 ⚠️ **Contador barato + ação completa é um par legítimo — o que não pode é o barato TRANCAR a
 completa.** `countStaleEmbeddings()` puxaria o catálogo inteiro a cada visita ao `/settings`;
