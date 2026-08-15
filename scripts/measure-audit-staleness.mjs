@@ -4,10 +4,12 @@
  * lógica contra o banco real e fundamentar o mockup do card.
  *
  * Uso: node scripts/measure-audit-staleness.mjs
+ *
+ * ALVO: LOCAL — só LÊ, então o `.env.analysis` (que vem DEPOIS e vence) o manda pro clone
+ * local e o egress fica em zero. Sem ele, roda contra a NUVEM em silêncio.
+ *   node --env-file=.env.local --env-file=.env.analysis scripts/measure-audit-staleness.mjs
  */
 import { createClient } from '@supabase/supabase-js'
-import { config } from 'dotenv'
-config({ path: '.env.local' })
 
 const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 

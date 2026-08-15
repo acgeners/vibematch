@@ -1,5 +1,10 @@
-import { config } from 'dotenv'
-config({ path: '.env.local', quiet: true })
+/**
+ * Auditoria das causas de divergência entre a FAIXA citada na prosa e a nota persistida.
+ *
+ * ALVO: LOCAL — só LÊ, então o `.env.analysis` (que vem DEPOIS e vence) o manda pro clone
+ * local e o egress fica em zero. Sem ele, roda contra a NUVEM em silêncio.
+ *   node --env-file=.env.local --env-file=.env.analysis scripts/audit-bands-causes.mjs
+ */
 import { createClient } from '@supabase/supabase-js'
 const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 const BAND_RE = /^\s*Faixa\s+(\d+(?:-\d+)?(?:\/\d+-\d+)?)\s*(?:\(([^)]*)\))?\s*:\s*([\s\S]*)$/i

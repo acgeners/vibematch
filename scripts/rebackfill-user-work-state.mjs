@@ -18,6 +18,10 @@
  *
  * Escopo: todo o estado de `works` é do DONO (a linha singleton de user_settings) —
  * `works` não tem coluna de dono, é a linha compartilhada do catálogo.
+ *
+ * 🔴 ALVO: NUVEM — este script GRAVA. Rodá-lo contra o local, que é réplica descartável,
+ * joga o trabalho fora no próximo `db:pull`.
+ *   node --env-file=.env.local scripts/rebackfill-user-work-state.mjs
  */
 import fs from "node:fs"
 import path from "node:path"

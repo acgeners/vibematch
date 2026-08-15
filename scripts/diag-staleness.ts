@@ -2,6 +2,10 @@
  * DIAGNÓSTICO de materialidade da obsolescência do INTERESSE (Frente 1, $0, 0 escrita).
  * Mede quão sensível é a assinatura de entrada hoje a mudanças COSMÉTICAS vs MATERIAIS,
  * e o quanto um regen de perfil OVER-invalida (vs o conjunto que de fato muda).
+ *
+ * ALVO: LOCAL — só LÊ, então o `.env.analysis` (que vem DEPOIS e vence) o manda pro clone
+ * local e o egress fica em zero. Sem ele, roda contra a NUVEM em silêncio.
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/diag-staleness.ts
  */
 import { createAdminClient } from "@/lib/supabase/admin"
 import { computeInterestInputSignature } from "@/lib/orchestration/integrations/synopsis-interest"

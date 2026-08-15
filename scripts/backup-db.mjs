@@ -11,6 +11,12 @@
  *   node scripts/backup-db.mjs            → .backups/<timestamp>/
  *   node scripts/backup-db.mjs /caminho   → /caminho/<timestamp>/
  *
+ * 🔴 ALVO: NUVEM — e aqui a palavra tem sentido inverso ao dos outros scripts. Ele não GRAVA
+ * no banco; o que ele grava é o BACKUP, e um backup do banco errado é pior que backup nenhum,
+ * porque reporta sucesso. O alvo sai de `BACKUP_ENV_FILE` (default `.env.local`), não de
+ * `--env-file`, então o `.env.analysis` não o alcança — mandá-lo pro clone descartável
+ * salvaria a réplica no lugar da produção, com a mesma mensagem de "ok" no fim.
+ *
  * ⚠️ O `select` do Supabase corta em 1000 linhas SEM AVISAR — um backup truncado é a pior
  * forma possível desse bug: ele "funciona", você confia, e o dado só some quando você
  * precisa dele. Por isso aqui tudo é paginado E conferido contra `count: "exact"`: se um

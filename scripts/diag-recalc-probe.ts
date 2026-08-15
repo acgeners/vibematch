@@ -2,6 +2,10 @@
  * SONDA read-only do diagnóstico de recalc (Frente 1, $0, 0 escrita).
  * Só LÊ: estado de recalc_pending, nº de obras, nº de rotuladas (user_score),
  * e a dispersão atual dos scores em calculated_scores. Nada é computado/escrito.
+ *
+ * ALVO: LOCAL — só LÊ, então o `.env.analysis` (que vem DEPOIS e vence) o manda pro clone
+ * local e o egress fica em zero. Sem ele, roda contra a NUVEM em silêncio.
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/diag-recalc-probe.ts
  */
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getRecalcPendingState } from "@/server/recalc/queue"
