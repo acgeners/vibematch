@@ -5,6 +5,7 @@ import "server-only"
 // decisão A×B for tomada. Ver PLANO-INTERESSE-PREFS-CONFIANCA.md §Shadow.
 // ============================================================================
 import { isInterestShadowEnabled } from "@/lib/ai-evaluation/compiled-preferences"
+import { interestPredictLabel } from "@/lib/ui/interest-predict-label"
 import {
   getShadowComparisonRows,
   getSynopsisVersionComparison,
@@ -55,8 +56,11 @@ export async function ShadowComparePanel({
           Shadow A/B · ativo
         </span>
         <span className="ml-2 text-xs text-muted-foreground">
-          Sem obras com o arm B ainda. Clique <b>&quot;Reprever&quot;</b> numa obra (perfil precisa estar
-          fresco), espere ~30s e recarregue — o arm B roda em background.
+          {/* ⚠️ O nome do botão vem do dono único: instrução que soletra o rótulo à mão
+              envelhece calada quando ele muda — foi o que aconteceu com "Reprever". */}
+          Sem obras com o arm B ainda. Clique{" "}
+          <b>&quot;{interestPredictLabel({ hasPrediction: true, stale: true })}&quot;</b> numa obra
+          (perfil precisa estar fresco), espere ~30s e recarregue — o arm B roda em background.
         </span>
       </div>
     )

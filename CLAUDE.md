@@ -1002,6 +1002,22 @@ meio da rampa. O que a régua proíbe é **chip de palavra** em âmbar que não 
 
 ⚠️ **Violeta fica FORA da régua**: `✨` é procedência ("quem escreveu isto"), não estado.
 
+🔴 **Estado fica junto da SAÍDA dele — não no rodapé** (2026-08-15, card do Interesse). O
+"Previsão desatualizada" era a última linha do bloco, **depois** da justificativa: ~230px
+abaixo do único botão que o desfaz e, pior, **depois da seta de aplicar** — ou seja, era lido
+quando já não servia pra nada. Hoje é chip âmbar no cabeçalho, encostado no botão, e o rótulo
+do botão acompanha o estado (`lib/ui/interest-predict-label.ts`): "Atualizar previsão" só
+quando desatualizada, "Prever de novo" quando fresca. Prometer "atualizar" sobre previsão
+fresca é oferecer conserto pro que não está quebrado — numa chamada que CUSTA (**1,44¢**,
+média medida em 295 chamadas de `synopsis_quality_predict`).
+
+⚠️ **Desatualizada é a REGRA, não a exceção — e isso limita onde o chip cabe.** Medido em
+2026-08-15 no clone local, sobre a previsão ATIVA de cada obra (prefere `v4`, cai pra `v3`):
+**815 obras têm previsão e 728 estão stale — 89,3%**. Num card de UMA obra o chip informa;
+numa COLUNA de lista ele pintaria 9 em 10 linhas e viraria o alarme que sempre toca (mesma
+régua do `db:health` e do painel "Estado da obra"). Por isso no `/ranking` o "Desatualizada"
+segue **dentro do tooltip** do badge de Interesse, e isso é escolha medida, não esquecimento.
+
 ⚠️ **`border-<cor>` não pinta** (o `* { border-color }` do `globals.css` vence utilities no
 Tailwind v4) — por isso `box` usa `ring-*` e `outline` carrega `!`. **Medido em 2026-08-14**
 no browser com o CSS real: `border-emerald-300` computa `rgb(49, 56, 68)`, o neutro do tema,
@@ -1274,7 +1290,7 @@ selo; se ela aparece como enfeite, deixa de significar "um modelo escreveu isto"
 | uso | regra |
 |---|---|
 | **selo** violeta clicável | conteúdo na tela saiu de um modelo — tooltip de proveniência |
-| **em botão**, com texto | a ação CHAMA um modelo (e custa): "Prever de novo", "Avaliar com IA" |
+| **em botão**, com texto | a ação CHAMA um modelo (e custa): "Atualizar previsão", "Avaliar com IA" |
 | ~~ícone fixo de título/aba/métrica~~ | **não** — não abre nada e gasta a marca |
 
 Saíram nesta leva: o ✨ do título de **"Obras parecidas"** (o card é busca vetorial, não
@@ -2721,10 +2737,11 @@ Quatro ocorrências MEDIDAS em 2026-08-13/14, todas com suíte verde:
 | `deep-dive.ts` × RPC | um `as SimilarRow[]` em TS | o `RETURNS TABLE` em SQL | a migration 151 tirou `user_score`; "obras similares na biblioteca" saiu VAZIA por um mês |
 | banda dos tiers | `DEFAULT_TIER_BAND_WIDTH` = 0,25 (medido) | `formula_config.tier_band_width` = 0,5 | a constante é só FALLBACK e a coluna é NOT NULL ⇒ o valor medido **nunca esteve em vigor**; o /ranking agrupou uma semana na largura que a medição reprovou, e a UI mostrava "0,5 (Padrão)" |
 | lista do `/descobrir` | percentil sobre as **737 candidatas** (a barra `sim`) | percentil sobre o **pool de ~50** (o número que ORDENA) | a combinação exibia **97** onde as duas barras diziam 100, e 92 onde diziam 99 e 97; a ordem da lista saía diferente da do servidor |
+| botão de prever Interesse | a obra dizia "Prever de novo" | a fila dizia "Reprever" (e o popup, "Prever") | mesma ação com **três nomes**; e uma instrução na tela (`shadow-compare-panel`) mandava clicar num "Reprever" que já não existiria — ver `lib/ui/interest-predict-label.ts` |
 
 🔴 **A régua: quando duas coisas afirmam o mesmo fato, uma tem que ser DERIVADA da outra.**
-É o que já vale para `LOW_BALANCE_USD`, `STRONG_TAG_WEIGHT`, `CRITERIA_SCALE_LEGEND` e
-`decision-queues.ts` — e é a mesma régua, não uma parecida. Ao ver um contador ao lado de uma
+É o que já vale para `LOW_BALANCE_USD`, `STRONG_TAG_WEIGHT`, `CRITERIA_SCALE_LEGEND`,
+`decision-queues.ts` e `interest-predict-label.ts` — e é a mesma régua, não uma parecida. Ao ver um contador ao lado de uma
 ação, a pergunta é: *os dois chamam a mesma função?* Se não, um vai mentir sobre o outro, e o
 que mente costuma ser o que decide se o botão fica clicável.
 
@@ -2814,17 +2831,19 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.883 passando (+24 pulados) em 274 arquivos** (269 passando + 5 pulados;
-medido em 2026-08-15 **na `origin/main`** depois do merge do PR #415, que somou 11 testes SEM
-somar arquivo — mexeu em dois já existentes, e é por isso que o total de arquivos não se moveu.
-Conferido contra o que está VERSIONADO: **274** pelo `git ls-tree` = **274 executados** pelo
-Vitest.
+`npm run test` → **2.891 passando (+24 pulados) em 275 arquivos** (270 passando + 5 pulados;
+medido em 2026-08-15 com o dono único do rótulo de "prever Interesse"
+(`lib/ui/interest-predict-label.ts`), que somou 1 arquivo e 8 testes sobre os **2.883 em 274**
+que a `origin/main` tinha depois do PR #415.
 
-⚠️ A árvore tinha um arquivo de teste NÃO COMMITADO de outra sessão
-(`tests/unit/ui/pendencias-ia-abrem-em-aba-nova.test.tsx`), e com ele o rodapé dizia
-**2.885 em 275**. A medição o excluiu de propósito: contá-lo seria a armadilha da árvore suja
-descrita logo abaixo, dessa vez com trabalho de outra pessoa. Quando aquele PR entrar, este
-número sobe junto).
+⚠️ A árvore tem um arquivo de teste NÃO COMMITADO de outra sessão
+(`tests/unit/ui/pendencias-ia-abrem-em-aba-nova.test.tsx`). A medição o excluiu de propósito
+(`--exclude`): contá-lo seria a armadilha da árvore suja descrita logo abaixo, dessa vez com
+trabalho de outra pessoa. Quando aquele PR entrar, este número sobe junto.
+
+⚠️ **Confira o TOTAL EXECUTADO contra o disco, sempre.** Aqui: `find tests -name '*.test.ts*'`
+deu **276**, menos o arquivo alheio = **275**, e o Vitest executou **275** — é essa igualdade
+que descarta truncamento silencioso, não o "0 failed" do rodapé.
 
 🔴 **Este número tem que ser medido DEPOIS do rebase, não antes — e eu quase publiquei o de
 antes.** A branch nasceu de `4af3e64`, e enquanto ela existia entraram na `main` os PRs #403 e
@@ -2848,7 +2867,8 @@ também os ARQUIVOS executados: sob carga o Vitest deixa arquivo de fora e ainda
 teste. A linha já disse "~1.780 em
 ~157", "~2.353 em 218", "2.386 em 221", "2.408 em 225", "2.428 em 228", "2.433 em 228",
 "2.440 em 229", "2.717 em 255", "2.727 em 255", "2.753 em 258", "2.776 em 261", "2.784 em 263",
-"2.788 em 264", "2.807 em 266", "2.813 em 267", "2.828 em 270", "2.833 em 271" e "2.872 em 274", todas
+"2.788 em 264", "2.807 em 266", "2.813 em 267", "2.828 em 270", "2.833 em 271", "2.872 em 274"
+e "2.883 em 274", todas
 envelhecendo sem nada acusar — **re-meça antes de editar este número**,
 não incremente de cabeça. ⚠️ O "2.717" durou menos de um dia: dois PRs do mesmo dia somaram 10
 testes e nenhum dos dois tocou nesta linha. Envelhecer aqui é o normal, não a exceção. Vitest, jsdom, alias `@` → raiz. A
