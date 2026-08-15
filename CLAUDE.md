@@ -1071,6 +1071,39 @@ objeto** (papel novo entra na checagem sozinho) e reprova cor repetida entre pap
 um caso de render em `interesse-obra-veredito-pareado.test.tsx` — a colisão é entre
 VIZINHOS, e isso só aparece na árvore desenhada.
 
+## `shrink-0` com `flex-wrap` no MESMO elemento não encolhe NEM quebra
+
+As duas se anulam. `flex-wrap` faz o container quebrar linha **quando o pai o aperta**;
+`shrink-0` é exatamente o que impede o pai de apertar, porque a largura-base vira o
+`max-content` — e o `max-content` de um container que quebra linha é **a soma de TUDO numa
+linha só**. O bloco trava nessa largura e é desenhado por FORA do pai.
+
+🔴 **É silencioso nos três canais de sempre.** Sem `overflow-hidden` no `Card`, nada é
+cortado; sem `overflow: auto`, nada rola; e `document.scrollWidth − clientWidth` continua **0**,
+então nem barra de rolagem na página aparece. `tsc` passa, a suíte passa. Só aparece na tela —
+foi a Ana quem viu, num screenshot.
+
+Medido em 15/08/2026 no cabeçalho de "Obras parecidas"
+(`components/titles/similar-works-card.tsx`), que tinha `sm:shrink-0` ao lado de `flex-wrap`:
+
+| janela | card | controles | vazamento |
+|---|---|---|---|
+| 1920 · 1600 · 1440 · 1280 | 868px | **855px FIXOS** | 145px |
+| 1024 | 684px | 855px fixos | **329px** |
+
+O contador ficava **inteiro** fora do card e "Nota prevista" cortada ao meio. ⚠️ E o card **não
+acompanha a janela** — a página é `max-w-6xl` com a coluna da capa fixa —, então o defeito era
+constante, não caso de borda.
+
+⚠️ **Quando os controles não cabem numa faixa, divida por PERGUNTA**, a régua da barra superior:
+em cima "o que é isto / quantas são / pra onde eu vou"; embaixo "como quero ver esta lista". Foi
+o único arranjo que fecha em **altura constante (81px) de 1600 a 1024** — pôr os três controles
+juntos numa 2ª faixa dá 3 linhas (122px) em 1024.
+
+⚠️ **jsdom não tem layout** (`getBoundingClientRect` volta zerado), então isto **não é testável
+no vitest**; um teste que casasse a string `"shrink-0"` protegeria a grafia, o que esta base
+proíbe (ver "Teste de arquitetura tem que casar o FATO"). A verificação é no browser.
+
 ## A query string do /ranking é um CONTRATO — e ela fala PONTOS
 
 Os limiares dos 9 atributos (`min_<slug>`/`max_<slug>`) estão **sempre em pontos (0–10)** na
@@ -1868,6 +1901,45 @@ propriedade do estilo, nunca por uma lista de ids.
 num traço VERTICAL não pinta (bbox de largura zero — a spec manda não renderizar), daí
 `userSpaceOnUse`; ponta de cabelo solta deixa o crânio à mostra e lê como coroa; e vale abaixo da
 linha da franja auto-intersecta o caminho e abre buraco no preenchimento. Confira a 36px, não a 120.
+
+## Capa que não carrega: o fallback existia e estava DESLIGADO em 34 de 36 telas
+
+Irmã da regra do avatar logo acima — lá o `onError` calado afirmava "você não tem avatar"; aqui
+ele afirma "esta obra não tem capa". `components/ui/cover-image.tsx` aceita **`urls`** (candidatas
+em ordem) e avança no `onError` até uma carregar; com **`url`** (uma só) ele não tem pra onde ir e
+desenha o traço "—". A docstring dele promete o fallback, e **34 dos 36 pontos de uso passavam
+`url`**: capacidade construída e desligada é pior que ausente, porque quem lê o componente acha
+que está coberto.
+
+🔴 **E o host inteiro da Comix caiu sem nada acusar.** Medido em 15/08/2026 nas 990 obras da
+nuvem, capa por capa: **29 (2,9%) exibiam capa morta**, e em **21** havia alternativa VIVA na
+própria `work_covers` — o app tinha a capa boa na mão. **23 das 29 eram `static.comix.to`**, e
+numa amostra de 15 capas de lá **ZERO respondem 200**: é o mesmo Cloudflare de 11/08 que matou o
+fetch de reviews da Comix, e ele levou as capas junto. `<img>` que falha não emite erro, não corta
+layout e não gera rolagem — o defeito viveu 4 dias invisível.
+
+**Duas frentes, porque são dois problemas.** O `urls=` cura quebra futura sozinha, mas conserta
+**uma tela por vez**; consertar o DADO conserta as 34 de uma vez, e é o que a ferramenta faz:
+
+```bash
+npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/repick-dead-covers.ts
+#   ALVO: NUVEM · US$0 · ensaio por padrão; --execute grava e salva o estado anterior
+```
+
+⚠️ **Ela escolhe por `scoreCover`, não "a próxima da ordem".** Pegar a próxima promovia uma
+miniatura do Google Imagens e um `i.pinimg.com` de 736px tendo CDN de verdade na mesma lista.
+🔴 `encrypted-tbn*.gstatic.com` fica em ÚLTIMO como desempate: aquelas URLs **expiram**, então
+promovê-la recria o próprio defeito. Isso **não** é preferência de fonte — essa régua já foi
+medida e reprovada em 07/2026 (a ordem por fonte acertava a melhor capa em só 32% das obras);
+`tbn` não é fonte, é proxy temporário de uma.
+
+⚠️ **"Viva" é a ASSINATURA do arquivo, nunca o `content-type`:** a Tappytoon devolve `image` (sem
+a barra) num JPEG válido, e um `startsWith("image/")` reprovou 2 capas boas na 1ª medição. Do
+outro lado o Cloudflare devolve 403 com `text/html` — então o status também não basta sozinho.
+
+⚠️ **Sobram 7 obras sem NENHUMA capa viva.** Aí o fallback não tem o que escolher: precisam de
+capa nova de alguma fonte. E 33 telas seguem passando URL única — cobertas pelo conserto no dado,
+mas não se curam sozinhas na próxima fonte que cair.
 
 ## Supabase: o `select` corta em 1000 linhas, sem avisar
 
