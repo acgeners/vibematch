@@ -1640,9 +1640,12 @@ Os três números que ficam piores quando alguém tenta melhorá-los:
 3. ⚠️ **Stance oposta é CONFLITO, nunca confirmação.** Somar os dois transformaria discordância em
    prova de acerto — o único caso em que a manchete sobe enquanto o entendimento piora.
 
-🔴 **TAG ≠ TEMA, e a diferença é FUNCIONAL.** `computePersonalFit` só consome
-`loved_tags`/`avoided_tags` + critérios: um TEMA (frase livre da IA) não existe no catálogo, não
-casa com obra nenhuma e **não entra no cálculo do alinhamento** — só contextualiza prompts. Por
+🔴 **TAG ≠ TEMA, e a diferença é FUNCIONAL.** `netNameOverlap` — quem calcula o Alinhamento — só
+consome os NOMES de `loved_tags`/`avoided_tags`: um TEMA (frase livre da IA) não existe no
+catálogo, não casa com obra nenhuma e **não entra no cálculo do alinhamento** — só contextualiza
+prompts. ⚠️ Esta linha dizia "`computePersonalFit` … + critérios", e os dois pedaços estavam
+errados: a função foi REMOVIDA em 15/08/2026 (morta desde 27/06) e critério nunca entrou no
+Alinhamento. Por
 isso a distinção é de **FORMA** (pílula × linha de texto), não de cor: os dois já dividem a cor de
 stance, e frase de ~60 caracteres nunca foi chip.
 ⚠️ Coração de **contorno**, nunca preenchido — o preenchido é o marcador de ênfase 2×
@@ -2024,6 +2027,64 @@ a fila em `server/recalc/queue.ts` (debounce de 1h; um teste de arquitetura gara
 importa). ⚠️ **Não existe recálculo por obra** — `recalculateWork` foi citado aqui por muito tempo e
 **não existe no código** (conferido 2026-07-29: zero referências). Toda edição de dado custa uma leitura
 do catálogo inteiro: **5,3 MB** por rodada (medido). É o maior consumidor de egress do projeto. The honest cross-validated MAE of Nota Prevista is stored in `formula_config` (`cv_mae_expected`). Since the `user_score` label switched from craft to **taste** (2026-07-16 — the average of the 7 fixed taste axes, excluding the "Final"; see `computeTasteUserScore`), the absolute cvMAE rose to **~0.73** (was ~0.58 under craft). This is a **scale artifact**, not a regression: the taste target has a wider spread (σ 0.95→1.25, baseline MAE 0.73→0.98), so normalized the model is slightly better (cvMAE/baseline 0.79→0.75). Don't read the raw ~0.73 as "the model got worse".
+
+## "Alinhamento" é SÓ TAG, e é uma soma sem denominador
+
+Quarto número da página da obra, ao lado dos três acima — e o único que não passa
+por Ridge nem por LLM. Dono: `netNameOverlap` (`lib/ai-recommendation/personal-fit.ts`),
+chamado no **bloco 5** de `server/actions/calculations.ts`:
+
+```
+netName        = Σ strength(amadas presentes) − 1.5 × Σ strength(evitadas presentes)
+personal_fit   = (netName − min) / (max − min)          ← min-max sobre o catálogo
+personal_fit_percentile = percentil midrank             ← O NÚMERO DA TELA
+```
+
+Casamento por **nome em minúsculo, ignorando o grupo** (validado por bootstrap em
+27/06/2026: acc-par ~0,544 contra ~0,514 do `group::name`). O perfil é o **efetivo**
+— persistido ⊕ tags declaradas em `/preferencias`, com encolhimento `λ = n/(n+k)`,
+`k` = 5 amar / 8 evitar.
+
+⚠️ **Critério NÃO entra.** `criterionAlignment` existe e é usada, mas como **feature
+do Ridge da Nota Prevista** (bloco 2b), não aqui. E `work_genres` também não — só
+`work_tags`.
+
+⚠️ **Não confundir com as colunas `alignment_*` da MESMA tabela**, que são o
+**Veredito IA** (LLM). O nome da coluna e o rótulo da UI não se correspondem.
+
+🔴 **Sem denominador ⇒ o nº de tags é o TETO do número.** Medido em 15/08/2026 nas
+988 obras do clone local:
+
+| tags da obra | obras | percentil médio | mediana |
+|---|---|---|---|
+| 0–10 | 18 | **8,5** | 6,3 |
+| 11–24 | 194 | 26,7 | 21,7 |
+| 25–39 | 348 | 45,0 | 45,7 |
+| 40–99 | 393 | 64,2 | 71,4 |
+| 100+ | 35 | **80,8** | 84,5 |
+
+Spearman nº de tags × percentil: **+0,584**. Distribuição de tags: p10 19 · p25 26 ·
+mediana 35 · p90 74 · máx 261.
+
+🔴 **O erro é DIRECIONAL, e é isso que decide onde a ressalva cabe.** Alinhamento ≥75
+com <25 tags: **3 obras (0,3%)** — não dá pra inflar sendo pouco tagueado. Já <30 com
+<25 tags: **139 (14,1%)**. Logo, valor ALTO é confiável sempre; valor BAIXO em obra
+sub-tagueada é ambíguo entre "não combina" e "não sabemos o que é". A ressalva vive no
+**tooltip** (opt-in) e a contagem de tags entrou na Matéria-prima do painel "Estado da
+obra" — **não** vira chip em lista, pelos mesmos 14,1% (1 em 7 linhas é o alarme que
+sempre toca). O `/ranking` não recebe a contagem de propósito: o payload dele não
+embute `work_tags` (corte de egress) e, medido, o **top 50 por Nota Prevista não tem
+nenhuma obra abaixo de 25 tags** — é justo onde a ressalva menos serve.
+
+⚠️ **Normalizar por nº de tags foi testado e REPROVADO** (03/07/2026): `net/nTags`
+piora a acc-par em −0,040 (IC exclui zero), `net/√n` e `net/ln` são neutros. O volume
+carrega sinal real — nº de tags tem Spearman **+0,470** com `user_score`, porque é em
+boa parte proxy de popularidade. Corolário de produto: o Alinhamento serve pra
+**ordenar o que você vai gostar**, não pra **achar joia de nicho**; obra sub-tagueada é
+punida por dado faltando. O conserto sem trade-off é COBERTURA de tags, não fórmula.
+
+Guardado por `tests/unit/ui/alinhamento-materia-prima.test.tsx` (RENDER, com contraprova
+que reprova o texto antigo) e por `estado-da-obra-painel.test.tsx`.
 
 ## O badge "Recalcular notas" só acende com mudança MATERIAL
 
@@ -2830,6 +2891,7 @@ Quatro ocorrências MEDIDAS em 2026-08-13/14, todas com suíte verde:
 | lista do `/descobrir` | percentil sobre as **737 candidatas** (a barra `sim`) | percentil sobre o **pool de ~50** (o número que ORDENA) | a combinação exibia **97** onde as duas barras diziam 100, e 92 onde diziam 99 e 97; a ordem da lista saía diferente da do servidor |
 | botão de prever Interesse | a obra dizia "Prever de novo" | a fila dizia "Reprever" (e o popup, "Prever") | mesma ação com **três nomes**; e uma instrução na tela (`shadow-compare-panel`) mandava clicar num "Reprever" que já não existiria — ver `lib/ui/interest-predict-label.ts` |
 | card da fila de Interesse | chip "Diverge"/"Bate" (`diverges`) | chip `Δ +1`/`Δ 0` (`delta !== 0`) | o **mesmo predicado**, nas mesmas duas cores, desenhado 2× no mesmo card, com uma 3ª cópia da paleta hand-rollada no `Δ`. Medido: o chip aparecia em 45 de 815 obras (5,5%) e nas 45 o `Δ` já dizia o mesmo — e ele PERDIA a precedência pro "Desatualizado" justo nas 676 stale que tinham o que comparar. Ficou o `Δ` |
+| explicação do Alinhamento | o **texto** do tooltip e o docstring diziam "40% tag + 30% critério + 30% consistência" | o **código** roda `netNameOverlap` (só tags, sem critério) | a fórmula descrita foi APOSENTADA em 27/06 e virou código morto; as duas superfícies seguiram documentando-a por ~2 meses, e quem lesse o arquivo pra entender o número aprenderia a fórmula errada. Aqui o "outro lado" não era um segundo cálculo — era **prosa**, que não tem como divergir barulhentamente |
 
 🔴 **A régua: quando duas coisas afirmam o mesmo fato, uma tem que ser DERIVADA da outra.**
 É o que já vale para `LOW_BALANCE_USD`, `STRONG_TAG_WEIGHT`, `CRITERIA_SCALE_LEGEND`,
@@ -2923,9 +2985,11 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.896 passando (+24 pulados) em 276 arquivos** (271 passando + 5 pulados;
-medido em 2026-08-15 com a remoção do chip "Diverge"/"Bate" da fila de Interesse, que somou
-1 arquivo e 5 testes sobre os **2.891 em 275** do PR #418.
+`npm run test` → **2.913 passando (+24 pulados) em 277 arquivos** (272 passando + 5 pulados;
+medido em 2026-08-15 com a ressalva de matéria-prima do Alinhamento, que somou 1 arquivo e
+11 testes, mais a remoção de `computePersonalFit` — que **somou** 6, em vez de tirar: o
+`personal-fit.test.ts` cobria só a função morta e foi repontado pras três VIVAS, inclusive
+`netNameOverlap`, que não tinha teste nenhum. Base: **2.896 em 276**.
 
 ⚠️ A árvore tem um arquivo de teste NÃO COMMITADO de outra sessão
 (`tests/unit/ui/pendencias-ia-abrem-em-aba-nova.test.tsx`). A medição o excluiu de propósito
@@ -2933,7 +2997,7 @@ medido em 2026-08-15 com a remoção do chip "Diverge"/"Bate" da fila de Interes
 trabalho de outra pessoa. Quando aquele PR entrar, este número sobe junto.
 
 ⚠️ **Confira o TOTAL EXECUTADO contra o disco, sempre.** Aqui: `find tests -name '*.test.ts*'`
-deu **277**, menos o arquivo alheio = **276**, e o Vitest executou **276** — é essa igualdade
+deu **278**, menos o arquivo alheio = **277**, e o Vitest executou **277** — é essa igualdade
 que descarta truncamento silencioso, não o "0 failed" do rodapé.
 
 ⚠️ **"Errors 1 error" no rodapé COM tudo passando é a flakiness de carga, não queda de teste** —
@@ -2964,7 +3028,7 @@ teste. A linha já disse "~1.780 em
 ~157", "~2.353 em 218", "2.386 em 221", "2.408 em 225", "2.428 em 228", "2.433 em 228",
 "2.440 em 229", "2.717 em 255", "2.727 em 255", "2.753 em 258", "2.776 em 261", "2.784 em 263",
 "2.788 em 264", "2.807 em 266", "2.813 em 267", "2.828 em 270", "2.833 em 271", "2.872 em 274"
-, "2.883 em 274" e "2.891 em 275", todas
+, "2.883 em 274", "2.891 em 275" e "2.896 em 276", todas
 envelhecendo sem nada acusar — **re-meça antes de editar este número**,
 não incremente de cabeça. ⚠️ O "2.717" durou menos de um dia: dois PRs do mesmo dia somaram 10
 testes e nenhum dos dois tocou nesta linha. Envelhecer aqui é o normal, não a exceção. Vitest, jsdom, alias `@` → raiz. A

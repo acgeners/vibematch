@@ -44,6 +44,23 @@ export interface WorkStatePanelProps {
     /** `works.ai_eval_reviews_stale` — chegaram reviews depois da avaliação. */
     newSinceEval: boolean
   }
+  /**
+   * Quantas tags a obra tem (`work_tags` inteiro — a mesma contagem que o
+   * `netNameOverlap` do recalc itera; `work_genres` fica de fora porque o recalc
+   * não a lê).
+   *
+   * 🔴 Mora na 1ª coluna porque ela pergunta *"com quanta evidência isso foi
+   * feito?"*, e até 2026-08-15 ela contava reviews e fontes mas NÃO contava
+   * tags — que são a matéria-prima EXCLUSIVA do Alinhamento. Medido no clone
+   * local nas 988 obras: o percentil médio de Alinhamento vai de 8,5 (obras com
+   * ≤10 tags) a 80,8 (100+ tags), Spearman +0,584 contra o nº de tags. Sem este
+   * número, "Alinhamento 12" e "Alinhamento 89" saem idênticos na tela mesmo
+   * quando o primeiro só quer dizer que a obra mal foi tagueada.
+   *
+   * ⚠️ NÚMERO, nunca chip: 21% do catálogo está abaixo de 25 tags, e chip nessa
+   * frequência é o alarme que sempre toca (a régua desta 1ª coluna, no topo).
+   */
+  tagCount: number
   dates: {
     created: string | null
     refreshed: string | null
@@ -84,7 +101,13 @@ function Marco({ k, v }: { k: string; v: string | null }) {
   )
 }
 
-export function WorkStatePanel({ reviews, dates, externalIds, pending }: WorkStatePanelProps) {
+export function WorkStatePanel({
+  reviews,
+  dates,
+  externalIds,
+  pending,
+  tagCount,
+}: WorkStatePanelProps) {
   const chips: string[] = []
   if (pending.verdictStale) chips.push("Veredito desatualizado")
   if (pending.reviewPending) chips.push("Avaliação a revisar")
@@ -103,6 +126,8 @@ export function WorkStatePanel({ reviews, dates, externalIds, pending }: WorkSta
             {reviews.total} {reviews.total === 1 ? "review" : "reviews"}
             <span className="mx-1.5 font-normal text-muted-foreground/50">·</span>
             {reviews.sources} {reviews.sources === 1 ? "fonte" : "fontes"}
+            <span className="mx-1.5 font-normal text-muted-foreground/50">·</span>
+            {tagCount} {tagCount === 1 ? "tag" : "tags"}
           </span>
           {reviews.evalLabel && (
             <span className="text-[12.5px] text-muted-foreground">

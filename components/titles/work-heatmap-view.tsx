@@ -636,6 +636,7 @@ function ScoreCell({
       <AlignmentCell
         value={work.calculated_scores?.personal_fit ?? null}
         percentile={work.calculated_scores?.personal_fit_percentile ?? null}
+        tagCount={work.tags?.length ?? null}
         showBar={false}
       />
     )

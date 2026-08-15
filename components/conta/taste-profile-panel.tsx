@@ -1146,10 +1146,16 @@ function CriterionRow({
 /**
  * 🔴 TAG e TEMA são coisas diferentes, e a diferença é FUNCIONAL — não de estilo.
  *
- * `computePersonalFit` só consome `loved_tags`/`avoided_tags` e os critérios: um TEMA
- * (frase livre da IA) não existe no catálogo, não casa com obra nenhuma e **não entra
- * no cálculo do alinhamento** — só contextualiza os prompts de IA. Na v2 os dois
- * saíam como a mesma pílula colorida, afirmando que pesavam igual.
+ * `netNameOverlap` — quem calcula o Alinhamento — só consome os NOMES de
+ * `loved_tags`/`avoided_tags`: um TEMA (frase livre da IA) não existe no catálogo, não
+ * casa com obra nenhuma e **não entra no cálculo do alinhamento** — só contextualiza os
+ * prompts de IA. Na v2 os dois saíam como a mesma pílula colorida, afirmando que
+ * pesavam igual.
+ *
+ * ⚠️ Esta linha citava `computePersonalFit` "e os critérios" até 15/08/2026. Os dois
+ * pedaços estavam errados: a função foi removida (era morta desde 27/06) e critério
+ * nunca entrou no Alinhamento — `criterionAlignment` é feature do Ridge da Nota
+ * Prevista. O argumento TAG ≠ TEMA continua válido, e fica até mais simples.
  *
  * Por isso a distinção é de FORMA (pílula × linha de texto) e não de cor: os dois já
  * dividem a cor de stance (verde ama / vermelho evita), e uma frase de ~60 caracteres

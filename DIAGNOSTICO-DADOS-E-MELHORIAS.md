@@ -93,7 +93,7 @@
 | **MAE** | — | ~0,58 | Erro médio da Nota Prevista (confiança do modelo). |
 | Preferências (`taste_profile`) | 🟠/🟢 | — | Tags amadas/evitadas + faixas de critério. Base de Alinhamento, Interesse e Veredito. |
 
-> ⚠️ **Pegadinhas:** (1) filtros `min_final_score`/`min_calc_score`/`min_predicted_score` têm nomes **trocados** vs. o que mostram — não renomear. (2) `computePersonalFit` (fórmula de 3 componentes) é **código morto** desde o PR #16 — o Alinhamento hoje é `netNameOverlap` ([calculations.ts:1091](server/actions/calculations.ts#L1091)); a seção "detalhe" do MAPA ainda descreve a fórmula antiga (contradição conhecida).
+> ⚠️ **Pegadinhas:** (1) filtros `min_final_score`/`min_calc_score`/`min_predicted_score` têm nomes **trocados** vs. o que mostram — não renomear. (2) `computePersonalFit` (fórmula de 3 componentes) foi **REMOVIDA em 15/08/2026**; era código morto desde o PR #16 — o Alinhamento hoje é `netNameOverlap` ([calculations.ts:1091](server/actions/calculations.ts#L1091)); a seção "detalhe" do MAPA ainda descreve a fórmula antiga (contradição conhecida).
 
 **9 atributos (critérios):** `romance · couple_dynamics · fantasy_nobility · action_adventure · adult_content · protagonist · humor · drama · tragedy`.
 
@@ -152,7 +152,11 @@
 - 🔴 **C3** — não re-avaliar atributos com inputs inalterados (a flag `ai_eval_reviews_stale` já ajuda a focar).
 
 ### ♻️ Redundância
-- 🔴 **R2** — remover `computePersonalFit` (**código morto**, sem callers).
+- ✅ **R2** — remover `computePersonalFit` (**código morto**, sem callers). **FEITO em 15/08/2026**,
+  junto com `tagAlignment`/`profileConsistency`, que só ela usava. O custo de ter esperado 5
+  semanas: o docstring do módulo e o tooltip do `/ranking` descreviam a fórmula DELA como se
+  fosse a vigente. O teste não foi apagado — foi repontado pras três funções vivas, porque duas
+  das seis asserções eram a única cobertura de `criterionAlignment`.
 - 🔴 **R1** — documentar que Alinhamento e "desempate por tags" são **o mesmo sinal** (um normalizado), não alavancas independentes.
 
 ### 🎯 Diferenciação (a dor: tudo parecido no topo)

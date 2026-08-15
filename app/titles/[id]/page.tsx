@@ -1117,6 +1117,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   tags: tagsInferredAt,
                   lastRead: (work as { last_read_at?: string | null }).last_read_at ?? null,
                 }}
+                // `work_tags` inteiro — a matéria-prima do Alinhamento. NÃO somar
+                // `genres`: são tabelas diferentes e o recalc só lê `work_tags`.
+                tagCount={tags.length}
                 externalIds={externalIdMap}
                 pending={{
                   verdictStale: Boolean(work.calculated_scores?.alignment_stale),
@@ -1499,7 +1502,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                             </span>
                           </TooltipTrigger>
                           <TooltipContent side="left" className="max-w-[280px] space-y-1">
-                            <AlignmentTooltipContent value={pf} percentile={pctRaw} />
+                            <AlignmentTooltipContent
+                              value={pf}
+                              percentile={pctRaw}
+                              tagCount={tags.length}
+                            />
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
