@@ -2374,6 +2374,14 @@ fora, é a taxa de erro do casamento por título.
 defasada (vínculo entra em background pelo resolve resiliente). Removê-la reprova
 `tests/unit/external/marcar-ausente-em-lote.test.ts` — conferido.
 
+⚠️ **O DESFAZER não tem action própria, de propósito** — quem reverte a ausência é o próprio
+diálogo de fontes: marcar "Não decidir agora" faz o passo OMITIR a fonte do payload e o
+`saveWorkSourceSelections` apaga a linha (rejeitada SEM id não é vínculo aceito, então cai no
+`toDelete`). Uma action dedicada seria um endpoint HTTP a mais para o que o fluxo já faz. ⚠️ Mas
+isso põe uma promessa da UI ("dá pra desfazer") dependendo de regra escrita em OUTRO arquivo —
+travado por `tests/unit/external/desfazer-ausencia-pelo-dialogo.test.ts`, que também exige que o
+mesmo caminho NUNCA apague um vínculo aceito omitido do payload.
+
 ⚠️ **A Comix não tem o que marcar: 976 vinculadas + 2 já declaradas ausentes = 978, lacuna
 ZERO.** O chip dela aparece apagado e o lote nunca é oferecido. Para "reverificar" uma obra da
 Comix o gesto é outro — marcar ausência SOBRE um vínculo existente, que a guarda recusa de
@@ -3120,9 +3128,9 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.945 passando (+24 pulados) em 281 arquivos** (276 passando + 5 pulados;
-medido em 2026-08-15 depois do lote de ausência, que somou 1 arquivo (8 testes da guarda do
-upsert) e 2 casos de render do gating por fonte. Base: **2.935 em 280**, da aba "Fontes".
+`npm run test` → **2.948 passando (+24 pulados) em 282 arquivos** (277 passando + 5 pulados;
+medido em 2026-08-15 depois de travar o caminho do DESFAZER da ausência (1 arquivo, 3 casos).
+Base: **2.945 em 281**, do lote de ausência.
 
 ⚠️ A árvore tem um arquivo de teste NÃO COMMITADO de outra sessão
 (`tests/unit/ui/pendencias-ia-abrem-em-aba-nova.test.tsx`). A medição o excluiu de propósito
@@ -3130,7 +3138,7 @@ upsert) e 2 casos de render do gating por fonte. Base: **2.935 em 280**, da aba 
 trabalho de outra pessoa. Quando aquele PR entrar, este número sobe junto.
 
 ⚠️ **Confira o TOTAL EXECUTADO contra o disco, sempre.** Aqui: `find tests -name '*.test.ts*'`
-deu **282**, menos o arquivo alheio = **281**, e o Vitest executou **281** — é essa igualdade
+deu **283**, menos o arquivo alheio = **282**, e o Vitest executou **282** — é essa igualdade
 que descarta truncamento silencioso, não o "0 failed" do rodapé.
 
 ⚠️ **"Errors 1 error" no rodapé COM tudo passando é a flakiness de carga, não queda de teste** —
@@ -3161,7 +3169,7 @@ teste. A linha já disse "~1.780 em
 ~157", "~2.353 em 218", "2.386 em 221", "2.408 em 225", "2.428 em 228", "2.433 em 228",
 "2.440 em 229", "2.717 em 255", "2.727 em 255", "2.753 em 258", "2.776 em 261", "2.784 em 263",
 "2.788 em 264", "2.807 em 266", "2.813 em 267", "2.828 em 270", "2.833 em 271", "2.872 em 274"
-, "2.883 em 274", "2.891 em 275", "2.896 em 276", "2.913 em 277" e "2.935 em 280", todas
+, "2.883 em 274", "2.891 em 275", "2.896 em 276", "2.913 em 277", "2.935 em 280" e "2.945 em 281", todas
 envelhecendo sem nada acusar — **re-meça antes de editar este número**,
 não incremente de cabeça. ⚠️ O "2.717" durou menos de um dia: dois PRs do mesmo dia somaram 10
 testes e nenhum dos dois tocou nesta linha. Envelhecer aqui é o normal, não a exceção. Vitest, jsdom, alias `@` → raiz. A
