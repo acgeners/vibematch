@@ -45,6 +45,36 @@ function needsPrediction(w: SynopsisQueueWork): boolean {
 }
 
 /**
+ * O `Δ` é o ÚNICO lugar onde a previsão da IA e o seu ♥ são comparados (o chip
+ * "Diverge"/"Bate" saiu — ver o comentário no `state`). Duas consequências:
+ *
+ * 🔴 **Cor e texto saem da MESMA função.** Um `if` de cor escrito à parte no JSX é
+ * como o chip fica laranja e a explicação fala de concordância — a família "dois
+ * critérios pro mesmo fato", que é justamente o que a remoção do chip veio fechar.
+ *
+ * ⚠️ **`Δ` é jargão, e sem o chip ao lado ninguém mais o traduz** — daí o texto, que
+ * vai no `title` e no `aria-label`. Ele diz o que a sigla quer dizer, não o que ela
+ * já mostra: "+1" sozinho não revela de quem é o nível mais alto.
+ *
+ * ⚠️ Isto fica FORA do `STATUS_TONE` de propósito: a régua dele é de ESTADO ("o que eu
+ * faço com isso?") e diz, por escrito, que escala de VALOR não é estado — o `Δ` vem
+ * sempre com o número ao lado, que é o critério que ela usa pra separar os dois.
+ */
+export function deltaChip(delta: number): { className: string; texto: string } {
+  if (delta === 0) {
+    return {
+      className: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
+      texto: "A IA sugere o mesmo nível de ♥ que você marcou.",
+    }
+  }
+  const niveis = Math.abs(delta) === 1 ? "1 nível" : `${Math.abs(delta)} níveis`
+  return {
+    className: "bg-orange-500/12 text-orange-700 dark:text-orange-300",
+    texto: `A IA sugere ${niveis} ${delta > 0 ? "acima" : "abaixo"} do ♥ que você marcou.`,
+  }
+}
+
+/**
  * Fila de Interesse na Obra (aba /fila-recomendacao?tab=sinopse): obras com sinopse
  * canônica que precisam de estimativa (desatualizada ou não prevista). Usa o card
  * unificado `WorkQueueCard` + seleção em lote: as ações (Prever/Aplicar) agem sobre
@@ -170,19 +200,27 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
           const isStale = w.predictedQuality != null && w.predictionStale
           const hasBoth = w.predictedQuality != null && w.manualSynopsisQuality != null
           const alreadyApplied = w.predictedQuality != null && w.manualSynopsisQuality === w.predictedQuality
-          const diverges = hasBoth && !alreadyApplied
           const delta = hasBoth ? synopsisLevel(w.predictedQuality) - synopsisLevel(w.manualSynopsisQuality) : null
+          const dc = delta != null ? deltaChip(delta) : null
 
-          // 1 chip de estado, por precedência.
+          // 1 chip de estado, por precedência — só ESTADO do sistema.
+          //
+          // 🔴 "Diverge"/"Bate" saíram daqui (2026-08-15) e o motivo não é gosto: eles
+          // não são estado, são a COMPARAÇÃO entre a previsão e o seu ♥ — e o card já a
+          // fazia DUAS vezes, com as mesmas duas cores, a partir do mesmo predicado
+          // (`delta !== 0` ⟺ `diverges`). Medido nas 815 obras com previsão ativa: o
+          // chip aparecia em 45 (5,5%) e, nas 45, o `Δ` logo abaixo já dizia o mesmo —
+          // dizendo mais, porque diz QUANTO e pra que lado.
+          //
+          // ⚠️ Quem sobreviveu foi o `Δ`, e a PRECEDÊNCIA é o argumento: o chip perdia
+          // pro "Desatualizado" justamente nas 676 obras stale que TÊM os dois valores
+          // pra comparar. O `Δ` não tem precedência — aparece nas 721. Reintroduzir um
+          // chip aqui devolve o par que discorda em silêncio.
           const state: WorkQueueState | null = isStale
             ? { label: "Desatualizado", tone: "amber" }
             : w.predictedQuality == null
               ? { label: "Não previsto", tone: "slate" }
-              : diverges
-                ? { label: "Diverge", tone: "orange" }
-                : alreadyApplied
-                  ? { label: "Bate", tone: "emerald" }
-                  : null
+              : null
 
           // Destaque da aba: a sugestão da IA (linha 2).
           const headline =
@@ -203,14 +241,11 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
               )}
               <p className="font-mono text-[11px] text-muted-foreground tabular-nums">
                 {w.predictedPromptVersion ? `versão ${w.predictedPromptVersion}` : ""}
-                {delta != null && (
+                {delta != null && dc && (
                   <span
-                    className={cn(
-                      "ml-1.5 rounded px-1 py-0.5 font-semibold",
-                      delta === 0
-                        ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300"
-                        : "bg-orange-500/12 text-orange-700 dark:text-orange-300",
-                    )}
+                    className={cn("ml-1.5 rounded px-1 py-0.5 font-semibold", dc.className)}
+                    title={dc.texto}
+                    aria-label={dc.texto}
                   >
                     Δ {delta > 0 ? `+${delta}` : delta}
                   </span>
