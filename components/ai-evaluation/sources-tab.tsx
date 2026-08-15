@@ -10,6 +10,7 @@ import { WorkQueueGrid } from "@/components/ai-evaluation/queue/work-queue-grid"
 import { QueueToolbar, QueueSortSelect } from "@/components/ai-evaluation/queue/queue-toolbar"
 import { useWorkSelection } from "@/components/ai-evaluation/queue/use-work-selection"
 import { SourceLinkDialog } from "@/components/ai-evaluation/source-link-dialog"
+import { MarkAbsentAction } from "@/components/ai-evaluation/mark-absent-action"
 import { sourceLabel } from "@/lib/external/source-labels"
 import { MIN_USEFUL_REVIEWS_FOR_DIGEST } from "@/lib/reviews/digest-gate"
 import { cn } from "@/lib/utils"
@@ -194,10 +195,27 @@ export function SourcesTab({
           </Button>
         }
         selectedActions={
-          <Button size="sm" onClick={() => openAt(queue[0]?.id ?? "")} disabled={queue.length === 0}>
-            <ListChecks className="h-3.5 w-3.5" />
-            Percorrer {queue.length} selecionada(s)
-          </Button>
+          <>
+            {/* 🔴 O lote de ausência só aparece com um chip de fonte ATIVO: sem ele,
+                "marcar como ausente" não tem sujeito — a obra tem lacuna em várias
+                fontes e o lote gravaria na errada. Sem chip fica a dica de como chegar
+                lá, que é melhor que um botão desabilitado sem explicação. */}
+            {activeSource ? (
+              <MarkAbsentAction
+                workIds={selection.selectedIds}
+                source={activeSource}
+                onDone={selection.clear}
+              />
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                escolha uma fonte acima para marcar ausência em lote
+              </span>
+            )}
+            <Button size="sm" onClick={() => openAt(queue[0]?.id ?? "")} disabled={queue.length === 0}>
+              <ListChecks className="h-3.5 w-3.5" />
+              Percorrer {queue.length} selecionada(s)
+            </Button>
+          </>
         }
       />
 

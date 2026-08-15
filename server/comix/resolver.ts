@@ -23,6 +23,7 @@ import { getComixStatus, recordComixFailure } from "@/lib/external/comix-gate"
 import { ensureComixHid } from "@/server/actions/comix-hid"
 import { isComixRenderConfigured } from "@/lib/external/comix-render-client"
 import { ensureAdmin } from "@/server/queries/current-user"
+import { markSourceAbsent, unmarkSourceAbsent } from "@/server/external-ids/absence"
 
 const CACHE_DIR = path.join(process.cwd(), ".cache")
 const LOG_PATH = path.join(CACHE_DIR, "resolve-comix.log")
@@ -745,29 +746,11 @@ export async function setComixHidManually(input: {
  * (resolve resiliente). Nesse caso a ação falha em vez de apagar o vínculo.
  */
 export async function markComixAbsent(workId: string): Promise<{ ok: boolean; error?: string }> {
-  const gate = await ensureAdmin()
-  if (!gate.ok) return { ok: false, error: gate.error }
-  if (!workId) return { ok: false, error: "Obra inválida." }
-  const supabase = createAdminClient()
-  const { data: existing } = await supabase
-    .from("work_external_ids")
-    .select("external_id, is_rejected")
-    .eq("work_id", workId)
-    .eq("source", "comix")
-    .maybeSingle()
-  if (existing?.external_id && existing.is_rejected !== true) {
-    return { ok: false, error: "Esta obra já tem um hid da Comix vinculado — recarregue a lista." }
-  }
-  const { error } = await supabase
-    .from("work_external_ids")
-    .upsert(
-      { work_id: workId, source: "comix", external_id: null, is_rejected: true },
-      { onConflict: "work_id,source" },
-    )
-  if (error) return { ok: false, error: error.message }
-  revalidatePath("/settings")
-  revalidatePath("/titles")
-  return { ok: true }
+  // 🔴 DELEGA: o dono da declaração de ausência é `markSourceAbsent`, compartilhado com a
+  // aba "Fontes" (que faz o mesmo para as outras 8 fontes). A guarda que impede o upsert
+  // de sobrescrever um hid ativo com NULL vive lá — duas cópias dela divergiriam, e a
+  // que perdesse a guarda apagaria vínculo válido em silêncio.
+  return markSourceAbsent(workId, "comix")
 }
 
 /**
@@ -776,19 +759,5 @@ export async function markComixAbsent(workId: string): Promise<{ ok: boolean; er
  * ausência some, nunca um hid válido (defesa contra chamar na obra errada).
  */
 export async function unmarkComixAbsent(workId: string): Promise<{ ok: boolean; error?: string }> {
-  const gate = await ensureAdmin()
-  if (!gate.ok) return { ok: false, error: gate.error }
-  if (!workId) return { ok: false, error: "Obra inválida." }
-  const supabase = createAdminClient()
-  const { error } = await supabase
-    .from("work_external_ids")
-    .delete()
-    .eq("work_id", workId)
-    .eq("source", "comix")
-    .is("external_id", null)
-    .eq("is_rejected", true)
-  if (error) return { ok: false, error: error.message }
-  revalidatePath("/settings")
-  revalidatePath("/titles")
-  return { ok: true }
+  return unmarkSourceAbsent(workId, "comix")
 }
