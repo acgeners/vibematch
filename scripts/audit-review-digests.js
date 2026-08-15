@@ -26,6 +26,10 @@
  *
  * ⚠️ Regere só com a blindagem de review-summarizer.ts ativa — senão o mesmo
  * tool-call mal-serializado pode voltar a ser gravado.
+ *
+ * 🔴 ALVO: NUVEM — grava no CATÁLOGO (tags e propostas), que é compartilhado. Rodá-lo
+ * contra o clone local perde o trabalho no próximo `db:pull`.
+ *   node --env-file=.env.local scripts/audit-review-digests.js
  */
 
 const { createClient } = require("@supabase/supabase-js")
