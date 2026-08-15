@@ -237,6 +237,10 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
             <PredictSynopsisRowActions
               workId={w.id}
               hasPrediction={w.predictedQuality != null}
+              // O MESMO `isStale` que pinta o chip "Desatualizado" do card: chip e
+              // rótulo do botão têm que sair do mesmo fato, senão um diz "desatualizado"
+              // enquanto o outro convida a "prever de novo".
+              stale={isStale}
               alreadyApplied={alreadyApplied}
               readiness={w.readiness}
               isPaid={isPaid}
@@ -246,6 +250,12 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
           return (
             <WorkQueueCard
               key={w.id}
+              // ⚠️ Medido no browser em 2026-08-15: com o trilho padrão (`w-28`, 112px)
+              // o botão "Atualizar previsão" pede 128px — o ✨ saía PRA FORA da pílula
+              // e o "ã" vazava pela borda. `wideActions` dá 144px, com folga de 16.
+              // O rótulo tem dono único, então encurtá-lo aqui reabriria a divergência
+              // de vocabulário que ele existe pra fechar.
+              wideActions
               workId={w.id}
               title={w.title}
               coverUrls={w.coverUrls}

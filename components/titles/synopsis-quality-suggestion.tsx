@@ -3,7 +3,7 @@
 import { useTransition } from "react"
 import { useRefresh } from "@/lib/use-refresh"
 import { toast } from "sonner"
-import { Sparkles, Loader2, Check, Heart, ArrowRight, ChevronRight } from "lucide-react"
+import { Sparkles, Loader2, Check, Heart, ArrowRight, ChevronRight, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -18,7 +18,8 @@ import { QualityHearts } from "@/components/ui/quality-hearts"
 import { SynopsisQualityPicker } from "@/components/titles/synopsis-quality-picker"
 import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
 import { AiProvenanceSeal, formatProvenanceWhen } from "@/components/ui/ai-provenance"
-import { STATUS_TONE } from "@/lib/ui/status-tone"
+import { STATUS_CHIP_BASE, STATUS_TONE } from "@/lib/ui/status-tone"
+import { interestPredictLabel } from "@/lib/ui/interest-predict-label"
 
 export interface SynopsisQualitySuggestionProps {
   workId: string
@@ -59,8 +60,16 @@ export interface SynopsisQualitySuggestionProps {
  * ⚠️ **Cada fato aparece UMA vez.** A 2ª versão dizia "desatualizado" em três lugares
  * (chip no topo, faixa âmbar com a data, e a data de novo no rodapé) e tinha dois
  * caminhos pra mesma ação (o botão "Aplicar" e a seta entre os cards, que era só
- * decoração). Hoje: a seta É o botão de aplicar, "Prever de novo" ocupa o topo (onde
- * ficava o chip) e o estado da previsão vive só no rodapé + no tom do botão.
+ * decoração). Hoje: a seta É o botão de aplicar, e o estado da previsão aparece uma
+ * vez só — chip âmbar no cabeçalho, encostado no botão que o resolve.
+ *
+ * ⚠️ **Estado fica junto da SAÍDA dele.** A 3ª versão empurrou "Previsão desatualizada"
+ * pro rodapé, depois da justificativa: o aviso ficava a ~230px do único controle que o
+ * desfaz e DEPOIS da seta de aplicar — ou seja, era lido quando já não servia pra nada.
+ * Desatualizada, o botão diz "Atualizar previsão" (não "Prever de novo") porque é essa
+ * a ação que o chip pede; os dois são o mesmo par, e por isso dividem o âmbar. O rótulo
+ * tem dono único (`lib/ui/interest-predict-label.ts`) — a fila de Interesse mostra o
+ * MESMO botão e chamava a mesma coisa de "Reprever".
  *
  * ⚠️ Cor: a previsão é LARANJA (`variant="pred"`, mesma do /ranking) e o manual é
  * ROSA. Antes a sugestão usava o rosa do manual — duas coisas diferentes, uma cor só.
@@ -128,15 +137,15 @@ export function SynopsisQualitySuggestion({
   // cópia de formatador de data neste mesmo card.
   const predictedOn = formatProvenanceWhen(prediction?.predictedAt)
 
-  // O botão herda o aviso: âmbar quando a previsão envelheceu. O texto do porquê fica
-  // no `title` e no rodapé — uma faixa inteira só pra repetir a data era o maior bloco
-  // do componente. Aplicar uma previsão velha grava no pipeline de notas um número que
-  // a IA já não sustenta, então aqui ele passa na frente do aplicar.
-  const predictTitle = blocked
-    ? blockTitle
-    : stale
-      ? `Previsão${predictedOn ? ` de ${predictedOn.toLowerCase()}` : ""} desatualizada: a sinopse ou seu perfil de gosto mudaram desde então.`
-      : undefined
+  // ⚠️ O aviso mora COLADO no botão que o resolve (2026-08-15) — antes ele era a última
+  // linha do bloco, embaixo da justificativa, a ~230px do único controle que o desfaz.
+  // Aplicar uma previsão velha grava no pipeline de notas um número que a IA já não
+  // sustenta, então o estado tem que ser lido ANTES do gesto de aplicar, não depois.
+  // O chip nomeia o fato; o botão âmbar ao lado é a saída. Uma cor, um par.
+  const staleTitle = `A sinopse ou seu perfil de gosto mudaram desde a previsão${
+    predictedOn ? ` de ${predictedOn.toLowerCase()}` : ""
+  } — atualize antes de aplicar ao cálculo das notas.`
+  const predictTitle = blocked ? blockTitle : stale ? staleTitle : undefined
 
   const applyLabel = alreadyApplied
     ? "Aplicado — a sugestão já é o seu interesse"
@@ -152,21 +161,29 @@ export function SynopsisQualitySuggestion({
         <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           <Heart className="h-3.5 w-3.5" /> Interesse na Obra
         </span>
-        <Button
-          variant="outline"
-          size="sm"
-          className={cn(
-            "h-7 gap-1.5 text-xs",
-            // Âmbar = desatualizado, e só isso (lib/ui/status-tone.ts).
-            stale && !blocked && cn(STATUS_TONE.stale.text, STATUS_TONE.stale.outline, "hover:text-amber-600"),
+        <div className="flex flex-wrap items-center gap-2">
+          {stale && (
+            <span className={cn(STATUS_CHIP_BASE, STATUS_TONE.stale.chip)} title={staleTitle}>
+              <AlertTriangle className="size-3 shrink-0" aria-hidden />
+              Previsão desatualizada
+            </span>
           )}
-          onClick={() => void runPredict()}
-          disabled={predicting || blocked}
-          title={predictTitle}
-        >
-          {predicting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-          {predicting ? "Estimando…" : prediction ? "Prever de novo" : "Prever interesse"}
-        </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn(
+              "h-7 gap-1.5 text-xs",
+              // Âmbar = desatualizado, e só isso (lib/ui/status-tone.ts).
+              stale && !blocked && cn(STATUS_TONE.stale.text, STATUS_TONE.stale.outline, "hover:text-amber-600"),
+            )}
+            onClick={() => void runPredict()}
+            disabled={predicting || blocked}
+            title={predictTitle}
+          >
+            {predicting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {predicting ? "Estimando…" : interestPredictLabel({ hasPrediction: prediction != null, stale })}
+          </Button>
+        </div>
       </div>
 
       {/* Veredito pareado. A seta do meio É o botão de aplicar: ela já apontava da
@@ -320,18 +337,12 @@ export function SynopsisQualitySuggestion({
       )}
 
       {prediction && (
-        <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-border/40 pt-2 text-[11px] text-muted-foreground">
-          {/* ⚠️ Data e modelo subiram pro selo ✨ de "A IA sugere". O que fica aqui NÃO é
-              proveniência: "desatualizada" é ESTADO — é o que impede aplicar ao pipeline
-              de notas um número que a IA já não sustenta — e a última frase é a REGRA de
-              cálculo. Esconder qualquer um dos dois num tooltip seria enterrar o aviso. */}
-          {stale && (
-            <>
-              <span className={STATUS_TONE.stale.text}>Previsão desatualizada</span>
-              <span aria-hidden>·</span>
-            </>
-          )}
-          <span>Só o seu ♥ entra no cálculo das notas</span>
+        // ⚠️ Data e modelo subiram pro selo ✨ de "A IA sugere"; o "desatualizada" subiu
+        // pro cabeçalho, ao lado do botão que o resolve. O que sobra aqui é a REGRA de
+        // cálculo — informação permanente, que não pede ação nenhuma e por isso pode
+        // fechar o bloco. Estado no rodapé é estado que se lê depois de já ter aplicado.
+        <p className="border-t border-border/40 pt-2 text-[11px] text-muted-foreground">
+          Só o seu ♥ entra no cálculo das notas
         </p>
       )}
     </div>

@@ -149,7 +149,35 @@ describe("Interesse na Obra: veredito pareado", () => {
     expect(texto).toMatch(/desatualizada/i)
     expect(texto).not.toMatch(/12\/07\/2026/)
     expect(texto).not.toMatch(/claude-sonnet-4-6/)
+    expect(screen.getByRole("button", { name: /Atualizar previsão/ })).toBeTruthy()
+  })
+
+  it("o aviso de desatualizada mora COLADO no botão que o resolve", () => {
+    // 🔴 Ele já morou no RODAPÉ, depois da justificativa: ~230px abaixo do único
+    // controle que o desfaz, e depois da seta de aplicar — lido quando já não servia
+    // pra nada. Aqui a âncora é a VIZINHANÇA, não a existência do texto: um teste que
+    // só procurasse "desatualizada" na tela passa verde com o aviso de volta no rodapé,
+    // que é exatamente a regressão.
+    renderBlock({ prediction: { ...PRED, stale: true } })
+    const chip = screen.getByText("Previsão desatualizada")
+    const botao = screen.getByRole("button", { name: /Atualizar previsão/ })
+    expect(chip.parentElement).toBe(botao.parentElement)
+    // E o chip carrega o "por quê" no tooltip, sem gastar linha na tela.
+    expect(chip.getAttribute("title")).toMatch(/perfil de gosto mudaram/i)
+  })
+
+  it("fresca: nada de âmbar, e o botão NÃO promete atualizar nada", () => {
+    // O contrário do caso acima — sem esta contraprova, um chip pintado SEMPRE passaria
+    // nos dois testes anteriores e o âmbar deixaria de significar "desatualizado".
+    //
+    // 🔴 O rótulo acompanha o estado (`lib/ui/interest-predict-label.ts`): "Atualizar
+    // previsão" promete trocar algo velho por algo novo, e sobre previsão fresca isso é
+    // oferecer conserto pro que não está quebrado — numa ação que CUSTA.
+    const { container } = renderBlock()
+    expect(screen.queryByText("Previsão desatualizada")).toBeNull()
     expect(screen.getByRole("button", { name: /Prever de novo/ })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /Atualizar previsão/ })).toBeNull()
+    expect(container.querySelector('[class*="amber"]')).toBeNull()
   })
 
   it("“desatualizada” e “Inputs: média” NÃO dividem a mesma cor", () => {

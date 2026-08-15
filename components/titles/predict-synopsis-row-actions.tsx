@@ -10,11 +10,16 @@ import { predictInterestWithToast } from "@/components/titles/predict-interest-t
 import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { GenerationGate } from "@/components/generation/generation-gate"
 import type { UiReadiness } from "@/lib/orchestration/ui-readiness"
+import { interestPredictLabel } from "@/lib/ui/interest-predict-label"
 
 export interface PredictSynopsisRowActionsProps {
   workId: string
-  /** Já existe previsão persistida? Muda "Prever" → "Reprever" e habilita Aplicar. */
+  /** Já existe previsão persistida? Habilita o "Aplicar" e entra no rótulo do botão. */
   hasPrediction: boolean
+  /** A previsão existente ficou para trás? Só o ESTADO decide entre "Prever de novo" e
+   *  "Atualizar previsão" — ver `lib/ui/interest-predict-label.ts` para por que o
+   *  `hasPrediction` da fila não serve de atalho pra isto. */
+  stale?: boolean
   /** Previsão já igual ao valor manual? Desabilita Aplicar. */
   alreadyApplied: boolean
   /** Prontidão do gerador (motor → UI). Quando presente, gate no "Prever". */
@@ -30,6 +35,7 @@ export interface PredictSynopsisRowActionsProps {
 export function PredictSynopsisRowActions({
   workId,
   hasPrediction,
+  stale = false,
   alreadyApplied,
   readiness,
   isPaid = true,
@@ -95,7 +101,7 @@ export function PredictSynopsisRowActions({
   const predictButton = (
     <Button size="sm" onClick={() => void runPredict()} disabled={predicting || blocked} title={blockTitle} className="w-full gap-1.5">
       {predicting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-      {predicting ? "Estimando…" : hasPrediction ? "Reprever" : "Prever"}
+      {predicting ? "Estimando…" : interestPredictLabel({ hasPrediction, stale })}
     </Button>
   )
 
