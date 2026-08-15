@@ -4,6 +4,10 @@
  * 2) recalc WARM (config com o cvSig do passo 1) → reusa a MAE → pula a CV (~rápido),
  *    e a MAE tem que ser IDÊNTICA.
  * 3) recalc WARM mas com 1 obra ROTULADA perturbada → assinatura muda → recomputa.
+ *
+ * ALVO: LOCAL — só LÊ, então o `.env.analysis` (que vem DEPOIS e vence) o manda pro clone
+ * local e o egress fica em zero. Sem ele, roda contra a NUVEM em silêncio.
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/diag-q-verify.ts
  */
 import { createAdminClient } from "@/lib/supabase/admin"
 import { computeRecalc, buildWork, type RawWork } from "@/server/actions/calculations"

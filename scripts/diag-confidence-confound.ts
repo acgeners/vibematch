@@ -1,6 +1,10 @@
 /**
  * DIAGNÓSTICO 2: separar "mudou o DADO" de "mudou o MODELO/PROMPT" nas reavaliações.
  * Só leitura.
+ *
+ * ALVO: LOCAL — só LÊ, então o `.env.analysis` (que vem DEPOIS e vence) o manda pro clone
+ * local e o egress fica em zero. Sem ele, roda contra a NUVEM em silêncio.
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/diag-confidence-confound.ts
  */
 import { createAdminClient } from "@/lib/supabase/admin"
 import { pageAll } from "./lib/page-all"

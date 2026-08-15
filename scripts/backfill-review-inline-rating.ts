@@ -8,6 +8,10 @@
  *
  *   npx tsx scripts/backfill-review-inline-rating.ts            # dry-run
  *   node scripts/backup-db.mjs && npx tsx scripts/backfill-review-inline-rating.ts --apply
+ *
+ * 🔴 ALVO: NUVEM — este script GRAVA. Rodá-lo contra o local, que é réplica descartável,
+ * joga o trabalho fora no próximo `db:pull`.
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/backfill-review-inline-rating.ts
  */
 import path from "node:path"
 import { config } from "dotenv"

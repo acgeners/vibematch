@@ -14,10 +14,12 @@
  * mas Δbias máx 0,15 → abaixo do ruído (cvMAE 0,73). Ver project_attribute_bias_multiuser_fase3.
  *
  * Uso: node scripts/measure-stale-assessments.mjs   (não escreve nada)
+ *
+ * ALVO: LOCAL — só LÊ, então o `.env.analysis` (que vem DEPOIS e vence) o manda pro clone
+ * local e o egress fica em zero. Sem ele, roda contra a NUVEM em silêncio.
+ *   node --env-file=.env.local --env-file=.env.analysis scripts/measure-stale-assessments.mjs
  */
 import { createClient } from '@supabase/supabase-js'
-import { config } from 'dotenv'
-config({ path: '.env.local' })
 
 const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 const K = 10 // BIAS_SHRINKAGE_K

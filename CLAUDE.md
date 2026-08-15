@@ -226,15 +226,36 @@ aquela linha era o alvo CERTO; o cutover inverteu o **significado** da mesma lin
 arquivo nenhum e sem nada acusar. É a forma mais barata de uma base inteira apodrecer: não é o
 código que muda, é o que ele quer dizer.
 
-🔴 **A exigência é DECLARAR o alvo, não "usar o local"** — e a razão é medida: dos 58,
-**29 gravam** (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável
-perde o trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis`
-evita. Hoje cada arquivo declara um dos dois:
+🔴 **A exigência é DECLARAR o alvo, não "usar o local"** — e a razão é medida: quase metade
+GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
+trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
+cada arquivo `.ts`/`.mjs` fora do `package.json` que toca o banco declara um dos dois
+(**89 arquivos, remedidos em 2026-08-15**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
-| `--env-file=.env.analysis` na linha de uso | 29 | só LÊ ⇒ vai pro local, de graça |
-| `ALVO: NUVEM` no cabeçalho | 29 | GRAVA ⇒ tem que ir pra nuvem |
+| `--env-file=.env.analysis` na linha de uso | **44** | só LÊ ⇒ vai pro local, de graça |
+| `ALVO: NUVEM` no cabeçalho | **39** | GRAVA ⇒ tem que ir pra nuvem |
+| (não tocam o banco) | 6 | fora da régua |
+
+⚠️ **Esta tabela dizia "29 / 29" e envelheceu sem nada acusar** — o universo tinha crescido
+de 58 para 89. Pior: **16 desses arquivos não declaravam alvo nenhum**, e o teste não os
+via porque filtrava por quem **menciona** `--env-file=.env.local`, o que é uma allowlist
+disfarçada. Escapar da varredura não é ser inofensivo: 4 deles traziam
+`config({ path: '.env.local' })` no CÓDIGO e liam a NUVEM em toda execução, com o
+`.env.analysis` sem poder algum sobre eles.
+
+🔴 **Alvo fixado no código VENCE o `--env-file`, e por isso saiu.** Nos `.mjs` o padrão do
+repo é não usar `dotenv`: quem manda é a linha de comando, e sem ela o script falha alto
+(`supabaseUrl is required`) em vez de escolher um banco sozinho. Medido depois da correção:
+`measure-stale-assessments.mjs` passou a apontar para `127.0.0.1:54321`. Guardado por
+`scripts-apontam-pro-local.test.ts`, que agora varre por **quem cria client Supabase** — não
+por quem menciona env-file — e reprova declaração de LOCAL que fixe `.env.local` no código
+(as duas checagens conferidas com sondas).
+
+⚠️ **`backup-db.mjs` é `ALVO: NUVEM` com sentido INVERTIDO:** ele não grava no banco, grava
+o BACKUP — e backup do banco errado é pior que nenhum, porque reporta sucesso. O alvo dele
+sai de `BACKUP_ENV_FILE`, que o `--env-file` não alcança.
 
 ⚠️ **A classificação por `grep` de `.insert(`/`.update(` tem falso negativo, e ele é do lado
 caro.** `chance-recalc-run.ts` chama `recalculateAll`, `backfill-mal-reviews.ts` chama
@@ -3267,9 +3288,10 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.973 passando (+24 pulados) em 286 arquivos** (281 passando + 5 pulados);
-medido em 2026-08-15 na `main` **depois** do merge do PR #426, em árvore limpa e sem carga.
-Base: **2.971 em 285**, da recorrência nos grupos de favoritos.
+`npm run test` → **2.976 passando (+24 pulados) em 286 arquivos** (281 passando + 5 pulados);
+medido em 2026-08-15 depois de a varredura de alvo dos scripts ganhar 3 casos (nenhum arquivo
+novo — os 3 entraram num teste que já existia), em árvore limpa e sem carga.
+Base: **2.973 em 286**, do merge do PR #426.
 
 ✅ **Este número foi RE-MEDIDO, não incrementado.** A linha anterior avisava que o arquivo
 `tests/unit/ui/pendencias-ia-abrem-em-aba-nova.test.tsx` estava fora da conta por não estar
@@ -3316,7 +3338,7 @@ teste. A linha já disse "~1.780 em
 "2.440 em 229", "2.717 em 255", "2.727 em 255", "2.753 em 258", "2.776 em 261", "2.784 em 263",
 "2.788 em 264", "2.807 em 266", "2.813 em 267", "2.828 em 270", "2.833 em 271", "2.872 em 274"
 , "2.883 em 274", "2.891 em 275", "2.896 em 276", "2.913 em 277", "2.935 em 280", "2.945 em 281"
-e "2.971 em 285", todas
+, "2.971 em 285" e "2.973 em 286", todas
 envelhecendo sem nada acusar — **re-meça antes de editar este número**,
 não incremente de cabeça. ⚠️ O "2.717" durou menos de um dia: dois PRs do mesmo dia somaram 10
 testes e nenhum dos dois tocou nesta linha. Envelhecer aqui é o normal, não a exceção. Vitest, jsdom, alias `@` → raiz. A

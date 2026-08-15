@@ -6,6 +6,10 @@
  * Uso:
  *   node scripts/backfill-taste-user-score.mjs           # DRY-RUN (não escreve)
  *   node scripts/backfill-taste-user-score.mjs --apply   # escreve + marca recalc_pending
+ *
+ * 🔴 ALVO: NUVEM — este script GRAVA. Rodá-lo contra o local, que é réplica descartável,
+ * joga o trabalho fora no próximo `db:pull`.
+ *   node --env-file=.env.local scripts/backfill-taste-user-score.mjs
  */
 import { createClient } from '@supabase/supabase-js'
 import { config } from 'dotenv'

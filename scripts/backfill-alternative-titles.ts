@@ -25,6 +25,10 @@
  *
  * ⚠️ Rode `node scripts/backup-db.mjs` antes: escreve em massa e o banco não tem
  * backup em nuvem.
+ *
+ * 🔴 ALVO: NUVEM — este script GRAVA. Rodá-lo contra o local, que é réplica descartável,
+ * joga o trabalho fora no próximo `db:pull`.
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/backfill-alternative-titles.ts
  */
 import { createClient } from "@supabase/supabase-js"
 import { config } from "dotenv"

@@ -6,6 +6,10 @@
  *       mudadas/adicionadas desde o perfil → isola o IMPACTO das mudanças acumuladas.
  *   (B) HEURÍSTICO×LLM: heurístico AGORA vs o perfil LLM salvo (inclui ruído de método —
  *       upper bound da divergência).
+ *
+ * ALVO: LOCAL — só LÊ, então o `.env.analysis` (que vem DEPOIS e vence) o manda pro clone
+ * local e o egress fica em zero. Sem ele, roda contra a NUVEM em silêncio.
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/diag-profile-drift.ts
  */
 import { createAdminClient } from "@/lib/supabase/admin"
 import { loadCurrentTasteProfile, computeInputHash } from "@/lib/ai-recommendation/taste-profile"

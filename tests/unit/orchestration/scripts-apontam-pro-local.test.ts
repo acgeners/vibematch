@@ -142,6 +142,67 @@ describe("scripts de análise apontam para o banco local", () => {
     }
   })
 
+  /**
+   * 🔴 O FILTRO ACIMA ERA UMA ALLOWLIST DISFARÇADA, e deixou 16 scripts de fora.
+   *
+   * `arquivosComEnvLocal` só olha quem **menciona** `--env-file=.env.local`. Um script que
+   * não menciona env-file nenhum escapava da varredura inteira — e escapar não quer dizer
+   * ser inofensivo: medido em 2026-08-15, `measure-stale-assessments.mjs` trazia
+   * `config({ path: '.env.local' })` no CÓDIGO e lia a NUVEM em toda execução, com o
+   * `.env.analysis` sem poder algum sobre ele.
+   *
+   * A regra certa não é "menciona env-file" — é **toca o banco**. Quem cria client Supabase
+   * decide um alvo, mencione-o ou não, e por isso precisa declarar qual.
+   *
+   * ⚠️ Scripts do `package.json` ficam de fora: para eles a interface é a entrada npm, que os
+   * blocos anteriores já cobrem. Incluí-los aqui exigiria declarar o alvo duas vezes.
+   */
+  const TOCA_BANCO = /createAdminClient|createClient\(|SUPABASE_SERVICE_ROLE_KEY/
+  const noPackageJson = (nome: string) =>
+    Object.values(PKG.scripts).some((cmd) => cmd.includes(`scripts/${nome}`))
+
+  const invocadosAMao = fs
+    .readdirSync(SCRIPTS_DIR)
+    .filter((n) => n.endsWith(".ts") || n.endsWith(".mjs"))
+    .filter((n) => !noPackageJson(n))
+    .map((n) => ({ nome: n, src: fs.readFileSync(path.join(SCRIPTS_DIR, n), "utf8") }))
+    .filter(({ src }) => TOCA_BANCO.test(src))
+
+  it("existem scripts fora do package.json que tocam o banco (senão a varredura não prova nada)", () => {
+    expect(invocadosAMao.length).toBeGreaterThan(0)
+  })
+
+  it("todo script que TOCA o banco declara alvo, mencione --env-file ou não", () => {
+    for (const { nome, src } of invocadosAMao) {
+      expect(
+        /--env-file=\.env\.analysis/.test(src) || src.includes("ALVO: NUVEM"),
+        `"${nome}" cria um client Supabase e não declara alvo. Sem declaração ele roda contra ` +
+          `a NUVEM (o .env.local é o default de fato) e queima egress em silêncio. Se só LÊ, ` +
+          `escreva a linha de uso com "--env-file=.env.local --env-file=.env.analysis"; se ` +
+          `GRAVA, escreva "ALVO: NUVEM" no cabeçalho dizendo por quê.`,
+      ).toBe(true)
+    }
+  })
+
+  /**
+   * 🔴 Declarar LOCAL e fixar `.env.local` no código é pior que não declarar: a linha de uso
+   * promete um alvo que o `dotenv` do próprio arquivo sobrescreve depois, e quem lê o
+   * cabeçalho não tem como saber. Quatro arquivos estavam assim em 2026-08-15 — a mesma
+   * família de "dois critérios pro mesmo fato", com a doc de um lado e o código do outro.
+   */
+  it("script que declara LOCAL não fixa .env.local no código", () => {
+    for (const { nome, src } of invocadosAMao) {
+      if (src.includes("ALVO: NUVEM")) continue
+      if (!/--env-file=\.env\.analysis/.test(src)) continue
+      expect(
+        /config\(\{[^}]*path:\s*['"`]\.env\.local/.test(src),
+        `"${nome}" declara alvo LOCAL na linha de uso mas chama config({ path: '.env.local' }) ` +
+          `no código — o dotenv vence o --env-file e o script lê a NUVEM. Remova o config() e ` +
+          `deixe o --env-file mandar; sem ele o script falha alto, que é o desejado.`,
+      ).toBe(false)
+    }
+  })
+
   it("o gerador do .env.analysis existe e se recusa a apontar para fora do local", () => {
     // Sem essa trava, um `supabase status` devolvendo alvo remoto faria TODOS os scripts
     // migrarem para a nuvem de uma vez — o oposto exato do que este arquivo protege.

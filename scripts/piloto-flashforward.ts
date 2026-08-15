@@ -43,6 +43,10 @@
  *   npx tsx … scripts/piloto-flashforward.ts --web="The Viridescent Tiara"
  *
  *   # utilitários: --refazer (ignora o estado) · --max-cost-usd=1.00 · --listar
+ *
+ * ALVO: LOCAL — só LÊ, então o `.env.analysis` (que vem DEPOIS e vence) o manda pro clone
+ * local e o egress fica em zero. Sem ele, roda contra a NUVEM em silêncio.
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/piloto-flashforward.ts
  */
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs"
 import Anthropic from "@anthropic-ai/sdk"

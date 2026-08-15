@@ -10,9 +10,11 @@
  * é renderizada na página da obra (app/titles/[id]/page.tsx:398-403).
  *
  * Uso: node audit-bands.mjs   (não escreve nada)
+ *
+ * ALVO: LOCAL — só LÊ, então o `.env.analysis` (que vem DEPOIS e vence) o manda pro clone
+ * local e o egress fica em zero. Sem ele, roda contra a NUVEM em silêncio.
+ *   node --env-file=.env.local --env-file=.env.analysis scripts/audit-justification-bands.mjs
  */
-import { config } from 'dotenv'
-config({ path: '.env.local', quiet: true })
 import { createClient } from '@supabase/supabase-js'
 
 const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
