@@ -2,6 +2,7 @@ import "server-only"
 import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchAllRows } from "@/lib/supabase/paginate"
+import { classifySourceLink } from "@/lib/external/source-link-state"
 
 export interface WorkMissingComix {
   id: string
@@ -54,11 +55,16 @@ const loadComixCoverage = cache(async (): Promise<ComixCoverageLists> => {
     ),
   ])
 
+  // 🔴 A leitura dos 3 estados é `classifySourceLink` — DONO ÚNICO, compartilhado com a
+  // fila da aba "Fontes" (`getSourceGapQueue`), que faz o mesmo pras 9 fontes. Eram duas
+  // cópias do mesmo `if`, e duas telas discordando sobre a mesma obra é a classe de erro
+  // mais cara daqui: a aba diria "pendente" e este card diria "resolvida", sem erro.
   const active = new Set<string>()
   const absent = new Set<string>()
   for (const r of comixRows) {
-    if (r.is_rejected === false && r.external_id) active.add(r.work_id)
-    else if (r.is_rejected === true && !r.external_id) absent.add(r.work_id)
+    const state = classifySourceLink(r)
+    if (state === "linked") active.add(r.work_id)
+    else if (state === "absent") absent.add(r.work_id)
   }
 
   const missing: WorkMissingComix[] = []

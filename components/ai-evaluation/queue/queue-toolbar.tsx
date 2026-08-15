@@ -10,6 +10,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  selectedOptionLabel,
 } from "@/components/ui/select"
 import { BulkStatusAction } from "./bulk-status-action"
 
@@ -47,7 +48,10 @@ export function QueueSortSelect({
       <span className="text-xs text-muted-foreground">{label}</span>
       <Select value={value} onValueChange={onChange}>
         <SelectTrigger size="sm" className={`h-7 ${width} text-xs`}>
-          <SelectValue />
+          {/* Rótulo derivado das MESMAS `options` que viram os itens — sem ele o gatilho
+              sai vazio no SSR e só é preenchido na hidratação (medido: até 634 ms nesta
+              página). Ver `selectedOptionLabel`. */}
+          <SelectValue>{selectedOptionLabel(options, value)}</SelectValue>
         </SelectTrigger>
         <SelectContent>
           {options.map((o) => (

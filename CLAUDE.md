@@ -1071,6 +1071,39 @@ objeto** (papel novo entra na checagem sozinho) e reprova cor repetida entre pap
 um caso de render em `interesse-obra-veredito-pareado.test.tsx` — a colisão é entre
 VIZINHOS, e isso só aparece na árvore desenhada.
 
+## O `<SelectValue>` sai VAZIO no SSR — quem o preenche é um portal pós-mount
+
+🔴 **Não é bug do app: é como o Radix funciona.** Quem escreve o texto do gatilho é um
+PORTAL que o `SelectItemText` do item selecionado cria, e portal só existe depois do
+mount. Logo o HTML do servidor traz o gatilho vazio e ele só é preenchido na hidratação.
+Medido em 2026-08-15 na build de PRODUÇÃO contra o banco local:
+
+| | antes | depois |
+|---|---|---|
+| gatilhos vazios no HTML | **13 em 9 rotas** (nenhum com texto) | **0** |
+| tempo com o campo vazio | `/leitura` 196–211 ms · `/ranking` 218–370 · `/ai-evaluation` **420–634** | nunca visto vazio (0 de 3 cargas) |
+
+O conserto é passar o rótulo como `children`: **`selectedOptionLabel`**
+(`components/ui/select.tsx`).
+
+🔴 **`children` DESLIGA o portal** (`onValueNodeHasChildrenChange`) — o rótulo vira a fonte
+permanente do gatilho. Por isso ele TEM que sair da MESMA lista que gera os `<SelectItem>`
+(`options`, `SORTABLE_FIELDS`, `SORT_LABELS`…). String escrita à mão ali é "dois critérios
+pro mesmo fato" e divergiria em silêncio num rename. ⚠️ Valor sem opção correspondente
+devolve `undefined`, o que faz o Radix voltar ao portal — degrada pro comportamento
+antigo, nunca pra pior.
+
+⚠️ **Select dentro de diálogo NÃO tem esse flash** — ele só monta quando o diálogo abre,
+ou seja, nunca passa por SSR. Por isso a varredura foi por ROTA (contar `select-value`
+vazio no HTML servido), não por `grep` de `<SelectValue />`: dos 24 usos, só 13 chegavam
+ao HTML. Meça antes de sair editando os 24.
+
+🔴 **E a medição só vale contra o servidor CERTO.** A 1ª rodada depois do conserto deu
+"13 vazios" de novo: o `npm start` novo tinha morrido com `EADDRINUSE` e o processo
+ANTIGO seguia atendendo a porta, servindo a build velha. O `curl` respondia 200 e o
+número era plausível. Confira `lsof -ti:<porta>` e o horário do processo antes de
+acreditar num "não mudou nada".
+
 ## `shrink-0` com `flex-wrap` no MESMO elemento não encolhe NEM quebra
 
 As duas se anulam. `flex-wrap` faz o container quebrar linha **quando o pai o aperta**;
@@ -2243,6 +2276,84 @@ dois é erro de tipo. O primeiro virou
 `tests/unit/orchestration/use-server-so-exporta-async.test.ts`, que **deriva a lista do
 filesystem** e foi conferido reprovando o código quebrado. O badge da barra também se dividiu:
 `curadoria` e `rec-queue`. `/ranking/desatualizados` segue como redirect pra aba nova.
+
+### A 4ª aba é "Fontes", e a pergunta dela é por FONTE — não por obra
+
+🔴 **"Obras sem vínculo externo" é conjunto VAZIO.** Medido em 2026-08-15 (clone local, 978
+obras ativas): **nenhuma** obra está sem vínculo nenhum e a **mediana são 8 de 9 fontes**. O
+que existe são **1.424 lacunas** espalhadas por fonte:
+
+| fonte | obras sem vínculo avaliado |
+|---|---|
+| kitsu | 363 |
+| myanimelist | 338 |
+| mangadex | 251 |
+| mangago | 175 |
+| comick | 129 |
+| anilist | 81 |
+| animeplanet | 72 |
+| mangaupdates | 15 |
+| comix | **0** |
+
+Daí o **mapa de chips por fonte vir ANTES da lista**: sem ele a única entrada seriam as **629
+obras com ≥1 lacuna — 64% do catálogo**, que é o alarme que sempre toca.
+
+⚠️ **Lacuna ≠ "a obra não existe lá".** Chutei que MAL/Kitsu não indexam manhwa coreano; a
+medição INVERTEU: por script do título original, o coreano é o **melhor** coberto no MAL (26%
+de lacuna) contra 60% do jp/cn e **67% das obras sem título original**. É enriquecimento
+inacabado, não ausência estrutural — buscar acha.
+
+⚠️ **A lacuna custa evidência, e a relação é monotônica:** 0 lacunas → **57,2** reviews úteis
+em média; 3 → 24,5; 5 → **7,4**. Abaixo do piso de 4 reviews úteis do digest: **1,1%** das
+obras sem lacuna contra **57%** das com 5. Por isso o card carrega `usefulReviews` e marca
+"evidência escassa" — é o que separa lacuna que dói de lacuna que só existe.
+
+🔴 **Os três estados de `work_external_ids` têm DONO ÚNICO: `classifySourceLink`**
+(`lib/external/source-link-state.ts`) — `linked` (id + não rejeitado) · `absent` (rejeitado
+SEM id = "não existe aqui", DECIDIDO) · `gap` (sem linha, ou qualquer outra forma). Só `gap` é
+trabalho. Eram DUAS cópias do mesmo `if`: esta fila e o card de cobertura do Comix em
+`/settings` (`getComixCoverageLists`) — as duas telas falando da MESMA linha, e uma podia dizer
+"pendente" enquanto a outra dizia "resolvida". ⚠️ Rejeitado COM id volta pra `gap` de
+propósito: descartar um candidato não nega a obra na fonte.
+
+🔴 **O universo de fontes é `SELECTABLE_EXTERNAL_SOURCES`** (derivado da tabela `source`), que
+é o MESMO que o `SourceSelectionStep` desenha. Lista escrita à mão aqui faria a aba acusar
+lacuna numa fonte que o diálogo não sabe resolver: a obra entra na fila, você abre o diálogo,
+ela não aparece, e ela volta pra fila no carregamento seguinte — sem erro nenhum.
+
+🔴 **`tallySourceGaps` (`lib/external/source-gaps.ts`) é puro porque a ORDEM é a invariante:**
+os contadores do mapa somam o universo inteiro e **só depois** o chip de fonte recorta a lista.
+Invertido, filtrar por Kitsu zeraria os outros oito chips e a única saída visível seria limpar o
+filtro. Guardado por `tests/unit/external/source-gaps.test.ts` — conferido invertendo a ordem, o
+teste reprova.
+
+⚠️ **Status e Interesse são a EXCEÇÃO a essa regra, e é coerente:** eles recortam o UNIVERSO da
+pergunta ("dessas obras, quais têm lacuna?") e por isso entram ANTES do tally; o chip de fonte
+recorta a RESPOSTA. Medido no app: com `♥♥♥♥` a lista dá 50 e os chips viram MAL 19 / Kitsu 17;
+com `♥♥♥♥ + kitsu` a lista dá **17** e "Qualquer uma" segue **50**. ⚠️ O painel de filtros é
+compartilhado e desenha Interesse em TODA aba — não repassá-lo produziria um chip aceso que não
+filtra nada.
+
+**A fila é a LISTA EXIBIDA, na ordem exibida** (ou só as selecionadas). O diálogo hospeda o
+`SourceSelectionStep` — o MESMO passo do "Atualizar dados" —, e reusar não é economia: ele já
+distingue "fonte fora do ar" de "obra sem match" (senão uma queda de infra vira rejeição
+gravada) e traz o hid manual da Comix. A busca (`revalidateWorkSources`) é **US$0** e **ÂMBAR**
+(só lê; o resultado morre com a tela), e por morar num modal do Radix a porta de saída é fechar
+o diálogo — nada de `guardNavigation`.
+
+⚠️ **Sem `dot` na aba**, mesma régua do Digests: 629 de 978 obras acenderiam o badge da barra
+permanentemente.
+
+🔴 **O caminho `countOnly` pede só `id`, e o motivo é medido: 857 KB × 46 KB** (18×, 978 obras).
+Quem o chama é `getCuradoriaTabCounts`, cujo cache é invalidado pela tag `ai-eval-tab-counts` —
+**compartilhada com `/fila-recomendacao`** —, então toda mutação nas duas repagaria a projeção
+dos cards contra a NUVEM. As colunas de status ficam fora da projeção porque são filtro `.in()`
+resolvido no SQL.
+
+⚠️ **ABERTO, conhecido:** não há marcação de "não existe nessa fonte" em LOTE. A maioria das
+1.424 lacunas se fecha declarando ausência, não achando vínculo — com Kitsu em 363 e MAL em
+338, é esse item que decide se a fila zera algum dia. Ficou de fora por escolha (fila em
+sequência × lote), não por esquecimento.
 `triggerAiEvaluation(workId)` → `fetchExternalEvaluationContextForWork()` → `requestAiEvaluation()`
 - Uses saved work data (**ALL persisted synopses**, genres, grouped tags, cover). The primary synopsis is the prompt's main reference; every other persisted synopsis enters as `[S1]…[Sn]` blocks (`splitSynopsesForEvaluation` in `lib/work-derived.ts`), with `source = "manual"` ones labeled as user-written/high-authority. Fresh external `[C]` blocks that duplicate a persisted synopsis are filtered out (`isSameSynopsis`) — but only when additional synopses exist, so single-synopsis works keep a byte-identical input and preserve the eval cache `input_hash` (the `additionalSynopses` field is omitted from both hash versions when empty). If the work has accepted `work_external_ids`, reviews/context are fetched from those confirmed source IDs; otherwise it falls back to title search.
 - Review sources (each only when the candidate has that source's ID): MangaUpdates + AniList + MyAnimeList + Kitsu (reactions) + AnimePlanet + MangaDex (forum comments) + ComicK (curated reviews + comments) + Comix (per-work comment thread, mini-reviews). Comix has no formal reviews API; `fetchComixReviews(hid)` walks detail `id` → `threads/lookup?page_identifier=manga{id}&page_url=/title/{hid}` → `threads/{threadId}/comments` (cursor-paginated). ⚠️ Este caminho é **TOKEN-FREE**: usa `fetchComixDetailRaw`/`fetchComixThreadJson`, **não** o `fetchComixJson` — então o circuito de auth aberto pela busca gateada **não** o bloqueia (medido 2026-08-04: circuito aberto e, na sequência, 52 e 57 reviews normais em ~1,3s). 🔴 **A previsão que estava escrita aqui — "se a Comix voltar a desafiar, ~30% do acervo de reviews passa a depender do bypass da noite pro dia" — SE REALIZOU em 2026-08-11.** O plain fetch morreu: `https://comix.to/` e o SSR de `/title/{hid}` respondem **403 + `cf-mitigated: challenge`**. Toda a cadeia (4 chamadas) passou a depender de bypass, e o **FlareSolverr é hoje a única camada que atravessa** — o sidecar não passa na Comix desde 29/07 (medido no log: **1.168 tentativas, ZERO sucessos**), embora siga atravessando mangago/anime-planet/comick em ~1s.
@@ -2985,11 +3096,10 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.913 passando (+24 pulados) em 277 arquivos** (272 passando + 5 pulados;
-medido em 2026-08-15 com a ressalva de matéria-prima do Alinhamento, que somou 1 arquivo e
-11 testes, mais a remoção de `computePersonalFit` — que **somou** 6, em vez de tirar: o
-`personal-fit.test.ts` cobria só a função morta e foi repontado pras três VIVAS, inclusive
-`netNameOverlap`, que não tinha teste nenhum. Base: **2.896 em 276**.
+`npm run test` → **2.935 passando (+24 pulados) em 280 arquivos** (275 passando + 5 pulados;
+medido em 2026-08-15 depois da aba "Fontes", que somou 3 arquivos e 22 testes — o núcleo puro
+(`source-gaps`), o dono da classificação (`source-link-state`) e o render da aba. Base:
+**2.913 em 277**.
 
 ⚠️ A árvore tem um arquivo de teste NÃO COMMITADO de outra sessão
 (`tests/unit/ui/pendencias-ia-abrem-em-aba-nova.test.tsx`). A medição o excluiu de propósito
@@ -2997,7 +3107,7 @@ medido em 2026-08-15 com a ressalva de matéria-prima do Alinhamento, que somou 
 trabalho de outra pessoa. Quando aquele PR entrar, este número sobe junto.
 
 ⚠️ **Confira o TOTAL EXECUTADO contra o disco, sempre.** Aqui: `find tests -name '*.test.ts*'`
-deu **278**, menos o arquivo alheio = **277**, e o Vitest executou **277** — é essa igualdade
+deu **281**, menos o arquivo alheio = **280**, e o Vitest executou **280** — é essa igualdade
 que descarta truncamento silencioso, não o "0 failed" do rodapé.
 
 ⚠️ **"Errors 1 error" no rodapé COM tudo passando é a flakiness de carga, não queda de teste** —
@@ -3028,7 +3138,7 @@ teste. A linha já disse "~1.780 em
 ~157", "~2.353 em 218", "2.386 em 221", "2.408 em 225", "2.428 em 228", "2.433 em 228",
 "2.440 em 229", "2.717 em 255", "2.727 em 255", "2.753 em 258", "2.776 em 261", "2.784 em 263",
 "2.788 em 264", "2.807 em 266", "2.813 em 267", "2.828 em 270", "2.833 em 271", "2.872 em 274"
-, "2.883 em 274", "2.891 em 275" e "2.896 em 276", todas
+, "2.883 em 274", "2.891 em 275", "2.896 em 276" e "2.913 em 277", todas
 envelhecendo sem nada acusar — **re-meça antes de editar este número**,
 não incremente de cabeça. ⚠️ O "2.717" durou menos de um dia: dois PRs do mesmo dia somaram 10
 testes e nenhum dos dois tocou nesta linha. Envelhecer aqui é o normal, não a exceção. Vitest, jsdom, alias `@` → raiz. A

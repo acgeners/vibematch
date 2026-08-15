@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue, selectedOptionLabel } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -345,7 +345,9 @@ function SortLevelsSection({ searchParams, updateParams, className, contentClass
                     scale.trigger,
                   )}
                 >
-                  <SelectValue />
+                  {/* `SORTABLE_FIELDS` é o flatMap dos MESMOS grupos que o
+                      `SortFieldOptions` desenha — sem isto o chip sai vazio no SSR. */}
+                  <SelectValue>{selectedOptionLabel(SORTABLE_FIELDS, level.field)}</SelectValue>
                 </SelectTrigger>
                 {/* ⚠️ Não adianta pôr `max-h-*` aqui: em `position="item-aligned"` (o
                     default do nosso `SelectContent`) o Radix escreve `max-height: 100%`

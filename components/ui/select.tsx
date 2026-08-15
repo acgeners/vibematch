@@ -24,6 +24,36 @@ function SelectValue({
   return <SelectPrimitive.Value data-slot="select-value" {...props} />
 }
 
+/**
+ * Rótulo do item selecionado, para passar como `children` do `<SelectValue>`.
+ *
+ * 🔴 **Por que existe: sem ele o gatilho sai VAZIO no SSR.** Quem preenche o gatilho no
+ * Radix é um PORTAL que o `SelectItemText` do item selecionado cria — e portal só
+ * existe depois do mount. Então o HTML do servidor traz o gatilho vazio e ele só é
+ * preenchido na hidratação. Medido em 2026-08-15 na build de PRODUÇÃO contra o banco
+ * local: **13 gatilhos vazios em 9 rotas**, nenhum com texto, e o campo fica vazio por
+ * **196 a 634 ms** (`/leitura` 196–211 · `/ranking` 218–370 · `/ai-evaluation` 420–634,
+ * a página mais pesada). Não é hipótese: `renderToString` devolve `""` e o mesmo
+ * componente montado devolve o rótulo.
+ *
+ * 🔴 **Passar `children` DESLIGA o portal** (`onValueNodeHasChildrenChange`): o rótulo
+ * vira a fonte permanente do que aparece no gatilho. Por isso ele TEM que sair da MESMA
+ * lista que gera os `<SelectItem>` — uma string escrita à mão aqui é a família "dois
+ * critérios pro mesmo fato", e divergiria em silêncio no dia em que alguém renomeasse a
+ * opção só na lista.
+ *
+ * ⚠️ **Valor sem opção correspondente devolve `undefined` de propósito**, e isso é a
+ * rede: `children === undefined` faz o Radix voltar ao comportamento de hoje (portal),
+ * em vez de fixar um gatilho vazio. Degrada para o que já existia, nunca para pior.
+ */
+function selectedOptionLabel(
+  options: ReadonlyArray<{ value: string; label: React.ReactNode }>,
+  value: string | null | undefined,
+): React.ReactNode {
+  if (value == null) return undefined
+  return options.find((o) => o.value === value)?.label
+}
+
 function SelectTrigger({
   className,
   size = "default",
@@ -187,4 +217,5 @@ export {
   SelectSeparator,
   SelectTrigger,
   SelectValue,
+  selectedOptionLabel,
 }
