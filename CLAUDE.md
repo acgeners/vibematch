@@ -2588,8 +2588,13 @@ pareamento ajuda, mas não o bastante: continua acima do ganho de ~0,05.
 deltas empíricos de um piloto sobre as notas do catálogo no gold set (Monte Carlo). Calibrado
 contra a v25 — o único caso com piloto julgado **e** gold rodado —, a simulação **exagera a
 piora em ~32%** (fator 0,69 geral / 0,68 ponderado), e esse fator corrige a previsão. Foi
-assim que a v27 foi reprovada sem gastar os US$1,2: previsão calibrada **0,947 geral / 0,785
+assim que a v27 foi reprovada **sem rodar o gold**: previsão calibrada **0,947 geral / 0,785
 ponderado** contra o catálogo em 0,776 / 0,637, com **P(bater) = 0,0%** em 4000 réplicas.
+
+⚠️ **Uma rodada de gold custa ~US$1,09** (medido: `custo.usd` do JSON da v25, 32 chamadas em
+30 obras) — **não** os US$1,20 do piloto. Os dois são amostras de 30 obras e custam quase o
+mesmo, e por isso é fácil usar um número pelo outro; esta seção já fez isso, citando "US$1,2"
+para o gold a duas linhas do JSON que registra 1,09.
 
 🔴 **O gold da v25 ficou 5 dias em disco sem nunca ter sido computado.** O JSON
 (`.pilot/gold-v25-2026-08-10T01-30-06-192Z.json`, US$1,09) já trazia `gold`, `catalogo` e
