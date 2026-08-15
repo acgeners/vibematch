@@ -5,14 +5,30 @@ import { getScoresReader } from "@/server/queries/user-scores"
 import { getHideAdultContent } from "@/server/queries/current-user"
 import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import {
+  anchoredCohesionOf,
   classifyCohesion,
+  cohesionOf,
   extremesDivergence,
+  primaryEffectByStep,
   snapWeight,
   unionOfTops,
+  weakestSeed,
   DEFAULT_SIM_WEIGHT,
 } from "@/lib/discovery/blend"
-import type { BlendCandidate, CohesionLevel } from "@/lib/discovery/blend"
-import { MIN_SEEDS, MAX_SEEDS, MAX_ANTI_SEEDS, DEFAULT_RESULT_LIMIT } from "@/lib/discovery/limits"
+import type {
+  BlendCandidate,
+  CohesionLevel,
+  PrimaryEffect,
+  SeedPair,
+  WeakestSeed,
+} from "@/lib/discovery/blend"
+import {
+  MIN_SEEDS,
+  MAX_SEEDS,
+  MAX_ANTI_SEEDS,
+  DEFAULT_RESULT_LIMIT,
+  SEED_SUGGESTION_COUNT,
+} from "@/lib/discovery/limits"
 
 /**
  * "Mais como estas" (`/descobrir`) — o cruzamento entre PARECENÇA com obras-semente e
@@ -25,7 +41,13 @@ import { MIN_SEEDS, MAX_SEEDS, MAX_ANTI_SEEDS, DEFAULT_RESULT_LIMIT } from "@/li
 
 // Os limites moram em `lib/discovery/limits.ts` porque a TELA também precisa deles, e este
 // módulo é server-only (ver o comentário de lá). Re-exportados para quem já os importa daqui.
-export { MIN_SEEDS, MAX_SEEDS, MAX_ANTI_SEEDS, DEFAULT_RESULT_LIMIT } from "@/lib/discovery/limits"
+export {
+  MIN_SEEDS,
+  MAX_SEEDS,
+  MAX_ANTI_SEEDS,
+  DEFAULT_RESULT_LIMIT,
+  PRIMARY_SEED_WEIGHT,
+} from "@/lib/discovery/limits"
 
 export interface DiscoverySeedInfo {
   id: string
@@ -74,9 +96,34 @@ export interface DiscoveryResult {
   works: DiscoveryWork[]
   seeds: DiscoverySeedInfo[]
   antiSeeds: DiscoverySeedInfo[]
-  /** Similaridade média entre as sementes; `null` com menos de 2 com vetor. */
+  /** Similaridade média entre TODOS os pares de sementes; `null` com menos de 2 com vetor. */
   cohesion: number | null
+  /**
+   * A mesma média contando só os pares que tocam a semente PRINCIPAL; `null` sem principal.
+   *
+   * 🔴 As duas leituras podem dar vereditos opostos sobre as MESMAS sementes, e é o caso que
+   * torna a principal delicada: duas coadjuvantes abaixo do acaso entre si derrubam a média
+   * geral sem que a busca — ancorada numa terceira — esteja mal dirigida.
+   */
+  anchoredCohesion: number | null
+  /**
+   * A faixa da leitura que descreve a BUSCA CORRENTE: ancorada quando há principal, todos os
+   * pares quando não há. É ela que decide o tom do card.
+   *
+   * ⚠️ Não é `classifyCohesion(cohesion)`. Com principal, usar a geral faria o alarme
+   * condenar uma busca que a própria ferramenta ancorou — dois critérios para o mesmo fato,
+   * a dois centímetros um do outro na tela.
+   */
   cohesionLevel: CohesionLevel
+  /** Qual semente puxa a coesão para baixo; `null` com menos de 3 ou sem ganho algum. */
+  weakest: WeakestSeed | null
+  /** A semente com peso dobrado, se houver. */
+  primaryId: string | null
+  /**
+   * Quanto a principal mexe no topo, em CADA parada do slider (alinhado a `WEIGHT_STEPS`).
+   * Vazio sem principal.
+   */
+  primaryEffect: PrimaryEffect[]
   /** Quantas sementes foram ignoradas por não terem embedding. */
   seedsIgnored: number
   /** Total de obras consideradas depois dos filtros — a base dos percentis. */
@@ -106,14 +153,16 @@ export interface DiscoveryResult {
 interface SimRow {
   id: string
   sim_pos: number
+  /** A mesma parecença com as sementes valendo igual — ver `BlendCandidate.simPosFlat`. */
+  sim_pos_flat: number
   sim_neg: number
   nearest_seed_id: string | null
 }
 
-interface DiagRow {
-  n_requested: number
-  n_with_embedding: number
-  cohesion: number | null
+interface PairRow {
+  a: string
+  b: string
+  sim: number
 }
 
 interface MetaRow {
@@ -148,6 +197,12 @@ export interface DiscoverBySeedsOptions {
   antiIds?: string[]
   /** 0 = só alinhamento, 1 = só parecença. */
   weight?: number
+  /**
+   * Semente com peso dobrado. Ignorada se não estiver entre as sementes — id órfão na URL
+   * (semente removida com a estrela nela) tem que degradar para "sem principal", nunca
+   * ancorar numa obra que não está mais na busca.
+   */
+  primaryId?: string | null
   /** Esconde obras já lidas/em curso (default true — a página serve para achar o que ler). */
   onlyUnread?: boolean
   limit?: number
@@ -165,6 +220,8 @@ export async function discoverBySeeds(opts: DiscoverBySeedsOptions): Promise<Dis
     .filter((id) => !seedIds.includes(id))
     .slice(0, MAX_ANTI_SEEDS)
   const weight = snapWeight(opts.weight ?? DEFAULT_SIM_WEIGHT)
+  // Principal órfã degrada para "sem principal": a estrela some junto com a semente.
+  const primaryId = opts.primaryId && seedIds.includes(opts.primaryId) ? opts.primaryId : null
   const onlyUnread = opts.onlyUnread ?? true
   const limit = opts.limit ?? DEFAULT_RESULT_LIMIT
 
@@ -173,7 +230,11 @@ export async function discoverBySeeds(opts: DiscoverBySeedsOptions): Promise<Dis
     seeds: [],
     antiSeeds: [],
     cohesion: null,
+    anchoredCohesion: null,
     cohesionLevel: "unknown",
+    weakest: null,
+    primaryId,
+    primaryEffect: [],
     seedsIgnored: 0,
     candidateCount: 0,
     fitAvailable: false,
@@ -195,28 +256,49 @@ export async function discoverBySeeds(opts: DiscoverBySeedsOptions): Promise<Dis
 
   const hideAdult = await getHideAdultContent()
 
-  const [simResult, diagResult, seedMeta] = await Promise.all([
+  const [simResult, pairResult, seedMeta] = await Promise.all([
     supabase.rpc("find_similar_to_seeds", {
       seed_ids: seedIds,
       anti_ids: antiIds,
       include_adult: !hideAdult,
+      primary_seed_id: primaryId,
     }),
-    supabase.rpc("seeds_diagnostics", { seed_ids: seedIds }),
+    supabase.rpc("seed_pair_similarity", { seed_ids: seedIds }),
     loadSeedInfo(supabase, [...seedIds, ...antiIds]),
   ])
 
   if (simResult.error) {
-    // Tipicamente "function does not exist" antes da migration 187 rodar.
+    // Tipicamente "function does not exist" antes da migration 187/192 rodar.
     console.warn("[seed-discovery] RPC falhou:", simResult.error.message)
     return empty
   }
 
   const simRows = (simResult.data as SimRow[] | null) ?? []
-  if (simRows.length === 0) return { ...empty, seeds: pick(seedMeta, seedIds), antiSeeds: pick(seedMeta, antiIds) }
+  const seedsInfo = pick(seedMeta, seedIds)
+  const antiInfo = pick(seedMeta, antiIds)
 
-  const diag = ((diagResult.data as DiagRow[] | null) ?? [])[0] ?? null
-  const cohesion = diag?.cohesion == null ? null : Number(diag.cohesion)
-  const seedsIgnored = diag ? Math.max(0, diag.n_requested - diag.n_with_embedding) : 0
+  // ⚠️ Derivado de `hasEmbedding`, não de um contador próprio da RPC. `loadSeedInfo` já
+  // consulta `work_embeddings` para marcar cada chip; um `n_with_embedding` vindo do SQL
+  // seria uma 2ª fonte para o mesmo fato — e a que ninguém vê é a que passa a mentir.
+  const seedsIgnored = seedsInfo.filter((s) => !s.hasEmbedding).length
+
+  if (simRows.length === 0) return { ...empty, seeds: seedsInfo, antiSeeds: antiInfo, seedsIgnored }
+
+  if (pairResult.error) {
+    console.warn("[seed-discovery] seed_pair_similarity falhou:", pairResult.error.message)
+  }
+  const pairs: SeedPair[] = ((pairResult.data as PairRow[] | null) ?? []).map((p) => ({
+    a: p.a,
+    b: p.b,
+    sim: Number(p.sim),
+  }))
+
+  const cohesion = cohesionOf(pairs, seedIds)
+  const anchoredCohesion = anchoredCohesionOf(pairs, seedIds, primaryId)
+  // A faixa descreve a BUSCA: ancorada quando há principal. Ver o comentário do tipo.
+  const cohesionLevel = classifyCohesion(primaryId ? anchoredCohesion : cohesion)
+  // Na MESMA régua do veredito — ancorada quando há principal. Ver `weakestSeed`.
+  const weakest = weakestSeed(pairs, seedIds, primaryId)
 
   // Os dois eixos pessoais: estado de leitura e scores derivados de QUEM OLHA.
   const [personal, scoresReader] = await Promise.all([
@@ -233,10 +315,12 @@ export async function discoverBySeeds(opts: DiscoverBySeedsOptions): Promise<Dis
   if (filtered.length === 0) {
     return {
       ...empty,
-      seeds: pick(seedMeta, seedIds),
-      antiSeeds: pick(seedMeta, antiIds),
+      seeds: seedsInfo,
+      antiSeeds: antiInfo,
       cohesion,
-      cohesionLevel: classifyCohesion(cohesion),
+      anchoredCohesion,
+      cohesionLevel,
+      weakest,
       seedsIgnored,
     }
   }
@@ -259,6 +343,9 @@ export async function discoverBySeeds(opts: DiscoverBySeedsOptions): Promise<Dis
   const candidates: BlendCandidate[] = filtered.map((r) => ({
     workId: r.id,
     simPos: Number(r.sim_pos),
+    // Sem principal a RPC devolve as duas colunas idênticas (conferido no banco), então o
+    // caminho de quem não usa a estrela é bit a bit o mesmo de antes.
+    simPosFlat: Number(r.sim_pos_flat ?? r.sim_pos),
     simNeg: Number(r.sim_neg ?? 0),
     fitPercentile: numOrNull(scoreByWork.get(r.id)?.personal_fit_percentile),
   }))
@@ -308,10 +395,15 @@ export async function discoverBySeeds(opts: DiscoverBySeedsOptions): Promise<Dis
 
   return {
     works,
-    seeds: pick(seedMeta, seedIds),
-    antiSeeds: pick(seedMeta, antiIds),
+    seeds: seedsInfo,
+    antiSeeds: antiInfo,
     cohesion,
-    cohesionLevel: classifyCohesion(cohesion),
+    anchoredCohesion,
+    cohesionLevel,
+    weakest,
+    primaryId,
+    // Só custa as 22 ordenações quando há estrela — sem ela as duas listas são a mesma.
+    primaryEffect: primaryId ? primaryEffectByStep(candidates, Math.min(limit, 10)) : [],
     seedsIgnored,
     candidateCount: candidates.length,
     fitAvailable,
@@ -319,6 +411,85 @@ export async function discoverBySeeds(opts: DiscoverBySeedsOptions): Promise<Dis
     weight,
     simMatrix,
   }
+}
+
+/** Uma obra oferecida como substituta da semente que está destoando. */
+export interface SeedSuggestion extends DiscoverySeedInfo {
+  /** A coesão que a busca teria com esta obra no lugar da destoante. */
+  cohesionIfPicked: number
+  cohesionLevelIfPicked: CohesionLevel
+}
+
+/**
+ * "Trocar por outra": obras que combinam com as sementes que FICAM.
+ *
+ * 🔴 Aqui cortar um top-K na RPC é CERTO, ao contrário da busca principal. Lá o corte
+ * enviesaria o percentil de parecença, que é medido sobre o conjunto devolvido; aqui não há
+ * percentil nenhum — quer-se literalmente "as mais próximas destas". Por isso `match_limit`
+ * é 40 e não 5000: o payload cai de ~140 KB para poucos KB.
+ *
+ * ⚠️ É uma consulta A MAIS, e é por isso que a tela só a dispara sob clique. Automática, ela
+ * pagaria a varredura em toda visita a uma busca de coesão baixa — inclusive nas que a
+ * pessoa já decidiu manter como estão.
+ *
+ * O número que a tela mostra em cada sugestão é a coesão RESULTANTE, não um ganho abstrato:
+ * uma primeira versão do mockup mostrava "+0,31" e a troca terminava abaixo do corte — a
+ * ferramenta recomendando algo que não resolvia. Todas as coesões saem de UMA chamada a
+ * `seed_pair_similarity` sobre a união (mantidas + candidatas).
+ */
+export async function suggestSeedReplacements(
+  keepIds: string[],
+  excludeIds: string[],
+): Promise<SeedSuggestion[]> {
+  const manter = dedupe(keepIds)
+  if (manter.length === 0) return []
+
+  const supabase = createAdminClient()
+  const hideAdult = await getHideAdultContent()
+
+  const { data, error } = await supabase.rpc("find_similar_to_seeds", {
+    seed_ids: manter,
+    anti_ids: [],
+    match_limit: 40,
+    include_adult: !hideAdult,
+  })
+
+  if (error) {
+    console.warn("[seed-discovery] sugestões falharam:", error.message)
+    return []
+  }
+
+  const proibidos = new Set([...manter, ...excludeIds])
+  const candidatos = ((data as SimRow[] | null) ?? [])
+    .filter((r) => !proibidos.has(r.id))
+    .slice(0, SEED_SUGGESTION_COUNT)
+    .map((r) => r.id)
+
+  if (candidatos.length === 0) return []
+
+  const [pairResult, info] = await Promise.all([
+    supabase.rpc("seed_pair_similarity", { seed_ids: [...manter, ...candidatos] }),
+    loadSeedInfo(supabase, candidatos),
+  ])
+
+  const pairs: SeedPair[] = ((pairResult.data as PairRow[] | null) ?? []).map((p) => ({
+    a: p.a,
+    b: p.b,
+    sim: Number(p.sim),
+  }))
+
+  const out: SeedSuggestion[] = []
+  for (const id of candidatos) {
+    const base = info.get(id)
+    if (!base) continue
+    const c = cohesionOf(pairs, [...manter, id])
+    if (c == null) continue
+    out.push({ ...base, cohesionIfPicked: c, cohesionLevelIfPicked: classifyCohesion(c) })
+  }
+
+  // Melhor coesão primeiro — a ordem da RPC é por parecença com as mantidas, que é parecida
+  // mas não igual: o que a pessoa escolhe pelo número tem que estar em cima.
+  return out.sort((a, b) => b.cohesionIfPicked - a.cohesionIfPicked)
 }
 
 /**

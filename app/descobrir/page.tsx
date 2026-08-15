@@ -24,6 +24,8 @@ interface PageProps {
     anti?: string
     w?: string
     lidas?: string
+    /** Id da semente PRINCIPAL (peso 2×). Ausente = todas valem igual. */
+    principal?: string
   }>
 }
 
@@ -50,10 +52,16 @@ export default async function DescobrirPage({ searchParams }: PageProps) {
   // `lidas=1` INCLUI as já lidas; a ausência do parâmetro é o padrão (só não lidas).
   const onlyUnread = params.lidas !== "1"
 
+  // ⚠️ Passa pelo MESMO `parseIds` das sementes: é um uuid vindo da URL, e validar num lugar
+  // e não no outro é como um id malformado chega ao `rpc` por um caminho e não pelo outro.
+  // Semente principal que não esteja entre as sementes é ignorada lá dentro, de propósito.
+  const primaryId = parseIds(params.principal)[0] ?? null
+
   const result = await discoverBySeeds({
     seedIds,
     antiIds,
     weight,
+    primaryId,
     onlyUnread,
     limit: DEFAULT_RESULT_LIMIT,
   })

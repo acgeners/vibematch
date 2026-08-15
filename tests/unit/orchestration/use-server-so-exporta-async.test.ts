@@ -56,6 +56,25 @@ describe('arquivos "use server" só exportam função async', () => {
           // function` é a única forma válida de valor exportado.
           ofensores.push(`${relativo}: export ${palavra}`)
         }
+
+        // 🔴 `export type { X }` SEM `from` quebra o módulo em runtime, e a distinção é
+        // fina: o loader de server actions do Next reexporta o NOME, e um binding que só
+        // existia como tipo importado não existe depois da compilação —
+        // `ReferenceError: X is not defined` na avaliação do módulo.
+        //
+        // ⚠️ `export type { X } from "módulo"` é OUTRO caso e está CERTO: cinco arquivos de
+        // actions já fazem isso (embeddings, recalc-queue, synopsis-quality…) e funcionam,
+        // porque ali o loader tem o especificador e resolve sem tocar em binding local.
+        // A 1ª versão desta checagem acusava as duas formas e reprovava código bom.
+        //
+        // Medido em 2026-08-15 em `server/actions/discovery.ts`: `tsc --noEmit` limpo,
+        // suíte verde, e TODAS as actions da rota respondendo 500 — inclusive a do chrome,
+        // então a barra dizia "Entrar" para quem estava logado. Só apareceu ao abrir a
+        // página. Declarar tipo novo (`export interface`, `export type X =`) segue válido.
+        for (const [stmt] of src.matchAll(/^export\s+type\s*\{[^}]*\}[^\n]*/gm)) {
+          if (/\}\s*from\s*["']/.test(stmt)) continue
+          ofensores.push(`${relativo}: export type { … } sem "from" (reexporta binding local)`)
+        }
       }
     }
 

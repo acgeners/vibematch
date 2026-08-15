@@ -37,6 +37,14 @@ export interface BlendCandidate {
   workId: string
   /** Similaridade média às sementes, espaço centralizado (~−0,1 a 0,45). */
   simPos: number
+  /**
+   * A MESMA similaridade com todas as sementes valendo igual — o que `simPos` seria sem a
+   * semente principal. Igual a `simPos` quando não há principal.
+   *
+   * Existe para responder "a estrela mudou alguma coisa?" sem uma 2ª varredura do catálogo
+   * (140 KB crus, medidos). Ver `primaryEffectByStep`.
+   */
+  simPosFlat?: number
   /** Similaridade média às anti-sementes; 0 quando não há nenhuma. */
   simNeg: number
   /**
@@ -350,7 +358,8 @@ export function extremesDivergence(candidates: BlendCandidate[], topN: number): 
 }
 
 /**
- * Faixas de coesão das sementes (`seeds_diagnostics.cohesion`).
+ * Faixas de coesão das sementes — a média dos pares que `seed_pair_similarity` devolve
+ * (migration 192).
  *
  * Os cortes vêm de medição, não de gosto (2026-08-13): sementes vizinhas entre si dão
  * coesão ~0,33 e um top-10 com similaridade 0,266; sementes aleatórias dão ~0,00 e 0,169 —
@@ -367,4 +376,151 @@ export function classifyCohesion(cohesion: number | null): CohesionLevel {
   if (cohesion < COHESION_WEAK) return "weak"
   if (cohesion < COHESION_STRONG) return "fair"
   return "strong"
+}
+
+/**
+ * Um par de sementes e a similaridade entre elas — o que `seed_pair_similarity` devolve
+ * (migration 192). Triângulo superior: cada par aparece UMA vez.
+ *
+ * 🔴 Tudo o que a tela diz sobre "eixo em comum" sai DAQUI, e é de propósito. Antes o SQL
+ * devolvia a média pronta, e a média sozinha acende o alarme sem conseguir apagá-lo: ela
+ * não sabe qual semente está fora. Com os pares, as três leituras (coesão, coesão ancorada
+ * e leave-one-out) são o MESMO dado visto de três ângulos, em vez de três contas que podem
+ * discordar.
+ */
+export interface SeedPair {
+  a: string
+  b: string
+  sim: number
+}
+
+function pairsWithin(pairs: SeedPair[], ids: string[]): SeedPair[] {
+  const set = new Set(ids)
+  return pairs.filter((p) => set.has(p.a) && set.has(p.b))
+}
+
+/**
+ * Coesão de um conjunto: a média dos pares internos a ele.
+ *
+ * `null` com menos de 2 sementes — não existe "coesão" de um ponto só, e devolver 0 ali
+ * seria indistinguível de "sem eixo em comum", que é justamente o alarme.
+ */
+export function cohesionOf(pairs: SeedPair[], ids: string[]): number | null {
+  if (ids.length < 2) return null
+  const relevantes = pairsWithin(pairs, ids)
+  if (relevantes.length === 0) return null
+  return relevantes.reduce((acc, p) => acc + p.sim, 0) / relevantes.length
+}
+
+/**
+ * Coesão ANCORADA numa semente principal: só os pares que a tocam.
+ *
+ * 🔴 A pergunta muda junto com a busca, e é por isso que este número existe. Sem principal,
+ * "as N obras apontam para o mesmo lugar?" — todos os pares pesam igual. Com uma âncora, a
+ * pergunta é "as outras reforçam ESTA?", e o par entre duas coadjuvantes deixa de decidir:
+ * nenhuma das duas está dirigindo a busca.
+ *
+ * ⚠️ Isto NÃO é refinamento — é o que impede o card contradizer a própria busca. Medido no
+ * mockup com números reais: um trio pode dar 0,09 ("sem eixo em comum") por todos os pares
+ * e 0,17 ("eixo fraco") ancorado, porque as duas coadjuvantes estão ABAIXO do acaso entre
+ * si. Sem esta leitura, o alarme condena uma busca bem dirigida.
+ */
+export function anchoredCohesionOf(
+  pairs: SeedPair[],
+  ids: string[],
+  primaryId: string | null,
+): number | null {
+  if (!primaryId || !ids.includes(primaryId) || ids.length < 2) return null
+  const tocam = pairsWithin(pairs, ids).filter((p) => p.a === primaryId || p.b === primaryId)
+  if (tocam.length === 0) return null
+  return tocam.reduce((acc, p) => acc + p.sim, 0) / tocam.length
+}
+
+/** Qual semente puxa a coesão para baixo, e para quanto ela iria sem essa semente. */
+export interface WeakestSeed {
+  id: string
+  before: number
+  after: number
+}
+
+/**
+ * Leave-one-out: tira cada semente, recalcula, e devolve aquela cuja remoção mais SOBE a
+ * coesão. É o que transforma "estas obras não têm um eixo em comum" em algo acionável.
+ *
+ * 🔴 `null` com menos de 3 sementes, e não é limitação a contornar: com 2, remover uma deixa
+ * zero pares e cai abaixo do mínimo da busca. A tela precisa de um ramo próprio ali — dizer
+ * "tire esta" quando não sobra busca nenhuma seria um conselho que não se pode seguir.
+ *
+ * 🔴 Com PRINCIPAL, mede na régua ANCORADA — e isso não é refinamento. O card decide o
+ * veredito pela leitura ancorada quando há estrela; medir a culpada pela geral punha, a dois
+ * centímetros um do outro, um "sem ela: −0,05 → 0,28" que não se refere ao número que o
+ * veredito usa. Visto na tela em 2026-08-15, antes de existir este parâmetro. E a principal
+ * NÃO entra como candidata a remoção: tirá-la não melhora a ancoragem, acaba com ela.
+ *
+ * ⚠️ Esta função NÃO decide se vale nomear a culpada; ela só mede. Quem decide é a tela, pela
+ * troca de FAIXA (`classifyCohesion(after) !== classifyCohesion(before)`) — critério que não
+ * precisa de um limiar inventado. Um limiar numérico aqui seria escolhido a olho, e este
+ * projeto já pagou por isso; medir a distribuição de ganhos reais e cortá-la seria melhor,
+ * e não foi feito.
+ */
+export function weakestSeed(
+  pairs: SeedPair[],
+  ids: string[],
+  primaryId: string | null = null,
+): WeakestSeed | null {
+  if (ids.length < 3) return null
+
+  const ancorada = primaryId != null && ids.includes(primaryId)
+  const medir = (conjunto: string[]) =>
+    ancorada ? anchoredCohesionOf(pairs, conjunto, primaryId) : cohesionOf(pairs, conjunto)
+
+  const before = medir(ids)
+  if (before == null) return null
+
+  let melhor: WeakestSeed | null = null
+  for (const id of ids) {
+    if (ancorada && id === primaryId) continue
+    const resto = ids.filter((x) => x !== id)
+    const after = medir(resto)
+    if (after == null) continue
+    if (melhor === null || after > melhor.after) melhor = { id, before, after }
+  }
+  return melhor != null && melhor.after > melhor.before ? melhor : null
+}
+
+/** Quanto a semente principal mexeu no topo, num peso do slider. */
+export interface PrimaryEffect {
+  /** Quantas obras do top-N entram ou saem por causa dela. */
+  enters: number
+  /** Quantas apenas mudam de posição. */
+  moves: number
+}
+
+/**
+ * O efeito da principal em CADA parada do slider.
+ *
+ * 🔴 Um array de 11, e não um número, pela mesma razão que `unionOfTops` existe: o slider
+ * reordena no cliente, sem ir ao servidor. Um único número ficaria correto no peso em que
+ * foi calculado e passaria a mentir no primeiro arraste — e mentiria em silêncio, que é o
+ * pior formato. O efeito depende MESMO do peso: medido, a mesma estrela reordena 4 posições
+ * em 50% e 7 em 100%.
+ *
+ * ⚠️ Comparar contra o pool exibível não serviria: obra que sai do top-10 pode nem estar no
+ * pool. Chame com o conjunto INTEIRO de candidatos.
+ */
+export function primaryEffectByStep(candidates: BlendCandidate[], topN: number): PrimaryEffect[] {
+  const semPrincipal = candidates.map((c) => ({ ...c, simPos: c.simPosFlat ?? c.simPos }))
+
+  return WEIGHT_STEPS.map((w) => {
+    const com = blendCandidates(candidates, w).slice(0, topN).map((b) => b.workId)
+    const sem = blendCandidates(semPrincipal, w).slice(0, topN).map((b) => b.workId)
+
+    const base = new Set(sem)
+    const enters = com.filter((id) => !base.has(id)).length
+    let moves = 0
+    com.forEach((id, i) => {
+      if (sem[i] !== id) moves++
+    })
+    return { enters, moves }
+  })
 }
