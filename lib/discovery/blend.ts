@@ -118,10 +118,30 @@ export function midrankPercentiles(values: number[]): number[] {
   return out
 }
 
+/** Como interpretar o `simPos` que chega. */
+export interface BlendOptions {
+  /**
+   * `true` quando `simPos` JÁ É o percentil (0–100) medido sobre o conjunto completo.
+   *
+   * 🔴 Sem isto o cliente repercentilava o que já era percentil, e o resultado NÃO era
+   * inofensivo. Medido no app: uma obra com as duas barras em 100 exibia combinação **97**,
+   * e outra com 99/97 exibia **92** — porque a barra mostra o percentil sobre as 737
+   * candidatas e o score usava o percentil recalculado sobre o pool de ~50, enquanto
+   * `fitPercentile` passava sem recalcular. Um eixo renormalizado num conjunto já
+   * selecionado (e portanto comprimido) contra outro que não é: exatamente a mistura de
+   * escalas que o cabeçalho deste arquivo existe para impedir — e ela muda a ORDEM.
+   *
+   * ⚠️ O comentário no cliente afirmava que reusar o percentil "mantém a régua idêntica à do
+   * servidor em vez de recalcular sobre um subconjunto". A intenção estava certa; faltava o
+   * código honrá-la.
+   */
+  percentileInputs?: boolean
+}
+
 /**
  * Combina os dois eixos e devolve a lista ORDENADA (melhor primeiro).
  *
- * @param weight 0 = só alinhamento, 1 = só parecença. Fora de [0,1] é clampado.
+ * @param weight 0 = só alinhamento, 1 = só similaridade. Fora de [0,1] é clampado.
  *
  * ⚠️ O percentil de similaridade é calculado sobre TODOS os candidatos recebidos. Filtre
  * (não lidas, adulto, etc.) ANTES de chamar: filtrar depois compara cada obra contra um
@@ -130,12 +150,15 @@ export function midrankPercentiles(values: number[]): number[] {
 export function blendCandidates(
   candidates: BlendCandidate[],
   weight: number = DEFAULT_SIM_WEIGHT,
+  opts: BlendOptions = {},
 ): BlendedWork[] {
   const w = Math.min(1, Math.max(0, weight))
   if (candidates.length === 0) return []
 
   const effective = candidates.map((c) => c.simPos - ANTI_WEIGHT * c.simNeg)
-  const simPcts = midrankPercentiles(effective)
+  // A subtração da anti-semente já entrou no percentil que o servidor mediu, então repetir
+  // o percentilamento aqui seria a 2ª transformação sobre o mesmo número.
+  const simPcts = opts.percentileInputs ? effective : midrankPercentiles(effective)
 
   return candidates
     .map((c, i) => {

@@ -81,12 +81,32 @@ function fmtCoesao(v: number): string {
  * do slider não, senão cada pixel arrastado viraria um round-trip.
  */
 
+/**
+ * As colunas da lista, por breakpoint. Mesma escada do resto do app: as barras aparecem em
+ * `sm`, as colunas informativas em `lg`. A contagem de colunas tem que casar com a de células
+ * VISÍVEIS em cada faixa — ver o 🔴 do grid.
+ *
+ * ⚠️ As larguras foram medidas contra o CABEÇALHO, não contra os números. "veredito" (em
+ * coluna de 58px) e "combinação" (74px) transbordavam e colavam um no outro na tela — os
+ * VALORES caberiam. Rótulo em versalete com `tracking` é mais largo do que parece.
+ */
+const GRID_COLS =
+  "grid-cols-[22px_40px_minmax(0,auto)_84px] " +
+  "sm:grid-cols-[22px_44px_minmax(0,auto)_104px_104px_84px] " +
+  "lg:grid-cols-[22px_44px_minmax(0,auto)_104px_104px_64px_64px_84px]"
+
+/** O cliente sempre recebe percentis prontos do servidor — nunca similaridade crua. */
+const PCT = { percentileInputs: true } as const
+
+export type DiscoveryViewMode = "lista" | "cards"
+
 interface Props {
   result: DiscoveryResult
   onlyUnread: boolean
+  view: DiscoveryViewMode
 }
 
-export function DiscoveryView({ result, onlyUnread }: Props) {
+export function DiscoveryView({ result, onlyUnread, view }: Props) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [weight, setWeight] = useState(result.weight)
@@ -109,6 +129,7 @@ export function DiscoveryView({ result, onlyUnread }: Props) {
     lidas?: boolean
     /** `null` tira a estrela; omitido mantém a atual. */
     principal?: string | null
+    view?: DiscoveryViewMode
   }) {
     const params = new URLSearchParams()
     const s = next.seeds ?? seedIds
@@ -125,6 +146,9 @@ export function DiscoveryView({ result, onlyUnread }: Props) {
     const p = next.principal === undefined ? result.primaryId : next.principal
     if (p && s.includes(p)) params.set("principal", p)
 
+    const v = next.view ?? view
+    if (v === "cards") params.set("view", "cards")
+
     startTransition(() => router.push(`/descobrir?${params}`, { scroll: false }))
   }
 
@@ -132,8 +156,9 @@ export function DiscoveryView({ result, onlyUnread }: Props) {
   const ordered = useMemo(() => {
     const candidates: BlendCandidate[] = result.works.map((w) => ({
       workId: w.id,
-      // `simPos` já está normalizado em percentil pelo servidor; reusar o percentil aqui
-      // mantém a régua idêntica à do servidor em vez de recalcular sobre um subconjunto.
+      // `simPos` já É o percentil medido pelo servidor sobre TODAS as candidatas — por isso
+      // o blend abaixo recebe `percentileInputs`. Sem essa flag ele repercentilava sobre o
+      // pool exibível e a combinação deixava de bater com a barra ao lado (ver blend.ts).
       simPos: w.simPercentile,
       simNeg: 0,
       fitPercentile: w.fitPercentile,
@@ -145,7 +170,7 @@ export function DiscoveryView({ result, onlyUnread }: Props) {
     // o MMR só embaralharia as mesmas 24 obras — quem entra no lugar da quase-duplicata está
     // na 25ª posição, fora do corte. Medido: 2,4 de 10 obras do top-10 tinham uma
     // quase-duplicata, com posição mediana 4.
-    const ordenados = blendCandidates(candidates, weight)
+    const ordenados = blendCandidates(candidates, weight, PCT)
     const rows = diversify(ordenados, result.simMatrix, DEFAULT_RESULT_LIMIT)
       .map((b) => ({ work: byId.get(b.workId)!, score: b.score }))
       .filter((r) => r.work != null)
@@ -171,20 +196,19 @@ export function DiscoveryView({ result, onlyUnread }: Props) {
     )
 
     // 🔴 As marcas "só deste lado" saem das MESMAS pontas que `extremesDivergence` mede no
-    // servidor, e por isso os dois números concordam sempre — não por sorte. Nos extremos o
-    // cliente reproduz a ordem do servidor exatamente: em w=1 a ordem é a de `simPos` (e
-    // percentil de percentil preserva ordem), em w=0 é a de `fitPercentile`, que vem pronto.
-    // Nos pesos do meio isso NÃO valeria, e é justamente por isso que a régua são as pontas.
+    // servidor, e agora os dois concordam em QUALQUER peso — não só nos extremos. Antes o
+    // cliente repercentilava a similaridade sobre o pool e só as pontas coincidiam por
+    // acidente aritmético (w=1 vira a ordem de `simPos`, w=0 a de `fitPercentile`).
     //
     // ⚠️ A mesma marca para a semente PRINCIPAL ficou de fora de propósito: ela exigiria o
     // top sem-principal, que sai de um pool que este componente não tem (`unionOfTops` é
-    // construído sobre a parecença JÁ ponderada). Uma marca aproximada ao lado de um número
+    // construído sobre a similaridade JÁ ponderada). Uma marca aproximada ao lado de um número
     // exato é a receita para os dois se contradizerem na tela.
     const extremos = { sim: new Set<string>(), fit: new Set<string>() }
     if (result.fitAvailable) {
       const N = Math.min(DEFAULT_RESULT_LIMIT, 10)
-      for (const b of blendCandidates(candidates, 1).slice(0, N)) extremos.sim.add(b.workId)
-      for (const b of blendCandidates(candidates, 0).slice(0, N)) extremos.fit.add(b.workId)
+      for (const b of blendCandidates(candidates, 1, PCT).slice(0, N)) extremos.sim.add(b.workId)
+      for (const b of blendCandidates(candidates, 0, PCT).slice(0, N)) extremos.fit.add(b.workId)
     }
 
     return {
@@ -213,7 +237,7 @@ export function DiscoveryView({ result, onlyUnread }: Props) {
         </div>
         <h1 className="text-2xl font-semibold tracking-tight">Mais como estas</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
-          Aponte de {MIN_SEEDS} a {MAX_SEEDS} obras. O catálogo é varrido por parecença com{" "}
+          Aponte de {MIN_SEEDS} a {MAX_SEEDS} obras. O catálogo é varrido por similaridade com{" "}
           <em>elas</em> e por alinhamento com <em>você</em> — dois eixos independentes, então
           cada ponta do controle devolve uma lista diferente.
         </p>
@@ -262,6 +286,7 @@ export function DiscoveryView({ result, onlyUnread }: Props) {
                     algumas obras aqui são muito parecidas entre si
                   </span>
                 )}
+                <ViewToggle view={view} disabled={pending} onChange={(v) => navigate({ view: v })} />
                 <Button
                   variant="outline"
                   size="sm"
@@ -280,18 +305,47 @@ export function DiscoveryView({ result, onlyUnread }: Props) {
                 </p>
               ) : (
                 <div className="flex flex-col gap-4">
-                  <ol className="flex flex-col gap-1">
-                    {ordered.rows.map(({ work, score, showSeed, side }, i) => (
-                      <ResultRow
-                        key={work.id}
-                        rank={i + 1}
-                        work={work}
-                        score={score}
-                        showSeed={showSeed}
-                        side={side}
-                      />
-                    ))}
-                  </ol>
+                  {view === "cards" ? (
+                    <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+                      {ordered.rows.map(({ work, score, showSeed, side }, i) => (
+                        <ResultCard
+                          key={work.id}
+                          rank={i + 1}
+                          work={work}
+                          score={score}
+                          showSeed={showSeed}
+                          side={side}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    /* 🔴 UM grid para a lista INTEIRA (as linhas usam `contents`), e não um
+                       por linha. Com um grid por linha a coluna de conteúdo é `1fr` e estica
+                       até a borda, empurrando os números para longe do texto — medido: 270px
+                       de vão. Aqui a coluna é `auto`, mede a linha mais larga, as colunas
+                       ALINHAM entre si (é o que dá sentido ao cabeçalho) e a régua encosta no
+                       texto (14px, o próprio gap).
+
+                       ⚠️ Toda linha emite o MESMO número de células que o template tem de
+                       colunas, em cada breakpoint. Com `contents`, uma célula a menos não
+                       deixa buraco: desloca todas as seguintes e a lista escorrega uma casa
+                       por linha. */
+                    <div
+                      className={`grid items-center justify-center gap-x-3.5 ${GRID_COLS}`}
+                    >
+                      <ResultHeader />
+                      {ordered.rows.map(({ work, score, showSeed, side }, i) => (
+                        <ResultRow
+                          key={work.id}
+                          rank={i + 1}
+                          work={work}
+                          score={score}
+                          showSeed={showSeed}
+                          side={side}
+                        />
+                      ))}
+                    </div>
+                  )}
 
                   {/* Só as EXIBIDAS no topo vão ao modelo: mandar as 24 multiplicaria o
                       custo por uma prosa que ninguém vai ler até o fim. */}
@@ -817,7 +871,7 @@ function MixCard({
           O que deve pesar mais
           <InfoTip label="O que cada ponta significa">
             <p>
-              <strong>Parecidas com as sementes</strong> — obras cujo perfil de texto se
+              <strong>Similaridade</strong> — obras cujo perfil de texto se
               aproxima das que você escolheu.
             </p>
             <p className="mt-2">
@@ -833,7 +887,7 @@ function MixCard({
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <div className="flex justify-between text-xs font-semibold">
-          <span className="text-indigo-600 dark:text-indigo-400">◄ Parecidas com as sementes</span>
+          <span className="text-indigo-600 dark:text-indigo-400">◄ Similaridade</span>
           <span className="text-emerald-600 dark:text-emerald-400">A minha cara ►</span>
         </div>
         <input
@@ -842,7 +896,7 @@ function MixCard({
           max={100}
           step={10}
           value={Math.round(weight * 100)}
-          aria-label="Peso entre parecença com as sementes e alinhamento com o seu perfil"
+          aria-label="Peso entre similaridade com as sementes e alinhamento com o seu perfil"
           // Trilho em degradê para a posição ser lida como MISTURA dos dois eixos, e não
           // como uma porcentagem de algo. As duas cores são as mesmas das pontas.
           className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-gradient-to-r from-indigo-500 via-slate-500 to-emerald-500 accent-indigo-600 dark:accent-indigo-400"
@@ -893,7 +947,7 @@ function MixCard({
 
         {!fitAvailable && (
           <p className="rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-xs text-sky-700 dark:text-sky-300">
-            Você ainda não tem <strong>perfil de gosto</strong>, então só a parecença pesa aqui
+            Você ainda não tem <strong>perfil de gosto</strong>, então só a similaridade pesa aqui
             — mover o controle não muda a lista. O perfil nasce depois de você avaliar algumas
             obras.
           </p>
@@ -921,24 +975,103 @@ function fraseDoPeso(w: number): React.ReactNode {
     return (
       <>
         <strong className="font-semibold">Sobretudo o seu gosto</strong>, com um toque de
-        parecença.
+        similaridade.
       </>
     )
   if (w < 0.65)
-    return <strong className="font-semibold">Metade parecença, metade o seu gosto.</strong>
+    return <strong className="font-semibold">Metade similaridade, metade o seu gosto.</strong>
   if (w < 0.999)
     return (
       <>
-        <strong className="font-semibold">Sobretudo parecença</strong> com as sementes.
+        <strong className="font-semibold">Sobretudo similaridade</strong> com as sementes.
       </>
     )
   return (
     <>
-      <strong className="font-semibold">Só parecença.</strong> O seu perfil não entra na ordem.
+      <strong className="font-semibold">Só similaridade.</strong> O seu perfil não entra na ordem.
     </>
   )
 }
 
+/** Alterna lista × cards. A escolha vive na URL — ver o comentário em `page.tsx`. */
+function ViewToggle({
+  view,
+  disabled,
+  onChange,
+}: {
+  view: DiscoveryViewMode
+  disabled: boolean
+  onChange: (v: DiscoveryViewMode) => void
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      {(["lista", "cards"] as const).map((v) => (
+        <Button
+          key={v}
+          variant={view === v ? "default" : "outline"}
+          size="sm"
+          disabled={disabled}
+          aria-pressed={view === v}
+          onClick={() => onChange(v)}
+        >
+          {v === "lista" ? "Lista" : "Cards"}
+        </Button>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * O cabeçalho nomeia os QUATRO sistemas de número da linha, uma vez só.
+ *
+ * 🔴 Sem ele a linha repetia `sim` e `vc` em cada obra — abreviações que não existem em
+ * lugar nenhum da página — e deixava `Prev.`, `Ver.` e a combinação sem nome. E os quatro
+ * têm escalas diferentes: dois são percentil 0–100, um é nota 0–10, outro é 0–100. As
+ * palavras são as MESMAS do controle acima; duas palavras para o mesmo eixo é o defeito
+ * que este cabeçalho existe para não ter.
+ */
+function ResultHeader() {
+  return (
+    <div className="contents">
+      <span />
+      <span />
+      <span className="border-b pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        obra
+      </span>
+      <span className="hidden border-b pb-1.5 text-right text-[10px] font-semibold uppercase tracking-wide text-indigo-600 sm:block dark:text-indigo-400">
+        similaridade
+      </span>
+      <span className="hidden border-b pb-1.5 text-right text-[10px] font-semibold uppercase tracking-wide text-emerald-600 sm:block dark:text-emerald-400">
+        a minha cara
+      </span>
+      <span className="hidden border-b pb-1.5 text-right text-[10px] font-semibold uppercase tracking-wide text-muted-foreground lg:block">
+        prevista
+      </span>
+      <span className="hidden border-b pb-1.5 text-right text-[10px] font-semibold uppercase tracking-wide text-violet-600 lg:block dark:text-violet-400">
+        veredito
+      </span>
+      <span className="flex items-center justify-end gap-1 border-b pb-1.5 text-[10px] font-semibold uppercase tracking-wide">
+        combinação
+        <InfoTip label="Como a combinação é calculada">
+          <p>
+            <strong>peso × similaridade + (1−peso) × a minha cara</strong>, com os dois em
+            percentil <strong>dentro desta busca</strong>.
+          </p>
+          <p className="mt-2 text-background/65">
+            Não é “% de compatibilidade”: o 1º colocado dá ~100 por construção. Mova o controle
+            e ela muda — é resultado do peso, não propriedade da obra.
+          </p>
+          <p className="mt-2 text-background/65">
+            A coluna não desce sempre: a lista também espaça obras quase idênticas entre si,
+            então uma combinação maior pode aparecer abaixo de uma menor.
+          </p>
+        </InfoTip>
+      </span>
+    </div>
+  )
+}
+
+/** As células de UMA obra. `contents` para que elas entrem no grid da lista inteira. */
 function ResultRow({
   rank,
   work,
@@ -953,112 +1086,204 @@ function ResultRow({
   /** "sim"/"fit" quando a obra só existe no topo de UMA das pontas do controle. */
   side: "sim" | "fit" | null
 }) {
+  const cel = "py-2 group-hover:bg-muted/50"
   return (
-    <li className="flex items-center gap-3 rounded-lg border border-transparent p-2 hover:border-border hover:bg-muted/50">
-      <span className="w-5 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">
+    <div className="group contents">
+      <span
+        className={`${cel} text-right font-mono text-xs tabular-nums text-muted-foreground`}
+      >
         {rank}
       </span>
-      {work.coverUrl ? (
-        <Image
-          src={work.coverUrl}
-          alt=""
-          width={32}
-          height={44}
-          className="h-11 w-8 shrink-0 rounded object-cover"
-          unoptimized
-        />
-      ) : (
-        <div className="h-11 w-8 shrink-0 rounded border bg-muted" />
-      )}
+      <span className={cel}>
+        <Cover work={work} className="h-14 w-10 sm:h-[62px] sm:w-11" />
+      </span>
 
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span className={`${cel} block min-w-0`}>
         <Link
           href={`/titles/${titleToSlug(work.title)}`}
-          className="truncate text-sm font-medium hover:underline"
+          className="block truncate text-sm font-medium hover:underline"
         >
           {work.title}
         </Link>
-        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-          {work.isAdult && <AdultBadge />}
-          <span className="tabular-nums">{work.year ?? "—"}</span>
-          <span>·</span>
-          <span className="tabular-nums">{work.totalChapters ?? "?"} cap.</span>
-          {showSeed && work.nearestSeedTitle && (
-            <>
-              <span>·</span>
-              <span className="truncate">puxada por {work.nearestSeedTitle}</span>
-            </>
-          )}
-          {/* 🔴 O que torna o controle TANGÍVEL: estas obras só estão no topo por causa da
-              posição atual. Cores dos EIXOS (índigo/esmeralda), nunca um tom de estado — a
-              régua de `status-tone.ts` fala de estado do sistema, e isto é uma dimensão. */}
-          {side === "sim" && (
-            <span className="rounded-full bg-indigo-500/15 px-1.5 py-px text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
-              ◄ só deste lado
-            </span>
-          )}
-          {side === "fit" && (
-            <span className="rounded-full bg-emerald-500/15 px-1.5 py-px text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
-              só deste lado ►
-            </span>
-          )}
-        </div>
-      </div>
+        <WorkMeta work={work} showSeed={showSeed} side={side} />
+      </span>
 
-      <div className="hidden w-28 shrink-0 flex-col gap-1 sm:flex">
-        <Bar label="sim" value={work.simPercentile} tone="sim" />
-        <Bar label="vc" value={work.fitPercentile} tone="fit" />
-      </div>
+      <span className={`${cel} hidden sm:block`}>
+        <Bar value={work.simPercentile} tone="sim" />
+      </span>
+      <span className={`${cel} hidden sm:block`}>
+        <Bar value={work.fitPercentile} tone="fit" />
+      </span>
 
       {/* Colunas informativas — NUNCA entram no score (ver lib/discovery/blend.ts). */}
-      <div className="hidden w-20 shrink-0 flex-col items-end gap-0.5 font-mono text-[10px] tabular-nums text-muted-foreground lg:flex">
-        <span>Prev. {work.expectedScore == null ? "—" : work.expectedScore.toFixed(1).replace(".", ",")}</span>
-        <span className={work.alignmentScore == null ? "opacity-50" : "text-violet-600 dark:text-violet-400"}>
-          Ver. {work.alignmentScore == null ? "—" : Math.round(work.alignmentScore)}
-        </span>
-      </div>
+      <span
+        className={`${cel} hidden text-right font-mono text-xs tabular-nums text-muted-foreground lg:block`}
+      >
+        {work.expectedScore == null ? "—" : work.expectedScore.toFixed(1).replace(".", ",")}
+      </span>
+      <span
+        className={`${cel} hidden text-right font-mono text-xs tabular-nums lg:block ${
+          work.alignmentScore == null ? "text-muted-foreground opacity-50" : "text-violet-600 dark:text-violet-400"
+        }`}
+      >
+        {work.alignmentScore == null ? "—" : Math.round(work.alignmentScore)}
+      </span>
 
-      <span className="w-10 shrink-0 text-right font-mono text-base font-semibold tabular-nums">
+      <span className={`${cel} text-right font-mono text-lg font-semibold tabular-nums`}>
         {Math.round(score)}
       </span>
-    </li>
+    </div>
   )
 }
 
-function Bar({
-  label,
-  value,
-  tone,
+/** A mesma obra em card — a largura da tela vira mais ITENS por linha, não linhas maiores. */
+function ResultCard({
+  rank,
+  work,
+  score,
+  showSeed,
+  side,
 }: {
-  label: string
-  value: number | null
-  tone: "sim" | "fit"
+  rank: number
+  work: DiscoveryWork
+  score: number
+  showSeed: boolean
+  side: "sim" | "fit" | null
 }) {
+  return (
+    <div className="flex gap-3 rounded-lg border bg-muted/30 p-2.5 hover:bg-muted/60">
+      <Cover work={work} className="h-[78px] w-14" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex items-baseline justify-between gap-2">
+          <Link
+            href={`/titles/${titleToSlug(work.title)}`}
+            className="line-clamp-2 text-[13px] font-medium leading-tight hover:underline"
+          >
+            {work.title}
+          </Link>
+          <span className="shrink-0 text-right">
+            <span className="block font-mono text-lg font-semibold leading-none tabular-nums">
+              {Math.round(score)}
+            </span>
+            <span className="block font-mono text-[9px] text-muted-foreground">#{rank}</span>
+          </span>
+        </div>
+        <WorkMeta work={work} showSeed={showSeed} side={side} />
+        <div className="mt-1.5 flex flex-col gap-1">
+          <Bar value={work.simPercentile} tone="sim" />
+          <Bar value={work.fitPercentile} tone="fit" />
+        </div>
+        <div className="mt-1 flex gap-3 font-mono text-[10px] tabular-nums text-muted-foreground">
+          <span>
+            prevista {work.expectedScore == null ? "—" : work.expectedScore.toFixed(1).replace(".", ",")}
+          </span>
+          <span className={work.alignmentScore == null ? "opacity-50" : "text-violet-600 dark:text-violet-400"}>
+            veredito {work.alignmentScore == null ? "—" : Math.round(work.alignmentScore)}
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * ⚠️ URL quebrada cai no MESMO placeholder de "obra sem capa", em vez do ícone de imagem
+ * partida do browser. Enquanto a lista nunca mostrava capa isto não existia; ao consertá-la,
+ * as URLs mortas do catálogo (host extinto, CDN que sumiu) ficaram visíveis — e um glifo de
+ * erro no meio da lista é pior do que o quadrado neutro que estava ali antes.
+ *
+ * ⚠️ `useState` e não `onError` direto no `<img>`: sem estado o browser retenta a cada
+ * render e o ícone pisca.
+ */
+function Cover({ work, className }: { work: DiscoveryWork; className: string }) {
+  const [quebrou, setQuebrou] = useState(false)
+  if (!work.coverUrl || quebrou) {
+    return <span className={`block shrink-0 rounded border bg-muted ${className}`} />
+  }
+  return (
+    <Image
+      src={work.coverUrl}
+      alt=""
+      width={44}
+      height={62}
+      className={`shrink-0 rounded object-cover ${className}`}
+      onError={() => setQuebrou(true)}
+      unoptimized
+    />
+  )
+}
+
+function WorkMeta({
+  work,
+  showSeed,
+  side,
+}: {
+  work: DiscoveryWork
+  showSeed: boolean
+  side: "sim" | "fit" | null
+}) {
+  return (
+    <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted-foreground">
+      {work.isAdult && <AdultBadge />}
+      <span className="tabular-nums">{work.year ?? "—"}</span>
+      <span>·</span>
+      <span className="tabular-nums">{work.totalChapters ?? "?"} cap.</span>
+      {showSeed && work.nearestSeedTitle && (
+        <>
+          <span>·</span>
+          {/* ⚠️ `max-w` obrigatório: num grid a coluna mede a linha MAIS LARGA, então um nome
+              comprido de semente estica a coluna de TODAS e devolve o vão nas curtas. */}
+          <span className="max-w-[190px] truncate">puxada por {work.nearestSeedTitle}</span>
+        </>
+      )}
+      {/* 🔴 O chip diz o que ACONTECE, não onde a obra está. A 1ª versão dizia "só deste
+          lado" e exigia saber de antemão que o controle tem duas pontas e que a lista muda
+          entre elas — quem desenhou a página não entendeu, o que é veredito suficiente.
+          Cores dos EIXOS (índigo/esmeralda), nunca um tom de estado. */}
+      {side === "sim" && (
+        <span
+          title="Esta obra está no topo com o controle deste lado. Levando-o para a outra ponta, ela sai da lista."
+          className="rounded-full bg-indigo-500/15 px-1.5 py-px text-[10px] font-semibold text-indigo-700 dark:text-indigo-300"
+        >
+          sai em “A minha cara”
+        </span>
+      )}
+      {side === "fit" && (
+        <span
+          title="Esta obra está no topo com o controle deste lado. Levando-o para a outra ponta, ela sai da lista."
+          className="rounded-full bg-emerald-500/15 px-1.5 py-px text-[10px] font-semibold text-emerald-700 dark:text-emerald-300"
+        >
+          sai em “Similaridade”
+        </span>
+      )}
+    </span>
+  )
+}
+
+function Bar({ value, tone }: { value: number | null; tone: "sim" | "fit" }) {
   const pct = value == null ? 0 : Math.max(0, Math.min(100, value))
   return (
-    <div className="flex items-center gap-1.5 font-mono text-[10px] tabular-nums">
+    <span className="flex items-center gap-1.5 font-mono text-[10px] tabular-nums">
+      {/* `block` é obrigatório: span inline ignora height e a barra sai vazia. */}
+      <span className="block h-1 flex-1 overflow-hidden rounded-full bg-border">
+        <span
+          className={`block h-full rounded-full ${tone === "sim" ? "bg-indigo-500" : "bg-emerald-500"}`}
+          style={{ width: `${pct}%` }}
+        />
+      </span>
       <span
-        className={`w-4 font-semibold ${
+        className={`w-6 text-right ${
           tone === "sim"
             ? "text-indigo-600 dark:text-indigo-400"
             : "text-emerald-600 dark:text-emerald-400"
         }`}
       >
-        {label}
+        {value == null ? "—" : Math.round(value)}
       </span>
-      {/* `block` é obrigatório: span inline ignora height e a barra sai vazia. */}
-      <span className="block h-1 flex-1 overflow-hidden rounded-full bg-border">
-        <span
-          className={`block h-full rounded-full ${
-            tone === "sim" ? "bg-indigo-500" : "bg-emerald-500"
-          }`}
-          style={{ width: `${pct}%` }}
-        />
-      </span>
-      <span className="w-5 text-right">{value == null ? "—" : Math.round(value)}</span>
-    </div>
+    </span>
   )
 }
+
 
 function SeedChip({
   seed,
