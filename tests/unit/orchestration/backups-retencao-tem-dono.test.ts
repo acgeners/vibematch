@@ -106,6 +106,7 @@ describe("retenção de .backups: um dono único, e ninguém grava sem família"
       "backfill-tags",
       "fix-external-ids-2026-08-14T00-15-58-115Z",
       "push-opening-structure-2026-08-14T01-00-49-104Z",
+      "repick-cover-2026-08-15T03-11-22-333Z",
     ]
     for (const nome of nomes) {
       const casam = FAMILIAS.filter((f) => f.casa(nome)).map((f) => f.id)
@@ -121,7 +122,8 @@ describe("retenção de .backups: um dono único, e ninguém grava sem família"
        "push-curation-2026-08-10T17-37-07-121Z", "new-works-2026-08-04T15-56-02-670Z",
        "synopsis-lab-2026-07-30T05-38-06-927Z", "fingerprints", "backfill-tags",
        "fix-external-ids-2026-08-14T00-15-58-115Z",
-       "push-opening-structure-2026-08-14T01-00-49-104Z"]
+       "push-opening-structure-2026-08-14T01-00-49-104Z",
+       "repick-cover-2026-08-15T03-11-22-333Z"]
         .flatMap((n) => FAMILIAS.filter((f) => f.casa(n)).map((f) => f.id)),
     )
     for (const f of FAMILIAS) expect(cobertas.has(f.id), `família "${f.id}" sem nome de exemplo`).toBe(true)

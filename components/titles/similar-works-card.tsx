@@ -493,9 +493,12 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
                     href={`/titles/${titleToSlug(w.title)}`}
                     className="block h-[148px] w-[104px] overflow-hidden rounded-lg border border-border bg-muted shadow-sm transition-transform group-hover:scale-[1.02]"
                   >
-                    {w.coverUrl ? (
+                    {w.coverUrls.length > 0 ? (
+                      // `urls` e não `url`: o CoverImage avança no `onError` até achar
+                      // uma capa que carregue. Com uma URL só ele não tem pra onde ir e
+                      // cai no traço — foi o que aconteceu com a capa da Comix.
                       <CoverImage
-                        url={w.coverUrl}
+                        urls={w.coverUrls}
                         className="size-full object-cover transition-transform duration-500 group-hover:scale-105"
                       />
                     ) : (

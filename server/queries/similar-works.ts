@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getSynopsisPredictionsByWorkIds } from "@/server/queries/synopsis-quality"
-import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
+import { pickCoverUrls, pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 
@@ -8,7 +8,19 @@ export interface SimilarWork {
   id: string
   title: string
   similarity: number
-  coverUrl: string | null
+  /**
+   * TODAS as capas em ordem de preferência, pro `<CoverImage urls>` cair na
+   * próxima quando a primeira for link morto.
+   *
+   * 🔴 Não é `coverUrl` singular por medição, não por gosto: em 15/08/2026,
+   * **29 das 988 obras (2,9%)** exibiam capa morta, e em **21** delas havia
+   * alternativa VIVA na própria tabela — o app tinha a capa boa na mão e
+   * mostrava o traço, porque recebia só a primeira. 23 das 29 são
+   * `static.comix.to`, que caiu inteiro no Cloudflare de 11/08 (0 de 15 numa
+   * amostra respondem 200) — o mesmo evento que matou o fetch de reviews da
+   * Comix e levou as capas junto, sem nada acusar.
+   */
+  coverUrls: string[]
   synopsis: string | null
   expectedScore: number | null
   personalFit: number | null
@@ -53,6 +65,14 @@ interface WorkMetaRow {
   publication_status_id: number | null
   is_adult: boolean | null
   canonical_synopsis: string | null
+}
+
+/** Linha de `work_covers` no formato que o `pickCoverUrls` consome. */
+interface WorkCoverPickRow {
+  work_id: string
+  url: string | null
+  is_primary: boolean | null
+  position: number | null
 }
 
 interface WorkGenreRow {
@@ -100,7 +120,7 @@ export async function getSimilarWorks(
   if (rows.length === 0) return []
 
   const ids = rows.map((r) => r.id)
-  const [metaResult, genresResult, ratingsResult, calcResult, predictions] = await Promise.all([
+  const [metaResult, genresResult, ratingsResult, calcResult, coversResult, predictions] = await Promise.all([
     supabase
       .from("works")
       .select("id, year, total_chapters, publication_status_id, is_adult, canonical_synopsis")
@@ -117,6 +137,13 @@ export async function getSimilarWorks(
       .from("calculated_scores")
       .select("work_id, personal_fit_percentile, alignment_score, alignment_stale")
       .in("work_id", ids),
+    // ⚠️ Sem `.range()` de propósito: `ids` tem no máximo `limit` (hoje 8) e a
+    // média é 4,2 capas por obra — ~34 linhas, longe do corte silencioso de 1000.
+    // Se o `limit` do chamador passar de ~230, isto precisa paginar.
+    supabase
+      .from("work_covers")
+      .select("work_id, url, is_primary, position")
+      .in("work_id", ids),
     getSynopsisPredictionsByWorkIds(ids),
   ])
 
@@ -132,6 +159,29 @@ export async function getSimilarWorks(
   if (calcResult.error) {
     console.warn("[similar-works] calc query falhou:", calcResult.error.message)
   }
+  if (coversResult.error) {
+    console.warn("[similar-works] covers query falhou:", coversResult.error.message)
+  }
+
+  /**
+   * Candidatas por obra, na ordem de `pickCoverUrls` (is_primary, depois position).
+   *
+   * ⚠️ Essa é a MESMA ordem do `cover_url` que a RPC devolve
+   * (`order by wc.is_primary desc nulls last, wc.position asc nulls last limit 1`),
+   * então `coverUrls[0]` é exatamente a capa que aparecia antes: ligar o fallback
+   * não muda qual capa a obra mostra quando ela funciona. E é por isso que o
+   * `r.cover_url` da RPC deixou de ser lido — dois lugares calculando "qual é a
+   * principal" é o jeito de eles discordarem depois.
+   */
+  const coverRowsByWorkId = new Map<string, WorkCoverPickRow[]>()
+  for (const row of (coversResult.data as WorkCoverPickRow[] | null) ?? []) {
+    const list = coverRowsByWorkId.get(row.work_id)
+    if (list) list.push(row)
+    else coverRowsByWorkId.set(row.work_id, [row])
+  }
+  const coverUrlsByWorkId = new Map<string, string[]>(
+    [...coverRowsByWorkId].map(([workId, rows]) => [workId, pickCoverUrls(rows)]),
+  )
 
   const metaById = new Map<string, WorkMetaRow>(
     ((metaResult.data as WorkMetaRow[] | null) ?? []).map((m) => [m.id, m]),
@@ -198,7 +248,7 @@ export async function getSimilarWorks(
       id: r.id,
       title: r.title,
       similarity: Number(r.similarity),
-      coverUrl: r.cover_url,
+      coverUrls: coverUrlsByWorkId.get(r.id) ?? [],
       synopsis: canonical || r.synopsis,
       expectedScore: calc?.expected_score == null ? null : Number(calc.expected_score),
       personalFit: calc?.personal_fit == null ? null : Number(calc.personal_fit),

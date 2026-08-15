@@ -97,6 +97,18 @@ export const FAMILIAS = [
     env: "FIX_IDS_KEEP",
   },
   {
+    id: "repick-cover",
+    dono: "repick-dead-covers.ts",
+    // Datado, como o `fix-external-ids`: um diretório por execução com o estado ANTERIOR
+    // de `work_covers.is_primary`. Poucos KB, e é a única forma de desfazer — o banco não
+    // tem PITR. Guardamos bastante porque só se descobre que a repescagem errou quando
+    // alguém olha a capa, o que pode demorar.
+    oQueE: "estado anterior de is_primary ao repescar capa morta",
+    casa: (n) => /^repick-cover-\d{4}/.test(n),
+    keepPadrao: 10,
+    env: "REPICK_COVER_KEEP",
+  },
+  {
     id: "push-opening-structure",
     dono: "push-opening-structure.ts",
     oQueE: "estado anterior da nuvem ao resgatar estrutura de abertura do local",
