@@ -16,7 +16,6 @@ vi.mock("@/components/ai-evaluation/source-link-dialog", () => ({
 }))
 vi.mock("@/server/actions/source-links", () => ({
   markWorksAbsentFromSource: vi.fn(async () => ({ marked: 0, skipped: 0 })),
-  restoreWorkSourceGap: vi.fn(async () => ({ ok: true })),
 }))
 
 import { fireEvent, render, screen, within } from "@testing-library/react"
