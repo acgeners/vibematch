@@ -263,43 +263,73 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
   return (
     <Card className={className}>
       <CardHeader className="pb-0">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle className="text-base flex items-center gap-2">
-            {/* ⚠️ Alvo, não ✨. Aqui nenhum texto foi escrito por um modelo: é busca
-                vetorial (distância cosseno entre embeddings). O ✨ violeta afirmava
-                "isto é geração de IA" — e ainda por cima sem tooltip nenhum, enquanto
-                o ℹ️ ao lado é quem explica o método e carrega o modelo do vetor. */}
-            <Radar className="h-4 w-4 text-muted-foreground" />
-            Obras parecidas
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label="Como as recomendações são geradas"
-                    className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    <Info className="h-3.5 w-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="max-w-[280px] text-xs leading-relaxed">
-                  <strong>Similaridade semântica.</strong> De cada obra montamos um
-                  “retrato” em texto — sinopse, tags e gêneros, as notas dos atributos
-                  avaliados pela IA e um resumo das reviews — e transformamos esse texto
-                  num vetor (<strong>embedding</strong>). O <strong>%</strong> é a
-                  proximidade entre os dois vetores, medida por distância cosseno.
-                  {embedding && (
-                    <span className="mt-2 block border-t border-background/20 pt-1.5 text-[11px] text-muted-foreground">
-                      Vetor desta obra: <span className="font-mono font-semibold">{embedding.model ?? "sem registro"}</span>
-                      {formatProvenanceWhen(embedding.at) && <> · {formatProvenanceWhen(embedding.at)}</>}
-                    </span>
-                  )}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </CardTitle>
+        {/* DUAS faixas, e não uma: elas não cabem na mesma linha — é geometria, não
+            gosto. Medido no app em 15/08/2026: os controles somam 855px FIXOS
+            (Cruzar 146 · Mostrar 234 · Ordenar por 343 · contador 84, com 16px de
+            intervalo) contra 816px de conteúdo do card. E o card não acompanha a
+            janela: a página é `max-w-6xl` com a coluna da capa fixa, então ele mede
+            868px em qualquer janela ≥1280 e 684px em 1024.
 
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:shrink-0">
+            🔴 A causa era `sm:shrink-0` ao lado de `flex-wrap`, no mesmo bloco. Com
+            `shrink-0` a largura-base vira o `max-content`, e o `max-content` de um
+            container que quebra linha é a soma de TUDO numa linha só: ele não
+            encolhia NEM quebrava. Ficava travado em 855px e era desenhado por FORA
+            da borda — o Card não tem `overflow-hidden`, então nada corta e nada rola,
+            e o defeito só aparece na tela. Medido: vazava 145px em 1600 e em 1280, e
+            329px em 1024, com o contador INTEIRO fora do card e "Nota prevista"
+            cortada ao meio.
+
+            A divisão é por PERGUNTA, mesma régua da barra superior: em cima "o que é
+            isto, quantas são, pra onde eu vou"; embaixo "como eu quero ver esta
+            lista". A faixa de baixo tem 593px e cabe até no card de 684px, então o
+            cabeçalho fecha em 81px nas TRÊS larguras. ⚠️ Não há mais `shrink-0` em
+            lugar nenhum aqui: controle novo quebra linha em vez de voltar a vazar. */}
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <CardTitle className="text-base flex items-center gap-2">
+              {/* ⚠️ Alvo, não ✨. Aqui nenhum texto foi escrito por um modelo: é busca
+                  vetorial (distância cosseno entre embeddings). O ✨ violeta afirmava
+                  "isto é geração de IA" — e ainda por cima sem tooltip nenhum, enquanto
+                  o ℹ️ ao lado é quem explica o método e carrega o modelo do vetor. */}
+              <Radar className="h-4 w-4 text-muted-foreground" />
+              Obras parecidas
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Como as recomendações são geradas"
+                      className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-[280px] text-xs leading-relaxed">
+                    <strong>Similaridade semântica.</strong> De cada obra montamos um
+                    “retrato” em texto — sinopse, tags e gêneros, as notas dos atributos
+                    avaliados pela IA e um resumo das reviews — e transformamos esse texto
+                    num vetor (<strong>embedding</strong>). O <strong>%</strong> é a
+                    proximidade entre os dois vetores, medida por distância cosseno.
+                    {embedding && (
+                      <span className="mt-2 block border-t border-background/20 pt-1.5 text-[11px] text-muted-foreground">
+                        Vetor desta obra: <span className="font-mono font-semibold">{embedding.model ?? "sem registro"}</span>
+                        {formatProvenanceWhen(embedding.at) && <> · {formatProvenanceWhen(embedding.at)}</>}
+                      </span>
+                    )}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </CardTitle>
+
+            {/* `ml-auto` e não `justify-between`: contador e atalho andam JUNTOS no
+                canto direito, então quando a linha quebra num card estreito eles
+                descem colados em vez de se afastarem pras duas pontas. */}
+            <span className="ml-auto text-[11px] tabular-nums text-muted-foreground/60">
+              {showOnly === "all"
+                ? `${works.length} ${works.length === 1 ? "obra" : "obras"}`
+                : `${filtered.length} de ${works.length} · não lidas`}
+            </span>
+
             {/* Esta lista parte de UMA obra. O atalho leva pro cruzamento com várias +
                 o alinhamento com o perfil — a pergunta seguinte, não a mesma. */}
             {workId && (
@@ -311,6 +341,9 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
                 Cruzar com outras
               </Link>
             )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <div className="flex items-center gap-2.5">
               <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground/60">
                 Mostrar
@@ -375,12 +408,6 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
                 </div>
               </div>
             )}
-
-            <span className="text-[11px] tabular-nums text-muted-foreground/60">
-              {showOnly === "all"
-                ? `${works.length} ${works.length === 1 ? "obra" : "obras"}`
-                : `${filtered.length} de ${works.length} · não lidas`}
-            </span>
           </div>
         </div>
       </CardHeader>
@@ -466,9 +493,12 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
                     href={`/titles/${titleToSlug(w.title)}`}
                     className="block h-[148px] w-[104px] overflow-hidden rounded-lg border border-border bg-muted shadow-sm transition-transform group-hover:scale-[1.02]"
                   >
-                    {w.coverUrl ? (
+                    {w.coverUrls.length > 0 ? (
+                      // `urls` e não `url`: o CoverImage avança no `onError` até achar
+                      // uma capa que carregue. Com uma URL só ele não tem pra onde ir e
+                      // cai no traço — foi o que aconteceu com a capa da Comix.
                       <CoverImage
-                        url={w.coverUrl}
+                        urls={w.coverUrls}
                         className="size-full object-cover transition-transform duration-500 group-hover:scale-105"
                       />
                     ) : (
