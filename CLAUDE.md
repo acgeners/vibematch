@@ -2567,7 +2567,7 @@ o erro que fez a auditoria de 2026-08-09/10 gastar US$2 em medições que não d
 
 | | instrumento | n | piso de detecção |
 |---|---|---|---|
-| **Precisão** | `scripts/gold-mae.ts` contra `.gold/gold-FILLED.csv` | 30 obras | **0,10** no MAE geral |
+| **Precisão** | `scripts/gold-mae.ts` contra `.gold/gold-FILLED.csv` | 30 obras | **0,10** no MAE absoluto · **0,136** na diferença pareada |
 | **Coerência estrutural** | `scripts/coherence-audit.ts` (checagem A) | 8.673 atributos | dezenas de casos |
 | **Consistência** | `npm run consistency` (2026-08-10) | 8.757 notas · 5.733 pares | comparação por retrato |
 | **Coerência semântica** | — **não existe** | — | — |
@@ -2577,6 +2577,25 @@ reamostragens): MAE do catálogo 0,78, IC95% **[0,68 – 0,88]**. O ganho realis
 reescrita de prompt é ~0,05 — **abaixo do que o instrumento enxerga**. Foi por isso que
 quatro tentativas (v23, v24-pesada, v24-cirúrgica, v25) falharam: o experimento nunca teve
 como dar certo.
+
+⚠️ **São DOIS pisos, e confundi-los subestima o instrumento.** O 0,10 é do MAE **absoluto**
+(bootstrap de uma versão sozinha). Comparar duas versões é teste **PAREADO** — mesmas obras,
+mesmos critérios —, e aí o que vale é o erro padrão da diferença: medido em 2026-08-15,
+**0,049** sobre n=270 pares critério-obra ⇒ menor diferença detectável **0,136**. O
+pareamento ajuda, mas não o bastante: continua acima do ganho de ~0,05.
+
+🔴 **Dá pra PREVER o gold sem rodá-lo, e o método está VALIDADO** (2026-08-15). Amostre os
+deltas empíricos de um piloto sobre as notas do catálogo no gold set (Monte Carlo). Calibrado
+contra a v25 — o único caso com piloto julgado **e** gold rodado —, a simulação **exagera a
+piora em ~32%** (fator 0,69 geral / 0,68 ponderado), e esse fator corrige a previsão. Foi
+assim que a v27 foi reprovada sem gastar os US$1,2: previsão calibrada **0,947 geral / 0,785
+ponderado** contra o catálogo em 0,776 / 0,637, com **P(bater) = 0,0%** em 4000 réplicas.
+
+🔴 **O gold da v25 ficou 5 dias em disco sem nunca ter sido computado.** O JSON
+(`.pilot/gold-v25-2026-08-10T01-30-06-192Z.json`, US$1,09) já trazia `gold`, `catalogo` e
+`novo` por obra — bastava somar. Calculado em 2026-08-15: **geral 1,04 · ponderado 0,97**, a
+PIOR das cinco. Pagar a medição e não computá-la é a forma mais cara de não medir; ao rodar o
+`gold-mae.ts`, **compute o MAE na mesma sessão**.
 
 🔴 **Mas ampliar o gold NÃO é o investimento que destrava — e esta seção já disse que era.**
 O gold mede PRECISÃO; o que a v23/v25 mudavam era CONSISTÊNCIA e COERÊNCIA. Levar o gold de
@@ -2608,6 +2627,12 @@ o catálogo com ele mesmo, e os dois retratos vêm idênticos. Foi a lacuna que 
 ```bash
 npm run consistency -- --piloto=.pilot/piloto-v27-<ts>.json
 ```
+
+🔴 **Antes de reprovisionar qualquer medição paga, LISTE `.pilot/` e `.consistency/`.** O
+piloto da v27 (30 obras, **US$1,20**) foi gerado 55 minutos depois do commit que o exigia e
+ficou **4 dias em disco sem julgamento**, com quatro sessões tratando "falta o piloto" como
+pendência aberta enquanto o resultado esperava num arquivo. Julgar é **US$0**; o mesmo
+aconteceu com o gold da v25. A parte cara é a chamada ao modelo — e ela já foi paga.
 
 ⚠️ **E comparar as obras do piloto CONTRA o retrato do catálogo é pior que não medir**: os
 estratos são deliberadamente não representativos (foram escolhidos para concentrar os
@@ -2738,6 +2763,23 @@ n=30 e piso 0,10, não enxerga. **Salve o retrato ANTES de mexer no prompt**
 que foi o destino das quatro. E leia a seção **"Duas réguas para as notas de atributo"**:
 os dois instrumentos são complementares, e passar num não dispensa o outro.
 
+🔴 **O instrumento foi usado, e a 5ª tentativa também REPROVOU — agora pela régua certa**
+(2026-08-15, `arquivo/prompt-v27`). A v27 portava o texto da v23 por cima da main mirando os
+mecanismos 1 e 4. O piloto (30 obras, US$1,20, pago em 11/08 e julgado só agora) deu movimento
+**distinguível do ruído** — 22,6% de troca de faixa contra piso 12,2%, z = 5,1 — **nos lugares
+errados**:
+
+| mecanismo mirado | resultado |
+|---|---|
+| **1** · `action_adventure`, remover o piso ≥5 | **Δ 0,00**. No estrato escolhido pra concentrar o mecanismo (6 obras de slice of life), **nenhuma caiu para 0-3** |
+| **4** · `protagonist` passivo | as 3 obras do estrato ficaram **8 → 8**; no geral **subiu** +0,29 |
+| — (não mirado) | `tragedy` **+1,05**, o maior movimento — e pesa **0,2%** na Nota Prevista |
+
+⚠️ **O F-controle andou tanto quanto os estratos-alvo** (|Δ| 0,71 contra 0,61–0,71; faixa
+22,2% contra 22,6% geral), com humor −2,5, drama +2,0, tragedy +2,0. Controle que anda igual
+ao tratamento **impede ler o efeito como local** — o z=5,1 mede deriva global, não correção
+dirigida.
+
 Os quatro mecanismos, então — a tentação é tratar como um problema só, e não é:
 
 🔴 **1. O piso de 5 se sobrepunha à RUBRICA.** Ele existe contra dois vieses reais (baixar por
@@ -2747,6 +2789,14 @@ life", "uneventful", "nada acontece"), **316 (30,8%) ficaram ≥5** — enquanto
 critério diz literalmente *"cotidiano, sem conflito externo relevante (slice of life)"*. A prosa
 citava a definição da faixa e a nota não ia pra lá. ⚠️ Ao mexer nisto, mantenha explícito o que o
 piso ainda protege: corrigir um viés reabre o outro.
+
+🔴 **TESTADO EM 2026-08-15, e o piso NÃO era o mecanismo causal.** A v27 removeu as duas
+frases (*"a nota deve ser ≥ 5"* e *"0-4 são RESERVADAS"*) e `action_adventure` **não se
+moveu** — Δ médio 0,00 no piloto, e nenhuma das 6 obras de slice of life caiu para 0-3. A
+contradição entre o piso e a rubrica **é real e segue no ar**, mas removê-la não muda a nota:
+o modelo não estava obedecendo àquele piso. Quem reabrir este mecanismo precisa de outra
+hipótese sobre por que a prosa afirma ausência e o número não acompanha — trocar o texto do
+piso já foi tentado e medido.
 
 🔴 **2. A posição DENTRO da faixa era surda à intensidade que a própria prosa declarava.** Entre
 notas 4–6,9, a justificativa com "pontual/esporádico/não domina" distribuía **31/32/35%** (em
@@ -2785,6 +2835,7 @@ rebaixam.* Sem essa distinção nomeada, consertar a agência reabre o viés de 
 | v24 | *(nunca foi versão de prompt — ver abaixo)* | — |
 | v25 | descompressão dos 4 critérios colapsados | ❌ **revertida** |
 | **v26** | **texto da v22 + a `description` da migration 181** | ✅ **VIVA** |
+| v27 | porte da v23 por cima da main | ❌ **arquivada** — reprovou no piloto (`arquivo/prompt-v27`) |
 
 🔴 **v26 não é "v25 + 1": é a v22 de volta.** A única diferença real em relação à v22 é que a
 `description` do `couple_dynamics` vem ampliada do banco (migration 181), e isso entra no prompt
@@ -2819,7 +2870,10 @@ dois eixos em qualquer query por `prompt_version`.
 critérios — a única régua de ACURÁCIA que existe. Medir "a nota mudou no rumo pretendido" é
 consistência, não acurácia, e já enganou uma vez: a v23 mudava no rumo e ficava MAIS LONGE da
 curadora. Harness: `scripts/gold-mae.ts`. Baseline a bater: **catálogo 0,77 geral / 0,64
-ponderado** — v24-pesada 0,82 · v23 0,87 · v24-cirúrgica 0,89, nenhuma bateu.
+ponderado** — v24-pesada 0,82 · v23 0,87 · v24-cirúrgica 0,89 · **v25 1,04 / 0,97**, nenhuma
+bateu. ⚠️ **São CINCO derrotas, não quatro**: a v25 esteve fora desta linha até 2026-08-15
+porque o gold dela foi pago e nunca computado. E a melhor perdeu por **+0,05** — o padrão não
+é "quase lá", é uma classe de tentativa que não funciona.
 
 🔴 **ENTANGLEMENT:** as 9 notas saem de UMA leitura do modelo, então mexer na rubrica de um
 critério recalibra o modelo inteiro e move os vizinhos — e isso NÃO é controlável por tamanho de
@@ -3197,10 +3251,11 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 medido em 2026-08-15 depois da recorrência nos grupos de favoritos (3 arquivos, 22 casos).
 Base: **2.948 em 282**, do DESFAZER da ausência.
 
-⚠️ A árvore tem um arquivo de teste NÃO COMMITADO de outra sessão
-(`tests/unit/ui/pendencias-ia-abrem-em-aba-nova.test.tsx`). A medição o excluiu de propósito
-(`--exclude`): contá-lo seria a armadilha da árvore suja descrita logo abaixo, dessa vez com
-trabalho de outra pessoa. Quando aquele PR entrar, este número sobe junto.
+⚠️ O arquivo de teste que estava NÃO COMMITADO na árvore
+(`tests/unit/ui/pendencias-ia-abrem-em-aba-nova.test.tsx`) virou o **PR #426** em 2026-08-15 —
+a medição acima o excluiu de propósito (`--exclude`), porque contá-lo seria a armadilha da
+árvore suja descrita logo abaixo. **Quando o #426 mergear, RE-MEÇA**; não some 2 de cabeça,
+que é como esta linha envelheceu todas as outras vezes.
 
 ⚠️ **Confira o TOTAL EXECUTADO contra o disco, sempre.** Aqui: `find tests -name '*.test.ts*'`
 deu **286**, menos o arquivo alheio = **285**, e o Vitest executou **285** — é essa igualdade
