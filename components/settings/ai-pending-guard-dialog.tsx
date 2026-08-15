@@ -1,7 +1,5 @@
 "use client"
 
-import { useRouter } from "next/navigation"
-
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,10 +37,13 @@ interface AiPendingGuardDialogProps {
 /**
  * Trava reutilizável: avisa que há artefatos gerados por IA pendentes antes de
  * uma ação que os consome como sinal (calibração / recálculo de notas). O
- * usuário decide seguir mesmo assim ou resolver as pendências antes. Cada item
- * é um link que fecha o popup e leva à seção correspondente; o botão "Resolver
- * pendências antes" leva direto ao /settings na primeira pendência da lista
- * (todas moram no mesmo grupo "Gerado por IA", então as demais ficam à vista).
+ * usuário decide seguir mesmo assim ou resolver as pendências antes.
+ *
+ * 🔴 Os dois caminhos de "ir resolver" abrem em ABA NOVA (o botão e cada item da
+ * lista), porque a ação que disparou a trava mora na página atual: navegar por
+ * cima dela obriga a refazer o caminho até o botão depois de resolver. Pelo mesmo
+ * motivo eles são o mesmo comportamento — um abrindo aba e o outro navegando em
+ * cima seriam dois critérios pro mesmo fato, a dois centímetros um do outro.
  */
 export function AiPendingGuardDialog({
   open,
@@ -55,9 +56,9 @@ export function AiPendingGuardDialog({
   cancelLabel = "Resolver pendências antes",
   proceedClassName,
 }: AiPendingGuardDialogProps) {
-  const router = useRouter()
   // "Resolver pendências antes" abre o /settings na primeira pendência (o popup
-  // só abre com items.length > 0, então sempre há um alvo).
+  // só abre com items.length > 0, então sempre há um alvo). Todas moram no mesmo
+  // grupo "Gerado por IA", então as demais ficam à vista na mesma aba.
   const resolveHref = items[0]?.href
 
   return (
@@ -72,6 +73,8 @@ export function AiPendingGuardDialog({
             <li key={item.href} className="flex items-center justify-between gap-3">
               <a
                 href={item.href}
+                target="_blank"
+                rel="noopener noreferrer"
                 onClick={() => onOpenChange(false)}
                 className="text-foreground hover:underline"
               >
@@ -86,7 +89,7 @@ export function AiPendingGuardDialog({
         <AlertDialogFooter>
           <AlertDialogCancel
             onClick={() => {
-              if (resolveHref) router.push(resolveHref)
+              if (resolveHref) window.open(resolveHref, "_blank", "noopener,noreferrer")
             }}
           >
             {cancelLabel}
