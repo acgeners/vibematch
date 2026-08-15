@@ -4,7 +4,7 @@
  * O gold (`.gold/gold-FILLED.csv`) são 29 obras que a curadora leu e avaliou nos 9
  * critérios **às cegas**, sem ver a nota da IA (construído em 2026-07-28/29). Ele mede
  * ACURÁCIA (distância até o julgamento humano). Não confundir com o piloto
- * `pilot-prompt-v25.ts`, que mede MOVIMENTO (antes → depois) — a investigação de julho
+ * `pilot-prompt.ts`, que mede MOVIMENTO (antes → depois) — a investigação de julho
  * registrou que consistência ≠ acurácia, e que a métrica de movimento já enganou uma vez:
  * a v23 "mudava no rumo pretendido" e mesmo assim ficava MAIS LONGE da curadora.
  *
