@@ -156,6 +156,8 @@ export type RankingSortBy =
   | "personal_fit"
   | "alignment_score"
   | "art"
+  /** Recorrência nos grupos de favoritos — exige `groupCountByWorkId` nos filtros. */
+  | "groups"
   | `crit_${string}`
 
 export interface SortLevel {
@@ -271,6 +273,19 @@ export interface RankingFilters {
    *   nunca foi medido apagaria 2,4% do catálogo em silêncio (e 100% antes da semente).
    */
   artFilter?: "forte" | "sem_fraca"
+  /**
+   * Em quantos grupos de favoritos cada obra está — só para poder ORDENAR por isso
+   * (`sortLevels: [{ field: "groups" }]`). Não filtra nada.
+   *
+   * Vem de fora porque é dado de OUTRA tabela (`work_list_items`) e per-usuário: o
+   * `getRanking` serve /titles e /ranking também, e ali ninguém paga essa leitura. Ausente,
+   * a contagem é 0 para todos e ordenar por "groups" não muda nada — o que é o correto,
+   * já que nessas telas a coluna nem é oferecida.
+   *
+   * 🔴 Quem monta este Record tem que ser a MESMA leitura que alimenta a célula da tabela
+   * (`groupCountsFrom(membership)`), senão a lista ordena por um número e mostra outro.
+   */
+  groupCountByWorkId?: Record<string, number>
   sortBy?: RankingSortBy
   sortDir?: "asc" | "desc"
   sortLevels?: SortLevel[]
@@ -1001,6 +1016,13 @@ export async function getRanking(
     // "não sei" não disputa as primeiras posições com "provavelmente forte".
     if (field === "art") {
       return m * ((a.artPercentile ?? -Infinity) - (b.artPercentile ?? -Infinity))
+    }
+    // Recorrência (em quantos grupos de favoritos a obra está). Ausente ⇒ 0 para todos, e o
+    // nível não decide nada — nunca -Infinity: "em nenhum grupo" é um fato, não um vazio, e
+    // com -Infinity a ordem ASC começaria pelas sem grupo em vez de por 0, 1, 2…
+    if (field === "groups") {
+      const counts = filters.groupCountByWorkId
+      return m * ((counts?.[a.workId] ?? 0) - (counts?.[b.workId] ?? 0))
     }
     if (field === "total_votes") return m * (a.totalVotes - b.totalVotes)
     if (field === "chapters_total" || field === "chapters")

@@ -2,7 +2,7 @@ import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 import { sanitizeInterestSelection } from "@/lib/interest-sentinels"
 import Link from "next/link"
-import { ChevronLeft, FolderOpen, Heart, Sparkles } from "lucide-react"
+import { ChevronLeft, FolderOpen, Heart, Layers, Sparkles } from "lucide-react"
 import { Header } from "@/components/layout/header"
 import { Badge } from "@/components/ui/badge"
 import { WorkTable } from "@/components/titles/work-table"
@@ -18,7 +18,7 @@ import { getWorksByIds } from "@/server/queries/works"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
 import { getFavoritesSummary } from "@/server/queries/favorites"
-import { getListDetail, getListName, getUngroupedFavorites, getWorksLiteForPicker, getListRecommendations, getListsForPicker } from "@/server/queries/lists"
+import { getListDetail, getListName, getUngroupedFavorites, getWorksLiteForPicker, getListRecommendations, getListsForPicker, getGroupMembership, getMultiGroupFavorites, groupCountsFrom } from "@/server/queries/lists"
 import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
@@ -43,24 +43,27 @@ function toArray(value: string | string[] | undefined): string[] {
   return Array.isArray(value) ? value : [value]
 }
 
-// Os mesmos três casos do `title` do Header abaixo (linha ~230): os dois ids reservados e o
+// Os mesmos quatro casos do `title` do Header abaixo (linha ~230): os três ids reservados e o
 // nome do grupo. Grupo apagado ou de outra pessoa cai em "Favoritos" — a página redireciona
 // pro índice de qualquer jeito.
 export async function generateMetadata({ params }: FavoritesListPageProps): Promise<Metadata> {
   const { listId } = await params
   if (listId === "all") return { title: "Todos os favoritos" }
   if (listId === "ungrouped") return { title: "Sem grupo" }
+  if (listId === "multi") return { title: "Em vários grupos" }
   return { title: (await getListName(listId)) ?? "Favoritos" }
 }
 
 export default async function FavoritesListPage({ params, searchParams }: FavoritesListPageProps) {
   const { listId } = await params
-  // Dois ids RESERVADOS: nenhum dos dois é um `work_lists`. "all" é o universo de favoritos;
-  // "ungrouped" é a visão derivada das favoritas fora de qualquer grupo. Ambos são
-  // somente-leitura: não têm o que editar, comentar ou excluir.
+  // TRÊS ids RESERVADOS: nenhum deles é um `work_lists`. "all" é o universo de favoritos;
+  // "ungrouped" é a visão derivada das favoritas fora de qualquer grupo; "multi", das que
+  // estão em 2+ recortes. Os três são somente-leitura: não têm o que editar, comentar ou
+  // excluir.
   const isAll = listId === "all"
   const isUngrouped = listId === "ungrouped"
-  const isPseudo = isAll || isUngrouped
+  const isMulti = listId === "multi"
+  const isPseudo = isAll || isUngrouped || isMulti
 
   // Grupo real: carrega metadados + escopo. Grupo inexistente volta ao índice.
   const listDetail = isPseudo ? null : await getListDetail(listId)
@@ -70,6 +73,13 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
   // O card nem aparece nesse caso; quem chegar pela URL volta ao índice.
   const ungrouped = isUngrouped ? await getUngroupedFavorites() : null
   if (isUngrouped && ungrouped!.groupCount === 0) redirect("/favorites")
+
+  // Mesma regra para "Em vários grupos": sem interseção nenhuma a visão não existe. O card
+  // já se esconde nesse caso — isto cobre quem chega pela URL (link salvo, histórico).
+  // `multiFavs`, não `multi`: já existe um helper `multi(key)` para params de valor múltiplo
+  // nesta página, e o nome curto colidiria com ele.
+  const multiFavs = isMulti ? await getMultiGroupFavorites() : null
+  if (isMulti && multiFavs!.workIds.length === 0) redirect("/favorites")
 
   const basePath = `/favorites/${listId}`
   const params_ = await searchParams
@@ -100,6 +110,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
   }
 
   const validSortFields = new Set<string>([
+    "groups",
     "decision",
     "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
     "user_score",
@@ -111,7 +122,17 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     "updated_at", "last_read_at",
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
-  const rawSort = str("sort") ?? "expected_score:desc"
+  // Em "Em vários grupos" a recorrência é o assunto da página, então ela ordena — com a
+  // Prevista logo abaixo, porque a recorrência empata muito (são 4 valores possíveis hoje).
+  // Nas demais visões o default segue o de sempre.
+  //
+  // 🔴 UMA constante para os dois lados. O painel de filtros tem um default PRÓPRIO
+  // (`expected_score:desc`) e, sem receber este, ele desenhava "N. Prevista · 1 nível"
+  // sobre uma lista ordenada por Grupos — e o "Aplicar filtros" seguinte reescrevia a URL
+  // com o que o painel achava que era a ordem, apagando a ordenação da página. Medido na
+  // tela em 2026-08-15.
+  const defaultSort = isMulti ? "groups:desc,expected_score:desc" : "expected_score:desc"
+  const rawSort = str("sort") ?? defaultSort
   const sortLevels: SortLevel[] = rawSort.split(",").map((seg) => {
     const [field, dir] = seg.trim().split(":")
     return {
@@ -150,6 +171,12 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
   // não pode aparecer: "Forte" devolveria vazio, indistinguível de "não há obra com arte
   // forte". `cache()` no reader ⇒ sem round-trip extra.
   const artScoresReader = await getScoresReader()
+
+  // Recorrência: um mapa só alimenta a ORDENAÇÃO (via getRanking) e a CÉLULA (via
+  // WorkTable). Duas contagens independentes é como a coluna passaria a mostrar um número
+  // e a ordem a obedecer outro — ver "DOIS critérios para o MESMO fato" no CLAUDE.md.
+  // `cache()` no reader ⇒ sem round-trip extra, mesmo com o `getListsForPicker` abaixo.
+  const membership = await getGroupMembership()
 
   const filters: RankingFilters = {
     search: str("search"),
@@ -190,12 +217,20 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     onlyWithFinalScore: str("only_scored") === "1",
     onlyWithoutFinalScore: str("no_score") === "1",
     // "Todos": universo de favoritos. "Sem grupo": favoritas menos as agrupadas (a query já
-    // resolveu o conjunto). Grupo real: escopo pelos IDs do grupo.
+    // resolveu o conjunto). "Em vários grupos": as que aparecem em 2+ recortes. Grupo real:
+    // escopo pelos IDs do grupo.
     onlyFavorites: isPseudo,
-    onlyWorkIds: isAll ? undefined : isUngrouped ? ungrouped!.workIds : listDetail!.workIds,
+    onlyWorkIds: isAll
+      ? undefined
+      : isUngrouped
+        ? ungrouped!.workIds
+        : isMulti
+          ? multiFavs!.workIds
+          : listDetail!.workIds,
     includeFinishedDropped: true,
     adultFilter,
     artFilter,
+    groupCountByWorkId: groupCountsFrom(membership),
     sortLevels,
   }
 
@@ -238,14 +273,28 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     }
   })
 
-  const summary = isAll ? favSummary! : isUngrouped ? ungrouped!.summary : listDetail!.summary
-  const title = isAll ? "Todos os favoritos" : isUngrouped ? "Sem grupo" : listDetail!.name
+  const summary = isAll
+    ? favSummary!
+    : isUngrouped
+      ? ungrouped!.summary
+      : isMulti
+        ? multiFavs!.summary
+        : listDetail!.summary
+  const title = isAll
+    ? "Todos os favoritos"
+    : isUngrouped
+      ? "Sem grupo"
+      : isMulti
+        ? "Em vários grupos"
+        : listDetail!.name
   const description = isAll
     ? "Exploração detalhada das obras marcadas como favoritas."
     : isUngrouped
       ? "Favoritas que ainda não entraram em nenhum grupo — a fila do que falta organizar."
-      : listDetail!.description ?? "Recorte dos seus favoritos pra comparar em um contexto."
-  const kicker = isAll ? "Biblioteca" : isUngrouped ? "Visão derivada" : "Grupo"
+      : isMulti
+        ? "Obras que você fichou em mais de um recorte — onde seus recortes se cruzam."
+        : listDetail!.description ?? "Recorte dos seus favoritos pra comparar em um contexto."
+  const kicker = isAll ? "Biblioteca" : isPseudo ? "Visão derivada" : "Grupo"
 
   return (
     <div className="space-y-4">
@@ -260,7 +309,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         kicker={kicker}
         title={title}
         description={description}
-        icon={isUngrouped ? <FolderOpen /> : <Heart />}
+        icon={isUngrouped ? <FolderOpen /> : isMulti ? <Layers /> : <Heart />}
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Badge variant="outline" className="text-sm">
@@ -325,6 +374,8 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         // "Completed"/"Want to Read" hardcoded de /ranking, que aqui seria mentira.
         defaultPublicationStatus="all"
         defaultPersonalStatus="all"
+        // O MESMO default que o `rawSort` acima usa — ver o 🔴 lá.
+        defaultSort={defaultSort}
         defaultTopN={null}
         basePath={basePath}
         criterionMoments={criterionMoments}
@@ -338,6 +389,10 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         showTierBand={false}
         showHideAvoided
         showArtFilter={artScoresReader.isOwner}
+        // A recorrência só é ordenável onde a contagem é carregada — e o painel precisa
+        // CONHECER o campo, senão ele lê `sort=groups:desc` como "N. Prevista" e o
+        // "Aplicar filtros" seguinte apaga a ordenação da página.
+        showGroupsSort
         showAdultFilter
       />
 
@@ -355,8 +410,10 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         enableSelectAll
         isPaid={isPaid}
         groups={groupOptions}
-        // Só num grupo REAL há de onde remover — em /all e /ungrouped a ação não existe.
+        // Só num grupo REAL há de onde remover — nas três visões derivadas a ação não existe.
         currentGroup={isPseudo ? undefined : { id: listId, name: listDetail!.name }}
+        // A MESMA leitura que ordenou a lista (ver `groupCountByWorkId` nos filtros).
+        groupsByWorkId={membership.byWork}
       />
     </div>
   )

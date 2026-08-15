@@ -1577,6 +1577,71 @@ saía `$-4.20`, com o cifrão na frente do sinal) e por
 o `money.test.ts` passava verde enquanto o badge chamava `formatUsd` quatro vezes em separado. O
 que regride nesta classe não é a fórmula, é o **escopo**, e escopo só aparece na árvore desenhada.
 
+## Em quantos grupos a obra está é DESEMPATE — e o número não promete gosto
+
+Uma obra pode estar em vários grupos de favoritos (M-pra-N desde a migration 123), e a
+**recorrência** — em quantos ela aparece — é curadoria manual. Medida em 2026-08-15 nas 126
+favoritas da nuvem (12 grupos, 186 vínculos, 117 obras agrupadas):
+
+| em N grupos | 0 | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|---|
+| obras | 9 | 71 | 28 | 14 | 3 | 1 |
+
+✅ **O que autoriza a feature: ela é ORTOGONAL ao que já existe.** Correlação com a Nota
+Prevista **0,13** e com o Alinhamento **0,11**; a média prevista é plana entre as faixas
+(7,63 → 7,83 → 7,77). E ela **separa 309 dos 481 pares empatados na Prevista exibida —
+64%**, número da mesma família do "arte desempata 67%". Logo: entra como **nível de
+ordenação** e **linha do comparador**, não como um ranking próprio.
+
+🔴 **NÚMERO, nunca chip aceso.** 2+ grupos são **36% das favoritas** — destaque em 1 de cada
+3 linhas é o alarme que ninguém lê, a mesma régua que mantém o Alinhamento fora dos chips de
+lista. A cor também não serve de identificação: os 12 grupos usam **4 cores**, e `Spicy`,
+`Best Spicy` e `Fotos boas` dividem o mesmo rosa. Quem nomeia é o **hover**.
+
+🔴 **O texto da UI fala em RECORTES, nunca em gosto — e isso é medido, não estilo.** Os
+grupos têm duas naturezas: uns descrevem a obra (`Spicy`, `Best Spicy`, `Fotos boas`,
+`Ideal`), outros o estado dela no fluxo (`Lendo agora`, `Next`, `Ongoing`, `Ranking`,
+`Iniciadas`, `Recomendações`, `Recomendado`, `10 de agosto`). Das 46 obras em 2+ grupos:
+**8 só-tema · 8 só-fluxo · 30 mistas** — e a de maior recorrência (5) tem **quatro** de
+fluxo. "Onde seu gosto converge" seria falso em 38 das 46. Separar as duas leituras exigiria
+marcar o TIPO do grupo (coluna nova em `work_lists`): **decidido em 2026-08-15 NÃO fazer**.
+
+⚠️ **Grupo contido em outro infla a contagem sem convergência nenhuma.** `Best Spicy` (13)
+está 100% dentro de `Spicy` (53), e é o **único par assim em 33 possíveis (3%)** — raro o
+bastante para virar aviso no card do grupo contido, que é o que impede a coluna de mentir.
+
+**Dono único: `getGroupMembership()`** (`server/queries/lists.ts`, `cache()` por requisição).
+Quatro superfícies consomem dele — a coluna, a ordenação, o card derivado e o comparador —
+porque quatro contagens próprias é a classe "dois critérios pro mesmo fato" com quatro lados.
+`groupCountsFrom()` deriva o Record que o `getRanking` ordena. **Custo: ZERO consulta nova**
+em /favorites; `getListsWithSummary` e `getListsForPicker` já paginavam esses itens e
+descartavam o vínculo.
+
+**`/favorites/multi` é o TERCEIRO pseudo-id** (com `all` e `ungrouped`) — irmão do "Sem
+grupo": as duas visões derivadas respondem perguntas opostas sobre a mesma coleção ("o que
+falta organizar" × "onde os recortes se cruzam"), nenhuma tem linha em `work_lists`. Corte
+2+, sem limiar inventado: quem destaca é a ordenação.
+
+🔴 **O default de ordenação precisa ser UMA constante para os dois lados.** O painel de
+filtros tem default próprio (`expected_score:desc`); sem recebê-lo da página, ele desenhava
+**"N. Prevista · 1 nível" sobre uma lista ordenada por Grupos** — e o "Aplicar filtros"
+seguinte reescrevia a URL, apagando a ordenação da página (o bug do rascunho da seção
+abaixo, agora pela ordenação). Medido na tela; `tsc` e a suíte passavam limpos.
+
+⚠️ **A coluna só é ORDENÁVEL onde o dado existe.** Em /titles e /ranking a contagem não é
+carregada, então a entrada em `sortableColumns` é condicional a `groupsByWorkId` — senão o
+clique no cabeçalho reordenaria por `expected_score` em silêncio. Quem pegou isso foi
+`tests/unit/orchestration/coluna-ordenavel-tem-campo-aceito.test.ts`, que passou a entender
+emissão condicional (a regra é derivada da FORMA do código, não uma exceção com "groups"
+dentro).
+
+Guardado por `tests/unit/favorites/recorrencia-em-grupos.test.ts` (aninhamento, corte 2+,
+gate do anônimo), `tests/unit/ui/coluna-grupos-recorrencia.test.tsx` (RENDER — um teste que
+lesse o mapa passaria verde com o número fora da tela) e
+`tests/unit/orchestration/recorrencia-uma-fonte-so.test.ts`, que **captura o identificador**
+de que cada ponta deriva em vez de casar o nome da variável. As três foram conferidas com
+sondas.
+
 ## O painel de filtros é RASCUNHO — navegar por fora dele apaga o filtro
 
 `RankingFilters` (usado por `/ranking` **e** `/favorites`) escreve tudo em `draftSearch` e só o
@@ -3128,9 +3193,9 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.948 passando (+24 pulados) em 282 arquivos** (277 passando + 5 pulados;
-medido em 2026-08-15 depois de travar o caminho do DESFAZER da ausência (1 arquivo, 3 casos).
-Base: **2.945 em 281**, do lote de ausência.
+`npm run test` → **2.971 passando (+24 pulados) em 285 arquivos** (280 passando + 5 pulados;
+medido em 2026-08-15 depois da recorrência nos grupos de favoritos (3 arquivos, 22 casos).
+Base: **2.948 em 282**, do DESFAZER da ausência.
 
 ⚠️ A árvore tem um arquivo de teste NÃO COMMITADO de outra sessão
 (`tests/unit/ui/pendencias-ia-abrem-em-aba-nova.test.tsx`). A medição o excluiu de propósito
@@ -3138,8 +3203,15 @@ Base: **2.945 em 281**, do lote de ausência.
 trabalho de outra pessoa. Quando aquele PR entrar, este número sobe junto.
 
 ⚠️ **Confira o TOTAL EXECUTADO contra o disco, sempre.** Aqui: `find tests -name '*.test.ts*'`
-deu **283**, menos o arquivo alheio = **282**, e o Vitest executou **282** — é essa igualdade
+deu **286**, menos o arquivo alheio = **285**, e o Vitest executou **285** — é essa igualdade
 que descarta truncamento silencioso, não o "0 failed" do rodapé.
+
+🔴 **E confira o DIFF antes de acreditar num verde.** Em 2026-08-15 três edições já aplicadas
+e testadas (o `showGroupsSort` do painel, o `defaultSort` da página) **sumiram do disco no meio
+da sessão** — causa não identificada, provavelmente buffer velho do editor salvando por cima.
+A suíte continuou verde (nenhum teste as cobria) e quem denunciou foi o `tsc`. Antes de dar
+por pronto, `git diff` nos arquivos que você tocou; a memória do que foi editado não é prova
+de que está no disco.
 
 ⚠️ **"Errors 1 error" no rodapé COM tudo passando é a flakiness de carga, não queda de teste** —
 apareceu numa rodada (com dev server + Chromium abertos) e não reproduziu em três seguintes, com

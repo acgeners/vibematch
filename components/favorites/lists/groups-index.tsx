@@ -4,7 +4,7 @@ import { useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { FolderOpen, Heart, MessageSquare, Pencil, Plus, Sparkles, Trash2 } from "lucide-react"
+import { FolderOpen, Heart, Layers, MessageSquare, Pencil, Plus, Sparkles, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CoverImage } from "@/components/ui/cover-image"
@@ -13,7 +13,13 @@ import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
 import { deleteWorkList } from "@/server/actions/lists"
 import type { FavoritesSummary } from "@/server/queries/favorites"
-import type { UngroupedFavorites, WorkListSummary, WorkLiteForPicker } from "@/server/queries/lists"
+import type {
+  MultiGroupFavorites,
+  NestedGroupPair,
+  UngroupedFavorites,
+  WorkListSummary,
+  WorkLiteForPicker,
+} from "@/server/queries/lists"
 import { GroupFormDialog, type GroupFormData } from "./group-form-dialog"
 import { SuggestGroupsDialog } from "./suggest-groups-dialog"
 
@@ -22,6 +28,10 @@ interface GroupsIndexProps {
   allSummary: FavoritesSummary
   /** Visão derivada "Sem grupo" (favoritas fora de qualquer grupo). */
   ungrouped: UngroupedFavorites
+  /** Visão derivada "Em vários grupos" (favoritas que aparecem em 2+ recortes). */
+  multi: MultiGroupFavorites
+  /** Grupos 100% contidos em outro — o card do CONTIDO avisa. */
+  nested: NestedGroupPair[]
   catalog: WorkLiteForPicker[]
 }
 
@@ -114,7 +124,18 @@ function CardFoot({ summary, commentCount }: { summary: FavoritesSummary; commen
   )
 }
 
-export function GroupsIndex({ lists, allSummary, ungrouped, catalog }: GroupsIndexProps) {
+export function GroupsIndex({
+  lists,
+  allSummary,
+  ungrouped,
+  multi,
+  nested,
+  catalog,
+}: GroupsIndexProps) {
+  // Um aviso por grupo CONTIDO. É raro por construção (1 par em 33 na medição de
+  // 2026-08-15) — se um dia deixar de ser, o aviso estará dizendo a verdade sobre uma
+  // estrutura de grupos de fato redundante.
+  const nestedByInner = new Map(nested.map((n) => [n.innerId, n]))
   const router = useRouter()
   const [createOpen, setCreateOpen] = useState(false)
   const [suggestOpen, setSuggestOpen] = useState(false)
@@ -195,6 +216,38 @@ export function GroupsIndex({ lists, allSummary, ungrouped, catalog }: GroupsInd
           </div>
         </div>
 
+        {/* Card DERIVADO: favoritas que aparecem em 2+ recortes. Irmão do "Sem grupo" (as duas
+            respondem perguntas opostas sobre a mesma coleção) e, como ele, sem linha em
+            `work_lists`: nada para editar, comentar ou excluir.
+
+            ⚠️ O texto fala em RECORTES, não em gosto. Medido em 2026-08-15: dos grupos de
+            hoje, uns descrevem a obra e outros o estado dela no fluxo, e 30 das 46 obras
+            misturam os dois — "onde seu gosto converge" seria falso na maioria delas. */}
+        {multi.workIds.length > 0 && (
+          <div className="relative flex min-h-[132px] items-center gap-4 rounded-xl border border-dashed border-primary/45 bg-gradient-to-b from-primary/10 to-muted/25 p-4 transition hover:-translate-y-0.5 hover:border-primary/70">
+            <Link
+              href="/favorites/multi"
+              aria-label="Favoritas em vários grupos"
+              className="absolute inset-0 rounded-xl"
+            />
+            <CoverStack urls={multi.coverUrls} />
+            <div className="pointer-events-none min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <Layers className="size-4 shrink-0 text-primary" />
+                <p className="truncate font-semibold">Em vários grupos</p>
+                <Badge variant="outline" className="border-primary/50 text-[10px] text-primary">
+                  derivado
+                </Badge>
+              </div>
+              <p className="line-clamp-2 text-sm text-muted-foreground">
+                Obras que você fichou em mais de um recorte — onde seus recortes se cruzam.
+                {multi.maxGroups >= 2 && ` A mais recorrente está em ${multi.maxGroups}.`}
+              </p>
+              <CardFoot summary={multi.summary} />
+            </div>
+          </div>
+        )}
+
         {/* Card DERIVADO: favoritas fora de qualquer grupo. Sem linha em `work_lists` — daí a
             borda tracejada e a ausência de editar/excluir. Escondido quando não há grupo
             nenhum: aí ele seria uma cópia exata de "Todos os favoritos". */}
@@ -248,6 +301,17 @@ export function GroupsIndex({ lists, allSummary, ungrouped, catalog }: GroupsInd
                 <p className="line-clamp-2 text-sm text-muted-foreground">{list.description}</p>
               )}
               <CardFoot summary={list} commentCount={list.commentCount} />
+              {/* Grupo contido em outro: sem isto, as obras dele exibem "2 grupos" na tabela e
+                  parecem convergência, quando são o mesmo recorte contado duas vezes. */}
+              {nestedByInner.has(list.id) && (
+                <p className="mt-2 rounded-md border bg-muted/60 px-2 py-1 text-[11px] leading-snug text-muted-foreground">
+                  ⊂ as {nestedByInner.get(list.id)!.innerCount} também estão em{" "}
+                  <span className="font-medium text-foreground">
+                    {nestedByInner.get(list.id)!.outerName}
+                  </span>{" "}
+                  — para elas, “2 grupos” não é convergência
+                </p>
+              )}
             </div>
             <div className="pointer-events-auto absolute right-3 top-3 z-10 flex gap-1 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100">
               <Button

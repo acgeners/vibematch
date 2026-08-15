@@ -80,7 +80,8 @@ import { AddToGroupDialog } from "@/components/favorites/lists/add-to-group-dial
 import { CompareSelectionBar } from "@/components/titles/selection-bar"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { addWorksToList, countSelectedWorksInFolders, removeWorksFromList } from "@/server/actions/lists"
-import type { ListPickerOption } from "@/server/queries/lists"
+import type { ListPickerOption, WorkGroupRef } from "@/server/queries/lists"
+import { GroupCountCell } from "@/components/titles/group-count-cell"
 import { AlignmentCell, AlignmentScoreCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
@@ -170,6 +171,9 @@ interface WorkTableProps {
    *  Habilita "Remover do grupo" (lote + menu da linha). Ausente em /favorites/all e
    *  /favorites/ungrouped, que não são grupos: não há de onde remover. */
   currentGroup?: { id: string; name: string }
+  /** work_id → grupos de favoritos a que a obra pertence, para a coluna "Grupos".
+   *  Só /favorites passa; nas demais telas a coluna nasce oculta e a célula fica em "—". */
+  groupsByWorkId?: Record<string, WorkGroupRef[]>
 }
 
 function scoreFor(work: WorkWithRelations, slug: string): number | null {
@@ -257,6 +261,7 @@ export function WorkTable({
   criterionPrefs,
   groups,
   currentGroup,
+  groupsByWorkId,
 }: WorkTableProps) {
   const router = useRouter()
   const refresh = useRefresh()
@@ -544,6 +549,7 @@ export function WorkTable({
           onClearAll={clearCompare}
           criterionPrefs={criterionPrefs}
           currentGroup={currentGroup}
+          groupsByWorkId={groupsByWorkId}
         />
       )}
 
@@ -900,6 +906,7 @@ function WorkListView({
   onClearAll,
   criterionPrefs,
   currentGroup,
+  groupsByWorkId,
 }: {
   works: WorkWithRelations[]
   searchParams: ReturnType<typeof useSearchParams>
@@ -917,6 +924,7 @@ function WorkListView({
   onClearAll?: () => void
   criterionPrefs?: Record<string, CriterionRange>
   currentGroup?: { id: string; name: string }
+  groupsByWorkId?: Record<string, WorkGroupRef[]>
 }) {
   const refresh = useRefresh()
   // Stopgap multi-user: o menu "Gerenciar obra" (editar/favoritar/arquivar) muta o
@@ -945,6 +953,15 @@ function WorkListView({
     title: { field: "title", label: "Título" },
     publication_status: { field: "publication_status", label: "Publicação" },
     personal_status: { field: "personal_status", label: "Status pessoal" },
+    // Ordenável mesmo empatando muito (são ~5 valores): é justamente como NÍVEL de
+    // desempate que ela serve — "Nota Prevista ↓, depois Grupos ↓".
+    //
+    // 🔴 …mas SÓ onde o dado existe. Sem `groupsByWorkId` (todas as telas fora de
+    // /favorites) a whitelist da página não aceita "groups" e o clique no cabeçalho
+    // reordenaria por `expected_score` em silêncio — a lista recarrega, a seta some e
+    // lê-se "esta coluna não ordena" em vez de "ordena por outra coisa". Cabeçalho sem
+    // clique é honesto; cabeçalho que ordena por outro campo, não.
+    ...(groupsByWorkId ? { groups: { field: "groups", label: "Grupos de favoritos" } } : {}),
     chapters_total: { field: "chapters_total", label: "Capítulos totais" },
     chapters_read: { field: "chapters_read", label: "Capítulos lidos" },
     year: { field: "year", label: "Ano" },
@@ -1025,6 +1042,14 @@ function WorkListView({
       ) : (
         <span className="text-muted-foreground">—</span>
       ),
+    // Sem `groupsByWorkId` (todas as telas fora de /favorites) a célula é o traço: a coluna
+    // nasce oculta lá, então isto só aparece para quem a ligou no seletor de colunas.
+    groups: (work) => (
+      <GroupCountCell
+        groups={groupsByWorkId?.[work.id] ?? []}
+        currentGroupId={currentGroup?.id}
+      />
+    ),
     chapters_read: (work) =>
       work.chapters_read != null ? (
         <span className="text-sm font-mono tabular-nums">{work.chapters_read}</span>

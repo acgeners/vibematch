@@ -27,6 +27,7 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { GroupCountCell } from "@/components/titles/group-count-cell"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Dialog,
@@ -88,7 +89,7 @@ const HIDDEN_ROWS_STORAGE_KEY = "compare_hidden_rows_v1"
 // `normalizeRowsConfig` descarta chave desconhecida, então o `hidden` salvo evaporava e
 // a escolha da pessoa se invertia em silêncio. O bump zera a personalização — que é
 // visível e reversível — em vez de contradizê-la sem avisar.
-const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v6"
+const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v7"
 // Tabela (grid) ⇄ Bússola (plano 2D das 3 forças). Persistido entre aberturas.
 const COMPARE_VIEW_STORAGE_KEY = "compare_view_v1"
 type CompareView = "table" | "bussola"
@@ -115,6 +116,9 @@ const COMPARE_ROW_GROUPS: CompareRowGroup[] = [
       // quebravam linha e esticavam a altura de TODAS as colunas daquela linha do grid.
       { key: "status:publicacao", label: "Publicação" },
       { key: "status:pessoal", label: "Meu status" },
+      // Recorrência nos grupos de favoritos. É LINHA e não cabeçalho porque compara as obras
+      // entre si — a régua desta tela. Fica junto de "Meu status": as duas falam de você.
+      { key: "grupos", label: "Grupos" },
       // O Interesse morava DENTRO do botão de Sinopse no cabeçalho: era a única medida da
       // tela fora de uma linha, logo a única que não dava pra ordenar, esconder nem incluir
       // no "só diferenças".
@@ -1043,6 +1047,9 @@ function CompareGrid({
     allEqual((w) => w.personalStatusId)
   )
   const interestVisible = isRowVisible("interesse", () => allEqual((w) => w.synopsisQuality))
+  // "Só diferenças" compara o que a célula IMPRIME: o número de grupos. Duas obras em dois
+  // grupos DIFERENTES imprimem "2" e "2", então somem juntas — igual à correção de Capítulos.
+  const gruposVisible = isRowVisible("grupos", () => allEqual((w) => w.groups.length))
   // 🔴 O "só diferenças" tem que comparar EXATAMENTE o que a célula imprime. Isto aqui
   // comparava `lidos/total` enquanto a tela mostrava só o total: duas obras com 45 capítulos
   // e leituras diferentes sobreviviam ao filtro e apareciam como "45" e "45" — o filtro
@@ -1164,7 +1171,7 @@ function CompareGrid({
   const tagsGenresVisible = isRowVisible("tags-genres")
 
   const showBasicoSection =
-    pubStatusVisible || perStatusVisible || interestVisible || chaptersVisible || yearVisible
+    pubStatusVisible || perStatusVisible || gruposVisible || interestVisible || chaptersVisible || yearVisible
   const showNotasSection = visibleNotasRows.length > 0
   const showCriteriosSection = visibleCritSlugs.length > 0
 
@@ -1318,6 +1325,18 @@ function CompareGrid({
             {displayed.map((w) => (
               <CompareCell key={w.id} horizontalAlign="center">
                 <PersonalStatusBadge statusId={w.personalStatusId ?? undefined} />
+              </CompareCell>
+            ))}
+          </>
+        )}
+
+        {/* Grupos — em quantos dos seus recortes a obra aparece */}
+        {showBasicoSection && !isCollapsed("basico") && gruposVisible && (
+          <>
+            <SectionLabel label="Grupos" />
+            {displayed.map((w) => (
+              <CompareCell key={w.id} horizontalAlign="center">
+                <GroupCountCell groups={w.groups} />
               </CompareCell>
             ))}
           </>

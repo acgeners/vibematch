@@ -54,9 +54,10 @@ describe("o que compara é LINHA, o que identifica é cabeçalho", () => {
 
   it("a config salva é invalidada quando as CHAVES de linha mudam", () => {
     // `normalizeRowsConfig` descarta chave desconhecida: sem o bump, quem tinha "status"
-    // escondido veria as duas linhas novas VISÍVEIS — a escolha da pessoa invertida em
-    // silêncio. O bump zera a personalização, que é visível e refazível.
-    expect(drawer).toContain('const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v6"')
+    // escondido veria as linhas novas VISÍVEIS — a escolha da pessoa invertida em silêncio.
+    // O bump zera a personalização, que é visível e refazível.
+    //   v6 → v7: entra a linha "grupos" (recorrência nos grupos de favoritos).
+    expect(drawer).toContain('const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v7"')
   })
 })
 
