@@ -1018,6 +1018,25 @@ numa COLUNA de lista ele pintaria 9 em 10 linhas e viraria o alarme que sempre t
 régua do `db:health` e do painel "Estado da obra"). Por isso no `/ranking` o "Desatualizada"
 segue **dentro do tooltip** do badge de Interesse, e isso é escolha medida, não esquecimento.
 
+⚠️ **ABERTO, e o inventário já está feito — não re-derive.** `WorkQueueCard`
+(`components/ai-evaluation/queue/work-queue-card.tsx`) tem paleta PRÓPRIA (`TONE_CLASS`) e o
+tipo é nomeado por **cor** (`tone: "amber"`), não por papel — então a régua acima é inaplicável
+ali **por construção**: quem chama escolhe a cor direto. São 12 chips em 4 painéis, e traduzir
+não é mecânico:
+
+| chip | hoje | pela régua |
+|---|---|---|
+| "Desatualizado" ×2 · "Aguardando revisão" · "sinopse curta" | amber · sky · rose | `stale` · `pending` · `failed` ✓ |
+| "Não previsto" · "Não avaliado" · "Nunca avaliada pela IA" | **slate** | deveriam ser **`pending`** — "nunca rodou ⇒ falta uma ação sua"; slate é "não se aplica", e são exatamente as obras que a fila existe pra resolver |
+| "Confiança baixa" | **amber** | não é "desatualizado" |
+| "Modelo antigo" · "Reviews novas" | rose · orange | sem papel óbvio |
+
+🔴 **E este arquivo se CONTRADIZ sobre o "Confiança baixa".** A seção do `STATUS_TONE` diz que
+âmbar é exclusivo do "desatualizado"; a seção do `/ai-evaluation` descreve, com aprovação, *"o
+chip âmbar diz só 'Confiança baixa'"*. Duas fontes discordando sobre o mesmo fato — não dá pra
+unificar a paleta sem escolher qual está errada, e é por isso que isto é PR de **decisão**, não
+de refactor. Já saiu daqui o `orange` do "Diverge" (ver a tabela de "dois critérios").
+
 ⚠️ **`border-<cor>` não pinta** (o `* { border-color }` do `globals.css` vence utilities no
 Tailwind v4) — por isso `box` usa `ring-*` e `outline` carrega `!`. **Medido em 2026-08-14**
 no browser com o CSS real: `border-emerald-300` computa `rgb(49, 56, 68)`, o neutro do tema,
@@ -2738,6 +2757,7 @@ Quatro ocorrências MEDIDAS em 2026-08-13/14, todas com suíte verde:
 | banda dos tiers | `DEFAULT_TIER_BAND_WIDTH` = 0,25 (medido) | `formula_config.tier_band_width` = 0,5 | a constante é só FALLBACK e a coluna é NOT NULL ⇒ o valor medido **nunca esteve em vigor**; o /ranking agrupou uma semana na largura que a medição reprovou, e a UI mostrava "0,5 (Padrão)" |
 | lista do `/descobrir` | percentil sobre as **737 candidatas** (a barra `sim`) | percentil sobre o **pool de ~50** (o número que ORDENA) | a combinação exibia **97** onde as duas barras diziam 100, e 92 onde diziam 99 e 97; a ordem da lista saía diferente da do servidor |
 | botão de prever Interesse | a obra dizia "Prever de novo" | a fila dizia "Reprever" (e o popup, "Prever") | mesma ação com **três nomes**; e uma instrução na tela (`shadow-compare-panel`) mandava clicar num "Reprever" que já não existiria — ver `lib/ui/interest-predict-label.ts` |
+| card da fila de Interesse | chip "Diverge"/"Bate" (`diverges`) | chip `Δ +1`/`Δ 0` (`delta !== 0`) | o **mesmo predicado**, nas mesmas duas cores, desenhado 2× no mesmo card, com uma 3ª cópia da paleta hand-rollada no `Δ`. Medido: o chip aparecia em 45 de 815 obras (5,5%) e nas 45 o `Δ` já dizia o mesmo — e ele PERDIA a precedência pro "Desatualizado" justo nas 676 stale que tinham o que comparar. Ficou o `Δ` |
 
 🔴 **A régua: quando duas coisas afirmam o mesmo fato, uma tem que ser DERIVADA da outra.**
 É o que já vale para `LOW_BALANCE_USD`, `STRONG_TAG_WEIGHT`, `CRITERIA_SCALE_LEGEND`,
@@ -2831,10 +2851,9 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.891 passando (+24 pulados) em 275 arquivos** (270 passando + 5 pulados;
-medido em 2026-08-15 com o dono único do rótulo de "prever Interesse"
-(`lib/ui/interest-predict-label.ts`), que somou 1 arquivo e 8 testes sobre os **2.883 em 274**
-que a `origin/main` tinha depois do PR #415.
+`npm run test` → **2.896 passando (+24 pulados) em 276 arquivos** (271 passando + 5 pulados;
+medido em 2026-08-15 com a remoção do chip "Diverge"/"Bate" da fila de Interesse, que somou
+1 arquivo e 5 testes sobre os **2.891 em 275** do PR #418.
 
 ⚠️ A árvore tem um arquivo de teste NÃO COMMITADO de outra sessão
 (`tests/unit/ui/pendencias-ia-abrem-em-aba-nova.test.tsx`). A medição o excluiu de propósito
@@ -2842,8 +2861,13 @@ que a `origin/main` tinha depois do PR #415.
 trabalho de outra pessoa. Quando aquele PR entrar, este número sobe junto.
 
 ⚠️ **Confira o TOTAL EXECUTADO contra o disco, sempre.** Aqui: `find tests -name '*.test.ts*'`
-deu **276**, menos o arquivo alheio = **275**, e o Vitest executou **275** — é essa igualdade
+deu **277**, menos o arquivo alheio = **276**, e o Vitest executou **276** — é essa igualdade
 que descarta truncamento silencioso, não o "0 failed" do rodapé.
+
+⚠️ **"Errors 1 error" no rodapé COM tudo passando é a flakiness de carga, não queda de teste** —
+apareceu numa rodada (com dev server + Chromium abertos) e não reproduziu em três seguintes, com
+contagem idêntica nas quatro. A régua é a de sempre: re-rode limpo antes de concluir qualquer
+coisa, nos dois sentidos.
 
 🔴 **Este número tem que ser medido DEPOIS do rebase, não antes — e eu quase publiquei o de
 antes.** A branch nasceu de `4af3e64`, e enquanto ela existia entraram na `main` os PRs #403 e
@@ -2868,7 +2892,7 @@ teste. A linha já disse "~1.780 em
 ~157", "~2.353 em 218", "2.386 em 221", "2.408 em 225", "2.428 em 228", "2.433 em 228",
 "2.440 em 229", "2.717 em 255", "2.727 em 255", "2.753 em 258", "2.776 em 261", "2.784 em 263",
 "2.788 em 264", "2.807 em 266", "2.813 em 267", "2.828 em 270", "2.833 em 271", "2.872 em 274"
-e "2.883 em 274", todas
+, "2.883 em 274" e "2.891 em 275", todas
 envelhecendo sem nada acusar — **re-meça antes de editar este número**,
 não incremente de cabeça. ⚠️ O "2.717" durou menos de um dia: dois PRs do mesmo dia somaram 10
 testes e nenhum dos dois tocou nesta linha. Envelhecer aqui é o normal, não a exceção. Vitest, jsdom, alias `@` → raiz. A
