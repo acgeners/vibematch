@@ -426,6 +426,25 @@ async function applySuggestionWithConflictCheck(
     return { ok: false, error: `Sugestão já em status ${sug.status}.` }
   }
 
+  // 🔴 Guarda de ESCOPO, e ela é sobre a fila que já existe. Tirar um critério de
+  // `AUDITABLE_CRITERIA` impede a auditoria de PROPOR de novo, mas não apaga o que ela
+  // propôs antes: medido em 2026-08-16, **204 das 765 pendentes (27%)** ficaram em critério
+  // fora de escopo — e aceitar uma de `adult_content` grava por cima do piso/teto por
+  // procedência, que é exatamente o que a exclusão existe pra impedir. As quatro portas de
+  // aceite (uma, editada, lote por filtro, lote por seleção) passam por aqui.
+  if (!isAuditableCriterion(sug.criterion_slug as string)) {
+    await supabase
+      .from("score_calibration_suggestions")
+      .update({ status: "superseded", reviewed_at: new Date().toISOString() })
+      .eq("id", suggestionId)
+    return {
+      ok: false,
+      error:
+        `"${sug.criterion_slug}" saiu do escopo da auditoria (tem régua própria) — a sugestão ` +
+        `não pode mais ser aplicada. Marcada como substituída.`,
+    }
+  }
+
   const { data: current, error: currentError } = await supabase
     .from("category_scores")
     .select("source, score")
