@@ -37,7 +37,7 @@ export default async function LoginPage() {
 
           <p className="text-center text-[13px] text-muted-foreground">
             Primeira vez aqui?{" "}
-            <Link href="/sobre" className="font-medium text-primary hover:underline">
+            <Link href="/about" className="font-medium text-primary hover:underline">
               Conheça a SatorIA
             </Link>
           </p>

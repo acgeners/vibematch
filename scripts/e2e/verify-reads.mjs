@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * A outra metade da Fatia 1: as LEITURAS (/leitura, /favoritos, home).
+ * A outra metade da Fatia 1: as LEITURAS (/reading, /favoritos, home).
  * A escrita já foi provada isolada (verify-fatia1.mjs). Aqui a pergunta é a do §13.2.4:
  * a Leitora vê os favoritos e os capítulos DELA — ou os do dono?
  */
@@ -114,10 +114,10 @@ async function main() {
     { onConflict: "user_id,work_id" },
   )
 
-  console.log("/leitura")
+  console.log("/reading")
   const [leituraOwner, leituraReader] = await Promise.all([
-    get("/leitura", owner.cookie),
-    get("/leitura", reader.cookie),
+    get("/reading", owner.cookie),
+    get("/reading", reader.cookie),
   ])
   const hisTitlesInHers = hisReading.filter((w) => leituraReader.includes(w.title))
   check(leituraOwner.includes(hisReading[0].title), `dono vê a lista DELE (${hisReading[0].title})`)

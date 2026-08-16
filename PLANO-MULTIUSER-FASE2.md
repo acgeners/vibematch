@@ -497,7 +497,7 @@ arrasta o Ridge, o `calculated_scores` e o `formula_config` junto — é a Fatia
    ⚠️ O writer passa a precisar do `userId` — e ele vem de `ensureSignedIn()`, **nunca** de
    `getCurrentUserId()` (que cai no singleton sem sessão → escreveria como o dono).
    ⚠️ **Só faz sentido depois do passo 2 estar escopado ao dono.** Invertida, a ordem corrompe.
-4. **Rewire das leituras de acompanhamento:** `/leitura`, `/favorites`, o card e a página da obra
+4. **Rewire das leituras de acompanhamento:** `/reading`, `/favorites`, o card e a página da obra
    passam a ler de `user_work_state`. O **fallback para `works` também é só do dono** — para os
    demais, sem fallback (estado vazio). Senão a Leitora **vê os favoritos e os capítulos do dono como
    se fossem dela**: o mesmo bug do passo 2, do lado da leitura.
@@ -559,7 +559,7 @@ risco sem volta por isso.
 >    vindo de `ensureSignedIn()` — **nunca** de `getCurrentUserId()`, que sem sessão cai no singleton do
 >    dono e escreveria como ele. É este passo que destrava a Leitora. **Só depois do passo 2 estar
 >    escopado ao dono** — a ordem invertida corrompe.
-> 4. **Rewire das leituras** de `/leitura` e `/favorites` para `user_work_state`. O **fallback para
+> 4. **Rewire das leituras** de `/reading` e `/favorites` para `user_work_state`. O **fallback para
 >    `works` também é só do dono**; para os demais, sem fallback (estado vazio). Senão a Leitora vê os
 >    favoritos e os capítulos do dono **como se fossem dela** — o mesmo bug do passo 2, na leitura.
 > 5. **Parar aqui.** O `DROP` das 4 colunas fica para depois, com pré-requisito de dump de schema

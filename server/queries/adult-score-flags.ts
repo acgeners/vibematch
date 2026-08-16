@@ -15,7 +15,7 @@ export interface AdultScoreFlag {
  * - `user_score` está em `works_owner`, mas nem toda query a seleciona.
  *
  * Busca ambas em lote por ids (chunk de 200 pra não estourar o `.in()`), pra casar o chip 🔞
- * e o badge "Real" em TODAS as abas de /ai-evaluation sem tocar em cada query/tipo intermediário.
+ * e o badge "Real" em TODAS as abas de /curation/works sem tocar em cada query/tipo intermediário.
  * Mesma fonte que o card principal (getEligibleWorks): `works.is_adult` + `works_owner.user_score`.
  */
 export async function fetchAdultScoreFlags(ids: string[]): Promise<Map<string, AdultScoreFlag>> {

@@ -43,7 +43,7 @@ export function AdultGate({ gated, children }: { gated: boolean; children: React
               Mostrar assim mesmo
             </Button>
             <Button asChild variant="ghost" size="sm">
-              <a href="/preferencias?g=conteudo">Ajustar preferências</a>
+              <a href="/preferences?g=conteudo">Ajustar preferências</a>
             </Button>
           </div>
         </div>

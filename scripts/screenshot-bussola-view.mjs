@@ -37,7 +37,7 @@ try {
 
   if (found) {
     const handle = await page.$('[data-shot="bussola-root"]')
-    const dots = await page.evaluate(() => document.querySelectorAll('[data-shot="bussola-root"] a[href^="/titles/"]').length)
+    const dots = await page.evaluate(() => document.querySelectorAll('[data-shot="bussola-root"] a[href^="/catalog/"]').length)
     await handle.screenshot({ path: out })
     console.log(`plano capturado · ${dots} pontos (links) no DOM → ${out}`)
   } else {

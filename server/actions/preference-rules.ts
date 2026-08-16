@@ -61,6 +61,6 @@ export async function savePreferenceRules(
     .eq("id", settingsId)
   if (error) return { ok: false, error: error.message }
 
-  revalidatePath("/preferencias")
+  revalidatePath("/preferences")
   return { ok: true }
 }

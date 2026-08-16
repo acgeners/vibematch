@@ -112,7 +112,7 @@ const nf = (v: number, digits = 1) =>
 type TabKey = "prova" | "criterios" | "tags" | "recomendacao"
 
 /**
- * Painel de /conta/perfil — v3 (2026-08-09). A página responde UMA pergunta ("o quanto
+ * Painel de /account/taste-profile — v3 (2026-08-09). A página responde UMA pergunta ("o quanto
  * vocês entendem meu gosto?"), e a v2 respondia em 4.020px com a prova em 6º lugar.
  *
  *  • Hero (sempre visível) — identidade + selo ✨ de procedência + resumo + as DUAS
@@ -408,7 +408,7 @@ export function TasteProfilePanel({
                     {/* A página afirma coisas sobre a pessoa; sem esta porta, não há
                         como discordar delas. */}
                     <Link
-                      href="/preferencias"
+                      href="/preferences"
                       className="font-semibold text-sky-600 hover:underline dark:text-sky-400"
                     >
                       Não é bem assim? corrigir em Preferências →
@@ -1239,7 +1239,7 @@ function TagsTab({
                 tags mais fortes, não um inventário. Elas continuam valendo integralmente no cálculo
                 do alinhamento.{" "}
                 <Link
-                  href="/preferencias"
+                  href="/preferences"
                   className="font-semibold text-sky-600 hover:underline dark:text-sky-400"
                 >
                   ver em Preferências →

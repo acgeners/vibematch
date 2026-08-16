@@ -517,7 +517,7 @@ created_by/timestamps; **nunca** do client). Fontes ∈ `EXTERNAL_REVIEW_SOURCES
 
 ## 32. Integração futura (DESENHO — não conectada)
 
-- **`/titles/[id]`:** seção separada *"Reviews externas adicionadas manualmente"* (fora do card de impressões
+- **`/catalog/[id]`:** seção separada *"Reviews externas adicionadas manualmente"* (fora do card de impressões
   pessoais); campos = fonte · URL/ID externo · autor opcional · texto · idioma opcional · data opcional; **sem nota pessoal**.
 - **Server Action:** Zod acima → validação admin (service role) → `prepareExternalReviewRow` (hash server-side) →
   tratamento de conflito (unique) → `revalidatePath`.
@@ -619,7 +619,7 @@ bloqueados; host não-local bloqueado; variável ausente = bloqueado. O componen
 bloqueado **e** cada Server Action **reexecuta** o mesmo gate (esconder o componente **não** é a defesa).
 `.env.example` ganhou `ENABLE_LOCAL_EXTERNAL_REVIEW_EDITOR=false` (o `.env` real **não** foi tocado).
 
-## 39. Interface separada (`/titles/[id]`, overview)
+## 39. Interface separada (`/catalog/[id]`, overview)
 
 Card **distinto** "Reviews externas adicionadas manualmente"
 ([external-manual-reviews-card.tsx](components/titles/external-manual-reviews-card.tsx)) — **fora** do card de
@@ -698,7 +698,7 @@ SELECT de revalidação). **base-2r1 não criada · digest não autorizado · Q2
 `server/queries/external-manual-reviews.ts` · `server/actions/external-manual-reviews.ts` ·
 `components/titles/external-manual-reviews-card.tsx` · `scripts/pilot2-review-coverage.ts` · 5 testes novos.
 **Alterados:** `lib/validations/external-review.schema.ts` (client-safe) ·
-`tests/.../external-review-schema.test.ts` (import) · `app/titles/[id]/page.tsx` (monta o card) ·
+`tests/.../external-review-schema.test.ts` (import) · `app/catalog/[id]/page.tsx` (monta o card) ·
 `.env.example` · `package.json` (`pilot2:coverage`).
 
 ---
@@ -811,7 +811,7 @@ temporário, removido):**
   **presença** de `x-forwarded-host` disparava em **100%** dos requests e não distinguia proxy de conexão
   direta. **Revertido**: o gate **não** consulta mais headers de proxy. Precedência agora
   `production > vercel > flag > host`.
-- **FATO 2 — `curl`+grep do card é INVÁLIDO** como verificação: a página `/titles/[id]` renderiza o conteúdo
+- **FATO 2 — `curl`+grep do card é INVÁLIDO** como verificação: a página `/catalog/[id]` renderiza o conteúdo
   das abas **no client** (só os *gatilhos* das abas vêm no HTML SSR; `Sinopses`, `Nota Prevista`, `tabpanel`
   ausentes). ⇒ as afirmações anteriores baseadas em `CARD_PRESENT=false` (B2.2M-AUDIT e início da B2.2N) eram
   **artefato de medição**, não prova de editor quebrado.

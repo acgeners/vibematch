@@ -840,7 +840,7 @@ export function UpdateDataDialog({
     }
     // Se o título mudou, navega DIRETO pro slug canônico novo (devolvido pela
     // action). Navegar pelo UUID dependia do redirect() server-side de
-    // /titles/{uuid} → slug, que FALHA numa navegação soft (RSC) e mostra
+    // /catalog/{uuid} → slug, que FALHA numa navegação soft (RSC) e mostra
     // erro/404; só funcionava após reload. Ir direto no slug elimina o redirect
     // (mesmo padrão já adotado no work-form).
     const newTitle = typeof updates.title === "string" ? updates.title : null
@@ -848,7 +848,7 @@ export function UpdateDataDialog({
     const titleChanged =
       newTitle != null && titleToSlug(currentWork.title) !== (newSlug ?? titleToSlug(newTitle))
     if (titleChanged && newSlug) {
-      router.push(`/titles/${newSlug}`)
+      router.push(`/catalog/${newSlug}`)
     } else {
       refresh()
     }

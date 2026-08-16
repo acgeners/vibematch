@@ -11,7 +11,7 @@
  * | `gap`    | sem linha, ou qualquer outra forma          | nunca avaliado — é o único que é trabalho |
  *
  * 🔴 **Existe porque DOIS lugares classificam a mesma linha**: a fila da aba "Fontes"
- * (`getSourceGapQueue`, todas as fontes) e o card de cobertura do Comix em /settings
+ * (`getSourceGapQueue`, todas as fontes) e o card de cobertura do Comix em /curation/settings
  * (`getComixCoverageLists`, só a Comix). Antes eram duas cópias do mesmo `if` — a
  * família de erro mais cara deste projeto: as duas telas falariam da MESMA obra e uma
  * diria "pendente" enquanto a outra diz "resolvida", sem erro e sem log. Uma delas

@@ -7,7 +7,7 @@
  * broad, mutually-exclusive ORGANIZATIONAL sub-groups (e.g. for
  * "female_lead": Looks / Traits / Context) — NOT synonym clusters.
  * Proposals are persisted in `tag_subgroup` (status='pending') for human
- * review at `/settings/tag-consolidation?view=subgroups&phase=define`.
+ * review at `/curation/settings/tag-consolidation?view=subgroups&phase=define`.
  *
  * Phase 2 (assigning tags into the approved sub-groups) lives in
  * `scripts/assign-tags-to-subgroups.js`.

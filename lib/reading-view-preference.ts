@@ -1,5 +1,5 @@
 /**
- * Preferência de vista da página /leitura (lista × calendário) — em COOKIE, não em
+ * Preferência de vista da página /reading (lista × calendário) — em COOKIE, não em
  * localStorage. O servidor renderiza a página já na vista final; com localStorage o
  * SSR não saberia o valor e o primeiro render do cliente divergiria → hidratação
  * quebrada (ver `lib/sidebar-preference.ts` e a armadilha documentada no CLAUDE.md).

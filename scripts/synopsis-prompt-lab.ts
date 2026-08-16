@@ -9,7 +9,7 @@
  *   npm run synopsis:lab -- --dry                 # só mostra a seleção, não chama a IA
  *
  * NÃO ESCREVE NO BANCO e NÃO registra em `ai_api_calls` — são experimentos, não uso
- * de produção; poluir o ledger falsearia o /ai-usage e entraria no push da curadoria.
+ * de produção; poluir o ledger falsearia o /curation/ai-usage e entraria no push da curadoria.
  * O baseline (v2) NÃO é regerado: ele já está em `works.canonical_synopsis`, então o
  * laboratório só paga as variantes novas.
  *

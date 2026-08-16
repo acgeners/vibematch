@@ -259,7 +259,7 @@ export default async function RunDetailPage({ params }: PageProps) {
           defaultOpen={false}
           action={
             <Link
-              href="/conta/perfil"
+              href="/account/taste-profile"
               className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-medium text-primary hover:underline"
             >
               Ver perfil atual <ArrowRight className="h-3 w-3" />

@@ -32,7 +32,7 @@ function SelectValue({
  * existe depois do mount. Então o HTML do servidor traz o gatilho vazio e ele só é
  * preenchido na hidratação. Medido em 2026-08-15 na build de PRODUÇÃO contra o banco
  * local: **13 gatilhos vazios em 9 rotas**, nenhum com texto, e o campo fica vazio por
- * **196 a 634 ms** (`/leitura` 196–211 · `/ranking` 218–370 · `/ai-evaluation` 420–634,
+ * **196 a 634 ms** (`/reading` 196–211 · `/ranking` 218–370 · `/curation/works` 420–634,
  * a página mais pesada). Não é hipótese: `renderToString` devolve `""` e o mesmo
  * componente montado devolve o rótulo.
  *

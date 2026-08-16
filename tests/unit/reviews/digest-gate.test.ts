@@ -132,7 +132,7 @@ describe("o piso tem dono único", () => {
 
   it("o LOTE não decide nada — delega pro caminho gateado", () => {
     // 🔴 É por isso que ele NÃO importa a régua: aplicar o piso ali seria uma
-    // segunda opinião sobre o mesmo fato. O lote anterior (no /settings) chamava o
+    // segunda opinião sobre o mesmo fato. O lote anterior (no /curation/settings) chamava o
     // consolidador direto, com corpus próprio e sem gate nenhum — e foi por isso
     // que ele foi aposentado em vez de corrigido.
     const src = semComentarios("server/actions/review-digest-batch.ts")

@@ -135,7 +135,7 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
   // Rótulo literal (como `separator`): não tem linha em `ui_labels`, então o cabeçalho
   // não troca full→short→abbrev por largura; se um dia tiver, migra pra LABELS.
   // ⚠️ Vazia em quem você ainda não avaliou: 211 de 988 obras (21,4%) tinham nota em
-  // 2026-08-14 — por isso ela nasce OCULTA fora de /titles (em /favorites são 7 de 126).
+  // 2026-08-14 — por isso ela nasce OCULTA fora de /catalog (em /favorites são 7 de 126).
   {
     key: "user_score",
     label: "Real",
@@ -181,7 +181,7 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
 
 const DEFAULT_COLUMN_KEYS = WORK_TABLE_COLUMNS.map((column) => column.key)
 
-// Per-namespace defaults: /titles foca em geral; /favorites foca em granular.
+// Per-namespace defaults: /catalog foca em geral; /favorites foca em granular.
 // Legacy: N.IA/N.Pr/N.Final ficam escondidos por padrão em TODOS os namespaces
 // após cutover Fase 1.5. (As colunas decompostas Perfil/Δ Qualidade foram
 // REMOVIDAS no §6 Bloco 2 — arquitetura 2-stage aposentada.)

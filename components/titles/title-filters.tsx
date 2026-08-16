@@ -62,8 +62,8 @@ const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
 ]
 
 /**
- * Ordenar pelos 9 atributos. O backend de /titles já aceitava `crit_<slug>`
- * (a whitelist em app/titles/page.tsx), só a UI não oferecia.
+ * Ordenar pelos 9 atributos. O backend de /catalog já aceitava `crit_<slug>`
+ * (a whitelist em app/catalog/page.tsx), só a UI não oferecia.
  */
 const CRITERION_SORT_FIELDS: Array<{ value: string; label: string }> = CRITERION_SLUGS.map(
   (slug) => ({
@@ -224,7 +224,7 @@ function ToggleChip({
 
 /**
  * Segmentado "Conteúdo 18+" — filtra pela classificação da obra (works.is_adult),
- * NÃO por tags. "Tudo" respeita a preferência global de /preferencias; as outras
+ * NÃO por tags. "Tudo" respeita a preferência global de /preferences; as outras
  * duas mandam nesta listagem.
  */
 function AdultContentSegment({
@@ -250,7 +250,7 @@ function AdultContentSegment({
         onClick={() => onChange("all")}
         aria-pressed={value === "all"}
         className={seg(value === "all", false)}
-        title="Mostra todas as obras (respeita sua preferência global de 18+ em /preferencias)."
+        title="Mostra todas as obras (respeita sua preferência global de 18+ em /preferences)."
       >
         Tudo
       </button>
@@ -279,7 +279,7 @@ function AdultContentSegment({
 /**
  * ASSINATURA — chips do atributo que mais marca a obra.
  *
- * A lente que diferencia /titles do /ranking: lá se pergunta "vale a pena?"
+ * A lente que diferencia /catalog do /ranking: lá se pergunta "vale a pena?"
  * (limiar de nota), aqui "que tipo de obra é essa?" (forma). A contagem é de
  * CATÁLOGO — não conhece os outros filtros ativos —, por isso o rótulo diz "no
  * catálogo" em vez de prometer o tamanho do resultado.
@@ -718,7 +718,7 @@ function SearchInputWithHistory({
                     className="cursor-pointer gap-2.5"
                   >
                     <a
-                      href={`/titles/${s.slug}`}
+                      href={`/catalog/${s.slug}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={() => setOpen(false)}
@@ -847,7 +847,7 @@ export function TitleFilters({
       // costuma ter menos de 3 páginas.
       next.delete("page")
       const qs = next.toString()
-      startTransition(() => router.replace(qs ? `/titles?${qs}` : "/titles"))
+      startTransition(() => router.replace(qs ? `/catalog?${qs}` : "/catalog"))
     },
     [appliedSearchString, router],
   )
@@ -873,12 +873,12 @@ export function TitleFilters({
     const next = new URLSearchParams(draftSearch)
     next.delete("page")
     const qs = next.toString()
-    startTransition(() => router.replace(qs ? `/titles?${qs}` : "/titles"))
+    startTransition(() => router.replace(qs ? `/catalog?${qs}` : "/catalog"))
   }
   // "Limpar" é imediato: zera o rascunho E navega, sem exigir "Aplicar filtros".
   const clearAll = () => {
     setDraftSearch("")
-    startTransition(() => router.replace("/titles"))
+    startTransition(() => router.replace("/catalog"))
   }
 
   // Search
@@ -1436,7 +1436,7 @@ export function TitleFilters({
                 do catálogo) mora no /ranking desde 2026-08-05: é lá que estão os
                 presets salvos, o mood e a bússola — e era lá que a normalização
                 fazia falta (o preset "Romance ≥ 7" devolvia 55% do acervo).
-                /titles é pra navegar; filtro literal é o certo aqui. */}
+                /catalog é pra navegar; filtro literal é o certo aqui. */}
             <FilterCard title={`Notas dos 9 atributos${criterionRangeCount ? ` (${criterionRangeCount})` : ""}`}>
               <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
                 {CRITERION_SLUGS.map((slug) => (
@@ -1504,7 +1504,7 @@ export function TitleFilters({
             {/* Mesmo componente do /ranking: o markup do chip estava DUPLICADO
                 literalmente entre os dois arquivos, e mudar num só era como as duas
                 páginas passavam a discordar sobre a mesma coisa. Aqui os chips ainda
-                são um-por-valor (o /titles não tem exclusão de status) — o componente
+                são um-por-valor (o /catalog não tem exclusão de status) — o componente
                 trata isso como chip simples. */}
             <ActiveFilterChips
               chips={activeChips.map((chip) => ({

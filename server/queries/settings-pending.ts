@@ -7,7 +7,7 @@ import { hasConsolidatableBlocks } from "@/lib/ai-recommendation/synopsis-consol
 import { splitSynopsesFromText } from "@/lib/work-derived"
 
 /**
- * Pendências do "Pipeline de dados" da página /settings.
+ * Pendências do "Pipeline de dados" da página /curation/settings.
  *
  * Duas variantes:
  *   - getSettingsPendingCounts()      → EXATA, usada pela própria página. Pode ser
@@ -94,7 +94,7 @@ export interface SettingsPendingCounts {
 }
 
 /**
- * Versão EXATA (página /settings): embeddings = hash desatualizado/ausente.
+ * Versão EXATA (página /curation/settings): embeddings = hash desatualizado/ausente.
  */
 export async function getSettingsPendingCounts(): Promise<SettingsPendingCounts> {
   const [embeddings, canonicalSynopsis, reviewSummary] = await Promise.all([
@@ -126,8 +126,8 @@ export async function getSettingsBadgePendingTotal(): Promise<number> {
 }
 
 /**
- * Pendências por ITEM (card) do console /settings — `Record<sectionId, count>`,
- * com o `sectionId` do registry (`app/settings/sections.tsx`). Cada fonte mapeia
+ * Pendências por ITEM (card) do console /curation/settings — `Record<sectionId, count>`,
+ * com o `sectionId` do registry (`app/curation/settings/sections.tsx`). Cada fonte mapeia
  * 1:1 com um item; o badge do GRUPO (sub-nav) é a soma dos itens do grupo e o
  * badge da sidebar é a soma de tudo — assim os três níveis (sidebar → tópico →
  * card) batem. Memoizado por request (`cache`) para o layout (grupos) e a page

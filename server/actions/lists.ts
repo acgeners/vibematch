@@ -36,7 +36,7 @@ function revalidateLists(listId?: string) {
   if (listId) revalidatePath(`/favorites/${listId}`)
   // Adicionar obras muda is_favorite → toca as mesmas superfícies do toggle.
   revalidatePath("/ranking")
-  revalidatePath("/titles")
+  revalidatePath("/catalog")
   revalidateTag("favorites-summary", "max")
 }
 
@@ -213,7 +213,7 @@ export async function unfavoriteWorkFromFolders(
   if (mirror.error) return { error: mirror.error }
 
   revalidateLists()
-  revalidatePath(`/titles/${workId}`)
+  revalidatePath(`/catalog/${workId}`)
   return { data: null }
 }
 

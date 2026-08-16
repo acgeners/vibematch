@@ -168,7 +168,7 @@ describe("scripts de análise apontam para o banco local", () => {
    * de julho, e cinco deles chamando a Anthropic. Não eram lixo, como pareciam pela idade: os
    * comentários de `server/actions/tag-consolidation.ts`, `lib/tag-consolidation/merge.ts` e
    * `lib/ai-evaluation/tag-clustering.ts` os citam como a metade OFFLINE de uma feature que
-   * tem aba viva em `/settings/tag-consolidation`.
+   * tem aba viva em `/curation/settings/tag-consolidation`.
    *
    * 🔴 A régua: o que define o escopo é **tocar o banco**, nunca a extensão do arquivo. Cada
    * recorte que sobra ("só .ts", "só quem menciona env-file") é uma allowlist esperando para

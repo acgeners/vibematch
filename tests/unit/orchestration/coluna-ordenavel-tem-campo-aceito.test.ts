@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs"
  * as duas listas eram escritas à mão, uma em cada arquivo.
  *
  * Foi assim que `decision` e `synopsis_pred` — ordenáveis na WorkTable desde sempre —
- * ficaram fora da whitelist do /titles, e `synopsis_pred` fora também da do /favorites.
+ * ficaram fora da whitelist do /catalog, e `synopsis_pred` fora também da do /favorites.
  * Achado em 2026-08-14, ao acrescentar a coluna "Minha nota (Real)" (`user_score`).
  *
  * O teste DERIVA os dois lados do source: whitelist nova ou coluna nova entra na
@@ -26,7 +26,7 @@ const RANKING_TABLE = "components/ranking/ranking-table.tsx"
 const RANKING_QUERY = "server/queries/ranking.ts"
 
 /**
- * Tabelas × páginas que as hospedam. A WorkTable serve /titles E /favorites.
+ * Tabelas × páginas que as hospedam. A WorkTable serve /catalog E /favorites.
  *
  * `campo` difere porque as duas tabelas guardam a mesma informação em formas diferentes:
  * a WorkTable num objeto `{ field, label }` e a RankingTable num mapa coluna → campo.
@@ -36,7 +36,7 @@ const TABELAS = [
     tabela: WORK_TABLE,
     marcador: "const sortableColumns",
     campo: /\bfield:\s*"([a-z_]+)"/g,
-    paginas: ["app/titles/page.tsx", "app/favorites/[listId]/page.tsx"],
+    paginas: ["app/catalog/page.tsx", "app/favorites/[listId]/page.tsx"],
   },
   {
     tabela: RANKING_TABLE,

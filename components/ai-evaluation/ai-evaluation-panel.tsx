@@ -58,7 +58,7 @@ interface PendingWork {
   matchedFilters?: Array<"pending" | "review-pending" | "low-confidence" | "outdated-model" | "outdated-reviews">
   /**
    * `works.ai_eval_status`. É daqui que sai o "Revisar" — ver o comentário do
-   * `WorkRow` em `app/ai-evaluation/page.tsx`: `matchedFilters` responde "por que
+   * `WorkRow` em `app/curation/works/page.tsx`: `matchedFilters` responde "por que
    * ela apareceu", que é outra pergunta e depende de quais filtros estão ligados.
    */
   aiEvalStatus?: string | null
@@ -166,7 +166,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
   const queueCancelledRef = useRef(false)
   // Cancela a avaliação atual (single ou item da fila). A chamada do server
   // action continua e o resultado é salvo no DB; só ignoramos o resultado no
-  // cliente — usuário pode revisar depois pela página /ai-evaluation.
+  // cliente — usuário pode revisar depois pela página /curation/works.
   const evaluationCancelledRef = useRef(false)
   const reviewScrollRef = useRef<HTMLDivElement | null>(null)
   // Obras já pré-aquecidas nesta sessão de UI — evita disparar prewarm repetido.
@@ -862,7 +862,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
             {reviewData && (
               <div className="flex items-start justify-between gap-4">
                 <Link
-                  href={`/titles/${titleToSlug(reviewData.workTitle)}`}
+                  href={`/catalog/${titleToSlug(reviewData.workTitle)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="group inline-flex items-start gap-1.5 text-xl font-semibold leading-tight text-foreground hover:text-primary hover:underline"

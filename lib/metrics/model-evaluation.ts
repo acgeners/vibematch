@@ -15,7 +15,7 @@
  * entra como prioridade máxima quando houver amostra suficiente.
  *
  * Funções puras + sem efeitos colaterais → fáceis de testar e reusar tanto no
- * painel de calibração quanto na página técnica /admin/model-metrics.
+ * painel de calibração quanto na página técnica /curation/model-metrics.
  */
 
 import { z } from "zod"

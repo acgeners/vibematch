@@ -15,7 +15,7 @@ import {
 export interface AiPendingItem {
   label: string
   count: number
-  /** URL da seção correspondente (ex.: "/settings?g=ia#card-embeddings"). */
+  /** URL da seção correspondente (ex.: "/curation/settings?g=ia#card-embeddings"). */
   href: string
 }
 
@@ -56,7 +56,7 @@ export function AiPendingGuardDialog({
   cancelLabel = "Resolver pendências antes",
   proceedClassName,
 }: AiPendingGuardDialogProps) {
-  // "Resolver pendências antes" abre o /settings na primeira pendência (o popup
+  // "Resolver pendências antes" abre o /curation/settings na primeira pendência (o popup
   // só abre com items.length > 0, então sempre há um alvo). Todas moram no mesmo
   // grupo "Gerado por IA", então as demais ficam à vista na mesma aba.
   const resolveHref = items[0]?.href

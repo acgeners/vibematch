@@ -26,7 +26,7 @@ export const STRONG_TAG_WEIGHT = 2
  * Stance + de onde ela veio + intensidade.
  *
  * `strong` só existe pra declaração (`user_tag_preferences.weight ≥
- * STRONG_TAG_WEIGHT`, o botão ✨ 2× de `/preferencias`). Tag que casou pelo
+ * STRONG_TAG_WEIGHT`, o botão ✨ 2× de `/preferences`). Tag que casou pelo
  * PERFIL de gosto nunca é forte: a régua de lá é `strength` 0–1, inferida pelo
  * modelo — outra escala, cujo "alto" precisaria de um limiar inventado.
  */

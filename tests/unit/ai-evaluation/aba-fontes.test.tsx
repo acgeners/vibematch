@@ -80,7 +80,7 @@ function renderTab(over: Partial<React.ComponentProps<typeof SourcesTab>> = {}) 
       activeSource={null}
       activePubStatuses={[]}
       activePersonalStatuses={[]}
-      baseHref="/ai-evaluation?tab=fontes"
+      baseHref="/curation/works?tab=fontes"
       {...over}
     />,
   )
@@ -115,7 +115,7 @@ describe("mapa por fonte", () => {
   it('"Qualquer uma" leva o tamanho real da fila e limpa o filtro de fonte', () => {
     renderTab({ activeSource: gapsBySource[0].source })
     const todas = screen.getByRole("link", { name: /Qualquer uma \(629\)/ })
-    expect(todas.getAttribute("href")).toBe("/ai-evaluation?tab=fontes")
+    expect(todas.getAttribute("href")).toBe("/curation/works?tab=fontes")
   })
 })
 

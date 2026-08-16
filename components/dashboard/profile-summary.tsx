@@ -18,7 +18,7 @@ export function ProfileSummary({ status }: { status: ProfileStatus }) {
         Seu perfil de gosto
       </CardTitle>
       <Button asChild variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
-        <Link href="/conta/perfil">
+        <Link href="/account/taste-profile">
           Ver perfil
           <ArrowRight className="size-3.5" />
         </Link>

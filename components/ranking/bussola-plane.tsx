@@ -846,7 +846,7 @@ function Dot({
   }
   return (
     <Link
-      href={`/titles/${titleToSlug(d.e.title)}`}
+      href={`/catalog/${titleToSlug(d.e.title)}`}
       aria-label={`${d.e.title}: chance ${d.forces.chance ?? "—"}, avaliação ${d.forces.avaliacao ?? "—"}, alcance ${d.forces.alcance ?? "—"}`}
       onMouseEnter={enter}
       onMouseLeave={() => onHover(null)}
@@ -888,7 +888,7 @@ function DotTooltip({
   ref: React.Ref<HTMLDivElement>
   d: PlottedDot
   pos: { left: number; top: number } | null
-  /** Faixas de cor da Nota Prevista (as de /preferencias). Ausentes → cutoffs fixos. */
+  /** Faixas de cor da Nota Prevista (as de /preferences). Ausentes → cutoffs fixos. */
   thresholds?: ScoreColorThresholds | null
   /** Linha extra sob o chip — o canto da FACE atual, que só existe no modo absoluto. */
   note?: React.ReactNode
@@ -916,7 +916,7 @@ function DotTooltip({
             {/* A Nota Prevista é o DESFECHO da leitura do ponto (as 3 forças são o
                 caminho), então ela abre o card em vez de fechá-lo. A cor sai de
                 `getScoreTextColor` — a mesma régua da badge do /ranking e da
-                página da obra, com as faixas configuradas em /preferencias.
+                página da obra, com as faixas configuradas em /preferences.
                 Inventar uma cor aqui seria uma 2ª régua pro mesmo número, que é
                 como duas telas passam a discordar.
                 ⚠️ FLOAT, não item de flex: ao lado, ela encolhia TODAS as linhas
@@ -1108,7 +1108,7 @@ function PairedRow({
   const lit = hovered === d.e.workId
   return (
     <Link
-      href={`/titles/${titleToSlug(d.e.title)}`}
+      href={`/catalog/${titleToSlug(d.e.title)}`}
       data-work={d.e.workId}
       onMouseEnter={() => setHovered(d.e.workId)}
       onMouseLeave={() => setHovered(null)}

@@ -366,7 +366,7 @@ Integra a avaliação por gosto na aba de leitura da página da obra:
 - `post-reading-flow.tsx` — card de gosto primário (expandido) + craft colapsado
 - `work-status-form.tsx` — prop `criteriaDefaultOpen` (colapsa o bloco de critérios; default aberto)
 - `post-attribute-assessment-form.tsx` — prop `defaultOpen` (fecha por padrão no fluxo)
-- `app/titles/[id]/page.tsx` — carrega critérios + notas de gosto da obra
+- `app/catalog/[id]/page.tsx` — carrega critérios + notas de gosto da obra
 - `server/queries/pilot-taste.ts` — `+ getTasteScoresForWork`
 
 ## 20. Pendências (registro 2026-07-07)

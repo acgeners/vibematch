@@ -67,7 +67,7 @@ describe("chapterCeiling", () => {
   })
 
   it("progresso ACIMA do total vira o teto — catálogo defasado não apaga leitura real", () => {
-    // "Marcar até o último lançado" da /leitura grava 132 numa obra que o catálogo diz ter 120.
+    // "Marcar até o último lançado" da /reading grava 132 numa obra que o catálogo diz ter 120.
     expect(chapterCeiling(120, 132)).toBe(132)
     expect(clampChaptersRead(132, chapterCeiling(120, 132)).value).toBe(132)
   })

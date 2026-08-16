@@ -17,7 +17,7 @@ const FEATURE_LABELS: Record<string, string> = {
    * 🔴 NÃO é "Qualidade da sinopse", apesar do nome da feature. O valor sai de
    * `SINOPSE_MAP[input.synopsisQuality]` (`♥=2 · ♥♥=5 · ♥♥♥=8 · ♥♥♥♥=13`) — ou seja, da
    * coluna `synopsis_quality`, que o app inteiro chama de **Interesse**. O rótulo antigo
-   * sobreviveu a uma renomeação e afirmava, no gráfico mais visível da `/conta/perfil`,
+   * sobreviveu a uma renomeação e afirmava, no gráfico mais visível da `/account/taste-profile`,
    * que o modelo pesa a qualidade do TEXTO da sinopse. Ele pesa o quanto a pessoa QUIS ler.
    */
   SinopseScore: "Interesse na obra",

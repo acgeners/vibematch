@@ -548,7 +548,7 @@ export function AiEvaluationReviewForm({
                 {NO_REVIEWS_REASON_LABEL[noReviewsReason]}.{" "}
                 {NO_REVIEWS_REASON_CTA[noReviewsReason] && (
                   <Link
-                    href={`/titles/${titleToSlug(workTitle)}#external-sources`}
+                    href={`/catalog/${titleToSlug(workTitle)}#external-sources`}
                     className="font-medium text-primary underline-offset-2 hover:underline"
                   >
                     {NO_REVIEWS_REASON_CTA[noReviewsReason]}

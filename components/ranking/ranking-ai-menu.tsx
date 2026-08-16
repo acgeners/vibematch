@@ -152,7 +152,7 @@ export function RankingAiMenu({ isPaid, staleAlignmentCount }: RankingAiMenuProp
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onSelect={() =>
-                  window.open("/fila-recomendacao?tab=ia-rk", "_blank", "noopener,noreferrer")
+                  window.open("/my-ai-scores?tab=ia-rk", "_blank", "noopener,noreferrer")
                 }
                 className="gap-2.5 py-2"
               >

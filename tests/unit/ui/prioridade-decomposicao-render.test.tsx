@@ -79,7 +79,7 @@ describe("o painel imprime a composição da Prioridade", () => {
   it("imprime qual ênfase dos atributos está em vigor", () => {
     const { unmount } = render(<DecisionBreakdownPanel breakdown={COM_VEREDITO} />)
     expect(screen.getByText(/Ênfase dos atributos: automática/)).toBeTruthy()
-    expect(screen.getByText(/não a de \/preferencias/)).toBeTruthy()
+    expect(screen.getByText(/não a de \/preferences/)).toBeTruthy()
     unmount()
     render(<DecisionBreakdownPanel breakdown={SEM_VEREDITO} />)
     expect(screen.getByText(/Ênfase dos atributos: a sua/)).toBeTruthy()

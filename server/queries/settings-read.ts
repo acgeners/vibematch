@@ -6,7 +6,7 @@ import { countPendingSuggestions } from "@/server/queries/calibration"
 import { getSettingsItemPending } from "@/server/queries/settings-pending"
 
 /**
- * "Marcar pendências de /settings como lidas" — leitura dos acks e cálculo do
+ * "Marcar pendências de /curation/settings como lidas" — leitura dos acks e cálculo do
  * NÃO-LIDO por seção. Ver migration 134 e `server/actions/settings-read.ts`.
  *
  * Dois modelos convivem (o mesmo split que a migration documenta):

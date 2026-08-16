@@ -33,7 +33,7 @@ export async function acquireReviewsForWork(workId: string): Promise<AcquireRevi
   // O save já dispara o digest (fire-and-forget); chamamos aqui pra AGUARDAR e
   // reportar o status — o gate por conteúdo/versão evita regerar (sem custo duplo).
   const d = await generateWorkReviewDigest(workId)
-  revalidatePath("/ai-evaluation")
+  revalidatePath("/curation/works")
   revalidateTag("ai-eval-tab-counts", "max")
   return { ok: true, reviews, digest: d.status, message: `${reviews} review(s); digest: ${d.status}` }
 }
@@ -66,7 +66,7 @@ export async function acquireReviewsForWorks(workIds: string[]): Promise<Acquire
       console.error("[acquireReviewsForWorks] falha em", id, err instanceof Error ? err.message : err)
     }
   }
-  revalidatePath("/ai-evaluation")
+  revalidatePath("/curation/works")
   revalidateTag("ai-eval-tab-counts", "max")
   return { processed, reviews, digested, failed, capped: (workIds ?? []).length > REVIEWS_BATCH_CAP }
 }
@@ -88,7 +88,7 @@ export async function inferTagsForWork(workId: string): Promise<InferTagsResult>
   if (!workId) return { ok: false, added: 0, message: "Obra inválida." }
   const added = await inferAndPersistTagsForWork(workId)
   if (added > 0) await markRecalcPending("infer_tags_ai_eval")
-  revalidatePath("/ai-evaluation")
+  revalidatePath("/curation/works")
   revalidateTag("ai-eval-tab-counts", "max")
   return { ok: true, added, message: `${added} tag(s) inferida(s)` }
 }
@@ -118,7 +118,7 @@ export async function inferTagsForWorks(workIds: string[]): Promise<InferTagsBat
     }
   }
   if (added > 0) await markRecalcPending("infer_tags_ai_eval_batch")
-  revalidatePath("/ai-evaluation")
+  revalidatePath("/curation/works")
   revalidateTag("ai-eval-tab-counts", "max")
   return { processed, added, failed, capped: (workIds ?? []).length > TAGS_BATCH_CAP }
 }
@@ -150,9 +150,9 @@ export async function regenerateCanonicalSynopsis(workId: string): Promise<Regen
   const { consolidateSynopsisForWork } = await import("@/lib/ai-recommendation/consolidate-for-work")
   const r = await consolidateSynopsisForWork(workId, { force: true })
 
-  revalidatePath(`/titles/${workId}`)
-  revalidatePath("/ai-evaluation")
-  revalidatePath("/fila-recomendacao")
+  revalidatePath(`/catalog/${workId}`)
+  revalidatePath("/curation/works")
+  revalidatePath("/my-ai-scores")
 
   const messages: Record<string, string> = {
     done: "Sinopse canônica regerada",

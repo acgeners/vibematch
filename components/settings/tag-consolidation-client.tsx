@@ -84,13 +84,13 @@ interface Props {
   genreProposals: GenreProposalRow[]
   genreProposalsCount: number
   /** Rota que a navegação de filtros reescreve. Default = a página dedicada;
-   *  quando embutida inline em /settings, recebe "/settings" pra ficar na pilha. */
+   *  quando embutida inline em /curation/settings, recebe "/curation/settings" pra ficar na pilha. */
   basePath?: string
 }
 
 // Consolidação de tags vive no grupo "Avançado" (accent slate). Ações afirmativas
 // (aprovar/aplicar/criar) = botão sólido no accent do grupo; rejeitar/deletar ficam
-// secundárias (outline/ghost). Padrão de /settings: 1 primário no accent por card.
+// secundárias (outline/ghost). Padrão de /curation/settings: 1 primário no accent por card.
 const AFFIRM_BTN = ACCENT_BUTTON.slate
 
 const STATUSES: Array<{ value: ProposalStatus; label: string }> = [
@@ -118,7 +118,7 @@ export function TagConsolidationClient({
   newTagsCount,
   genreProposals,
   genreProposalsCount,
-  basePath = "/settings/tag-consolidation",
+  basePath = "/curation/settings/tag-consolidation",
 }: Props) {
   const router = useRouter() // mantido pro router.replace em updateQuery
   const doRefresh = useRefresh()

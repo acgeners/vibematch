@@ -191,7 +191,7 @@ const PLAN = [
     table: "ai_api_calls",
     where: `created_at > '${maxCall}'::timestamptz`,
     atLeast: true, // log append-only: o destino pode ter linhas próprias mais novas
-    // Log de custo: sem ele o /ai-usage da nuvem não mostra o que estas avaliações gastaram.
+    // Log de custo: sem ele o /curation/ai-usage da nuvem não mostra o que estas avaliações gastaram.
     insert: (c) => `insert into public.ai_api_calls (${c}) select ${c} from stage_ai_api_calls on conflict do nothing`,
   },
   {

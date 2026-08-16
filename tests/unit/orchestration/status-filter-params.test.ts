@@ -36,16 +36,16 @@ const ALLOWED = new Set([
   "components/ranking/ranking-filters.tsx",
   "components/settings/calibration/taste-model-health-panel.tsx",
   "components/titles/title-filters.tsx",
-  "app/titles/page.tsx",
+  "app/catalog/page.tsx",
 ])
 
 /**
- * O /titles roda em OUTRO motor (`server/queries/works.ts`), que não tem exclusão de
+ * O /catalog roda em OUTRO motor (`server/queries/works.ts`), que não tem exclusão de
  * status — então ler só a metade positiva ali é coerente, não é meia-implementação.
- * A lista é explícita de propósito: no dia em que o /titles ganhar exclusão, tirar o
+ * A lista é explícita de propósito: no dia em que o /catalog ganhar exclusão, tirar o
  * arquivo daqui é o que faz o teste voltar a cobri-lo.
  */
-const WITHOUT_EXCLUSION = new Set(["components/titles/title-filters.tsx", "app/titles/page.tsx"])
+const WITHOUT_EXCLUSION = new Set(["components/titles/title-filters.tsx", "app/catalog/page.tsx"])
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {

@@ -149,7 +149,7 @@ export function DiscoveryView({ result, onlyUnread, view }: Props) {
     const v = next.view ?? view
     if (v === "cards") params.set("view", "cards")
 
-    startTransition(() => router.push(`/descobrir?${params}`, { scroll: false }))
+    startTransition(() => router.push(`/discover?${params}`, { scroll: false }))
   }
 
   // Reordenação local: os dois eixos já vêm resolvidos por obra.
@@ -1100,7 +1100,7 @@ function ResultRow({
 
       <span className={`${cel} block min-w-0`}>
         <Link
-          href={`/titles/${titleToSlug(work.title)}`}
+          href={`/catalog/${titleToSlug(work.title)}`}
           className="block truncate text-sm font-medium hover:underline"
         >
           {work.title}
@@ -1156,7 +1156,7 @@ function ResultCard({
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-baseline justify-between gap-2">
           <Link
-            href={`/titles/${titleToSlug(work.title)}`}
+            href={`/catalog/${titleToSlug(work.title)}`}
             className="line-clamp-2 text-[13px] font-medium leading-tight hover:underline"
           >
             {work.title}

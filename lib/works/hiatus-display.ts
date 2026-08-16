@@ -5,8 +5,8 @@ import type { HiatusKind } from "@/lib/external/hiatus-kind"
  * Como o tipo de hiato se APRESENTA — glifo, rótulo, a frase que explica e desde quando.
  *
  * 🔴 Dono único, e a razão é a de sempre neste projeto: são **três** superfícies consumindo o
- * mesmo estado (o badge de publicação, a banda da /leitura e o tooltip), e uma segunda cópia é
- * como a tabela diz "entre temporadas" e a /leitura chama a mesma obra de "Possível hiato".
+ * mesmo estado (o badge de publicação, a banda da /reading e o tooltip), e uma segunda cópia é
+ * como a tabela diz "entre temporadas" e a /reading chama a mesma obra de "Possível hiato".
  * Mesma armadilha do `LOW_BALANCE_USD` e do `STRONG_TAG_WEIGHT`.
  *
  * 🔴 **O sinal é FORMA, não cor.** Os dois tipos dividem o âmbar do status "Hiatus", e um
@@ -22,7 +22,7 @@ import type { HiatusKind } from "@/lib/external/hiatus-kind"
  * As três colunas que viajam juntas da query até o badge.
  *
  * ⚠️ Existe como tipo compartilhado porque são **6 fontes de dados diferentes** alimentando o
- * mesmo badge (vitrine, "Continue lendo", /painel, comparador, hero do login, fila de
+ * mesmo badge (vitrine, "Continue lendo", /dashboard, comparador, hero do login, fila de
  * avaliação) — e declarar a tripla à mão em cada uma é como uma delas ganha `hiatus_kind` sem
  * `publication_status_note` e o tooltip aparece sem a prova, só ali.
  */
@@ -49,7 +49,7 @@ export function hiatusFieldsFromRow(row: {
 }
 
 export interface HiatusDisplay {
-  /** Sobrevive onde o texto não cabe (coluna de tabela, `iconOnly` da /leitura). */
+  /** Sobrevive onde o texto não cabe (coluna de tabela, `iconOnly` da /reading). */
   glyph: string
   /** Sufixo do badge quando há largura. */
   label: string

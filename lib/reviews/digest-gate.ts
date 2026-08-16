@@ -53,7 +53,7 @@ export const MIN_USEFUL_REVIEWS_FOR_DIGEST = 4
  * ⚠️ O LOTE (`generateDigestsForWorks`) NÃO está na lista de propósito: ele
  * delega a `ensureReviewDigest`, que já aplica o gate. Aplicar o piso lá seria
  * uma segunda opinião sobre o mesmo fato. Foi por não delegar que o lote antigo
- * do `/settings` (`consolidatePendingReviewDigests`) foi aposentado em vez de
+ * do `/curation/settings` (`consolidatePendingReviewDigests`) foi aposentado em vez de
  * corrigido: ele tinha corpus próprio e nenhum gate.
  */
 export function hasEnoughReviewsForDigest(usefulReviewCount: number): boolean {

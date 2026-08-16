@@ -69,12 +69,12 @@ const READERS = [
   {
     file: "server/actions/recommendations.ts",
     fn: "getTasteProfileStatusAction",
-    // O status do perfil de gosto. Medido em 2026-08-09: `/painel` ANÔNIMO imprimia o
+    // O status do perfil de gosto. Medido em 2026-08-09: `/dashboard` ANÔNIMO imprimia o
     // `taste_profile.summary` do dono em prosa ("…o coração do gosto é o romance de
     // fantasia/rofan…"), mais os temas e as tags amadas dele — porque a cadeia inteira
     // (`loadCurrentTasteProfile` → `getRatedWorksForProfile` → `getCurrentUserId`)
     // resolvia no singleton sem sessão. TRÊS páginas renderizam esta função
-    // (`/painel`, `/recommendations`, `/conta/perfil`), então o gate de rota sozinho
+    // (`/dashboard`, `/recommendations`, `/account/taste-profile`), então o gate de rota sozinho
     // deixaria o próximo consumidor herdar o buraco.
     // Não consulta direto: repassa o `userId` resolvido para os dois leitores.
     delegatesTo: "loadCurrentTasteProfile",

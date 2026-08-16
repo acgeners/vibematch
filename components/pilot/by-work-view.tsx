@@ -182,7 +182,7 @@ export function ByWorkView({
             Obra {safePos + 1} de {total}
           </div>
           <a
-            href={`/titles/${titleToSlug(w.title)}`}
+            href={`/catalog/${titleToSlug(w.title)}`}
             target="_blank"
             rel="noopener noreferrer"
             title="Abrir a página da obra (nova aba)"

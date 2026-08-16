@@ -72,7 +72,7 @@ const CHUNK = 200
  *
  * Escopo restrito às obras que têm PELO MENOS UMA tag com adult_score_tier
  * decidido (ou a tag especial de teto R15) — evita varrer o catálogo inteiro
- * a cada carga de /settings.
+ * a cada carga de /curation/settings.
  */
 export async function getAdultBoundsDriftQueue(): Promise<AdultBoundsDriftItem[]> {
   const supabase = createAdminClient()

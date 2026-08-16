@@ -6,7 +6,7 @@
  * For a group whose sub-groups were already approved (Phase 1), asks Claude
  * to assign every tag to exactly one approved sub-group (or leave it out).
  * Proposals land in `tag_subgroup_assignment` (status='pending') for human
- * review at `/settings/tag-consolidation?view=subgroups&phase=assign`.
+ * review at `/curation/settings/tag-consolidation?view=subgroups&phase=assign`.
  * Applying approved assignments writes `tags.tag_subgroup_id`.
  *
  * Usage:

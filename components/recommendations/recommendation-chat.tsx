@@ -459,7 +459,7 @@ function RecommendationCards({ snapshot }: { snapshot: ChatRecommendationSnapsho
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <div className="flex items-start justify-between gap-2">
                 <Link
-                  href={`/titles/${titleToSlug(item.title)}`}
+                  href={`/catalog/${titleToSlug(item.title)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="line-clamp-2 text-xs font-medium leading-tight hover:underline"

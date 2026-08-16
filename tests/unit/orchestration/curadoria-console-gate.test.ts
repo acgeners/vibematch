@@ -3,17 +3,21 @@ import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { DECISION_QUEUES } from "@/lib/curadoria/decision-queues"
 
 /**
- * Invariante arquitetural: TODA rota que aparece na sidebar da console `/curadoria`
+ * Invariante arquitetural: TODA rota que aparece na sidebar da console `/curation`
  * tem que estar gateada — e o gate que vale é o do proxy.
  *
  * O erro que isto pega não quebra build nem runtime: alguém acrescenta uma entrada na
- * console (ou cria a rota `/admin/qualquer-coisa`), esquece o `CONSOLE_PREFIXES` do
+ * console apontando pra uma rota FORA de `/curation/*`, esquece o `CONSOLE_PREFIXES` do
  * `middleware.ts`, e a página é servida a qualquer visitante — com aparência de área
  * restrita, porque a sidebar da curadoria vem junto. Nada falha; só fica aberto.
  *
+ * ⚠️ Desde 2026-08-16 os cinco membros são `/curation/*` e o prefixo é UM só, o que
+ * torna esse esquecimento improvável — mas não impossível: a `ENTRIES` aceita qualquer
+ * `href`, e foi assim que `/admin/model-metrics` viveu fora do prefixo da console.
+ *
  * Por que o proxy é o gate que conta (e o layout não basta): o Next renderiza layout e
  * página em PARALELO, então um `notFound()` no layout chega DEPOIS de o stream ter
- * começado — medido em dev, `GET /settings` anônimo devolvia 200 com o HTML da página
+ * começado — medido em dev, `GET /curation/settings` anônimo devolvia 200 com o HTML da página
  * protegida no corpo. O `notFound()` da shell é 2ª linha, e por isso também é exigido
  * aqui: as duas camadas juntas.
  */
@@ -53,7 +57,7 @@ function gatedPrefixes(): string[] {
   return [...line![1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!)
 }
 
-describe("arquitetura: a console /curadoria é gateada no proxy", () => {
+describe("arquitetura: a console /curation é gateada no proxy", () => {
   it("toda rota da sidebar está coberta por um prefixo do middleware", () => {
     const prefixes = gatedPrefixes()
     const hrefs = consoleHrefs()
@@ -90,7 +94,7 @@ describe("arquitetura: a console /curadoria é gateada no proxy", () => {
    * de casar: `undefined` vira zero pelo `?? 0`, e zero não desenha badge nenhum. A
    * pendência some da tela feita pra mostrá-la, sem erro e sem log.
    *
-   * Só nesta direção: `/settings` tem badge e NÃO é fila de decisão (é pendência de
+   * Só nesta direção: `/curation/settings` tem badge e NÃO é fila de decisão (é pendência de
    * configuração), então a sidebar legitimamente tem entradas fora da lista.
    */
   it("toda fila de decisão tem entrada correspondente na sidebar da console", () => {
@@ -106,8 +110,8 @@ describe("arquitetura: a console /curadoria é gateada no proxy", () => {
    * Layout no App Router ANINHA. Um `layout.tsx` que monta a shell dentro de uma rota
    * cujo pai já a monta desenha a console DUAS VEZES — duas sidebars lado a lado.
    *
-   * Aconteceu com `/curadoria/pedidos`: o layout próprio parecia necessário ("entra na
-   * console"), mas `app/curadoria/layout.tsx` já cobre todo `/curadoria/*`. Nada falha
+   * Aconteceu com `/curation/requests`: o layout próprio parecia necessário ("entra na
+   * console"), mas `app/curation/layout.tsx` já cobre todo `/curation/*`. Nada falha
    * — nem build, nem gate, nem teste de rota; só a página fica errada, e só pra quem
    * abre aquela rota específica. Foi um humano olhando a tela que pegou.
    *

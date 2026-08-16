@@ -70,7 +70,7 @@ async function renderWithNewChapter() {
  * com um anel de 1px que ninguém enxergava, e com uma capa de 18px que não identificava
  * obra nenhuma. Nada disso quebra build nem runtime.
  */
-describe("/leitura: obra com capítulo novo se identifica na faixa e no card", () => {
+describe("/reading: obra com capítulo novo se identifica na faixa e no card", () => {
   beforeEach(() => checkReadingUpdates.mockReset())
   afterEach(cleanup)
 

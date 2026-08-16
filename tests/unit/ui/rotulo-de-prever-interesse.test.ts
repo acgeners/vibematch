@@ -6,7 +6,7 @@ import { interestPredictLabel } from "@/lib/ui/interest-predict-label"
 
 /**
  * O botão que dispara a previsão de Interesse aparece em DUAS telas (página da obra e
- * fila `/fila-recomendacao?tab=sinopse`) e chamava a mesma ação de dois jeitos:
+ * fila `/my-ai-scores?tab=sinopse`) e chamava a mesma ação de dois jeitos:
  * "Prever de novo" numa, "Reprever" na outra. Ninguém decidiu isso — cada tela nomeou
  * o botão quando foi construída, e nada as obrigava a concordar.
  *

@@ -2,7 +2,7 @@
  * Sentinela do filtro de Interesse (`?synopsis_q=` manual e `?synopsis_pred=` previsão):
  * o único valor que NÃO é um ♥.
  *
- * Aparece na UI como o chip **"Outros"**, e no /ai-evaluation como "Não avaliada".
+ * Aparece na UI como o chip **"Outros"**, e no /curation/works como "Não avaliada".
  */
 
 /**

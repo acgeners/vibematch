@@ -52,7 +52,7 @@ export function DeepDiveRecommendationCard({ payload }: DeepDiveRecommendationCa
 
       {rec.suggested_alternative_id && rec.suggested_alternative_title && (
         <Link
-          href={`/titles/${titleToSlug(rec.suggested_alternative_title)}`}
+          href={`/catalog/${titleToSlug(rec.suggested_alternative_title)}`}
           className="flex items-center justify-between gap-2 rounded-md border bg-background/60 px-3 py-2 text-xs hover:bg-background"
         >
           <span className="min-w-0 flex-1">

@@ -201,7 +201,7 @@ const PERSONAL_BY_SLUG = new Map<string, PersonalStatusInfo>(
  * O nome de UM status específico, buscado pelo slug — e ESTOURA se o slug não existir.
  *
  * Existe pros poucos lugares onde o código legitimamente precisa nomear um status: a página
- * /leitura tem uma seção "Lendo" e outra "Em hiato". Não há conceito a abstrair ali — a seção É
+ * /reading tem uma seção "Lendo" e outra "Em hiato". Não há conceito a abstrair ali — a seção É
  * daquele status.
  *
  * O ganho não é evitar o acoplamento (ele é inevitável aqui); é trocar uma falha SILENCIOSA por

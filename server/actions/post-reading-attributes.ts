@@ -97,7 +97,7 @@ export async function submitPostReadingAttributes(
     changed: ["attribute_bias"],
     actorId: userId,
   })
-  revalidatePath(`/titles/${workId}`)
+  revalidatePath(`/catalog/${workId}`)
 
   return { ok: true }
 }

@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
  * O que este arquivo prende: que o healthcheck FALHE quando o banco falha.
  *
  * O caminho feliz é fácil e inútil de testar sozinho — o monitor que existia antes também
- * passava, porque checava `/sobre` e `/`, rotas que não tocam o banco. Produção ficou três dias
+ * passava, porque checava `/about` e `/`, rotas que não tocam o banco. Produção ficou três dias
  * respondendo 200 com TODA leitura quebrada (`Invalid API key`) e ninguém soube.
  *
  * Os dois ramos de falha são o valor: erro do PostgREST e catálogo vazio. O segundo é o mais

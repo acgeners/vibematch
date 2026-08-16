@@ -252,7 +252,7 @@ export async function getAiUsageTotals(operation?: string | null): Promise<{
 }
 
 // ── KPIs do período selecionado (range-aware, com delta vs. período anterior) ──
-// Substitui as 4 janelas fixas na página /ai-usage: mostra custo/chamadas/lat.
+// Substitui as 4 janelas fixas na página /curation/ai-usage: mostra custo/chamadas/lat.
 // p95/erro DO período escolhido, comparados ao período imediatamente anterior de
 // mesma duração + uma sparkline de custo diário. "Tudo" não tem período anterior.
 
@@ -555,7 +555,7 @@ export async function getRecentAiCalls(
 // — ver migration 059). Some `cost_total_usd` de TODAS as chamadas dessa obra
 // (inclui erros: uma tentativa que falhou também gastou tokens) e quebra por
 // `operation`. Sem índice nesse campo JSONB, mas é 1 obra (dezenas de linhas) e
-// só roda em dev. Ressalva: avaliações do fluxo de CRIAÇÃO (`/titles/new`) rodam
+// só roda em dev. Ressalva: avaliações do fluxo de CRIAÇÃO (`/catalog/new`) rodam
 // antes de a obra existir (`work_id` nulo) e não são atribuídas aqui.
 
 interface WorkCostRawRow {

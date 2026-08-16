@@ -1368,7 +1368,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
         {displayEntries.map((entry) => (
           <Link
             key={entry.workId}
-            href={`/titles/${titleToSlug(entry.title)}`}
+            href={`/catalog/${titleToSlug(entry.title)}`}
             className="block rounded-lg border border-border/70 bg-card/80 p-3 shadow-sm shadow-black/5 transition-all hover:border-primary/30 hover:bg-card"
           >
             <div className="flex items-start gap-3">
@@ -1947,7 +1947,7 @@ function RankingCard({
         title={entry.title}
         preview={entryToPreview(entry)}
         previewVariant="compact"
-        href={`/titles/${slug}`}
+        href={`/catalog/${slug}`}
         className="absolute inset-0 z-10 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
       >
         <span className="sr-only">{entry.title}</span>

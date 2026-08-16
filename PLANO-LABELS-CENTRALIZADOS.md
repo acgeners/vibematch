@@ -113,7 +113,7 @@ Uso: `LABELS.platform_avg.abbrev` (header curto), `.full` (config picker), `.sho
    - *Definition sites*: `work-table-config.ts` (`label`→abbrev/short, `configLabel`→full/short, `description`→tooltip_full), `work-heatmap-view.tsx` (2 dicts NON_CRITERION_LABELS→short/abbrev + NON_CRITERION_TOOLTIPS→tooltip_full), `ranking-filters.tsx`/`title-filters.tsx` (SORTABLE_FIELDS→short, range defs + pushRange(Chip)→full), filtro synopsis_pred (abbrev + tooltip_full).
    - *Render sites*: `ranking-table.tsx` MetricCell 2×2 (short/abbrev) + re-key dos 38 sites que usavam `SCORE_LABELS` (→ `.full`).
    - **Fora de propósito (deixados hardcoded):** presets (Tudo/Compacto…), rótulos de grupo (Básico/Notas/Atributos), tooltips de estado/ação/plano e as ricas dinâmicas (score-tooltip-content, cells state, detalhe da obra, hints de settings) — são UI contextual/dinâmica, não descrição do campo.
-5. ✅ Verificado — `tsc` 0 erros; `/titles` `/ranking` `/favorites` `/recommendations` HTTP 200 sem erro. 21 arquivos alterados.
+5. ✅ Verificado — `tsc` 0 erros; `/catalog` `/ranking` `/favorites` `/recommendations` HTTP 200 sem erro. 21 arquivos alterados.
 
 ## 8. Pendências do usuário (não dá pra eu fazer)
 

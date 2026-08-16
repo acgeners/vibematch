@@ -20,7 +20,7 @@
 - **Medição prospectiva ACUMULANDO** — hoje **0 obras resolvidas** (esperado: obras "Quero ler"/"Sem status" só resolvem quando lidas+avaliadas). Rodar `npm run prospective:ranking` periodicamente. **A decisão sobre Ridge/chance/Bússola (P3) e a deduplicação de sinais dependem de ≥30 resolvidas + IC.**
 - **P0.1** (auth/rate-limit) e **P0.2** (migrations reproduzíveis) — **não iniciados**.
 - **P1.2** (deduplicar `personal_fit`/`chance`), **P1.3** (unificar mood), **P2.\*** — pendentes.
-- **Backlog:** tooltip `~0,6` da Faixas → `cv_mae` real; Opção B (helpers puros + aba "Ranking" em `/admin/model-metrics`) quando houver dados.
+- **Backlog:** tooltip `~0,6` da Faixas → `cv_mae` real; Opção B (helpers puros + aba "Ranking" em `/curation/model-metrics`) quando houver dados.
 
 ---
 

@@ -80,7 +80,7 @@ const call = async (id, args, cookie, referer = "/favorites") =>
 
 const owner = await session(OWNER.email)
 const reader = await session(OTHER.email)
-const ids = await actionIds(["/favorites", "/titles", "/titles/new"])
+const ids = await actionIds(["/favorites", "/catalog", "/catalog/new"])
 console.log(`createWorkList: ${ids.createWorkList ?? "?"} · deleteWorkList: ${ids.deleteWorkList ?? "?"}\n`)
 
 // Grupos DELE, antes.
@@ -115,7 +115,7 @@ const criar = await call(
   ids.createWork,
   [{ title: nome, publication_status: "Unknown", personal_status: "Want to Read", observation_adjustment: 0, tags: [], genres: [], alternative_titles: [], covers: [], synopses: [], story: 9, adult_content: 9 }],
   reader.cookie,
-  "/titles/new",
+  "/catalog/new",
 )
 check(!criar.includes("Só o Curador"), "a Leitora PODE cadastrar obra")
 const { data: nova } = await admin.from("works").select("id, ai_eval_status").eq("title", nome).maybeSingle()

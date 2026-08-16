@@ -9,10 +9,10 @@ import { setChaptersRead } from "@/server/actions/works"
 import { refreshChrome } from "@/lib/chrome-refresh"
 
 /**
- * "Marcar até o N" do destaque da home — o mesmo gesto que existe em cada card da /leitura,
+ * "Marcar até o N" do destaque da home — o mesmo gesto que existe em cada card da /reading,
  * na tela onde a obra está em foco.
  *
- * Usa a MESMA action (`setChaptersRead`), então o estado escrito é idêntico ao da /leitura:
+ * Usa a MESMA action (`setChaptersRead`), então o estado escrito é idêntico ao da /reading:
  * um caminho só para "li até aqui", em vez de dois que podem divergir.
  *
  * Depois de salvar, `router.refresh()` re-renderiza a home no servidor — o destaque muda

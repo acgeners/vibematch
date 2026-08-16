@@ -28,7 +28,7 @@ export interface PredictSynopsisRowActionsProps {
 }
 
 /**
- * Ações por linha da fila de Interesse Sinopse (aba /fila-recomendacao?tab=sinopse).
+ * Ações por linha da fila de Interesse Sinopse (aba /my-ai-scores?tab=sinopse).
  * Espelha o RerankAiRkButton da fila de IA Rk, somando o "Aplicar" (copia a
  * previsão pro campo manual — única via que entra no pipeline de notas).
  */

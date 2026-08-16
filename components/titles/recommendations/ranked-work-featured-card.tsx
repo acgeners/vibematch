@@ -38,7 +38,7 @@ const RANK_STYLE: Record<number, string> = {
 
 export function RankedWorkFeaturedCard({ rank, ranked }: RankedWorkFeaturedCardProps) {
   const { work, coverUrl, alignment_score, justification } = ranked
-  const href = `/titles/${titleToSlug(work.title)}`
+  const href = `/catalog/${titleToSlug(work.title)}`
   const q = quality(alignment_score)
 
   return (

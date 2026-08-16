@@ -14,7 +14,7 @@
  * errado.
  *
  * ⚠️ Três páginas montam `RankingFilters` a partir da URL (`/ranking`, `/favorites`,
- * `/titles`). Uma 2ª cópia deste parse é como o filtro passa a valer numa e não na outra.
+ * `/catalog`). Uma 2ª cópia deste parse é como o filtro passa a valer numa e não na outra.
  */
 
 import { ART_BAND_CUTOFFS, ART_BAND_LABELS } from "./bands"

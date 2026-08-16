@@ -2,7 +2,7 @@ import type { LucideIcon } from "lucide-react"
 import type { SettingsAccent } from "@/lib/settings-accent"
 
 // Tipos + estilos + helpers GENÉRICOS do padrão "console" (drill-in card-grid).
-// Compartilhados entre /settings e /preferencias — cada página fornece só o seu
+// Compartilhados entre /curation/settings e /preferences — cada página fornece só o seu
 // registry (`ConsoleGroup[]`) e o switch de painéis; a navegação (overview de
 // cards + seletor rápido) e o visual saem daqui.
 

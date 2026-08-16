@@ -38,13 +38,13 @@ export interface TagConsolidationParams {
 
 /**
  * Ferramenta de Consolidação de tags (clusters + mudanças de grupo + sub-grupos).
- * Extraída da página `/settings/tag-consolidation` pra ser reusada tanto lá
- * (`basePath` default) quanto inline na pilha de /settings (`basePath="/settings"`,
+ * Extraída da página `/curation/settings/tag-consolidation` pra ser reusada tanto lá
+ * (`basePath` default) quanto inline na pilha de /curation/settings (`basePath="/curation/settings"`,
  * pra a navegação de filtros ficar no card em vez de trocar de rota).
  */
 export async function TagConsolidationTool({
   params,
-  basePath = "/settings/tag-consolidation",
+  basePath = "/curation/settings/tag-consolidation",
 }: {
   params: TagConsolidationParams
   basePath?: string

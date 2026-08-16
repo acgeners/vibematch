@@ -98,7 +98,7 @@ export function GenerateAllBanner({
       id: `generate-all:${workId}`,
       kind: "generate-all",
       label,
-      href: `/titles/${workId}`,
+      href: `/catalog/${workId}`,
       run: () => generateAllWorkData(workId, opts),
       onDone: handleResult,
       onError: (e) => {

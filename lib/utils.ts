@@ -15,7 +15,7 @@ export function titleToSlug(title: string): string {
   if (base) return base
   // Título sem NENHUM caractere latino (coreano/japonês/cirílico) slugificaria pra
   // vazio. O fallback fixo "untitled" fazia TODAS essas obras colidirem na mesma URL
-  // (`/titles/untitled`, first-wins → obra errada/ambígua). Deriva um sufixo
+  // (`/catalog/untitled`, first-wins → obra errada/ambígua). Deriva um sufixo
   // DETERMINÍSTICO do título original: mantém o slug único por título E reconstruível
   // — `getWorkBySlug` casa `titleToSlug(title) === slug`, então a mesma entrada gera
   // o mesmo slug dos dois lados. (Hoje 0 obras caem aqui; é defensivo p/ futuro.)

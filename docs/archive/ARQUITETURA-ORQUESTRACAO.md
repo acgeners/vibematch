@@ -149,7 +149,7 @@ Fluxo: lê contrato → resolve readiness → buildPlan (só faltantes/stale) �
 |---|---|
 | ready | botão habilitado, executa |
 | ready_partial | executa + badge "parcial: falta {digest…}" + "completar" |
-| blocked_manual | botão desabilitado + motivo + **link para a etapa** (atribuir fontes / `/ai-evaluation`) |
+| blocked_manual | botão desabilitado + motivo + **link para a etapa** (atribuir fontes / `/curation/works`) |
 | blocked_cost_confirmation | modal "Vou executar {passos}. Custo ~$X. Confirmar?" (uma confirmação p/ a cascata) |
 | processing | spinner com jobs em voo; auto-continua ao concluir |
 | failed | erro + Retry (reusa dedup_key) + last_error legível |

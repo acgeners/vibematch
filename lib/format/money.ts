@@ -18,7 +18,7 @@
  * Acima de 10¢ o inverso vale — `$0,57` lê melhor que `57,3¢` —, então o corte
  * fica exatamente onde o dólar deixa de funcionar, não em US$1.
  *
- * pt-BR (vírgula) em todo lugar: até 2026-08-07 o `/ai-usage` mostrava `$0.06` e
+ * pt-BR (vírgula) em todo lugar: até 2026-08-07 o `/curation/ai-usage` mostrava `$0.06` e
  * o popup de custo mostrava `~$0,05` na mesma sessão.
  *
  * 🔴 **Valor que aparece ao lado de outro precisa de `makeUsdScale`, não de
@@ -67,7 +67,7 @@ function asDollars(usd: number): string {
   const abs = Math.abs(usd)
   // Mesmo cuidado do `asCents`, e ele importa MAIS aqui: quando o veto do
   // `CENTS_VETO` puxa a régua pra dólar, os menores da série caem nesta faixa.
-  // Medido no /ai-usage: `suggest_groups` custou US$0,0046 e a coluna Custo
+  // Medido no /curation/ai-usage: `suggest_groups` custou US$0,0046 e a coluna Custo
   // imprimia "$0,00" — que AFIRMA que não houve custo.
   if (abs > 0 && abs < 0.005) return usd < 0 ? `>${MINUS}$0,01` : "<$0,01"
   return `${usd < 0 ? MINUS : ""}$${abs.toFixed(2).replace(".", ",")}`

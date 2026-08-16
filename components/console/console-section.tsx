@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils"
 /**
  * Cabeçalho + moldura do painel ativo do console: card com trilho de accent,
  * ícone, título, chips e descrição, seguido do conteúdo. Genérico —
- * compartilhado por /settings e /preferencias.
+ * compartilhado por /curation/settings e /preferences.
  */
 export function ConsoleSectionShell({
   section,

@@ -5,10 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { LABELS } from "@/lib/constants/ui-labels"
 
 /**
- * As filas de IA PESSOAIS — as duas de `/fila-recomendacao`.
+ * As filas de IA PESSOAIS — as duas de `/my-ai-scores`.
  *
- * Tinha uma terceira, "Atributos" (`/ai-evaluation`), removida em 2026-08-03: aquela fila é
- * curadoria do catálogo compartilhado e mora na console `/curadoria`. Num card do `/painel`,
+ * Tinha uma terceira, "Atributos" (`/curation/works`), removida em 2026-08-03: aquela fila é
+ * curadoria do catálogo compartilhado e mora na console `/curation`. Num card do `/dashboard`,
  * que qualquer logado abre, ela era um link que o gate da console barra — botão que quica.
  */
 interface AiQueueCardProps {
@@ -27,8 +27,8 @@ interface QueueRow {
 
 export function AiQueueCard({ iaRk, synopsis }: AiQueueCardProps) {
   const rows: QueueRow[] = [
-    { label: LABELS.alignment_score.full, count: iaRk, href: "/fila-recomendacao?tab=ia-rk", icon: Sparkles },
-    { label: "Interesse por sinopse", count: synopsis, href: "/fila-recomendacao?tab=sinopse", icon: FileText },
+    { label: LABELS.alignment_score.full, count: iaRk, href: "/my-ai-scores?tab=ia-rk", icon: Sparkles },
+    { label: "Interesse por sinopse", count: synopsis, href: "/my-ai-scores?tab=sinopse", icon: FileText },
   ]
   const total = iaRk + synopsis
 

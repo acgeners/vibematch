@@ -23,7 +23,7 @@ interface SimilarWorksCardProps {
   works: SimilarWork[]
   className?: string
   /**
-   * A obra desta página, para o atalho "Cruzar com outras" (`/descobrir`).
+   * A obra desta página, para o atalho "Cruzar com outras" (`/discover`).
    *
    * Opcional: sem ela o botão some, em vez de levar para uma busca sem semente.
    */
@@ -334,7 +334,7 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
                 o alinhamento com o perfil — a pergunta seguinte, não a mesma. */}
             {workId && (
               <Link
-                href={`/descobrir?seeds=${workId}`}
+                href={`/discover?seeds=${workId}`}
                 className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400"
               >
                 <Radar className="h-3.5 w-3.5" />
@@ -490,7 +490,7 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
                 {/* Col 1 — capa */}
                 <div className="flex items-start justify-center p-3">
                   <Link
-                    href={`/titles/${titleToSlug(w.title)}`}
+                    href={`/catalog/${titleToSlug(w.title)}`}
                     className="block h-[148px] w-[104px] overflow-hidden rounded-lg border border-border bg-muted shadow-sm transition-transform group-hover:scale-[1.02]"
                   >
                     {w.coverUrls.length > 0 ? (

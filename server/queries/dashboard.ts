@@ -416,7 +416,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
 
 /**
  * Contadores das filas de IA secundárias (re-rank e interesse por sinopse).
- * Replica o predicado dos estados-padrão das abas de /ai-evaluation pra os
+ * Replica o predicado dos estados-padrão das abas de /curation/works pra os
  * números baterem com os badges de lá — mas com queries ACHATADAS (só as colunas
  * do predicado, sem covers/título nem montar objetos). Antes chamava
  * getAlignmentQueueWorks/getSynopsisQueueWorks, que carregavam o catálogo 2x (com
@@ -434,7 +434,7 @@ export async function getAiQueueCounts(): Promise<AiQueueCounts> {
   try {
     // Tudo pagina: works/calculated_scores/predictions são de escala catálogo
     // (predictions já passou de 1000). Sem isso o PostgREST corta em 1000 linhas e
-    // as contagens da home não batem com as abas de /ai-evaluation.
+    // as contagens da home não batem com as abas de /curation/works.
     const [activeRows, calcRows, synRows, predRows] = await Promise.all([
       fetchAllRows<{ id: string }>(
         (from, to) => supabase.from("works").select("id").eq("is_archived", false).range(from, to),
@@ -457,11 +457,11 @@ export async function getAiQueueCounts(): Promise<AiQueueCounts> {
 
     // ⚠️ `calculated_scores` é a linha do DONO. O Veredito IA virou per-usuário (mora em
     // `user_calculated_scores` para os demais), então contar direto daqui devolvia a fila
-    // DELE para qualquer pessoa logada — no `/painel`, que qualquer logado abre. O overlay
+    // DELE para qualquer pessoa logada — no `/dashboard`, que qualquer logado abre. O overlay
     // troca os campos pessoais pelos de quem olha; para o dono é identidade e custa zero
     // query.
     //
-    // ⚠️ Isto NÃO faz o número bater com o que `/fila-recomendacao?tab=ia-rk` lista: a aba
+    // ⚠️ Isto NÃO faz o número bater com o que `/my-ai-scores?tab=ia-rk` lista: a aba
     // filtra `["stale"]` por padrão e esta contagem usa `["stale","unranked"]`. A divergência
     // é anterior e vale para o dono também — só ficou visível agora. Decidir qual dos dois é
     // "pendente" é decisão de produto, não de leitura.

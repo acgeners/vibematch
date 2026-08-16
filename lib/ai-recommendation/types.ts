@@ -162,7 +162,7 @@ export interface ChatEvaluationScore {
 }
 
 /** Resultado da avaliação completa (9 critérios) disparada pelo chat. Os scores
- * são SUGERIDOS (review_pending) — o usuário revisa/salva em /ai-evaluation. */
+ * são SUGERIDOS (review_pending) — o usuário revisa/salva em /curation/works. */
 export interface ChatEvaluationSnapshot {
   workId: string
   title: string

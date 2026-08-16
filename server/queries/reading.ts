@@ -46,7 +46,7 @@ function isMissingColumnError(message: string): boolean {
 
 /**
  * Obras com status pessoal "Reading" (opcionalmente "Started"), ordenadas pela
- * leitura mais recente. Alimenta a página /leitura e a checagem de capítulos.
+ * leitura mais recente. Alimenta a página /reading e a checagem de capítulos.
  * Traz o hid do comix de `work_external_ids` pra checagem exata por ID.
  */
 export async function getReadingWorks(

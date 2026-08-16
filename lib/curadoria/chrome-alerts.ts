@@ -8,7 +8,7 @@ import { formatUsd } from "@/lib/format/money"
  * ## Por que isto existe
  *
  * O ponto nasceu MUDO de propósito: o VALOR ("−$11,10", "Comix instável") desceu pra
- * `/curadoria` e na barra ficou só "algo lá precisa de você". Na prática ninguém
+ * `/curation` e na barra ficou só "algo lá precisa de você". Na prática ninguém
  * decifra um ponto de 8px — a pergunta que ele provoca ("o que é isso?") custava uma
  * navegação pra ser respondida, e o `title=` nativo dizia a frase genérica "saldo ou
  * fonte externa precisando de atenção", que serve pros dois problemas e não nomeia

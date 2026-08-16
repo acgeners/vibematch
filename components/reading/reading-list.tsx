@@ -1213,7 +1213,7 @@ function ReadingCard({
     toast.success(`Marcado como lido até o ${next}`)
   }
 
-  // Ações do "Parado": tira a obra do ritmo ativo (On-hold sai de /leitura) ou arquiva.
+  // Ações do "Parado": tira a obra do ritmo ativo (On-hold sai de /reading) ou arquiva.
   const moveToOnHold = () => {
     startAct(async () => {
       const res = await setReadingStatusForWorks([work.id], personalStatusNameBySlugOrThrow("on-hold"))

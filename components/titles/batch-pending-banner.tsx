@@ -21,7 +21,7 @@ export function BatchPendingBanner({ count }: BatchPendingBannerProps) {
       try {
         const result = await finalizePendingBatch()
         toast.success(`${result.finalized} obras calculadas. Lote finalizado.`)
-        router.push("/titles")
+        router.push("/catalog")
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Erro ao finalizar lote")
       }

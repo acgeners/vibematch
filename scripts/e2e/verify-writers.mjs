@@ -79,7 +79,7 @@ async function actionIds(paths) {
   return found
 }
 
-const call = async (id, args, cookie, referer = "/titles") =>
+const call = async (id, args, cookie, referer = "/catalog") =>
   (
     await fetch(`${APP}${referer}`, {
       method: "POST",
@@ -138,7 +138,7 @@ const { data: ressuscitadas, error: schemaErr } = await admin
 const colunasMortas = Boolean(schemaErr) && /does not exist/i.test(schemaErr.message)
 
 const { data: firstWork } = await admin.from("works").select("id").limit(1).single()
-const ids = await actionIds(["/titles", `/titles/${firstWork.id}`, "/ai-evaluation"])
+const ids = await actionIds(["/catalog", `/catalog/${firstWork.id}`, "/curation/works"])
 console.log(`dono: ${owner.userId}\n`)
 
 // As obras-cobaia agora saem do ESPELHO do dono — `works` não tem mais o dado pessoal com que
@@ -161,7 +161,7 @@ if (ids.setSynopsisQualityAction) {
   check(esp?.synopsis_quality === novo1, `o ESPELHO recebeu o ♥ novo (${esp?.synopsis_quality})`)
   await call(ids.setSynopsisQualityAction, [w1.work_id, orig1], owner.cookie) // restaura
 } else {
-  console.log("  ⏭️  action não encontrada no bundle (a página /ai-evaluation não a expõe aqui)")
+  console.log("  ⏭️  action não encontrada no bundle (a página /curation/works não a expõe aqui)")
 }
 
 // ── 2. updateWorkStatus (o form de status — já era espelhado; regressão)

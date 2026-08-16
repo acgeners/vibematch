@@ -12,7 +12,7 @@
  * saía incompreensível (`data-variant` secondary × outline, ⭐️ fora de lugar) apontando um
  * `<span aria-hidden>` inocente. Com a diretiva: HTML 2 e 12, payload 0.
  *
- * ⚠️ Consumidor CLIENT nunca teve o problema (`/titles`: 88 gatilhos no HTML) — é por isso que
+ * ⚠️ Consumidor CLIENT nunca teve o problema (`/catalog`: 88 gatilhos no HTML) — é por isso que
  * o defeito sobreviveu. Ele só existe nas telas onde o badge é renderizado pelo SERVIDOR, que
  * são justamente as que ninguém associa a "componente interativo".
  *

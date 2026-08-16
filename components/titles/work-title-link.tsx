@@ -20,7 +20,7 @@ interface WorkTitleLinkProps {
   workId?: string
   /** Optional eager preview — when provided, no fetch happens. */
   preview?: WorkPreview
-  /** Optional explicit href. Defaults to /titles/{titleToSlug(title)}. */
+  /** Optional explicit href. Defaults to /catalog/{titleToSlug(title)}. */
   href?: string
   className?: string
   children?: React.ReactNode
@@ -116,7 +116,7 @@ export function WorkTitleLink({ title, workId, preview, href, className, childre
     }
   }, [])
 
-  const finalHref = href ?? `/titles/${titleToSlug(title)}`
+  const finalHref = href ?? `/catalog/${titleToSlug(title)}`
   const linkClassName = className ?? "font-medium hover:underline"
 
   return (

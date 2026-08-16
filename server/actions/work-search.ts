@@ -9,7 +9,7 @@ import { getWorkSuggestions, type WorkSuggestion } from "@/server/queries/work-s
 const MIN_QUERY_LENGTH = 2
 
 /**
- * Sugestões pro dropdown de busca ao vivo de /titles.
+ * Sugestões pro dropdown de busca ao vivo de /catalog.
  *
  * ⚠️ `"use server"` = endpoint HTTP público (chamável por POST direto). Isto aqui
  * é leitura do CATÁLOGO, que é compartilhado por design — não leva `ensureAdmin`.

@@ -59,12 +59,12 @@ export async function updatePrimarySynopsis(
     // Sem texto: remove só a manual primária e deixa as externas assumirem. Se a
     // primária nem é manual, não há o que apagar.
     if (!primaryManual) {
-      revalidatePath(`/titles/${workId}`)
+      revalidatePath(`/catalog/${workId}`)
       return { error: null }
     }
     const { error } = await supabase.from("work_synopses").delete().eq("id", primaryManual.id)
     if (error) return { error: error.message }
-    revalidatePath(`/titles/${workId}`)
+    revalidatePath(`/catalog/${workId}`)
     return { error: null }
   }
 
@@ -88,6 +88,6 @@ export async function updatePrimarySynopsis(
     if (error) return { error: error.message }
   }
 
-  revalidatePath(`/titles/${workId}`)
+  revalidatePath(`/catalog/${workId}`)
   return { error: null }
 }

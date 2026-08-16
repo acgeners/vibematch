@@ -27,7 +27,7 @@
  * Efeito colateral esperado: `works.canonical_synopsis` de quem mudou fica DEFASADA
  * (o gate é o `canonical_synopsis_inputs_hash`, que passa a não bater). O script NÃO
  * re-consolida — isso chama LLM e custa dinheiro. Ele só conta quantas obras entram
- * na fila do painel "Consolidar sinopses" em /settings.
+ * na fila do painel "Consolidar sinopses" em /curation/settings.
  */
 import { createClient } from "@supabase/supabase-js"
 import { config } from "dotenv"
@@ -298,7 +298,7 @@ async function main() {
   console.log(`\naplicado em ${done} obras${failed ? ` · ${failed} falharam` : ""}`)
   console.log(
     `\n⚠️ ${plans.length} obras ficam com \`canonical_synopsis\` DEFASADA (o hash dos inputs mudou).\n` +
-      `   Re-consolidar chama LLM e custa — faça pelo painel "Consolidar sinopses" em /settings quando quiser.`
+      `   Re-consolidar chama LLM e custa — faça pelo painel "Consolidar sinopses" em /curation/settings quando quiser.`
   )
 }
 

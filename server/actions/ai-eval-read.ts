@@ -6,7 +6,7 @@ import { getSessionUserId } from "@/server/queries/current-user"
 import { getAllQueueMemberIds, READ_QUEUES, type ReadQueue } from "@/server/queries/ai-eval-read"
 
 /**
- * Ações de "marcar pendências como lidas" em /ai-evaluation. "Lida" silencia a
+ * Ações de "marcar pendências como lidas" em /curation/works. "Lida" silencia a
  * pendência (sai dos contadores/badge) SEM resolvê-la — a obra continua na fila.
  * Ver migration 125 (`ai_eval_read_acks`) e `server/queries/ai-eval-read.ts`.
  */

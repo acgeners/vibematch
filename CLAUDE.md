@@ -136,8 +136,8 @@ prever quando a quota estoura.
 
 | Operação | Payload |
 |---|---|
-| ~~1 página de `/titles` com `tags(*)`~~ | ~~569 KB~~ — **não é mais o código** |
-| 1 página de `/titles` (24 obras, `WORK_LIST_SELECT` de hoje) | **330 KB** (−42%) |
+| ~~1 página de `/catalog` com `tags(*)`~~ | ~~569 KB~~ — **não é mais o código** |
+| 1 página de `/catalog` (24 obras, `WORK_LIST_SELECT` de hoje) | **330 KB** (−42%) |
 | catálogo inteiro com o mesmo select (966) | **20,1 MB** |
 | um `recalculateAll` (só a leitura de `works`) | **5,3 MB** (1,66 MB comprimido, medido) |
 
@@ -334,7 +334,7 @@ Hoje escreve em `.e1/` no repo (gitignored, e no `.dockerignore` também, que n�
 ⚠️ `db:local` continua existindo para o caso raro de querer o **app** no local. Ele não mexe
 mais nos scripts. E quando o app está no local, uma **faixa de listras** aparece no topo
 (`components/layout/db-target-banner.tsx`) — ela mora no layout RAIZ, acima do `AppShell`,
-porque as rotas full-bleed (`/login`, `/sobre`) retornam antes da barra de navegação, e o login
+porque as rotas full-bleed (`/login`, `/about`) retornam antes da barra de navegação, e o login
 é justo onde saber o alvo mais importa: as contas dos dois bancos são diferentes, e entrar no
 errado parece "minha senha não funciona". Listras e não cor chapada de propósito — azul e âmbar
 já significam estado de TAREFA (ver "Ação lenta tem DUAS cores"), e ambiente é outra categoria.
@@ -518,7 +518,7 @@ NULL) e o `config.toml` vem com todo provider externo `enabled = false` — dá
 `Unsupported provider`. O `/login` tem formulário de e-mail+senha, então crie uma senha só no
 local (`update auth.users set encrypted_password = extensions.crypt('…', extensions.gen_salt('bf'))`).
 Refazer depois de cada `db:pull`. Desde 2026-08-06 há também **"Esqueci minha senha"**
-(`/recuperar-senha` → e-mail → `/nova-senha`), e no local o e-mail cai no **Mailpit** (`:54324`).
+(`/forgot-password` → e-mail → `/reset-password`), e no local o e-mail cai no **Mailpit** (`:54324`).
 
 🔴 **PENDENTE: a recuperação de senha NÃO funciona em produção — falta SMTP.** Medido na
 Management API (2026-08-06): `smtp_host`, `smtp_user`, `smtp_pass` e `smtp_admin_email` são
@@ -592,36 +592,107 @@ recalcularia as notas dele **sem a calibração dele** — sem erro, sem log, s�
 `signOutAction`). Quem autoriza é o **papel** (`user_settings.role` → `lib/plans/roles.ts`,
 `ensureAdmin`/`roleAllows`), verificado dentro das actions.
 
+### As rotas são em INGLÊS, e o nome descreve a PERGUNTA da página
+
+Padronizado em 2026-08-16. A URL era metade em português (`/curadoria`, `/leitura`,
+`/preferencias`, `/sobre`) e metade em inglês (`/titles`, `/settings`, `/favorites`), sem régua
+que dissesse qual usar — então cada rota nova reabria a escolha. Hoje **toda rota é em inglês**;
+os RÓTULOS visíveis (aba, top-nav, busca) continuam em português, como o resto do app.
+
+| rota | o que responde |
+|---|---|
+| `/catalog` · `/ranking` · `/favorites` · `/recommendations` · `/discover` | o catálogo e as formas de percorrê-lo |
+| `/reading` · `/dashboard` · `/import` · `/account` (+`/taste-profile`) · `/preferences` | o que é seu |
+| `/my-ai-scores` | "Suas notas de IA": Veredito IA e Interesse, por obra — per-user |
+| `/curation/*` | a console do curador — ver abaixo |
+| `/login` · `/signup` · `/forgot-password` · `/reset-password` · `/welcome` · `/about` · `/guide` | entrada e institucionais |
+
+🔴 **Três nomes mudaram de SIGNIFICADO, não só de idioma** — e é a parte que se perde ao ler
+isto como "tradução":
+
+- **`/titles` → `/catalog`.** A rota dizia "titles" e as três superfícies diziam "Catálogo"
+  (nav, aba, busca). Este arquivo já registrava a divergência como curiosidade; ela era a
+  família "dois critérios pro mesmo fato", com o lado que a pessoa lê sendo o errado.
+- **`/ai-evaluation` → `/curation/works`.** A página é a "Curadoria da Obra" e tem QUATRO abas
+  (atributos, digests, fontes, revisão); as filas de IA que davam nome a ela saíram em 08/2026
+  pro `/my-ai-scores`. O nome descrevia o que a página **era**.
+- **`/fila-recomendacao` → `/my-ai-scores`, rótulo "Suas notas de IA".** O nome velho errava
+  nos dois pedaços: "recomendação" não aparece no conteúdo (as abas produzem **Veredito IA** e
+  **Interesse**, notas por obra — e existe uma `/recommendations` de verdade, então duas rotas
+  dividiam a palavra e quem a levava no nome era a que não a produz), e "fila" promete que algo
+  anda sozinho, quando ali nada anda: você filtra, seleciona e dispara ações **pagas**. O
+  rótulo mudou junto em **quatro** superfícies — aba do browser, `<h1>`, menu do avatar e
+  índice da busca —, porque num item de menu é o rótulo que a pessoa lê, não a URL.
+  ⚠️ A aba **Untracked** continua lá e não pertence ao nome (é triagem de status, não nota de
+  IA). Fica por ora, por decisão da Ana — sai quando houver superfície própria pra triagem.
+- **`/settings` → `/curation/settings`.** Em inglês, `/settings` e `/preferences` viram um par
+  quase sinônimo — e são coisas opostas: config do CATÁLOGO (curador) × gosto PESSOAL. O
+  aninhamento diz de quem é cada uma sem depender de ninguém lembrar.
+
+🔴 **A console virou UM prefixo, e esse é o ganho estrutural.** `/curadoria`, `/ai-evaluation`,
+`/settings`, `/ai-usage` e `/admin` eram rotas IRMÃS: cinco `layout.tsx` idênticos de 3 linhas +
+cinco entradas no `CONSOLE_PREFIXES`. Rota nova da console que esquecesse um dos dois lados
+nascia sem sidebar ou **sem gate**, renderizando normalmente. Hoje `app/curation/layout.tsx`
+cobre tudo e o middleware tem um prefixo só. `/admin` deixou de existir (só hospedava
+`model-metrics`).
+
+⚠️ **O aninhamento criou um caso novo: `/curation` é prefixo dos outros quatro.** Por isso
+`isEntryActive` casa a raiz por **igualdade** e o resto por prefixo — um `startsWith` uniforme
+acende "Visão geral" nas cinco páginas, com dois `aria-current="page"` na tela. Guardado por
+`tests/unit/ui/console-nav-rota-ativa.test.tsx`, que **parametriza o `usePathname`**: o teste
+que já existia mockava `/curation` fixo, o único valor em que certo e errado coincidem
+(conferido com sonda — 5 dos 6 casos reprovam com o bug).
+
+⚠️ **Todo nome antigo responde 308** (`next.config.ts`), inclusive os filhos, via `:path*`. A
+ordem das regras é significativa: `?fav=1` e `/settings/calibration` vêm ANTES das amplas que as
+engoliriam. Conferidas as 25 no app rodando. E `/preferences → /preferencias` foi **invertido**,
+não apagado.
+
+⚠️ **Os diretórios de MÓDULO ficaram como estavam** (`components/curadoria/`, `components/conta/`,
+`components/titles/`, `lib/curadoria/`) — renomear rota é mudar contrato com o browser; renomear
+módulo é churn de import sem nada em jogo. É por isso que o replace desta leva casava só
+`"/titles`, nunca `@/components/titles`: o caractere ANTES da barra é o que separa os dois.
+
 **O `middleware.ts` gateia DUAS famílias, com exigências diferentes.** Ele refresca a sessão em
 toda rota e, só nesses prefixos, decide:
 
 | Lista | Prefixos | Exigência |
 |---|---|---|
-| `CONSOLE_PREFIXES` | `/curadoria`, `/ai-evaluation`, `/settings`, `/ai-usage`, `/admin` | sem sessão → `/login`; logado não-curador → `/` |
-| `SIGNED_IN_PREFIXES` | `/conta`, `/painel` | sem sessão → `/login`. **Papel não importa** |
+| `CONSOLE_PREFIXES` | **`/curation`** (um só) | sem sessão → `/login`; logado não-curador → `/` |
+| `SIGNED_IN_PREFIXES` | `/account`, `/dashboard`, `/discover` | sem sessão → `/login`. **Papel não importa** |
 
-**Todo o resto segue sem gate de rota** — visitante anônimo carrega `/titles`, `/leitura`,
+🔴 **A primeira lista tinha CINCO prefixos até 2026-08-16, e virar um só foi o ponto da
+renomeação — não o inglês.** `/curadoria`, `/ai-evaluation`, `/settings`, `/ai-usage` e `/admin`
+eram rotas IRMÃS na raiz do `app/`: cada uma precisava ser lembrada aqui **e** ter um
+`layout.tsx` de 3 linhas montando a shell. Rota nova da console que esquecesse qualquer um dos
+dois lados nascia sem gate ou sem sidebar, renderizando normalmente — nada acusa. Hoje o
+aninhamento `app/curation/*` faz os dois trabalhos, e os 5 layouts idênticos viraram 1.
+
+⚠️ Esta tabela já dizia `/account`, `/dashboard` quando o código tinha três — `/discover`
+entrou sem passar aqui.
+
+**Todo o resto segue sem gate de rota** — visitante anônimo carrega `/catalog`, `/reading`,
 `/favorites`, `/ranking`, `/import` e `/recommendations`, que é o desenho: o catálogo é
 compartilhado, e os leitores per-usuário devolvem vazio sem sessão (medido rota a rota em
 2026-08-09).
 
-🔴 **As duas listas são separadas porque `/conta` e `/painel` exigem IDENTIDADE, não papel.**
+🔴 **As duas listas são separadas porque `/account` e `/dashboard` exigem IDENTIDADE, não papel.**
 Herdar a checagem de curador jogaria todo leitor logado pra `/` — trancando fora justamente quem
 essas páginas descrevem. Daí o `if (!isConsole) return response` logo depois do `if (!user)`.
 
-🔴 **As duas entraram em 2026-08-09 por vazamento MEDIDO, não por precaução.** `/conta/perfil` e
-`/painel` anônimos devolviam **200 com o perfil de gosto do DONO** — o resumo em prosa, as tags, a
+🔴 **As duas entraram em 2026-08-09 por vazamento MEDIDO, não por precaução.** `/account/taste-profile` e
+`/dashboard` anônimos devolviam **200 com o perfil de gosto do DONO** — o resumo em prosa, as tags, a
 versão, o alinhamento — com "Entrar" na barra ao lado. Sem sessão, `getCurrentUserId()` cai no
 singleton **por design** (o recalc em background precisa do bias dele), então a página tinha um
 sujeito: o errado.
 
 ⚠️ **Não dá pra corrigir só trocando o leitor por `getSessionUserId()`** — sem sessão a página não
 tem sujeito nenhum. Mas gate de rota também não basta sozinho: `getTasteProfileStatusAction` é
-consumida por **três** páginas (`/painel`, `/recommendations`, `/conta/perfil`), então ela devolve
+consumida por **três** páginas (`/dashboard`, `/recommendations`, `/account/taste-profile`), então ela devolve
 um `ProfileStatus` vazio sem sessão e repassa o `userId` adiante. Rota + fonte, as duas.
 Guardadas por `tests/unit/orchestration/rotas-de-sessao.test.ts` (que **deriva** os diretórios de
-`SIGNED_IN_PREFIXES` — a 1ª versão tinha `app/conta` fixo, e foi assim que o `/painel` passou
-enquanto o `/conta` era corrigido) e por `leitores-por-sessao.test.ts`.
+`SIGNED_IN_PREFIXES` — a 1ª versão tinha `app/account` fixo, e foi assim que o `/dashboard` passou
+enquanto o `/account` era corrigido) e por `leitores-por-sessao.test.ts`.
 
 🔴 **Gate de rota NÃO funciona só no layout.** A 1ª versão fazia `notFound()` no layout da console e
 o Next devolvia **200 com o HTML da página protegida no corpo**, seguido do 404: layout e página
@@ -631,15 +702,15 @@ como 2ª linha (matcher pode mudar; e o proxy é fail-OPEN quando o usuário est
 linha em `user_settings`, caso que só `isCurrentUserAdmin()` resolve, pois precisa da service role).
 
 **A home (`/`) é uma VITRINE, e bifurca por sessão.** Não é mais o painel de KPIs — esse virou
-`/painel` ([[project-painel-provisorio]], provisório de propósito).
+`/dashboard` ([[project-painel-provisorio]], provisório de propósito).
 
-- **Com sessão:** destaque "Continue lendo" escolhido pela banda **Acompanhando** da `/leitura`
+- **Com sessão:** destaque "Continue lendo" escolhido pela banda **Acompanhando** da `/reading`
   (`lib/reading/pace-bands.ts`, ≥85% lido + leitura recente, desempate por capítulo mais novo),
   faixa de atividade e prateleira "Pra você hoje". ⚠️ `getContinueReading` ordena por última
   LEITURA e corta no limite **antes** de qualquer seleção — pedir poucos itens esconde do
   destaque a obra que acabou de receber capítulo (foi bug real).
 - **Sem sessão:** `components/home/public-home.tsx` — raio-X dos 9 critérios de uma obra,
-  prateleira por `platform_avg` (com piso de votos), rodapé pra `/sobre` e `/guia`. Nada
+  prateleira por `platform_avg` (com piso de votos), rodapé pra `/about` e `/guide`. Nada
   pessoal: sem sessão os leitores per-usuário devolvem vazio, e o que existia ali antes eram os
   dados do dono.
 
@@ -731,8 +802,8 @@ lugar: os papéis são em **português** (`"curador"`, não `"curator"`), e com 
 ### A aba do browser diz o nome da PÁGINA, e o sufixo tem um dono só
 
 Até 2026-08-14, **18 das 30 rotas** não declaravam título nenhum e a aba dizia **"SatorIA"** nas
-18 — `/ranking`, `/favorites`, `/leitura`, `/titles`, `/conta/perfil`, `/settings`,
-`/curadoria/pedidos` e mais 11. Com três abas abertas (o caso normal aqui), as três eram
+18 — `/ranking`, `/favorites`, `/reading`, `/catalog`, `/account/taste-profile`, `/curation/settings`,
+`/curation/requests` e mais 11. Com três abas abertas (o caso normal aqui), as três eram
 indistinguíveis: só clicando pra descobrir qual era qual.
 
 Hoje o **`title.template` do `app/layout.tsx` é o dono do sufixo** (`"%s · SatorIA"`), e cada
@@ -752,7 +823,7 @@ ESTÁTICO em vez de repuxar a rodada inteira ou o JSONB de mensagens.
 
 ⚠️ **Isto NÃO é derivado de `PAGES` (`search-index.ts`) nem do `NAV` (`top-nav.tsx`)**, de
 propósito: os rótulos de lá são de busca e de navegação, mais longos ("Importar minha lista",
-"Sobre a SatorIA"), e a aba trunca. As três superfícies já divergiam antes disto (a `/titles` é
+"Sobre a SatorIA"), e a aba trunca. As três superfícies já divergiam antes disto (a `/catalog` é
 "Títulos" no Header e "Catálogo" no nav).
 
 Guardado por `tests/unit/orchestration/titulo-de-aba-por-rota.test.ts`, que **deriva as rotas do
@@ -769,7 +840,7 @@ pedidos, ponto âmbar para saldo/fonte) e a fila de recomendação no avatar. **
 passava com o badge desligado, satisfeita pela mesma expressão no `title` do botão.
 
 🔴 **O ponto SOZINHO não funcionou, e o conserto foi dar-lhe voz** (2026-08-14). Um círculo de
-8px provoca "o que é isso?" e cobrava uma navegação até `/curadoria` pra responder; o `title=`
+8px provoca "o que é isso?" e cobrava uma navegação até `/curation` pra responder; o `title=`
 nativo dizia *"saldo ou fonte externa precisando de atenção"* — uma frase que serve pros dois
 problemas e não identifica nenhum. Hoje um tooltip nomeia cada alerta **com o número**
 (`Saldo da Anthropic: −$11,10`), e o `aria-label` carrega o mesmo texto.
@@ -786,7 +857,7 @@ deixar de consumir a lista — um teste da função pura passa verde com o `if` 
 
 🔴 **Saldo NEGATIVO não espera hover: abre modal** (`components/layout/negative-balance-dialog.tsx`),
 **1× por sessão do browser** (`sessionStorage`), com os dois destinos que resolvem — créditos na
-Anthropic e reinformar em `/ai-usage`. Saldo BAIXO **não** abre: âmbar informa, vermelho
+Anthropic e reinformar em `/curation/ai-usage`. Saldo BAIXO **não** abre: âmbar informa, vermelho
 interrompe; um modal por sessão enquanto o saldo acaba é o alarme que se aprende a fechar sem
 ler, e aí ele também não funciona no dia do negativo.
 
@@ -796,12 +867,12 @@ e o texto diz isso; sem essa frase o aviso manda recarregar uma conta que talvez
 
 ⚠️ **`LOW_BALANCE_USD` caiu de 5 para 2** na mesma leva (escolha da Ana), e a comparação virou
 `<` — exatamente $2 ainda é folga. O limiar é dono único, então o ponto, o tile da Visão geral e
-o card de `/ai-usage` mudaram juntos; o `balance-card.tsx` passou a derivar de `balanceTone` em
+o card de `/curation/ai-usage` mudaram juntos; o `balance-card.tsx` passou a derivar de `balanceTone` em
 vez de reescrever `remaining <= LOW_BALANCE_USD`, porque o NÚMERO já era compartilhado mas a
 COMPARAÇÃO não era — e foi ela que mudou.
 
 ⚠️ **Curadoria é MODO, não ação pontual — e por isso o `CurationMenu` deixou de ser menu**
-(2026-08-07). Hoje é um **botão-link** pra `/curadoria`: badge + ponto colorido, sem dropdown.
+(2026-08-07). Hoje é um **botão-link** pra `/curation`: badge + ponto colorido, sem dropdown.
 Três coisas convergiram:
 
 1. **A régua da própria barra o contradizia.** A zona direita responde "o que está acontecendo?"
@@ -815,7 +886,7 @@ Três coisas convergiram:
    botão-link — o dropdown só ganhava na Visão geral, o destino menos visitado.
 
 🔴 **O que mudou de verdade é onde os SINAIS moram.** Saldo e saúde de fonte desceram pra
-`/curadoria`; na barra ficou só o ponto colorido dizendo "algo lá precisa de você". Isso torna a
+`/curation`; na barra ficou só o ponto colorido dizendo "algo lá precisa de você". Isso torna a
 Visão geral **obrigada a explicar o badge inteiro** — ela é a única superfície de triagem que
 sobrou. Duas consequências que se pagam caro se forem esquecidas:
 
@@ -845,16 +916,16 @@ Comix instável) fecha em 968 de 978px.
 **"Ação lenta tem DUAS cores"** — inclusive por que `components/tasks/sidebar-tasks.tsx` foi
 apagado (ficou órfão quando a sidebar saiu, e o feedback sumiu sem nada acusar).
 
-**A console `/curadoria`** (`components/curadoria/console-shell.tsx`) é o terceiro braço dessa régua,
+**A console `/curation`** (`components/curadoria/console-shell.tsx`) é o terceiro braço dessa régua,
 desde 2026-08-03 — o 🛠 da barra aponta pra ela. Sidebar PRÓPRIA de dois níveis com Visão geral ·
 Curadoria da Obra · Configurações (+ os 4 tópicos) · Uso da API IA · Métricas do modelo. Cada rota
 membro entra por um `layout.tsx` de 3 linhas que renderiza a shell — o gate e a sidebar vêm dela.
 
-- ⚠️ **`/settings` PERDEU a `SettingsSubnav`**: os 4 tópicos viraram o ramo "Configurações" da
+- ⚠️ **`/curation/settings` PERDEU a `SettingsSubnav`**: os 4 tópicos viraram o ramo "Configurações" da
   sidebar da console. Continuam sendo `?g=` na mesma rota (nenhum deep-link quebrou, inclusive o
-  `/settings?g=fontes` do alerta do Comix). `SettingsSubnav` segue viva, para `/preferencias`.
+  `/curation/settings?g=fontes` do alerta do Comix). `SettingsSubnav` segue viva, para `/preferences`.
 - ⚠️ **"Desatualizados" ficou de FORA**, apesar de constar no plano: virou aba de
-  `/fila-recomendacao` e é de qualquer logado. Item de console que joga o usuário pra fora da
+  `/my-ai-scores` e é de qualquer logado. Item de console que joga o usuário pra fora da
   console é pior do que item ausente. `/ranking/desatualizados` segue como redirect.
 - Os contadores da sidebar e os da barra superior saem de **um fetch só**
   (`components/layout/chrome-badges.tsx`, no layout raiz). O coalescing do `useChromeData` é por
@@ -873,7 +944,7 @@ Até 2026-08-02 essa garantia existia **por acidente**: o layout lia `cookies()`
 sidebar, e isso bastava pra marcar tudo como dinâmico. Quando a sidebar virou barra superior o
 `cookies()` saiu junto e a rede caiu — nada apontava pra ela. Daí a linha explícita.
 
-O preço: as institucionais (`/sobre`, `/guia`, `/login`, `/signup`) perdem prerender. Pra liberar
+O preço: as institucionais (`/about`, `/guide`, `/login`, `/signup`) perdem prerender. Pra liberar
 essas, **meça**: `next build`, ler a tabela `ƒ`/`○`, marcar rota a rota. Nunca apagar a linha e
 torcer. ⚠️ Um grep por `cookies()` **não** responde quem é dinâmica: a detecção do Next é
 transitiva (`/favorites` não cita `cookies()`, mas chama `getPersonalStateReader` →
@@ -1065,7 +1136,7 @@ não é mecânico:
 | "Modelo antigo" · "Reviews novas" | rose · orange | sem papel óbvio |
 
 🔴 **E este arquivo se CONTRADIZ sobre o "Confiança baixa".** A seção do `STATUS_TONE` diz que
-âmbar é exclusivo do "desatualizado"; a seção do `/ai-evaluation` descreve, com aprovação, *"o
+âmbar é exclusivo do "desatualizado"; a seção do `/curation/works` descreve, com aprovação, *"o
 chip âmbar diz só 'Confiança baixa'"*. Duas fontes discordando sobre o mesmo fato — não dá pra
 unificar a paleta sem escolher qual está errada, e é por isso que isto é PR de **decisão**, não
 de refactor. Já saiu daqui o `orange` do "Diverge" (ver a tabela de "dois critérios").
@@ -1114,7 +1185,7 @@ Medido em 2026-08-15 na build de PRODUÇÃO contra o banco local:
 | | antes | depois |
 |---|---|---|
 | gatilhos vazios no HTML | **13 em 9 rotas** (nenhum com texto) | **0** |
-| tempo com o campo vazio | `/leitura` 196–211 ms · `/ranking` 218–370 · `/ai-evaluation` **420–634** | nunca visto vazio (0 de 3 cargas) |
+| tempo com o campo vazio | `/reading` 196–211 ms · `/ranking` 218–370 · `/curation/works` **420–634** | nunca visto vazio (0 de 3 cargas) |
 
 O conserto é passar o rótulo como `children`: **`selectedOptionLabel`**
 (`components/ui/select.tsx`).
@@ -1380,7 +1451,7 @@ sobre as 126 favoritas, o mesmo mood aplicado à lista inteira × a janelas de 5
 DIFERENTE em **até 17 de 25 janelas**. Por isso `applyMoodToList` (`lib/ranking/mood-list.ts`)
 é dono único, devolve o mapa de valores junto da ordem, e o `WorkCompareDrawer` recebe
 `moodAdjustedById` quando o refino veio da lista — em vez de recalcular sobre a seleção. É a
-família "mesma função, CONJUNTOS diferentes" do `/descobrir`.
+família "mesma função, CONJUNTOS diferentes" do `/discover`.
 
 ⚠️ **Excluir vem ANTES de normalizar** — obra fora da lista não pode esticar a régua de quem
 ficou. E a **célula imprime o número ajustado** (borda tracejada), nunca a base: a lista está
@@ -1491,7 +1562,7 @@ ZERO quando não há veredito (28,9% das obras), senão o painel afirmaria um aj
 seleção de atributos pra colocar ênfase, vocês consideram?"*. Consideram: as 9 notas são as
 features nº 1 do Ridge e viram `IA(n)` (a Nota.IA) ponderadas por `score_weights`. **Mas o peso
 que vale pode não ser o seu.** Medido em 2026-08-15: `formula_config.score_weights_auto = true`,
-então o sistema usa os pesos INFERIDOS do histórico e os declarados em `/preferencias` viram
+então o sistema usa os pesos INFERIDOS do histórico e os declarados em `/preferences` viram
 fallback (treino < 20). Os dois divergem em **7 dos 9**, e três com o SINAL INVERTIDO:
 
 | critério | declarado | inferido (em vigor) |
@@ -1543,7 +1614,7 @@ acende o ponto), e por isso o `lit` também é passado no modo absoluto.
 
 ⚠️ **O tooltip é a lupa: mostra o CRU** (nota externa 8,1 e 1.278 votos), porque "81" e "66" são
 as forças normalizadas — não são nota nem votos. A Nota Prevista abre o card com
-`getScoreTextColor` e as faixas de `/preferencias` (`scoreThresholds.expected`, passada pelos
+`getScoreTextColor` e as faixas de `/preferences` (`scoreThresholds.expected`, passada pelos
 dois consumidores); sem elas caem os cutoffs fixos do `ScoreBadge`. **Cor própria aqui seria uma
 2ª régua pro mesmo número.** O bloco da nota é `float`, não item de flex: ao lado, ele encolhia
 TODAS as linhas do título (46 caracteres viravam 4 linhas num card de 268px; hoje 320px + float
@@ -1822,7 +1893,7 @@ entre US$0,0001 e US$0,09, e com 2 casas isso vira "$0.00". Acima de 10¢ o inve
 lê melhor que `57,3¢`.
 
 ⚠️ **Isso não é cosmético — o formato antigo apagava diferença real.** Medido em 2026-08-07 na
-coluna "custo por chamada" do `/ai-usage`: `tag_classifier` (0,57¢), `tag_inference` (1,09¢) e
+coluna "custo por chamada" do `/curation/ai-usage`: `tag_classifier` (0,57¢), `tag_inference` (1,09¢) e
 `synopsis_quality_predict` (1,27¢) exibiam **todas o mesmo "$0.01"** — custos 2,2× distintos com
 o mesmo rótulo, sem erro e sem log.
 
@@ -1831,7 +1902,7 @@ dinheiro por conta própria (oito funções, duas convenções incompatíveis):
 `components/settings/ai-usage/format.ts` (ponto), **três cópias literais** dela (card de saldo, os
 dois gráficos), a de 4 casas do badge dev, e a dupla `formatUsd`/`formatUsdExact` de
 `lib/cost-preview/catalog.ts` (vírgula) — além de ~12 `toFixed()` soltos em toasts e mensagens de
-servidor. O sintoma era visível: o `/ai-usage` mostrava `$0.06` e o popup de custo mostrava
+servidor. O sintoma era visível: o `/curation/ai-usage` mostrava `$0.06` e o popup de custo mostrava
 `~$0,05` na mesma sessão. É a mesma armadilha do `LOW_BALANCE_USD`; uma 7ª cópia é como duas telas
 voltam a discordar sobre o mesmo número.
 
@@ -1848,7 +1919,7 @@ dois "0,3" que diferem 100×. **Coluna ordenável é o pior caso**: a mistura in
 sobre `5,37¢ · 3,98¢ · 1,53¢ · 1,14¢ · 0,50¢`, e a conta parava de fechar de olho.
 
 **Hoje são 15 réguas** — conferido, **não** contado de cabeça. Esta linha já dizia "12" quando eram
-13, porque a coluna "Custo USD" da tabela **Por modelo** (`app/ai-usage/page.tsx`) nunca entrou na
+13, porque a coluna "Custo USD" da tabela **Por modelo** (`app/curation/ai-usage/page.tsx`) nunca entrou na
 conta. Antes de mexer neste número, rode:
 
 ```bash
@@ -1956,7 +2027,7 @@ filtros tem default próprio (`expected_score:desc`); sem recebê-lo da página,
 seguinte reescrevia a URL, apagando a ordenação da página (o bug do rascunho da seção
 abaixo, agora pela ordenação). Medido na tela; `tsc` e a suíte passavam limpos.
 
-⚠️ **A coluna só é ORDENÁVEL onde o dado existe.** Em /titles e /ranking a contagem não é
+⚠️ **A coluna só é ORDENÁVEL onde o dado existe.** Em /catalog e /ranking a contagem não é
 carregada, então a entrada em `sortableColumns` é condicional a `groupsByWorkId` — senão o
 clique no cabeçalho reordenaria por `expected_score` em silêncio. Quem pegou isso foi
 `tests/unit/orchestration/coluna-ordenavel-tem-campo-aceito.test.ts`, que passou a entender
@@ -2001,10 +2072,10 @@ essa mesma tabela global no recalc per-usuário.
 ## Tag amada tem DOIS níveis, e o segundo é forma — não um verde mais escuro
 
 A ênfase **2×** (`user_tag_preferences.weight ≥ STRONG_TAG_WEIGHT`, o botão ✨ de
-`/preferencias`) aparece no chip como **♥ preenchido** (amada) ou **⊘** (evitada), e as fortes
+`/preferences`) aparece no chip como **♥ preenchido** (amada) ou **⊘** (evitada), e as fortes
 vêm **primeiro** dentro do bloco. Três superfícies, um componente só
 (`components/ui/tag-stance-mark.tsx`): card Tags da obra · prévia e popover do comparador ·
-"Informações sobre a obra" da `/fila-recomendacao`. Régua desde 2026-08-08.
+"Informações sobre a obra" da `/my-ai-scores`. Régua desde 2026-08-08.
 
 Medido no clone local (981 obras, 164 declarações): **895 obras (91,5%)** misturam os dois
 níveis no mesmo bloco "Amadas", **43%** dos chips amados são 2× (4.851 de 11.364), mediana de
@@ -2025,17 +2096,17 @@ o filtro não esconde — mesma armadilha do `LOW_BALANCE_USD`.
 (inferida pelo modelo; medido: 0,55–0,95, média 0,78) — outra escala, cujo "alto" precisaria de
 um limiar inventado. Por isso `TagStanceInfo` carrega `source: "declared" | "profile"`: sem ele o
 tooltip diria "você marcou" sobre algo que ninguém marcou, e a pessoa iria procurar em
-`/preferencias` uma linha que não existe.
+`/preferences` uma linha que não existe.
 
 ⚠️ **Quem RESSORTA depois do `segmentTags` precisa de `strong` como 1ª chave.** A partição por
 nível é estável, mas a página da obra reordena por proveniência (externa antes de IA) — omitir
 `strong` ali desfaz a partição em silêncio, e os dois níveis voltam a se intercalar.
 
-**Fora da régua, de propósito:** `/preferencias` (é onde a ênfase se DECLARA — já mostra o 2×) e
-os chips do perfil em `/conta` (régua `strength`, não `weight`; mesmo desenho ali afirmaria que
+**Fora da régua, de propósito:** `/preferences` (é onde a ênfase se DECLARA — já mostra o 2×) e
+os chips do perfil em `/account` (régua `strength`, não `weight`; mesmo desenho ali afirmaria que
 os dois números são o mesmo).
 
-## A `/conta/perfil` PROVA que entende você — e três números mentem se forem "melhorados"
+## A `/account/taste-profile` PROVA que entende você — e três números mentem se forem "melhorados"
 
 `components/conta/taste-profile-panel.tsx` + `lib/ai-recommendation/profile-tag-origin.ts`
 (v3, 2026-08-09). A página responde UMA pergunta — "o quanto vocês entendem meu gosto?" — e a v2
@@ -2273,8 +2344,8 @@ chegar. Pra testar esse ramo, atrase a server action no Playwright (`page.route`
 ## O avatar é DERIVADO da URL — não existe coluna de configuração
 
 `user_settings.avatar_url` é dona única, e guarda **uma string com três formas**: `""` (o chip cai
-no ícone), `/avatar.svg?estilo=…&cabelo=…` (montado em `/conta`) ou a URL de um upload no bucket
-público `avatars`. Quem consome — `components/layout/account-chip.tsx`, o card de `/conta`,
+no ícone), `/avatar.svg?estilo=…&cabelo=…` (montado em `/account`) ou a URL de um upload no bucket
+público `avatars`. Quem consome — `components/layout/account-chip.tsx`, o card de `/account`,
 qualquer `<img>` futuro — vê só uma URL comum e **não sabe montar avatar**. É isso que os mantém
 triviais.
 
@@ -2410,7 +2481,7 @@ DEPOIS de mandar os headers). ⚠️ Hipótese, não causa confirmada — a falh
 um corte de rede dá a mesma mensagem.
 
 Hoje as duas paginam em faixas de **200** (o peso ali é BYTE, não linha: 1000 linhas dessa
-projeção são os mesmos 8,6 MB). Medido depois: carga a quente da página de `/settings` em
+projeção são os mesmos 8,6 MB). Medido depois: carga a quente da página de `/curation/settings` em
 **0,3s** — a paginação não custou latência. E a falha de transporte passou a ganhar contexto
 (`comContexto`): `fetchAllRows` rotula só o erro que o PostgREST DEVOLVE, enquanto queda de
 conexão é exceção LANÇADA pelo `fetch` e subia crua até o toast. Guardado por
@@ -2468,7 +2539,7 @@ personal_fit_percentile = percentil midrank             ← O NÚMERO DA TELA
 
 Casamento por **nome em minúsculo, ignorando o grupo** (validado por bootstrap em
 27/06/2026: acc-par ~0,544 contra ~0,514 do `group::name`). O perfil é o **efetivo**
-— persistido ⊕ tags declaradas em `/preferencias`, com encolhimento `λ = n/(n+k)`,
+— persistido ⊕ tags declaradas em `/preferences`, com encolhimento `λ = n/(n+k)`,
 `k` = 5 amar / 8 evitar.
 
 ⚠️ **Critério NÃO entra.** `criterionAlignment` existe e é usada, mas como **feature
@@ -2576,17 +2647,17 @@ os call sites do SOURCE e falha quando um aparece, some ou muda de declaração,
 
 Two distinct paths both ultimately call `requestAiEvaluation()` in `lib/ai-evaluation/service.ts`:
 
-**Path A — "✨ Avaliar" (`/ai-evaluation`, "Curadoria da Obra")**
+**Path A — "✨ Avaliar" (`/curation/works`, "Curadoria da Obra")**
 
-⚠️ A página virou **duas** em 2026-08-02: `/ai-evaluation` ficou só com a fila de **atributos**
+⚠️ A página virou **duas** em 2026-08-02: `/curation/works` ficou só com a fila de **atributos**
 (curadoria do catálogo — do dono), e as filas de **Veredito IA / IA-Rk / Interesse / Sinopse**
-foram pra **`/fila-recomendacao`** (qualquer logado).
+foram pra **`/my-ai-scores`** (qualquer logado).
 
 🔴 **"Aguardando revisão" nomeava uma ação que não existia — corrigido em 2026-08-14.** O modal
 de revisão só abria como RESULTADO de uma avaliação paga (`handleEvaluate` → confirmação de
 custo → `triggerAiEvaluation`), então a única forma de ver a avaliação **já gravada** era pagar
 outra. O ciclo se contradizia por escrito: ao terminar uma avaliação, o toast oferece "Revisar"
-apontando pra `/ai-evaluation` (`components/titles/ai-evaluation-button.tsx`), e a página não
+apontando pra `/curation/works` (`components/titles/ai-evaluation-button.tsx`), e a página não
 sabia revisar. Hoje `loadAiEvaluationForReview` (só leitura, sem LLM) abre a avaliação
 persistida — medido no app: **2,2s e zero chamada à Anthropic**.
 
@@ -2621,11 +2692,11 @@ propósito (um teste que lesse o objeto do work passaria verde nos dois defeitos
 "apareceu por OUTRO filtro" explícito. Conferido com três sondas: derivar do filtro, esconder a
 confiança e devolvê-la ao chip reprovam.
 
-🔴 **A terceira aba de `/ai-evaluation` é "Digests" (2026-08-14)** — a fila do digest
-estruturado, que era um painel CEGO em `/settings?g=ia`: sabia dizer "125 pendentes" e
+🔴 **A terceira aba de `/curation/works` é "Digests" (2026-08-14)** — a fila do digest
+estruturado, que era um painel CEGO em `/curation/settings?g=ia`: sabia dizer "125 pendentes" e
 processava 10 obras que ninguém escolhia nem via. Digest é curadoria de CATÁLOGO (pago,
-compartilhado, do curador), que é o critério da página; `/fila-recomendacao` seria errado, é
-per-user. O **resumo** (Haiku, ~0,2¢, automático, 979/979) FICOU no `/settings`: é manutenção,
+compartilhado, do curador), que é o critério da página; `/my-ai-scores` seria errado, é
+per-user. O **resumo** (Haiku, ~0,2¢, automático, 979/979) FICOU no `/curation/settings`: é manutenção,
 não fila de decisão, e levá-lo junto poria na console um painel permanentemente zerado.
 
 🔴 **A aba tem um PISO de reviews, e ele é medido: 4 reviews úteis**
@@ -2705,7 +2776,7 @@ obras sem lacuna contra **57%** das com 5. Por isso o card carrega `usefulReview
 (`lib/external/source-link-state.ts`) — `linked` (id + não rejeitado) · `absent` (rejeitado
 SEM id = "não existe aqui", DECIDIDO) · `gap` (sem linha, ou qualquer outra forma). Só `gap` é
 trabalho. Eram DUAS cópias do mesmo `if`: esta fila e o card de cobertura do Comix em
-`/settings` (`getComixCoverageLists`) — as duas telas falando da MESMA linha, e uma podia dizer
+`/curation/settings` (`getComixCoverageLists`) — as duas telas falando da MESMA linha, e uma podia dizer
 "pendente" enquanto a outra dizia "resolvida". ⚠️ Rejeitado COM id volta pra `gap` de
 propósito: descartar um candidato não nega a obra na fonte.
 
@@ -2739,7 +2810,7 @@ permanentemente.
 
 🔴 **O caminho `countOnly` pede só `id`, e o motivo é medido: 857 KB × 46 KB** (18×, 978 obras).
 Quem o chama é `getCuradoriaTabCounts`, cujo cache é invalidado pela tag `ai-eval-tab-counts` —
-**compartilhada com `/fila-recomendacao`** —, então toda mutação nas duas repagaria a projeção
+**compartilhada com `/my-ai-scores`** —, então toda mutação nas duas repagaria a projeção
 dos cards contra a NUVEM. As colunas de status ficam fora da projeção porque são filtro `.in()`
 resolvido no SQL.
 
@@ -2811,7 +2882,7 @@ chamam `recordComixOk()` lá na frente, então a coleta que o app **jogou fora**
 painel de verde. Hoje: `delivery_timeout` (reportado pelo orquestrador) desqualifica um `ok` que
 chegue nos 2min seguintes; `search_blind` sai do resolvedor; e `sidecarBlocked` entra em
 `ComixStatus` **sem** rebaixar o estado — o FlareSolverr cobre, e alarmar viraria o alarme que
-sempre toca. A Visão geral (`/curadoria`) troca só o texto do cartão. Guardado por
+sempre toca. A Visão geral (`/curation`) troca só o texto do cartão. Guardado por
 `tests/unit/external/comix-gate-honestidade.test.ts`.
 - Reviews go through `selectReviewsForEvaluation()` before the prompt — stratified per-source sampling with an **adaptive** quota: `perSource = min(maxPerSource, ceil(total / sourcesWithReviews))`, capped by `AI_EVAL_REVIEW_CAPS = { total: 30, maxPerSource: 12 }` (service.ts), then global round-robin in `REVIEW_SOURCE_PRIORITY` order (MangaUpdates first). So few-source works fill the budget (2 sources → up to 24, not 16) instead of being stuck at a fixed 8/source. All sources are always fetched in parallel; the cap is applied at selection time only (no fetch short-circuit). The full pool persists to `work_reviews`. **The prompt selects from the UNION of fresh fetch + persisted `work_reviews` pool** (`mergeFreshWithPersistedReviews`, dedup by source+text, rejected sources filtered): CF-gated sources dropping out (sidecar 503 busy / Cloudflare block) can no longer shrink the evidence to 1–2 reviews when dozens are already persisted. Only the fresh pool is re-persisted (persistence semantics unchanged); when nothing is recovered the input is byte-identical to fresh-only, preserving the eval cache `input_hash`.
 - Passes `sourcedReviews: SourcedReview[]` (rich format with source, matchScore, sourceTitle)
@@ -2819,7 +2890,7 @@ sempre toca. A Visão geral (`/curadoria`) troca só o texto do cartão. Guardad
 - Saves results to `ai_evaluations` + `ai_evaluation_scores` tables
 - User reviews and optionally edits scores before they're committed to `category_scores`
 
-**Path B — "✨ Buscar dados" form (`/titles/new`)**
+**Path B — "✨ Buscar dados" form (`/catalog/new`)**
 `searchAllSources()` → user chooses candidate → `fetchMultiSourceDetails()` → user chooses final data → `evaluateCandidateForCreate()` → `requestAiEvaluation()`
 - "Buscar dados" only finds candidate/source matches. "Usar" extracts metadata, lets the user pick synopses/covers/conflicts, then runs AI against the final selected data.
 - Review/context sources come from the accepted external IDs for the selected candidate, not from a second independent title search.
@@ -3375,7 +3446,7 @@ dedup contra o DB é a própria reconciliação (matcher Jaccard + rede `pg_trgm
 
 **"Revisar pendentes" mostra SÓ obras criadas por importação** (`getPendingReviewWorks`: junta
 `import_rows.status = "imported"` ao filtro `ai_eval_status = "pending"` + não-arquivada). Obra criada
-em `/titles/new` **NÃO entra** aqui, mesmo sem avaliação IA — antes entrava e poluía a lista.
+em `/catalog/new` **NÃO entra** aqui, mesmo sem avaliação IA — antes entrava e poluía a lista.
 
 ### Import multi-user (Bloco 02 do destrave — feito)
 
@@ -3498,7 +3569,7 @@ Quatro ocorrências MEDIDAS em 2026-08-13/14, todas com suíte verde:
 | dono de um id externo | o texto de uma review | o slug da URL da fonte | hid removido da obra ERRADA, e o resolvedor o recriou 2h37 depois |
 | `deep-dive.ts` × RPC | um `as SimilarRow[]` em TS | o `RETURNS TABLE` em SQL | a migration 151 tirou `user_score`; "obras similares na biblioteca" saiu VAZIA por um mês |
 | banda dos tiers | `DEFAULT_TIER_BAND_WIDTH` = 0,25 (medido) | `formula_config.tier_band_width` = 0,5 | a constante é só FALLBACK e a coluna é NOT NULL ⇒ o valor medido **nunca esteve em vigor**; o /ranking agrupou uma semana na largura que a medição reprovou, e a UI mostrava "0,5 (Padrão)" |
-| lista do `/descobrir` | percentil sobre as **737 candidatas** (a barra `sim`) | percentil sobre o **pool de ~50** (o número que ORDENA) | a combinação exibia **97** onde as duas barras diziam 100, e 92 onde diziam 99 e 97; a ordem da lista saía diferente da do servidor |
+| lista do `/discover` | percentil sobre as **737 candidatas** (a barra `sim`) | percentil sobre o **pool de ~50** (o número que ORDENA) | a combinação exibia **97** onde as duas barras diziam 100, e 92 onde diziam 99 e 97; a ordem da lista saía diferente da do servidor |
 | botão de prever Interesse | a obra dizia "Prever de novo" | a fila dizia "Reprever" (e o popup, "Prever") | mesma ação com **três nomes**; e uma instrução na tela (`shadow-compare-panel`) mandava clicar num "Reprever" que já não existiria — ver `lib/ui/interest-predict-label.ts` |
 | card da fila de Interesse | chip "Diverge"/"Bate" (`diverges`) | chip `Δ +1`/`Δ 0` (`delta !== 0`) | o **mesmo predicado**, nas mesmas duas cores, desenhado 2× no mesmo card, com uma 3ª cópia da paleta hand-rollada no `Δ`. Medido: o chip aparecia em 45 de 815 obras (5,5%) e nas 45 o `Δ` já dizia o mesmo — e ele PERDIA a precedência pro "Desatualizado" justo nas 676 stale que tinham o que comparar. Ficou o `Δ` |
 | explicação do Alinhamento | o **texto** do tooltip e o docstring diziam "40% tag + 30% critério + 30% consistência" | o **código** roda `netNameOverlap` (só tags, sem critério) | a fórmula descrita foi APOSENTADA em 27/06 e virou código morto; as duas superfícies seguiram documentando-a por ~2 meses, e quem lesse o arquivo pra entender o número aprenderia a fórmula errada. Aqui o "outro lado" não era um segundo cálculo — era **prosa**, que não tem como divergir barulhentamente |
@@ -3509,7 +3580,7 @@ Quatro ocorrências MEDIDAS em 2026-08-13/14, todas com suíte verde:
 ação, a pergunta é: *os dois chamam a mesma função?* Se não, um vai mentir sobre o outro, e o
 que mente costuma ser o que decide se o botão fica clicável.
 
-⚠️ **"Chamam a mesma função?" NÃO BASTA — foi o que a lista do `/descobrir` mostrou (15/08/2026).**
+⚠️ **"Chamam a mesma função?" NÃO BASTA — foi o que a lista do `/discover` mostrou (15/08/2026).**
 Ali os dois lados chamavam `blendCandidates`, na mesma unidade (percentil 0–100). O que diferia
 era o **universo** em que o percentil foi medido: 737 candidatas de um lado, o pool exibível de
 ~50 do outro, porque a função **repercentila o que recebe** e quem chamava já passava um
@@ -3525,7 +3596,7 @@ código: foi a curadora olhando a tela e reparando que o número não era a méd
 ao lado dele.
 
 ⚠️ **Contador barato + ação completa é um par legítimo — o que não pode é o barato TRANCAR a
-completa.** `countStaleEmbeddings()` puxaria o catálogo inteiro a cada visita ao `/settings`;
+completa.** `countStaleEmbeddings()` puxaria o catálogo inteiro a cada visita ao `/curation/settings`;
 manter o contador barato foi certo. Errado foi `disabled={pendingCount === 0}`, que deu a uma
 medida incompleta poder de veto sobre a completa. Hoje o botão só apaga o TOM quando o
 contador é zero, e o `title` explica a assimetria.
@@ -3561,7 +3632,7 @@ Se a resposta for "escrever o mesmo caminho de outro jeito", o padrão está est
 
 🔴 O projeto já repete "alarme que sempre toca não é lido" no `db:health` e no painel
 "Estado da obra". O que faltava era o corolário: **medir a distribuição antes de escolher o
-corte.** Em `/descobrir`, "avisar quando houver > 3 pares repetidos" acenderia em **25%** das
+corte.** Em `/discover`, "avisar quando houver > 3 pares repetidos" acenderia em **25%** das
 listas; a distribuição real pós-diversificação era `[0,1,1,2,2,2,2,3,3,4,4,23]` — mediana 2,
 p90 4 —, e só `> 5` isola o caso que informa (1 em 12). O limiar vive em
 `NEAR_DUPLICATE_WARN_AT` com a distribuição escrita ao lado.
@@ -3595,11 +3666,17 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.076 passando (+24 pulados) em 295 arquivos** (290 passando + 5 pulados);
-medido em 2026-08-16 depois do refino na lista e do z-pareado do Veredito (3 arquivos novos:
-`ranking/mood-na-lista`, `ui/refino-na-lista-render`, `calculations/prioridade-veredito-z-pareado`),
-com `find tests -name '*.test.ts*'` = 295 conferido contra os 295 executados.
-Base: **3.053 em 292**, antes **3.043 em 291** e **3.021 em 290**.
+`npm run test` → **3.082 passando (+24 pulados) em 296 arquivos** (291 passando + 5 pulados);
+medido em 2026-08-16 depois da padronização das rotas pra inglês (1 arquivo novo:
+`ui/console-nav-rota-ativa`, 6 casos), com `find tests -name '*.test.ts*'` = 296 conferido
+contra os 296 executados.
+Base: **3.076 em 295**, antes **3.053 em 292**, **3.043 em 291** e **3.021 em 290**.
+
+⚠️ **A renomeação tocou ~40 arquivos de teste e não somou nenhum caso** — os testes de
+arquitetura DERIVAM o que checam (rotas do filesystem, prefixos do middleware, escritores
+do disco), então mover diretório não os quebra. Os dois que reprovaram foram os que casavam
+a rota como texto em regex ESCAPADA (`/não a de \/preferencias/`), que é justamente a forma
+que um replace de rota não enxerga.
 
 ⚠️ **Quatro arquivos foram REESCRITOS junto, não só somados** — `decision.test.ts`,
 `decision-breakdown.test.ts`, `prioridade-decomposicao-render.test.tsx` e

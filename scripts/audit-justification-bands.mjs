@@ -7,7 +7,7 @@
  *      própria IA citou na justificativa (ex.: nota 8,5 com "Faixa 7-8").
  *
  * O recorte que importa é o VISÍVEL: só a avaliação mais recente não-failed de cada obra
- * é renderizada na página da obra (app/titles/[id]/page.tsx:398-403).
+ * é renderizada na página da obra (app/catalog/[id]/page.tsx:398-403).
  *
  * Uso: node audit-bands.mjs   (não escreve nada)
  *

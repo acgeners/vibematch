@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { deltaChip } from "@/components/titles/synopsis-predict-panel"
 
 /**
- * Na fila de Interesse (`/fila-recomendacao?tab=sinopse`), a comparação entre a
+ * Na fila de Interesse (`/my-ai-scores?tab=sinopse`), a comparação entre a
  * previsão da IA e o ♥ manual era desenhada DUAS vezes no mesmo card, a partir do
  * mesmo predicado (`delta !== 0` ⟺ `diverges`):
  *

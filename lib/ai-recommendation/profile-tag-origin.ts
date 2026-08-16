@@ -1,7 +1,7 @@
 import type { ProfileTag } from "@/lib/ai-recommendation/types"
 
 /**
- * De onde veio cada tag do perfil de gosto — a resposta da /conta/perfil à pergunta
+ * De onde veio cada tag do perfil de gosto — a resposta da /account/taste-profile à pergunta
  * "o quanto vocês me entendem?".
  *
  * 🔴 Por que isto é evidência e não enfeite: o perfil é destilado **só** das obras

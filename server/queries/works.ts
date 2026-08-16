@@ -93,7 +93,7 @@ async function getSearchMatchIds(supabase: any, searchTerm: string | undefined):
  * NÃO usa `matchTier` de lib/title-match: aqui a entrada é um título INTEIRO
  * digitado (pelo chat), então o casamento reverso importa — "The Villainess Flips
  * the Script (2021)" precisa resolver pra obra sem o "(2021)". A busca incremental
- * de /titles quer o oposto (prefixo de token), por isso as duas faixas divergem
+ * de /catalog quer o oposto (prefixo de token), por isso as duas faixas divergem
  * de propósito. A normalização, essa sim, é a mesma.
  */
 export type TitleResolution =
@@ -225,7 +225,7 @@ export async function getWorks(
   // 🔴 Filtrar ou ordenar por estado pessoal NÃO PODE mais acontecer no SQL, e a razão é a
   // mesma dos outros lugares: o estado saiu de `works` e foi pro espelho, e uma obra SEM linha
   // no espelho **é** "Want to Read". Um `.in("personal_status_id", ...)` sobre uma lista de ids
-  // só alcança quem TEM linha — as sem linha sumiriam do /titles, em silêncio. E expressar "as
+  // só alcança quem TEM linha — as sem linha sumiriam do /catalog, em silêncio. E expressar "as
   // que não têm linha" como um `NOT IN (…)` de centenas de uuids estoura a URL do PostgREST
   // (o mesmo 400 que os `.in()` gigantes já causaram neste projeto).
   //

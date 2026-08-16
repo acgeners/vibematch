@@ -22,7 +22,7 @@ const STATUS_OPTIONS = (PERSONAL_STATUSES as readonly string[]).filter((s) => s 
 const STATUS_INFO = (s: string) => Object.values(PERSONAL_STATUSES_BY_ID).find((i) => i.status === s)
 
 /**
- * Ação em lote "Mudar status de leitura" — comum a TODAS as abas de /ai-evaluation
+ * Ação em lote "Mudar status de leitura" — comum a TODAS as abas de /curation/works
  * (antes exclusiva do Untracked). Aplica o status escolhido às obras selecionadas.
  */
 export function BulkStatusAction({

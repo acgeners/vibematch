@@ -26,7 +26,7 @@ import type { SynopsisQuality, SynopsisQualitySource } from "@/types/domain"
 // Na Fatia 1 o dono continuou lendo `works` por um motivo concreto: OITO writers gravavam
 // aquelas colunas, e quatro deles (`createWork`, `updateWork`, `addWorksToList`, o import de
 // CSV) eram caminhos de CURADORIA que NÃO espelhavam. Se o espelho fosse a fonte do dono
-// naquele momento, um import de planilha atualizaria `works` e a /leitura dele mostraria os
+// naquele momento, um import de planilha atualizaria `works` e a /reading dele mostraria os
 // capítulos ANTIGOS — sem erro e sem log.
 //
 // **A Fase A (PR #136) converteu os oito.** A razão caiu junto. E não é fé: com o espelho
@@ -199,7 +199,7 @@ export interface PersonalStateReader {
    * DONO para o anônimo, com o comentário de que era "só para satisfazer o tipo". Não era: dois
    * módulos o usavam como identidade real — `resolvePersonalFilterIds` filtrava
    * `user_work_state` por ele e `getFavoritesSummary` o usava como chave de `unstable_cache`.
-   * Resultado, medido em produção: um visitante sem conta abria `/leitura` e via a lista de
+   * Resultado, medido em produção: um visitante sem conta abria `/reading` e via a lista de
    * obras que o dono acompanha ("Obras que você acompanha", "Continuar lendo"), com o progresso
    * zerado — porque `get()` já devolvia vazio, mas o `userId` não.
    *

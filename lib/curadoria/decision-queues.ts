@@ -14,20 +14,20 @@ import type { SettingsAccent } from "@/lib/settings-accent"
  *
  * Guardar isso com teste registraria o esquecimento; a lista compartilhada tira o
  * lugar onde ele acontece. É o mesmo movimento que a Visão geral já fazia com o
- * `SETTINGS_GROUPS` pras pendências de `/settings`.
+ * `SETTINGS_GROUPS` pras pendências de `/curation/settings`.
  *
  * 🔴 **Ao criar uma fila nova, ela entra AQUI — não no somatório do badge nem na
  * página.** Quem consome itera; ninguém enumera.
  *
  * ## Escopo
  *
- * Só o que soma no badge do gatilho. As pendências de `/settings` NÃO entram: elas
+ * Só o que soma no badge do gatilho. As pendências de `/curation/settings` NÃO entram: elas
  * têm badge próprio, vêm do `SETTINGS_GROUPS` e são pendência de configuração, não
  * fila de decisão sobre obra.
  *
  * ⚠️ Duplicação que sobra, de propósito: a sidebar da console
  * (`components/curadoria/console-nav.tsx`) mapeia contagem por `href` na sua própria
- * `ENTRIES`, que inclui destinos sem fila (`/settings`). Unificá-la exigiria forçar
+ * `ENTRIES`, que inclui destinos sem fila (`/curation/settings`). Unificá-la exigiria forçar
  * esses destinos no formato de "fila de decisão", que eles não são. O risco residual
  * é um `href` daqui divergir do de lá e o badge da sidebar sumir calado.
  */
@@ -53,14 +53,14 @@ export interface DecisionQueue {
 export const DECISION_QUEUES: readonly DecisionQueue[] = [
   {
     key: "curadoria",
-    href: "/ai-evaluation",
+    href: "/curation/works",
     title: "Avaliar atributos",
     description: "obras sem os 9 critérios de IA, ou com avaliação aguardando revisão",
     accent: "violet",
   },
   {
     key: "requests",
-    href: "/curadoria/pedidos",
+    href: "/curation/requests",
     title: "Pedidos",
     description: "atualização, revisão ou cadastro que um leitor pediu e ninguém resolveu",
     accent: "amber",

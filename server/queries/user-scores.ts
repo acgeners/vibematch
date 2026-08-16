@@ -85,7 +85,7 @@ export interface ScoresReader {
   /**
    * Dono das notas que este leitor representa — `null` sem sessão. Mesma regra do
    * `PersonalStateReader.userId`, e pelo mesmo motivo: emprestar o id do dono "porque o tipo
-   * pede um string" foi o que expôs a lista de leitura dele em `/leitura` (2026-08-03).
+   * pede um string" foi o que expôs a lista de leitura dele em `/reading` (2026-08-03).
    * Nenhum consumidor usava este campo quando ele foi corrigido — a mudança é para que o
    * PRÓXIMO não herde a armadilha.
    */
@@ -112,7 +112,7 @@ export interface ScoresReader {
  * no singleton, e era exatamente por isso que o visitante anônimo recebia `isOwner: true` e
  * lia `calculated_scores`: a Nota Prevista, o personal_fit e o Veredito IA DO DONO, exibidos
  * como se fossem a avaliação do acervo. Numa página pública isso publica o gosto de uma
- * pessoa com cara de dado objetivo — e o /ranking e o /titles ordenam por `expected_score`
+ * pessoa com cara de dado objetivo — e o /ranking e o /catalog ordenam por `expected_score`
  * por padrão, então era a ordem do catálogo inteiro que saía dali.
  *
  * Anônimo → `hasModel: false` + os campos pessoais zerados. O fallback que já existia para

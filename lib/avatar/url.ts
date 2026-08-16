@@ -4,7 +4,7 @@
 // `user_settings.avatar_url` guarda UMA string, e ela tem exatamente três formas:
 //
 //   ""  ................. sem avatar (o chip cai no ícone)
-//   /avatar.svg?…  ...... montado no /conta — a rota redesenha a partir dos params
+//   /avatar.svg?…  ...... montado no /account — a rota redesenha a partir dos params
 //   https://…  .......... imagem enviada, no bucket público `avatars`
 //
 // Manter tudo numa coluna só é o que permite chip, card e qualquer `<img>` futuro
@@ -88,7 +88,7 @@ export function parseAvatarUrl(url: string | null | undefined): AvatarConfig | n
 /**
  * O que `user_settings.avatar_url` pode conter. Usado pelo schema do formulário.
  *
- * ⚠️ O campo de texto livre de URL SAIU do /conta — hoje só o painel e o upload
+ * ⚠️ O campo de texto livre de URL SAIU do /account — hoje só o painel e o upload
  * escrevem aqui. A validação continua porque a action é um endpoint HTTP público
  * (ver [[project_use_server_public_endpoints]]): esconder o campo não fecha a porta.
  */

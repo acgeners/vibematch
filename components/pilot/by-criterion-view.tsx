@@ -253,7 +253,7 @@ export function ByCriterionView({
                 <WorkCoverHover w={w} />
                 <div className="flex min-w-0 flex-1 flex-col gap-2">
                   <a
-                    href={`/titles/${titleToSlug(w.title)}`}
+                    href={`/catalog/${titleToSlug(w.title)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     title="Abrir a página da obra (nova aba)"
@@ -334,7 +334,7 @@ function WorkCoverHover({ w }: { w: PilotWork }) {
       <HoverCardContent side="right" align="start" className="w-80">
         <div className="flex flex-col gap-2">
           <a
-            href={`/titles/${titleToSlug(w.title)}`}
+            href={`/catalog/${titleToSlug(w.title)}`}
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm font-bold leading-snug underline-offset-2 hover:underline hover:decoration-violet-500"

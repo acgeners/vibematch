@@ -90,7 +90,7 @@ describe("barra de seleção: a zona de retirar degrada sem virar menu de um ite
   })
 
   it("fora de um grupo, a versão estreita é botão-ícone e não dropdown", () => {
-    // /titles, /ranking e "Todos os favoritos" não têm de onde remover: sobra o desfavoritar.
+    // /catalog, /ranking e "Todos os favoritos" não têm de onde remover: sobra o desfavoritar.
     renderBar({ onRemoveFromGroup: undefined })
     expect(screen.queryByLabelText("Mais ações")).toBeNull()
     expect(screen.getByLabelText("Desfavoritar 4")).toBeTruthy()

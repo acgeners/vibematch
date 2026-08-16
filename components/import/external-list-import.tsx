@@ -231,7 +231,7 @@ export function ExternalListImport({
     const titleCount = titlesText.split(/\r?\n/).filter((l) => l.trim()).length
     return (
       <div className="space-y-4">
-        {/* Método (nível 2): pílulas discretas — forma diferente das abas (padrão /leitura) */}
+        {/* Método (nível 2): pílulas discretas — forma diferente das abas (padrão /reading) */}
         <div className="space-y-1.5">
           <p className="text-xs font-medium text-muted-foreground">De onde importar</p>
           <div className="flex flex-wrap items-center gap-1.5">

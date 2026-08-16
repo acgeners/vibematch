@@ -21,7 +21,7 @@ export function FirstStepsCard({ progress }: { progress: FirstStepsProgress }) {
       done: progress.saidTastes,
       title: "Dizer o que você gosta e evita",
       sub: "Gêneros que te atraem e vetos que te poupam tempo.",
-      cta: { label: "Escolher", href: "/preferencias" },
+      cta: { label: "Escolher", href: "/preferences" },
     },
     {
       done: progress.broughtList,
@@ -36,19 +36,19 @@ export function FirstStepsCard({ progress }: { progress: FirstStepsProgress }) {
         progress.interestMarked > 0
           ? `Você marcou ${progress.interestMarked}.`
           : "O ♥ é o sinal mais barato que existe — e treina o preditor de Interesse.",
-      cta: { label: "Explorar", href: "/titles" },
+      cta: { label: "Explorar", href: "/catalog" },
     },
     {
       done: progress.firstSheet,
       title: "Preencher a primeira ficha pós-leitura",
       sub: "Sete eixos, 30 segundos. É a nota mais precisa que existe no app.",
-      cta: { label: "Ver como", href: "/guia" },
+      cta: { label: "Ver como", href: "/guide" },
     },
     {
       done: progress.profileGenerated,
       title: "Gerar seu perfil de gosto",
       sub: `Disponível a partir de 10 obras avaliadas — você tem ${progress.ratedCount}.`,
-      cta: { label: "Gerar", href: "/conta/perfil" },
+      cta: { label: "Gerar", href: "/account/taste-profile" },
     },
   ]
   const doneCount = steps.filter((s) => s.done).length

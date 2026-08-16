@@ -87,7 +87,7 @@ export interface DecisionBreakdownInput {
   /**
    * `formula_config.score_weights_auto`. Decide QUAL ênfase dos 9 atributos está em
    * vigor: os pesos INFERIDOS do histórico de notas (true) ou os que a pessoa
-   * declarou em `/preferencias` (false).
+   * declarou em `/preferences` (false).
    *
    * 🔴 Está aqui porque a omissão gerou a pergunta certa — "vocês consideram a
    * ênfase que eu escolhi?". Medido em 2026-08-15: com o auto LIGADO os pesos
@@ -155,8 +155,8 @@ export function buildDecisionBreakdown(input: DecisionBreakdownInput): DecisionB
     // 🔴 Nomeia o DONO da ênfase, não só o estado do toggle: "automática" sozinho não
     // diz que a sua declaração está fora de uso, que é justamente o que surpreende.
     weightsNote: input.weightsAuto
-      ? "Ênfase dos atributos: automática — aprendida do seu histórico, não a de /preferencias."
-      : "Ênfase dos atributos: a sua, declarada em /preferencias.",
+      ? "Ênfase dos atributos: automática — aprendida do seu histórico, não a de /preferences."
+      : "Ênfase dos atributos: a sua, declarada em /preferences.",
     insideExpected: [
       {
         // Primeiro da lista porque é o insumo mais pesado: as 9 notas entram como

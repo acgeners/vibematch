@@ -497,8 +497,8 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
       .update({ ai_eval_status: "review_pending", ai_eval_reviews_stale: false })
       .eq("id", workId)
 
-    revalidatePath(`/titles/${workId}`)
-    revalidatePath("/ai-evaluation")
+    revalidatePath(`/catalog/${workId}`)
+    revalidatePath("/curation/works")
     revalidateTag("ai-eval-tab-counts", "max")
     return { data: { evaluation: completedEvaluation as AiEvaluation, currentScores, currentEvaluation, reviewsUsed: response.reviewsUsed } }
   } catch (err) {
@@ -520,7 +520,7 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
  * significa "a IA já rodou, falta você conferir" — mas a única porta pro modal de
  * revisão era `triggerAiEvaluation`, ou seja, **pagar outra avaliação pra ver a
  * que já estava pronta**. O próprio app prometia o contrário: ao terminar uma
- * avaliação, o toast oferece "Revisar" apontando pra `/ai-evaluation`
+ * avaliação, o toast oferece "Revisar" apontando pra `/curation/works`
  * (`components/titles/ai-evaluation-button.tsx`), e a página não sabia revisar.
  *
  * Devolve a MESMA forma que o caminho pago (`{ evaluation, currentScores,
@@ -663,8 +663,8 @@ export async function submitAiReview(submission: AiReviewSubmission) {
   // "Recalcular agora" ou no auto-recalc (≥1h sem novas edições).
   await markRecalcPending("submitAiReview")
 
-  revalidatePath(`/titles/${submission.workId}`)
-  revalidatePath("/ai-evaluation")
+  revalidatePath(`/catalog/${submission.workId}`)
+  revalidatePath("/curation/works")
   revalidatePath("/ranking")
   revalidateTag("ai-eval-tab-counts", "max")
   return { data: null, error: null }
@@ -678,7 +678,7 @@ export async function skipAiEvaluation(workId: string) {
     .from("works")
     .update({ ai_eval_status: "skipped" })
     .eq("id", workId)
-  revalidatePath("/ai-evaluation")
+  revalidatePath("/curation/works")
   revalidateTag("ai-eval-tab-counts", "max")
   return { data: null, error: null }
 }

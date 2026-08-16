@@ -136,8 +136,8 @@ async function main() {
   console.log(`  · chave V2 em uso (output_schema_version=${EVAL_OUTPUT_SCHEMA_VERSION}) confirmada nos eventos acima`)
   console.log(`  · L2-legado vivo não exercitado (exige reproduzir input pré-107) — coberto por unit tests`)
 
-  // ── 4. Painel (mesma fonte de dados do /ai-usage) ──────────────────────────
-  console.log("\n[4] Painel /ai-usage (getCacheEventMetrics 30d)")
+  // ── 4. Painel (mesma fonte de dados do /curation/ai-usage) ──────────────────────────
+  console.log("\n[4] Painel /curation/ai-usage (getCacheEventMetrics 30d)")
   const panel = await getCacheEventMetrics(30)
   console.log(`  unavailable=${panel.unavailable} | lookups=${panel.totals.lookups} hits=${panel.totals.hits} misses=${panel.totals.misses} bypass=${panel.totals.bypasses} dedup=${panel.totals.dedupWaits} evitadas=${panel.totals.providerCallsAvoided} hitRate=${panel.totals.hitRate}`)
   check("painel mensurável (tabela presente)", !panel.unavailable)

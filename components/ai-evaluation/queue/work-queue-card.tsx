@@ -94,7 +94,7 @@ export interface WorkQueueCardProps {
 }
 
 /**
- * Card unificado das filas de /ai-evaluation. Shell de 3 tiers: núcleo comum
+ * Card unificado das filas de /curation/works. Shell de 3 tiers: núcleo comum
  * sempre visível (capa · título · nota · status · interesse · contagens · 1 chip
  * de estado), destaque específico da aba na linha 2, e detalhes pesados sob
  * demanda ("⋯ detalhes"). Seleção via checkbox em todas as abas.

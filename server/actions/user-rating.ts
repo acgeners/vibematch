@@ -97,10 +97,10 @@ export async function clearUserRating(
     })
   }
 
-  revalidatePath("/titles/[id]", "page")
-  revalidatePath("/titles")
+  revalidatePath("/catalog/[id]", "page")
+  revalidatePath("/catalog")
   revalidatePath("/ranking")
-  revalidatePath("/leitura")
+  revalidatePath("/reading")
   revalidatePath("/")
 
   return { ok: true }

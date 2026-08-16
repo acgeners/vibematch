@@ -157,7 +157,7 @@ export function AiEvaluationButton({
       id: evalTaskId,
       kind: "ai-eval",
       label: `Avaliando: ${workTitle}`,
-      href: "/ai-evaluation",
+      href: "/curation/works",
       run: () => triggerAiEvaluation(workId, opts),
       successToast: (result) => {
         if ("data" in result && result.data?.evaluation) {
@@ -167,7 +167,7 @@ export function AiEvaluationButton({
               reviewsUsed === 0
                 ? `Avaliação de "${workTitle}" pronta (sem reviews externas)`
                 : `Avaliação de "${workTitle}" pronta (${reviewsUsed} review${reviewsUsed === 1 ? "" : "s"})`,
-            action: { label: "Revisar", href: "/ai-evaluation" },
+            action: { label: "Revisar", href: "/curation/works" },
           }
         }
         return null // gate ("sem reviews") ou erro → sem toast de sucesso

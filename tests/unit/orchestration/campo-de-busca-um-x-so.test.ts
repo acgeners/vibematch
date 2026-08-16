@@ -8,7 +8,7 @@ import { join } from "node:path"
  * `type="search"` faz Blink/WebKit desenharem `::-webkit-search-cancel-button`
  * DENTRO da content box — ou seja, à esquerda do botão de limpar que o app
  * desenha no padding —, e só com o campo FOCADO. Resultado medido em
- * `/preferencias`: dois ✕ lado a lado, pesos diferentes, mesma ação, enquanto
+ * `/preferences`: dois ✕ lado a lado, pesos diferentes, mesma ação, enquanto
  * se digita. É a família "dois donos do mesmo fato" do CLAUDE.md, na tela.
  *
  * O reset em `app/globals.css` mata o nativo em todo lugar. O preço é que o

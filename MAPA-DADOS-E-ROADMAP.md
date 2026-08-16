@@ -136,7 +136,7 @@ Validação `golden-3` (n=180): e1 (com digest) bate b1 (sem) — MAE **0,46 vs 
 1. Aplicar migrations pendentes (119 toggle canônica, 120 stale por reviews).
 2. **Maximizar tags → reviews → digest** ANTES do backfill (ordem importa: tag muda a assinatura do Interesse; digest é o input do e1).
 3. **Backfill do Interesse** (`planInterestBackfill` dry-run → `runInterestBackfill`, ~$8) — o bump pra v3 deixou as predições "absent", então precisa rodar.
-4. Verificar no painel `/admin/model-metrics`.
+4. Verificar no painel `/curation/model-metrics`.
 
 **Reaproveitar testes:** os 180 rótulos humanos servem de ground-truth; as predições e1 do teste **não** foram pro banco ⇒ o backfill ainda precisa rodar sobre o catálogo.
 

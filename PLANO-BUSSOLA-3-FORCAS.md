@@ -76,7 +76,7 @@ Sobre 206 obras rotuladas (`scripts/axis-gate.ts`):
 ### Estado da Fase 2 (2026-07-06) ✅
 - **Helper**: `lib/calculations/forces.ts` — `computeWorkForces` deriva Chance (chance_score) / Avaliação (platform_avg×10) / Alcance (log-norm de votos, ref 50k).
 - **Componente**: `components/ranking/force-meters.tsx` — `ForceMeters` (size md horizontal / sm empilhado). Cores: Chance=violet, Avaliação=amber, Alcance=slate.
-- **Página da obra**: card "Bússola de leitura" no topo da aba Notas (`app/titles/[id]/page.tsx`). Usa `calculated_scores(*)` (já tinha chance_score).
+- **Página da obra**: card "Bússola de leitura" no topo da aba Notas (`app/catalog/[id]/page.tsx`). Usa `calculated_scores(*)` (já tinha chance_score).
 - **Card do ranking**: substituído o strip 2×2 pelo trio (opção aprovada); Veredito/Alinhamento seguem como colunas da tabela. Órfãos removidos (MetricCell/bandText/EMPTY_METRIC/alignPct/ícones/LABELS).
 - **Query**: `chance_score` plugado em `ranking.ts` (select+tipo+map) e `works.ts` (WORK_LIST_SELECT).
 - **Verificado por screenshot** (puppeteer-core, `scripts/screenshot-bussola.mjs` + `screenshot-ranking.mjs`): valores corretos, sem truncar. tsc/lint 0 nos arquivos novos.
@@ -109,7 +109,7 @@ Nada bloqueante — a feature está no ar. O que ficou:
 ## Arquivos da feature
 
 Novos: `lib/ml/logistic.ts`, `lib/calculations/chance.ts`, `lib/calculations/forces.ts`, `components/ranking/force-meters.tsx`, `components/ranking/bussola-plane.tsx`, `supabase/migrations/132_chance_score.sql`, este doc, + scripts de validação/verificação (`scripts/axis-gate.ts`, `chance-validate.ts`, `chance-recalc-dryrun.ts`, `chance-recalc-run.ts`, `chance-refine-measure.ts`, `screenshot-*.mjs`).
-Editados: `server/actions/calculations.ts` (recalc), `server/queries/ranking.ts` + `works.ts` (dados), `app/titles/[id]/page.tsx` (card), `components/ranking/ranking-table.tsx` (chips + view mode), `types/domain.ts` (2 campos).
+Editados: `server/actions/calculations.ts` (recalc), `server/queries/ranking.ts` + `works.ts` (dados), `app/catalog/[id]/page.tsx` (card), `components/ranking/ranking-table.tsx` (chips + view mode), `types/domain.ts` (2 campos).
 
 ## 6. Naming (aprovado)
 **Chance de gostar** · **Avaliação** · **Alcance**. Quadrantes: Aposta segura / Teu nicho / Alto potencial / Pular (e por face: joia escondida, hype fora do perfil, consagrada, cult).

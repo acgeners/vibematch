@@ -6,7 +6,7 @@ import { LOW_BALANCE_USD } from "@/lib/ai-usage/balance"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
 
 vi.mock("server-only", () => ({}))
-vi.mock("next/navigation", () => ({ usePathname: () => "/titles" }))
+vi.mock("next/navigation", () => ({ usePathname: () => "/catalog" }))
 vi.mock("@/server/actions/account", () => ({ getBalanceSummary: vi.fn() }))
 
 /** O saldo chega por fetch de cliente; aqui ele é injetado assim que monta. */
@@ -54,7 +54,7 @@ function status(remainingUsd: number | null): BalanceStatus {
  * o que continua valendo nos dois estados.
  */
 function curationLink(): HTMLElement {
-  const link = document.querySelector<HTMLElement>('a[href="/curadoria"]')
+  const link = document.querySelector<HTMLElement>('a[href="/curation"]')
   if (!link) throw new Error("gatilho de Curadoria não renderizou")
   return link
 }

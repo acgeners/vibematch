@@ -6,7 +6,7 @@ import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
 import { getWorksWithoutTags } from "@/server/queries/works-without-tags"
 
 /**
- * Filas de /ai-evaluation onde uma pendência pode ser marcada como "lida"
+ * Filas de /curation/works onde uma pendência pode ser marcada como "lida"
  * (silenciada sem ser resolvida). Uma obra é "lida" numa fila se existe uma
  * linha em `ai_eval_read_acks` para (work_id, queue). Ver migration 125.
  */
@@ -53,8 +53,8 @@ export async function getReadAckSets(): Promise<Map<ReadQueue, Set<string>>> {
  * IDs de TODOS os membros de cada fila pedida (com os estados "acionáveis" de
  * cada uma), sem filtros de UI. Usado por "marcar tudo como lido" — acka o
  * queue inteiro, não só o subconjunto que o usuário está filtrando. `queues`
- * decide QUAIS das 5 leituras rodam (cada página só pede as suas — /ai-evaluation
- * e /fila-recomendacao dividem o antigo conjunto de 5); default é todas, pra
+ * decide QUAIS das 5 leituras rodam (cada página só pede as suas — /curation/works
+ * e /my-ai-scores dividem o antigo conjunto de 5); default é todas, pra
  * chamadas que ainda não precisam escolher.
  */
 export async function getAllQueueMemberIds(
@@ -122,7 +122,7 @@ async function getAttributesMemberIds(): Promise<string[]> {
  * Contagem do badge "Curadoria da Obra" da barra lateral = obras NÃO-LIDAS na
  * fila de atributos (avaliação IA pendente/aguardando revisão). Sucessora da
  * antiga `getEvalBadgeUnreadCount`, que unia attr+veredito+interesse — dividida
- * quando as 3 primeiras abas de /ai-evaluation viraram duas páginas (Curadoria
+ * quando as 3 primeiras abas de /curation/works viraram duas páginas (Curadoria
  * da Obra × Fila de Recomendação). Fresco a cada chamada (sem `unstable_cache`).
  */
 export async function getCuradoriaBadgeUnreadCount(): Promise<number> {

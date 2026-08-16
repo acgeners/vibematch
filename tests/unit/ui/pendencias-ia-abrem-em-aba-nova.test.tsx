@@ -16,7 +16,7 @@ import type { AiPendingItem } from "@/components/settings/ai-pending-guard-dialo
  */
 
 const items: AiPendingItem[] = [
-  { label: "Embeddings", count: 1, href: "/settings?g=ia#card-embeddings" },
+  { label: "Embeddings", count: 1, href: "/curation/settings?g=ia#card-embeddings" },
 ]
 
 afterEach(cleanup)

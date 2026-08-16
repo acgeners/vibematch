@@ -37,7 +37,7 @@ export function ContinueReading({
           )}
         </CardTitle>
         <Button asChild variant="ghost" size="sm" className="shrink-0 text-muted-foreground hover:text-foreground">
-          <Link href="/leitura">
+          <Link href="/reading">
             Ver tudo
             <ArrowRight className="size-3.5" />
           </Link>

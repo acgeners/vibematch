@@ -66,7 +66,7 @@ const getPreferences = unstable_cache(async (): Promise<{
     topN: cfg?.top_n ?? null,
     // Confiança do público (pseudo-votos bayesianos): acima desse nº de votos a
     // média externa pesa ≥ 50% na Nota Prevista. Vira o limiar "confiável" do
-    // filtro de Votos externos (era um card passivo em /settings).
+    // filtro de Votos externos (era um card passivo em /curation/settings).
     confidenceVotes: cfg?.pseudo_votes_nota_m ?? null,
     // Colunas legadas repurposadas como filtros padrão (ver ranking-preferences-form):
     // min_calc_score → Alinhamento, min_predicted_score → Veredito IA, min_final_score → Nota Prevista.

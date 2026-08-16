@@ -6,8 +6,8 @@ import { join } from "node:path"
  * Invariante: toda rota declara o PRÓPRIO nome, e o sufixo "· SatorIA" tem UM dono.
  *
  * 🔴 O que isto pega, medido em 2026-08-14: das 30 rotas do app, **18 não declaravam
- * título nenhum** — `/ranking`, `/favorites`, `/leitura`, `/titles`, `/conta/perfil`,
- * `/settings`, `/curadoria/pedidos` e mais 11. Todas herdavam o `title` do layout raiz e
+ * título nenhum** — `/ranking`, `/favorites`, `/reading`, `/catalog`, `/account/taste-profile`,
+ * `/curation/settings`, `/curation/requests` e mais 11. Todas herdavam o `title` do layout raiz e
  * a aba do browser dizia **"SatorIA"** nas 18. Com três abas abertas (o caso normal aqui),
  * as três eram indistinguíveis: dava pra voltar pra uma aba só clicando e vendo.
  *

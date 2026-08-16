@@ -49,7 +49,7 @@ const ICONS: Record<string, LucideIcon> = {
   SlidersHorizontal,
 }
 
-/** Mesma regra do `/titles`: com 1 letra o resultado é grande demais pra ser útil. */
+/** Mesma regra do `/catalog`: com 1 letra o resultado é grande demais pra ser útil. */
 const MIN_WORK_QUERY = 2
 /** Espera o usuário parar de digitar antes de ir ao servidor. */
 const DEBOUNCE_MS = 200
@@ -126,7 +126,7 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
   const signedIn = useIsSignedIn()
 
   // ⌘K / Ctrl+K em qualquer lugar. Ignora quando o foco está num campo de texto: o app tem
-  // busca ao vivo no /titles e caixas de comentário, e sequestrar o atalho lá seria hostil.
+  // busca ao vivo no /catalog e caixas de comentário, e sequestrar o atalho lá seria hostil.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "k" || !(e.metaKey || e.ctrlKey)) return
@@ -374,7 +374,7 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
                   {/* Âncora de verdade, não handler: o cmdk espalha as props do usuário ANTES
                       de definir o `onClick` dele, então um onClick aqui nunca roda — o clique
                       vira no-op sem erro. Com <a>, ainda ganhamos ctrl+clique e URL no hover. */}
-                  <a href={`/titles/${w.slug}`} onClick={close}>
+                  <a href={`/catalog/${w.slug}`} onClick={close}>
                     <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded bg-muted text-[9px] text-muted-foreground">
                       {w.coverUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element -- capa externa, sem images config

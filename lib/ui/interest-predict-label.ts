@@ -2,7 +2,7 @@
  * Rótulo do botão que dispara a previsão de Interesse — DONO ÚNICO (2026-08-15).
  *
  * 🔴 A mesma ação tinha TRÊS nomes em três telas: "Prever de novo" na página da obra,
- * "Reprever" na fila de Interesse (`/fila-recomendacao?tab=sinopse`) e "Prever" no
+ * "Reprever" na fila de Interesse (`/my-ai-scores?tab=sinopse`) e "Prever" no
  * popup de custo. Ninguém escreveu isso de propósito — cada tela nomeou o botão quando
  * foi construída, e nada as obrigava a concordar. É a família "dois critérios pro mesmo
  * fato" do CLAUDE.md, aqui no vocabulário: quem aprende o botão numa tela não o

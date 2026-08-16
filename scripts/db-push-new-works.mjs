@@ -379,7 +379,7 @@ const PLAN = [
   },
   { table: "work_embeddings", where: `work_id = any(${idArray})`, insert: onConflictNothing("work_embeddings") },
   {
-    // Ledger durável de jobs com cost_actual_usd — é o que o /ai-usage soma.
+    // Ledger durável de jobs com cost_actual_usd — é o que o /curation/ai-usage soma.
     table: "work_processing_jobs",
     where: `work_id = any(${idArray})`,
     insert: onConflictNothing("work_processing_jobs"),

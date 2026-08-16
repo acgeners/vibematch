@@ -1,4 +1,4 @@
-// Accent system shared by the /settings page sections and their panels.
+// Accent system shared by the /curation/settings page sections and their panels.
 // Full class strings (no interpolation) so Tailwind's JIT picks them up.
 
 export type SettingsAccent =

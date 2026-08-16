@@ -137,7 +137,7 @@ function SurprisePickCard({ entry, onNavigate }: { entry: RankingEntry; onNaviga
   const justification = entry.alignmentJustification ?? buildSyntheticJustification(entry)
   return (
     <Link
-      href={`/titles/${titleToSlug(entry.title)}`}
+      href={`/catalog/${titleToSlug(entry.title)}`}
       onClick={onNavigate}
       className="group flex gap-3 rounded-lg border bg-card/60 p-3 transition-colors hover:border-primary/40 hover:bg-card"
     >

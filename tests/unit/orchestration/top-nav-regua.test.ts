@@ -24,7 +24,7 @@ const CURATION_MENU = "components/layout/curation-menu.tsx"
  * (ver [[project-testes-arquitetura-armadilhas]]). Ao criar destino de topo que
  * dependa de sessão, some aqui.
  */
-const PER_USER_DESTINATIONS = ["/leitura", "/favorites", "/ranking", "/recommendations"]
+const PER_USER_DESTINATIONS = ["/reading", "/favorites", "/ranking", "/recommendations"]
 
 /** Extrai `{ href: "...", ..., requiresSignedIn: true }` de uma lista literal de nav. */
 function navEntries(source: string): Array<{ href: string; guarded: boolean }> {
@@ -62,7 +62,7 @@ describe("barra superior — a régua", () => {
 
   it("a fila de recomendação mora em UM lugar só do chrome", () => {
     const places = [TOP_NAV, ACCOUNT_CHIP, CURATION_MENU, MOBILE_NAV].filter((f) =>
-      read(f).includes("/fila-recomendacao"),
+      read(f).includes("/my-ai-scores"),
     )
     expect(places, "a fila voltou a aparecer em mais de um lugar da barra").toEqual([ACCOUNT_CHIP])
   })

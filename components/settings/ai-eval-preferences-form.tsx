@@ -139,7 +139,7 @@ export function AiEvalPreferencesForm({
                 </span>
               </div>
               <p className="mt-2 text-[11px] text-muted-foreground">
-                Obras com confiança IA <span className={`font-semibold ${thresholdTone}`}>&lt; {thresholdPct}%</span> aparecem em <span className="font-mono">/ai-evaluation</span>.
+                Obras com confiança IA <span className={`font-semibold ${thresholdTone}`}>&lt; {thresholdPct}%</span> aparecem em <span className="font-mono">/curation/works</span>.
               </p>
             </div>
           )}

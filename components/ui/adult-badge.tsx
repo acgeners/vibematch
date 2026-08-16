@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils"
 
 /**
  * Selo "🔞 18+" — indicador de conteúdo adulto nos cards das obras. Mesmo
- * tratamento visual do chip da página da obra (app/titles/[id]/page.tsx), só que
+ * tratamento visual do chip da página da obra (app/catalog/[id]/page.tsx), só que
  * dimensionado pelo `Badge` base pra alinhar com os badges de status vizinhos
  * (PublicationStatusBadge/PersonalStatusBadge) em cada card.
  *

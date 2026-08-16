@@ -22,7 +22,7 @@ export interface AttributeBiasOverview {
 }
 
 /**
- * Lê o estado do offset de atributos pra exibição em /settings/calibration.
+ * Lê o estado do offset de atributos pra exibição em /curation/settings/calibration.
  * Junta attribute_bias com labels de CRITERIA_INFO. Atributos sem linha
  * aparecem zerados (ordem canônica de CRITERION_SLUGS).
  */

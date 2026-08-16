@@ -4,7 +4,7 @@ import { suggestSeedReplacements } from "@/server/queries/seed-discovery"
 import type { SeedSuggestion } from "@/server/queries/seed-discovery"
 
 /**
- * Sugestões de substituta para a semente que está destoando (`/descobrir`).
+ * Sugestões de substituta para a semente que está destoando (`/discover`).
  *
  * 🔴 `export type { X }` SEM `from` derruba o módulo inteiro em runtime. Medido em
  * 2026-08-15 abrindo a página: `ReferenceError: SeedSuggestion is not defined` no *server

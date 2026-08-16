@@ -75,7 +75,7 @@ export function deltaChip(delta: number): { className: string; texto: string } {
 }
 
 /**
- * Fila de Interesse na Obra (aba /fila-recomendacao?tab=sinopse): obras com sinopse
+ * Fila de Interesse na Obra (aba /my-ai-scores?tab=sinopse): obras com sinopse
  * canônica que precisam de estimativa (desatualizada ou não prevista). Usa o card
  * unificado `WorkQueueCard` + seleção em lote: as ações (Prever/Aplicar) agem sobre
  * as obras selecionadas; item a item continua no `PredictSynopsisRowActions`.

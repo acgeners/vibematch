@@ -51,28 +51,64 @@ const nextConfig: NextConfig = {
   // `redirects()` do config emite 308 de verdade.
   //
   // ⚠️ Isto NÃO cobre redirect que depende de dado (`/favorites/[listId]` de
-  // grupo inexistente, `/titles/[id]` que resolve pra slug): esses precisam de
+  // grupo inexistente, `/catalog/[id]` que resolve pra slug): esses precisam de
   // uma leitura no banco pra decidir e seguem no `page.tsx`.
+  //
+  // 🔴 A ORDEM É SIGNIFICATIVA — o Next casa a primeira regra e para. Toda regra
+  // específica (`?fav=1`, `/settings/calibration`) tem que vir ANTES da regra ampla
+  // que a engoliria, senão ela vira código morto sem nada acusar.
   async redirects() {
     return [
+      // --- Específicas: precisam vencer as amplas logo abaixo ---
       {
         source: "/titles",
         has: [{ type: "query", key: "fav", value: "1" }],
         destination: "/favorites",
         permanent: true,
       },
-      { source: "/preferences", destination: "/preferencias", permanent: true },
-      { source: "/conta/preferencias", destination: "/preferencias", permanent: true },
-      {
-        source: "/ranking/desatualizados",
-        destination: "/fila-recomendacao?tab=ia-rk",
-        permanent: true,
-      },
+      { source: "/conta/preferencias", destination: "/preferences", permanent: true },
       {
         source: "/settings/calibration",
-        destination: "/settings?g=notas&open=ai-audit",
+        destination: "/curation/settings?g=notas&open=ai-audit",
         permanent: true,
       },
+      {
+        source: "/ranking/desatualizados",
+        destination: "/my-ai-scores?tab=ia-rk",
+        permanent: true,
+      },
+
+      // --- Nomes antigos das rotas (padronização pra inglês, 2026-08-16) ---
+      //
+      // Todas em 308: são renomeações definitivas, e o que passa por aqui é bookmark,
+      // histórico do browser e link colado em conversa. `:path*` cobre a rota e os
+      // filhos numa regra só; o Next repassa a query string sozinho, que é o que mantém
+      // vivo o deep-link `/settings?g=fontes` do alerta do Comix.
+      //
+      // ⚠️ `/preferences → /preferencias` existia aqui e foi INVERTIDO, não apagado:
+      // agora quem é real é o lado inglês. Apagar teria transformado o alias antigo em
+      // 404 justo pra quem já usava o nome novo.
+      { source: "/titles/:path*", destination: "/catalog/:path*", permanent: true },
+      { source: "/leitura", destination: "/reading", permanent: true },
+      { source: "/descobrir", destination: "/discover", permanent: true },
+      { source: "/painel", destination: "/dashboard", permanent: true },
+      { source: "/conta/perfil", destination: "/account/taste-profile", permanent: true },
+      { source: "/conta/:path*", destination: "/account/:path*", permanent: true },
+      { source: "/preferencias/:path*", destination: "/preferences/:path*", permanent: true },
+      { source: "/sobre", destination: "/about", permanent: true },
+      { source: "/guia", destination: "/guide", permanent: true },
+      { source: "/bem-vindo", destination: "/welcome", permanent: true },
+      { source: "/fila-recomendacao", destination: "/my-ai-scores", permanent: true },
+      { source: "/recuperar-senha", destination: "/forgot-password", permanent: true },
+      { source: "/nova-senha", destination: "/reset-password", permanent: true },
+
+      // A console virou um prefixo só (`/curation/*`); estas cinco eram rotas irmãs.
+      { source: "/curadoria/pedidos", destination: "/curation/requests", permanent: true },
+      { source: "/curadoria/:path*", destination: "/curation/:path*", permanent: true },
+      { source: "/ai-evaluation/:path*", destination: "/curation/works/:path*", permanent: true },
+      { source: "/ai-usage/:path*", destination: "/curation/ai-usage/:path*", permanent: true },
+      { source: "/settings/:path*", destination: "/curation/settings/:path*", permanent: true },
+      { source: "/admin/model-metrics", destination: "/curation/model-metrics", permanent: true },
     ];
   },
 };

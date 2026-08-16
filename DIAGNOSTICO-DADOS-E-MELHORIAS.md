@@ -305,7 +305,7 @@ Misturadas ao perfil com **shrinkage** `λ = n/(n+k)` (`mergeDeclaredTagPreferen
 
 **Esclarecimentos:**
 - **`recalculateAll, awaited`** — `recalculateAll` recalcula as notas determinísticas de TODO o catálogo numa passada; "awaited" = no `createWork` roda com `await` ([works.ts:1081](server/actions/works.ts#L1081)) → bloqueia a resposta até a obra ter nota. No `updateWork` **não** é awaited (só `recalc_pending`).
-- **Embeddings** — `text-embedding-3-small` (~$0). Consumidos em **1 lugar só**: painel "Obras similares" da página da obra ([titles/[id]/page.tsx:206](app/titles/[id]/page.tsx#L206)). **Fora** de toda nota e da Avaliação IA. Ação de menor valor/mais dispensável.
+- **Embeddings** — `text-embedding-3-small` (~$0). Consumidos em **1 lugar só**: painel "Obras similares" da página da obra ([titles/[id]/page.tsx:206](app/catalog/[id]/page.tsx#L206)). **Fora** de toda nota e da Avaliação IA. Ação de menor valor/mais dispensável.
 
 ---
 

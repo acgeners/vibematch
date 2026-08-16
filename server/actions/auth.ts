@@ -93,7 +93,7 @@ export async function signUpAction(_prev: AuthState, formData: FormData): Promis
   // Cadastro com sessão → onboarding (decisão 1 do fluxo de boas-vindas: roda DEPOIS
   // do cadastro, gravando direto nas tabelas). Quem confirma por email entra depois
   // pela home — o card "Primeiros passos" (ponte) cobre esse caminho.
-  if (data.session) redirect("/bem-vindo")
+  if (data.session) redirect("/welcome")
   return { message: "Conta criada. Confirme pelo link enviado ao seu email para entrar." }
 }
 
@@ -113,14 +113,14 @@ export async function requestPasswordResetAction(
   if (!email) return { error: "Informe seu email." }
 
   const supabase = await createClient()
-  // O link do email chega no callback com `?code=`; ele troca por sessão e joga em /nova-senha,
+  // O link do email chega no callback com `?code=`; ele troca por sessão e joga em /reset-password,
   // que é onde a troca de fato acontece.
   //
   // O host vai junto porque em dev `localhost` e `127.0.0.1` não compartilham cookie, e o
   // callback precisa do code verifier gravado por ESTE request (ver lib/site-url.ts).
   const requestHost = (await headers()).get("host")
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${getSiteUrl(requestHost)}/auth/callback?next=/nova-senha`,
+    redirectTo: `${getSiteUrl(requestHost)}/auth/callback?next=/reset-password`,
   })
 
   // Só erro de INFRA aparece (SMTP fora, limite de envio estourado). "Email não existe" não é

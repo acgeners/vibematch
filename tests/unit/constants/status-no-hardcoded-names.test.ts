@@ -12,7 +12,7 @@
  *
  * Se este teste ficar vermelho: não troque o nome — pergunte o CONCEITO
  * (`isTerminalPersonalStatus`, `UNREAD_PERSONAL_STATUSES`, `DEFAULT_PERSONAL_STATUS`…), ou, quando
- * a referência a UM status for inevitável (a seção "Em hiato" da /leitura), use
+ * a referência a UM status for inevitável (a seção "Em hiato" da /reading), use
  * `personalStatusNameBySlugOrThrow` — que estoura alto em vez de falhar calado.
  */
 import { describe, it, expect } from "vitest"

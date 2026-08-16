@@ -31,7 +31,7 @@ export function TagStanceMark({ stance, className }: { stance: TagStance; classN
 /**
  * Texto do tooltip/`title` de uma tag com stance. Diz o NÍVEL e de onde ele veio
  * — sem isso o segundo nível vira "um chip com um coraçãozinho" sem explicação,
- * e a pessoa não tem como ligar o marcador ao botão ✨ 2× de `/preferencias`.
+ * e a pessoa não tem como ligar o marcador ao botão ✨ 2× de `/preferences`.
  */
 export function tagStanceTitle(info: TagStanceInfo): string {
   const isLove = info.stance === "love"

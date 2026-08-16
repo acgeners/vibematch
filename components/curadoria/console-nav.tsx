@@ -29,7 +29,7 @@ import type { SettingsAccent } from "@/lib/settings-accent"
 import { useChromeBadges } from "@/components/layout/chrome-badges"
 import { cn } from "@/lib/utils"
 
-/** Um tópico de /settings, já reduzido ao que atravessa a fronteira server→client. */
+/** Um tópico de /curation/settings, já reduzido ao que atravessa a fronteira server→client. */
 export interface ConsoleSettingsGroup {
   id: string
   label: string
@@ -40,7 +40,7 @@ export interface ConsoleSettingsGroup {
 interface ConsoleNavProps {
   settingsGroups: ConsoleSettingsGroup[]
   /**
-   * Tópico que /settings abre sem `?g=`. Vem do servidor (`DEFAULT_GROUP_ID`) em vez
+   * Tópico que /curation/settings abre sem `?g=`. Vem do servidor (`DEFAULT_GROUP_ID`) em vez
    * de ser constante aqui: hardcodado, uma reordenação de `SETTINGS_GROUPS` faria a
    * sidebar marcar um tópico e a página renderizar outro — sem erro nenhum.
    */
@@ -72,7 +72,7 @@ interface ConsoleEntry {
   hint: string
   iconName: string
   accent: SettingsAccent
-  /** Quando presente, o item vira ramo e os tópicos de /settings entram embaixo. */
+  /** Quando presente, o item vira ramo e os tópicos de /curation/settings entram embaixo. */
   branch?: "settings"
 }
 
@@ -86,39 +86,39 @@ interface ConsoleEntry {
  * IA e a acurácia do modelo — muta ou mede o catálogo COMPARTILHADO, e é isto.
  *
  * ⚠️ "Desatualizados" NÃO entra, apesar de constar no plano original: aquela fila
- * virou aba de `/fila-recomendacao` e é de qualquer logado. `/ranking/desatualizados`
+ * virou aba de `/my-ai-scores` e é de qualquer logado. `/ranking/desatualizados`
  * segue como redirect pra links antigos, só sem entrada de menu — um item de console
  * que joga o usuário PRA FORA da console é pior do que um item ausente.
  *
  * UMA sidebar, com dois níveis. Os quatro tópicos de Configurações eram uma segunda
  * sub-nav (`SettingsSubnav`), que empilhada nesta daria duas sidebars lado a lado.
- * O componente segue existindo — `/preferencias` (que é do usuário, e por isso nunca
+ * O componente segue existindo — `/preferences` (que é do usuário, e por isso nunca
  * entrou na console) continua usando.
  */
 const ENTRIES: ConsoleEntry[] = [
   {
-    href: "/curadoria",
+    href: "/curation",
     label: "Visão geral",
     hint: "o que precisa de decisão",
     iconName: "LayoutDashboard",
     accent: "cyan",
   },
   {
-    href: "/ai-evaluation",
+    href: "/curation/works",
     label: "Curadoria da Obra",
     hint: "fila de atributos",
     iconName: "Wrench",
     accent: "violet",
   },
   {
-    href: "/curadoria/pedidos",
+    href: "/curation/requests",
     label: "Pedidos",
     hint: "o que o leitor pediu",
     iconName: "Inbox",
     accent: "amber",
   },
   {
-    href: "/settings",
+    href: "/curation/settings",
     label: "Configurações",
     hint: "",
     iconName: "Settings",
@@ -126,14 +126,14 @@ const ENTRIES: ConsoleEntry[] = [
     branch: "settings",
   },
   {
-    href: "/ai-usage",
+    href: "/curation/ai-usage",
     label: "Uso da API IA",
     hint: "custo e chamadas",
     iconName: "Activity",
     accent: "emerald",
   },
   {
-    href: "/admin/model-metrics",
+    href: "/curation/model-metrics",
     label: "Métricas do modelo",
     hint: "acurácia da Prevista",
     iconName: "ChartNoAxesCombined",
@@ -141,9 +141,18 @@ const ENTRIES: ConsoleEntry[] = [
   },
 ]
 
-/** Rota ativa. `/curadoria` casa exato; o resto por prefixo (tem sub-rotas). */
+/**
+ * Rota ativa. `/curation` casa EXATO; o resto por prefixo (têm sub-rotas).
+ *
+ * 🔴 O ternário virou load-bearing em 2026-08-16, quando os quatro membros desceram
+ * pra dentro de `/curation/*`. Antes a raiz tinha um filho só (`/curadoria/pedidos`) e
+ * os outros eram rotas irmãs; hoje a raiz é prefixo de TODOS — trocar isto por um
+ * `startsWith` uniforme deixa a "Visão geral" acesa nas cinco páginas da console, com
+ * duas linhas marcadas `aria-current="page"` ao mesmo tempo. Não quebra nada: só passa
+ * a mentir sobre onde você está.
+ */
 function isEntryActive(href: string, pathname: string): boolean {
-  return href === "/curadoria" ? pathname === href : pathname.startsWith(href)
+  return href === "/curation" ? pathname === href : pathname.startsWith(href)
 }
 
 export function ConsoleNav({ settingsGroups, defaultSettingsGroup }: ConsoleNavProps) {
@@ -153,11 +162,11 @@ export function ConsoleNav({ settingsGroups, defaultSettingsGroup }: ConsoleNavP
   // As filas saem de `DECISION_QUEUES` — a mesma lista que o badge da barra soma e que a
   // Visão geral detalha. Redigitar os `href` aqui é como o badge da sidebar some sozinho:
   // chave que não casa vira `undefined`, o `?? 0` vira zero, e zero não desenha nada.
-  // `/settings` fica de fora da lista de propósito: é pendência de CONFIGURAÇÃO, tem badge
+  // `/curation/settings` fica de fora da lista de propósito: é pendência de CONFIGURAÇÃO, tem badge
   // próprio e não é fila de decisão sobre obra.
   const counts: Record<string, number> = {
     ...decisionCountsByHref({ curadoria, requests }),
-    "/settings": settings,
+    "/curation/settings": settings,
   }
 
   return (
@@ -222,7 +231,7 @@ export function ConsoleNav({ settingsGroups, defaultSettingsGroup }: ConsoleNavP
  * O atalho de criar obra — no RODAPÉ, e fora da lista de propósito.
  *
  * A lista responde "onde eu trabalho"; criar obra é "o que eu faço", e é o único
- * caminho daqui que joga o curador **pra fora** da console (`/titles/new`). Virar
+ * caminho daqui que joga o curador **pra fora** da console (`/catalog/new`). Virar
  * o 7º item faria dele um destino da console — a mesma régua que já custou caro na
  * barra superior, onde destino e sinal foram misturados.
  *
@@ -231,13 +240,13 @@ export function ConsoleNav({ settingsGroups, defaultSettingsGroup }: ConsoleNavP
  * botão fica visível no pé em vez de sumir junto com o resto.
  *
  * Sem gate próprio: quem renderiza esta sidebar já passou pelo `isCurrentUserAdmin()`
- * da `CuradoriaConsole` — o mesmo papel que `/titles/new` exige pra salvar.
+ * da `CuradoriaConsole` — o mesmo papel que `/catalog/new` exige pra salvar.
  */
 function NewWorkShortcut() {
   return (
     <div className="mt-auto border-t border-border/70 px-2.5 pb-3 pt-2.5">
       <Button asChild className="w-full">
-        <Link href="/titles/new">
+        <Link href="/catalog/new">
           <Plus />
           Nova obra
         </Link>
@@ -312,9 +321,9 @@ function EntryRow({
  * "Configurações" + os seus quatro tópicos.
  *
  * ⚠️ A LINHA INTEIRA É BOTÃO — não navega, só abre/fecha. Antes o rótulo era `<Link>`
- * pra `/settings` e só a seta expandia, o que dava dois alvos de clique com destinos
+ * pra `/curation/settings` e só a seta expandia, o que dava dois alvos de clique com destinos
  * diferentes a 20px um do outro: quem mirava o texto pra ver os tópicos ia parar numa
- * página. E o link não levava a lugar nenhum de próprio — `/settings` sem `?g=` abre o
+ * página. E o link não levava a lugar nenhum de próprio — `/curation/settings` sem `?g=` abre o
  * tópico default, ou seja, o MESMO destino do 1º filho. Quem navega são os tópicos.
  */
 function SettingsBranch({
@@ -333,7 +342,7 @@ function SettingsBranch({
   defaultGroup: string
 }) {
   // `null` = "segue a rota"; um booleano = o usuário mandou abrir/fechar. Ao ENTRAR
-  // ou SAIR de /settings a escolha manual é descartada, senão um ramo fechado numa
+  // ou SAIR de /curation/settings a escolha manual é descartada, senão um ramo fechado numa
   // visita anterior esconderia o tópico ativo — a sidebar ficaria sem indicar onde
   // se está. Ajuste-durante-render semeado com o valor atual (não com `null`), pra
   // não disparar na renderização de hidratação.
@@ -386,8 +395,8 @@ function SettingsBranch({
 }
 
 /**
- * Tópico de /settings — 2º nível. Continua sendo `?g=` na MESMA rota (nenhum
- * deep-link mudou, inclusive o `/settings?g=fontes` do alerta do Comix na barra).
+ * Tópico de /curation/settings — 2º nível. Continua sendo `?g=` na MESMA rota (nenhum
+ * deep-link mudou, inclusive o `/curation/settings?g=fontes` do alerta do Comix na barra).
  * Sem tile de ícone de propósito: a hierarquia vem do recuo e do trilho, não de
  * repetir a anatomia do pai um nível abaixo.
  */
@@ -404,11 +413,11 @@ function SettingsTopicLink({
   const sp = useSearchParams()
   const s = ACCENT_STYLES[group.accent]
   // Sem `?g=`, quem está ativo é o tópico default — é o que a página renderiza.
-  const active = pathname.startsWith("/settings") && (sp.get("g") ?? defaultGroup) === group.id
+  const active = pathname.startsWith("/curation/settings") && (sp.get("g") ?? defaultGroup) === group.id
 
   return (
     <Link
-      href={`/settings?g=${group.id}`}
+      href={`/curation/settings?g=${group.id}`}
       aria-current={active ? "page" : undefined}
       className={cn(
         "relative flex items-center gap-2 rounded-lg py-1.5 pl-2.5 pr-2 transition-colors",
@@ -450,9 +459,9 @@ export function ConsoleMobileNav({ settingsGroups, defaultSettingsGroup }: Conso
   const sp = useSearchParams()
   const router = useRouter()
 
-  const value = pathname.startsWith("/settings")
-    ? `/settings?g=${sp.get("g") ?? defaultSettingsGroup}`
-    : (ENTRIES.find((e) => isEntryActive(e.href, pathname))?.href ?? "/curadoria")
+  const value = pathname.startsWith("/curation/settings")
+    ? `/curation/settings?g=${sp.get("g") ?? defaultSettingsGroup}`
+    : (ENTRIES.find((e) => isEntryActive(e.href, pathname))?.href ?? "/curation")
 
   return (
     // O atalho fica AO LADO do seletor, nunca dentro dele: `<option>` navega, mas um
@@ -469,7 +478,7 @@ export function ConsoleMobileNav({ settingsGroups, defaultSettingsGroup }: Conso
             e.branch === "settings" ? (
               <optgroup key={e.href} label={e.label}>
                 {settingsGroups.map((g) => (
-                  <option key={g.id} value={`/settings?g=${g.id}`}>
+                  <option key={g.id} value={`/curation/settings?g=${g.id}`}>
                     {g.label}
                   </option>
                 ))}
@@ -483,7 +492,7 @@ export function ConsoleMobileNav({ settingsGroups, defaultSettingsGroup }: Conso
         </select>
       </label>
       <Button asChild className="h-auto w-11 shrink-0 rounded-xl px-0">
-        <Link href="/titles/new" aria-label="Nova obra" title="Nova obra">
+        <Link href="/catalog/new" aria-label="Nova obra" title="Nova obra">
           <Plus />
         </Link>
       </Button>

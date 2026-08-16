@@ -214,7 +214,7 @@ a divergência semântica vem do LLM. Auto-report puro de LLM é **mal-calibrado
 
 | Uso | O que toca | Depende de calibração? | Status |
 |---|---|---|---|
-| **1. Badge** no card do Interesse | card `/ai-evaluation?tab=sinopse`; mapear 0–1 → baixa/média/alta | ❌ tolera grosseiro | ⬜ |
+| **1. Badge** no card do Interesse | card `/curation/works?tab=sinopse`; mapear 0–1 → baixa/média/alta | ❌ tolera grosseiro | ⬜ |
 | **2. Triar** (♥♥♥ de baixa confiança → revisar / buscar reviews) | filtro "Confiança" (reusa infra de filtros existente) | ✅ **sim** | ⬜ |
 | **3. Priorizar backfill** | `planInterestBackfillForIds` ordena por confiança/escassez asc; trigger = **crescimento de dado** (contagens atuais vs. da previsão) | ✅ **sim** | ⬜ |
 
@@ -341,7 +341,7 @@ previsões **novas** (create/update) e acumula comparação vs. a sua nota manua
 ### Como ligar / ver
 - Env: **`INTEREST_SHADOW=1`** (+ `INTEREST_PREFS_V33=1` pra o arm A ser o v4/v3.3). Ligar,
   criar/atualizar obras → o arm B roda em background.
-- Painel: **/ai-evaluation?tab=sinopse** → card **"Shadow A/B"** (auto-gated pela flag): métricas
+- Painel: **/curation/works?tab=sinopse** → card **"Shadow A/B"** (auto-gated pela flag): métricas
   de decisão + tabela por-obra (A ♥·conf / B ♥·conf / manual), **discordantes primeiro**.
 
 ### Métrica de decisão (quando houver dados)
@@ -357,7 +357,7 @@ acúmulo lento (1 rótulo por vez).
 | S3 | `lib/orchestration/integrations/synopsis-interest.ts` | override `arm{compiled,declaredTags}` em `ensurePredictInterest` |
 | S4 | `server/actions/synopsis-quality.ts` | `after()` dispara o arm B pós-response (flag-gated) |
 | S5 | `server/queries/synopsis-quality.ts` | `getSynopsisVersionComparison` + gems-lost/precisão ♥♥♥♥/discordantes/teste de sinal; `getShadowComparisonRows` |
-| S6 | `components/titles/shadow-compare-panel.tsx` + `app/ai-evaluation/page.tsx` | painel `ShadowComparePanel` |
+| S6 | `components/titles/shadow-compare-panel.tsx` + `app/curation/works/page.tsx` | painel `ShadowComparePanel` |
 
 Validação: tsc 0, 1089 testes ✅, lint limpo. **Não commitado ainda** (aguardando OK).
 

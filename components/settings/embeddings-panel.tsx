@@ -123,7 +123,7 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
             O botão é idempotente e barato (re-embeda só o que mudou; ~2¢ por milhão de
             tokens), então deixá-lo sempre clicável não tem custo real — e a alternativa,
             usar `countStaleEmbeddings()` aqui, puxaria o catálogo inteiro com tags,
-            sinopses e digest a cada visita ao /settings.
+            sinopses e digest a cada visita ao /curation/settings.
           */}
           {/*
             Sem obra "sem embedding", o botão fica APAGADO — mas continua clicável, e o

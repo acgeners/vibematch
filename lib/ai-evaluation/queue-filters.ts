@@ -6,8 +6,8 @@ import {
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
 
 /**
- * Parsing de filtros de URL compartilhado por /ai-evaluation ("Curadoria da
- * Obra") e /fila-recomendacao — as duas metades em que a antiga página de 5
+ * Parsing de filtros de URL compartilhado por /curation/works ("Curadoria da
+ * Obra") e /my-ai-scores — as duas metades em que a antiga página de 5
  * abas foi dividida. Ambas filtram por Status (publicação/leitura) e Interesse
  * (manual + Previsão da IA) do mesmo jeito.
  */

@@ -36,7 +36,7 @@ export function ScoreWeightsAutoToggle({ initialEnabled }: { initialEnabled: boo
       <span className="text-sm text-muted-foreground">
         Quando ativo, a Nota.IA usa pesos dos 9 atributos{" "}
         <span className="font-medium text-foreground">inferidos do seu histórico</span> de notas;
-        desligado, usa os pesos manuais de /preferencias. Alternar recalcula o catálogo inteiro.{" "}
+        desligado, usa os pesos manuais de /preferences. Alternar recalcula o catálogo inteiro.{" "}
         <span className="font-medium text-foreground">Mesma opção da Calibração automática.</span>
       </span>
       <button

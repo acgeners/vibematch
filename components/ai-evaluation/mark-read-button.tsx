@@ -14,11 +14,11 @@ import type { ChromeBadgeDelta } from "@/lib/chrome-refresh"
 const BADGE_CLEAR_DELTA = -1_000_000
 
 /**
- * Toggle binário no cabeçalho de /ai-evaluation e /fila-recomendacao. Marca
+ * Toggle binário no cabeçalho de /curation/works e /my-ai-scores. Marca
  * TODAS as pendências das filas passadas como lidas (silencia sem resolver)
  * ou, quando tudo já está lido, desmarca tudo. `queues`/`badgeKey` escopam a
  * ação pra SÓ as filas daquela página — cada página tem seu próprio badge
- * desde que /ai-evaluation virou duas (Curadoria da Obra × Fila de
+ * desde que /curation/works virou duas (Curadoria da Obra × Fila de
  * Recomendação). Feedback OTIMISTA: o rótulo troca e o badge zera na hora; a
  * server action + refresh reconciliam os cards/contadores em segundo plano.
  */

@@ -31,7 +31,7 @@ import {
 } from "@/lib/discovery/limits"
 
 /**
- * "Mais como estas" (`/descobrir`) — o cruzamento entre PARECENÇA com obras-semente e
+ * "Mais como estas" (`/discover`) — o cruzamento entre PARECENÇA com obras-semente e
  * ALINHAMENTO com o perfil de quem olha.
  *
  * A conta pesada mora na RPC `find_similar_to_seeds` (migration 187), que faz a varredura
@@ -211,7 +211,7 @@ export interface DiscoverBySeedsOptions {
 /**
  * ⚠️ EXIGE SESSÃO indiretamente: `getScoresReader`/`getPersonalStateReader` usam
  * `getSessionUserId()` e devolvem vazio para anônimo — nunca o estado do dono. A rota
- * `/descobrir` está em `SIGNED_IN_PREFIXES` para que a página não renderize sem sujeito;
+ * `/discover` está em `SIGNED_IN_PREFIXES` para que a página não renderize sem sujeito;
  * este leitor é a 2ª camada, e é a que impede o vazamento se o matcher mudar.
  */
 export async function discoverBySeeds(opts: DiscoverBySeedsOptions): Promise<DiscoveryResult> {

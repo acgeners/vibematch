@@ -101,9 +101,9 @@ export async function markSourcesAbsent(
   )
   if (error) return { marked: 0, skipped: comVinculo.size, error: error.message }
 
-  revalidatePath("/ai-evaluation")
-  revalidatePath("/settings")
-  revalidatePath("/titles")
+  revalidatePath("/curation/works")
+  revalidatePath("/curation/settings")
+  revalidatePath("/catalog")
   // O contador da aba é cacheado por esta tag — sem isto o número só cairia em 60s,
   // e a lista já teria encolhido: as duas discordariam na mesma tela.
   revalidateTag("ai-eval-tab-counts", "max")
@@ -132,9 +132,9 @@ export async function unmarkSourceAbsent(
     .is("external_id", null)
     .eq("is_rejected", true)
   if (error) return { ok: false, error: error.message }
-  revalidatePath("/ai-evaluation")
-  revalidatePath("/settings")
-  revalidatePath("/titles")
+  revalidatePath("/curation/works")
+  revalidatePath("/curation/settings")
+  revalidatePath("/catalog")
   revalidateTag("ai-eval-tab-counts", "max")
   return { ok: true }
 }

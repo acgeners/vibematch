@@ -109,7 +109,7 @@ export async function createExternalManualReview(
     return { ok: false, error: "db", message: error.message }
   }
   regenReviewArtifactsAfterManualEdit(workId)
-  revalidatePath(`/titles/${workId}`)
+  revalidatePath(`/catalog/${workId}`)
   return { ok: true, id: data.id as string }
 }
 
@@ -156,7 +156,7 @@ export async function updateExternalManualReview(
     return { ok: false, error: "db", message: error.message }
   }
   regenReviewArtifactsAfterManualEdit(workId)
-  revalidatePath(`/titles/${workId}`)
+  revalidatePath(`/catalog/${workId}`)
   return { ok: true, id: reviewId }
 }
 
@@ -185,6 +185,6 @@ export async function deleteExternalManualReview(
   const { error } = await sb.from("work_external_reviews_manual").delete().eq("id", reviewId).eq("work_id", workId)
   if (error) return { ok: false, error: "db", message: error.message }
   regenReviewArtifactsAfterManualEdit(workId)
-  revalidatePath(`/titles/${workId}`)
+  revalidatePath(`/catalog/${workId}`)
   return { ok: true, id: reviewId }
 }

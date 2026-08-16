@@ -3,7 +3,7 @@ import { render, cleanup, screen, fireEvent } from "@testing-library/react"
 
 vi.mock("server-only", () => ({}))
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/curadoria",
+  usePathname: () => "/curation",
   useSearchParams: () => new URLSearchParams(),
   useRouter: () => ({ push: vi.fn() }),
 }))
@@ -34,9 +34,9 @@ function renderNav() {
 /**
  * "Configurações" ABRE o ramo; quem navega são os tópicos.
  *
- * Antes, o rótulo era `<Link href="/settings">` e só a seta expandia — dois alvos com
+ * Antes, o rótulo era `<Link href="/curation/settings">` e só a seta expandia — dois alvos com
  * destinos diferentes na mesma linha, a 20px um do outro. E o link nem tinha destino
- * próprio: `/settings` sem `?g=` renderiza o tópico default, o mesmo do 1º filho.
+ * próprio: `/curation/settings` sem `?g=` renderiza o tópico default, o mesmo do 1º filho.
  *
  * Teste de RENDER de propósito: o que regride aqui é o ELEMENTO (voltar a ser `<a>`),
  * e uma varredura de source não distingue "o href sumiu" de "o href mudou de lugar".
@@ -48,20 +48,20 @@ describe("ramo Configurações da sidebar da console", () => {
     renderNav()
     const row = screen.getByText("Configurações").closest("a, button")
     expect(row?.tagName).toBe("BUTTON")
-    // Com o ramo ABERTO (pior caso pro teste): nenhum `<a href="/settings">` solto —
+    // Com o ramo ABERTO (pior caso pro teste): nenhum `<a href="/curation/settings">` solto —
     // o único caminho pra rota é o tópico, via `?g=`.
     fireEvent.click(row!)
-    const settingsLinks = Array.from(document.querySelectorAll("a[href^='/settings']"))
+    const settingsLinks = Array.from(document.querySelectorAll("a[href^='/curation/settings']"))
     expect(settingsLinks.map((a) => a.getAttribute("href"))).toEqual([
-      "/settings?g=calibracao",
-      "/settings?g=ia",
+      "/curation/settings?g=calibracao",
+      "/curation/settings?g=ia",
     ])
   })
 
   it("clicar expande e recolhe os tópicos", () => {
     renderNav()
     const row = screen.getByText("Configurações").closest("button")!
-    // Fora de /settings o ramo começa fechado.
+    // Fora de /curation/settings o ramo começa fechado.
     expect(row.getAttribute("aria-expanded")).toBe("false")
     expect(screen.queryByText("Gerado por IA")).toBeNull()
 
@@ -89,7 +89,7 @@ describe("atalho de nova obra na console", () => {
   it("o link existe e fica fora da lista de seções", () => {
     renderNav()
     const link = screen.getByRole("link", { name: /Nova obra/ })
-    expect(link.getAttribute("href")).toBe("/titles/new")
+    expect(link.getAttribute("href")).toBe("/catalog/new")
     expect(link.closest("ul")).toBeNull()
     expect(link.closest("nav")).toBeNull()
   })
@@ -97,10 +97,10 @@ describe("atalho de nova obra na console", () => {
   it("no mobile fica ao lado do seletor, nunca dentro dele", () => {
     render(<ConsoleMobileNav settingsGroups={GROUPS} defaultSettingsGroup="calibracao" />)
     const link = screen.getByRole("link", { name: "Nova obra" })
-    expect(link.getAttribute("href")).toBe("/titles/new")
+    expect(link.getAttribute("href")).toBe("/catalog/new")
     // Uma `<option>` que cria obra faria o seletor mentir sobre o que ele é.
     expect(
       Array.from(document.querySelectorAll("option")).map((o) => o.getAttribute("value")),
-    ).not.toContain("/titles/new")
+    ).not.toContain("/catalog/new")
   })
 })

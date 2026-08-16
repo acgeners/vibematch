@@ -16,7 +16,7 @@ import type { FormulaConfig } from "@/types/domain"
 
 /**
  * Config dos filtros da fila de avaliação (tolerância de versão de prompt + limiar
- * de baixa confiança). Mora aqui — em /ai-evaluation — porque os dois knobs
+ * de baixa confiança). Mora aqui — em /curation/works — porque os dois knobs
  * configuram justamente os filtros "Modelo/prompt antigos" e "Baixa confiança"
  * desta página (não é preferência de gosto). Abre num diálogo pra não poluir a fila.
  */

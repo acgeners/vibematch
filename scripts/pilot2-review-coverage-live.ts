@@ -61,7 +61,7 @@ async function main(): Promise<void> {
       return {
         workId: w.workId,
         title: w.title,
-        localRoute: `/titles/${w.workId}`,
+        localRoute: `/catalog/${w.workId}`,
         scrapedUseful,
         manualUseful,
         usefulBeforeDedupe: scrapedUseful + manualUseful,

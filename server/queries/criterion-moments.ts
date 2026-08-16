@@ -29,7 +29,7 @@ import type { CriterionMoments } from "@/lib/ranking/criterion-unit"
  * ao lado (o usuário vê o alvo absoluto que ele está pedindo hoje).
  *
  * Histórico: este arquivo é o que sobrou de `work-signature.ts`, que calculava a
- * "Assinatura" (argmax do z-score) usada por um filtro de /titles. O filtro saiu
+ * "Assinatura" (argmax do z-score) usada por um filtro de /catalog. O filtro saiu
  * em 2026-08-05 — o argmax decidia por margem < 0,25σ em 47% do catálogo e o
  * rótulo não aparecia em obra nenhuma. Os momentos, que eram o miolo honesto
  * dele, seguem vivos aqui.
