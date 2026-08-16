@@ -21,7 +21,7 @@
 import { StandardScaler } from "@/lib/ml/preprocessing"
 import { fitRidge, fitRidgeCV } from "@/lib/ml/ridge"
 import { kFoldIndices } from "@/lib/ml/logistic"
-import { artFeatureVector, hasArtEvidence, type ArtSignal } from "@/lib/arte/signal"
+import { artFeatureVector, hasArtEvidence, type ArtSignal } from "@/lib/art/signal"
 
 /** Os mesmos α da medição — trocar aqui desliga a comparabilidade com o retrato de 2026-08-12. */
 const ALPHAS = [0.3, 1, 3, 10, 30, 100, 300]

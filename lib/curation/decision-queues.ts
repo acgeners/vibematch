@@ -26,7 +26,7 @@ import type { SettingsAccent } from "@/lib/settings-accent"
  * fila de decisão sobre obra.
  *
  * ⚠️ Duplicação que sobra, de propósito: a sidebar da console
- * (`components/curadoria/console-nav.tsx`) mapeia contagem por `href` na sua própria
+ * (`components/curation/console-nav.tsx`) mapeia contagem por `href` na sua própria
  * `ENTRIES`, que inclui destinos sem fila (`/curation/settings`). Unificá-la exigiria forçar
  * esses destinos no formato de "fila de decisão", que eles não são. O risco residual
  * é um `href` daqui divergir do de lá e o badge da sidebar sumir calado.

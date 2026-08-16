@@ -62,7 +62,7 @@ describe("arquitetura: a trilha de confirmação exige nota", () => {
     // Sem essa palavra o rodapé descreveria só "em andamento ou pausadas", e a obra lida
     // sem nota entraria numa conta que a frase não cobre.
     const painel = readFileSync(
-      join(process.cwd(), "components/conta/taste-profile-panel.tsx"),
+      join(process.cwd(), "components/account/taste-profile-panel.tsx"),
       "utf8",
     )
     expect(stripComments(painel)).toContain("lidas sem nota")

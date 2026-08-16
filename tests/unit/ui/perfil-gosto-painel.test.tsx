@@ -7,7 +7,7 @@ vi.mock("@/lib/tasks-store", () => ({ runTask: vi.fn() }))
 vi.mock("@/components/tasks/use-app-tasks", () => ({ useAppTasks: () => [] }))
 
 import { render, screen, cleanup, fireEvent, within } from "@testing-library/react"
-import { TasteProfilePanel } from "@/components/conta/taste-profile-panel"
+import { TasteProfilePanel } from "@/components/account/taste-profile-panel"
 import type { ProfileStatus } from "@/server/actions/recommendations"
 import type { AlignedWork, AlignedWorkSplit } from "@/server/queries/recommendations"
 import type { TasteProfileRow } from "@/lib/ai-recommendation/types"

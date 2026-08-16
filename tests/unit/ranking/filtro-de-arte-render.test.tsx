@@ -7,8 +7,8 @@ import {
   ART_FILTER_SEGMENT_LABELS,
   ART_FILTER_TOOLTIPS,
   parseArtFilter,
-} from "@/lib/arte/url"
-import { ART_BAND_CUTOFFS } from "@/lib/arte/bands"
+} from "@/lib/art/url"
+import { ART_BAND_CUTOFFS } from "@/lib/art/bands"
 
 /**
  * O controle de arte só aparece para quem TEM estimativa (`showArtFilter={…isOwner}`), então

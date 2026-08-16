@@ -2,8 +2,8 @@ import { Suspense } from "react"
 import { notFound } from "next/navigation"
 import type { ReactNode } from "react"
 import { SETTINGS_GROUPS, DEFAULT_GROUP_ID } from "@/app/curation/settings/sections"
-import { ConsoleNav, ConsoleMobileNav } from "@/components/curadoria/console-nav"
-import type { ConsoleSettingsGroup } from "@/components/curadoria/console-nav"
+import { ConsoleNav, ConsoleMobileNav } from "@/components/curation/console-nav"
+import type { ConsoleSettingsGroup } from "@/components/curation/console-nav"
 import { isCurrentUserAdmin } from "@/server/queries/current-user"
 
 /**
@@ -34,7 +34,7 @@ import { isCurrentUserAdmin } from "@/server/queries/current-user"
  * do `useIsAdmin()` que decide mostrar o ícone 🛠 na barra — se os dois divergissem,
  * existiria um botão visível levando a um 404.
  */
-export async function CuradoriaConsole({ children }: { children: ReactNode }) {
+export async function CurationConsole({ children }: { children: ReactNode }) {
   if (!(await isCurrentUserAdmin())) notFound()
 
   // Só o que a sidebar precisa: o registry inteiro carrega os textos de `help` de

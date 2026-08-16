@@ -1,7 +1,7 @@
 import { getTasteProfileStatusAction } from "@/server/actions/recommendations"
 import { getAlignedWorkSplit, getPredictionDrivers } from "@/server/queries/recommendations"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
-import { TasteProfilePanel } from "@/components/conta/taste-profile-panel"
+import { TasteProfilePanel } from "@/components/account/taste-profile-panel"
 import type { DeclaredTagLite } from "@/lib/ai-recommendation/profile-tag-origin"
 
 // Mesmo padrão de /recommendations: limita a staleness do TasteProfile.

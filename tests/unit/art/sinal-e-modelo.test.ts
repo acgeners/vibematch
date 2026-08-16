@@ -9,7 +9,7 @@ import {
   isArtSignalStale,
   parseArtSignal,
   type ArtSignal,
-} from "@/lib/arte/signal"
+} from "@/lib/art/signal"
 import {
   ART_MIN_TRAIN,
   artBandFromPercentile,
@@ -19,7 +19,7 @@ import {
   trainArtPredictor,
   type ArtCatalogInput,
   type ArtSample,
-} from "@/lib/arte/model"
+} from "@/lib/art/model"
 
 const sinalVazio = (over: Partial<ArtSignal> = {}): ArtSignal => ({
   v: ART_SIGNAL_VERSION,

@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { AvatarPicker } from "@/components/conta/avatar-picker"
+import { AvatarPicker } from "@/components/account/avatar-picker"
 import { refreshChrome } from "@/lib/chrome-refresh"
 import { accountProfileSchema } from "@/lib/validations/account.schema"
 import type { AccountProfileValues } from "@/lib/validations/account.schema"

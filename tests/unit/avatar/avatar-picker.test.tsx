@@ -6,7 +6,7 @@ vi.mock("server-only", () => ({}))
 // Só o caminho de MONTAR é exercitado aqui; o upload tem seu próprio caminho.
 vi.mock("@/server/actions/account", () => ({ uploadAvatar: vi.fn() }))
 
-import { AvatarPicker } from "@/components/conta/avatar-picker"
+import { AvatarPicker } from "@/components/account/avatar-picker"
 import { parseAvatarUrl, avatarConfigToUrl } from "@/lib/avatar/url"
 import { CONFIG_PADRAO, ESTILOS_SIMBOLO, ESTILO_POR_ID } from "@/lib/avatar/render"
 

@@ -159,7 +159,7 @@ describe("os cinco sinais 'já dentro da Prevista'", () => {
  *
  * A checagem mora AQUI e não no módulo por peso de bundle: o consumidor é
  * `"use client"`, e importar `expected.ts` levaria `lib/ml/{ridge,preprocessing}`
- * pro navegador (mesmo motivo de `lib/arte/bands.ts` existir).
+ * pro navegador (mesmo motivo de `lib/art/bands.ts` existir).
  */
 describe("guarda: os sinais citados existem MESMO no Ridge", () => {
   it("cada feature afirmada está em EXPECTED_BASELINE_FEATURES", () => {

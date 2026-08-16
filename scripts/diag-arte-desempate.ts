@@ -13,7 +13,7 @@
  *   C. o desempate serve ao gosto? — entre empatadas, arte maior ⇒ user_score maior?
  *   D. o filtro é honesto no catálogo? — compressão da estimativa e obras SEM sinal
  *
- * 🔴 Este script roda sobre `lib/arte/*`, os módulos de produção — não sobre uma cópia. É
+ * 🔴 Este script roda sobre `lib/art/*`, os módulos de produção — não sobre uma cópia. É
  * assim que ele serve de conferência: se o extrator ou o modelo divergirem do que foi medido
  * em 2026-08-12, os números abaixo mudam e o desenho inteiro volta à mesa. Retrato daquele
  * dia, a bater:
@@ -37,7 +37,7 @@ import {
   extractArtSignal,
   hasArtEvidence,
   type ArtSignal,
-} from "@/lib/arte/signal"
+} from "@/lib/art/signal"
 import {
   ART_BAND_CUTOFFS,
   artBandFromPercentile,
@@ -45,7 +45,7 @@ import {
   computeArtPercentiles,
   trainArtPredictor,
   type ArtSample,
-} from "@/lib/arte/model"
+} from "@/lib/art/model"
 import type { ScoreWeight, FormulaConfig } from "@/types/domain"
 
 const SELECT = `id, title, publication_status_id, total_chapters, is_archived,

@@ -1,7 +1,7 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { extractArtEvidence, extractArtSignal, type ArtEvidence, type ArtSignal } from "@/lib/arte/signal"
-import { artBandFromPercentile, type ArtBand } from "@/lib/arte/model"
+import { extractArtEvidence, extractArtSignal, type ArtEvidence, type ArtSignal } from "@/lib/art/signal"
+import { artBandFromPercentile, type ArtBand } from "@/lib/art/model"
 
 /**
  * TUDO que entrou na estimativa de arte de UMA obra — para o piloto na página da obra.

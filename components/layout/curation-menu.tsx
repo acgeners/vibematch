@@ -7,9 +7,9 @@ import { Wrench } from "lucide-react"
 import { getBalanceSummary } from "@/server/actions/account"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
 import { useChromeData } from "@/lib/use-refresh"
-import { alertDotTone, buildChromeAlerts } from "@/lib/curadoria/chrome-alerts"
-import type { ChromeAlert } from "@/lib/curadoria/chrome-alerts"
-import { totalPendingDecisions } from "@/lib/curadoria/decision-queues"
+import { alertDotTone, buildChromeAlerts } from "@/lib/curation/chrome-alerts"
+import type { ChromeAlert } from "@/lib/curation/chrome-alerts"
+import { totalPendingDecisions } from "@/lib/curation/decision-queues"
 import { useChromeBadges } from "@/components/layout/chrome-badges"
 import { NegativeBalanceDialog } from "@/components/layout/negative-balance-dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -31,7 +31,7 @@ const BALANCE_TTL_MS = 120_000
  * O curador também é leitor — tem lista, favoritos, obras que quer ler — mas os dois
  * focos não se intercalam: ninguém "gerencia um pouco enquanto procura o que ler".
  * Um dropdown com 6 destinos comunicava o contrário, e enfraquecia a console que já
- * existe (`components/curadoria/console-shell.tsx`) oferecendo atalhos pra dentro dela
+ * existe (`components/curation/console-shell.tsx`) oferecendo atalhos pra dentro dela
  * a partir de qualquer tela.
  *
  * A régua da própria barra já dizia isto, e o menu a contrariava: a zona direita

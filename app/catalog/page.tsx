@@ -13,7 +13,7 @@ import { TitleFilters } from "@/components/titles/title-filters"
 import { WorkTable } from "@/components/titles/work-table"
 import { Button } from "@/components/ui/button"
 import { CRITERION_SLUGS } from "@/types/domain"
-import { parseArtFilter } from "@/lib/arte/url"
+import { parseArtFilter } from "@/lib/art/url"
 import { getVerdictScale } from "@/server/queries/verdict-scale"
 
 interface TitlesPageProps {
@@ -97,7 +97,7 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
   const adultParam = str("adult")
   const adultFilter = adultParam === "hide" || adultParam === "only" ? adultParam : undefined
 
-  // Estimativa de arte (?art=forte|sem_fraca). Faixa, nunca pontos — ver lib/arte/url.ts.
+  // Estimativa de arte (?art=forte|sem_fraca). Faixa, nunca pontos — ver lib/art/url.ts.
   const artFilter = parseArtFilter(str("art"))
 
   const filters: RankingFilters = {

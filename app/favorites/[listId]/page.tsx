@@ -30,7 +30,7 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import { readStatusFilter } from "@/lib/status-filter-toggle"
-import { parseArtFilter } from "@/lib/arte/url"
+import { parseArtFilter } from "@/lib/art/url"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { getVerdictScale } from "@/server/queries/verdict-scale"
 
@@ -166,7 +166,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
   const adultParam = str("adult")
   const adultFilter = adultParam === "hide" || adultParam === "only" ? adultParam : undefined
 
-  // Estimativa de arte (?art=forte|sem_fraca). Faixa, nunca pontos — ver lib/arte/url.ts.
+  // Estimativa de arte (?art=forte|sem_fraca). Faixa, nunca pontos — ver lib/art/url.ts.
   const artFilter = parseArtFilter(str("art"))
   // 🔴 Quem NÃO é o dono não tem estimativa de arte (o overlay a anula), então o controle
   // não pode aparecer: "Forte" devolveria vazio, indistinguível de "não há obra com arte

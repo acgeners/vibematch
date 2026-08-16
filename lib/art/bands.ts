@@ -1,7 +1,7 @@
 /**
  * As FAIXAS da estimativa de arte — cortes, rótulos e a função que classifica.
  *
- * ⚠️ Isto morava em `lib/arte/model.ts` e saiu de lá por peso de bundle, não por organização:
+ * ⚠️ Isto morava em `lib/art/model.ts` e saiu de lá por peso de bundle, não por organização:
  * o painel de filtros é `"use client"` e passou a precisar dos cortes para escrever
  * "Top 20%" no botão. Importar o módulo do modelo levaria junto `lib/ml/{ridge,logistic,
  * preprocessing}` — Ridge, StandardScaler e k-fold — para o bundle de uma tela que só quer

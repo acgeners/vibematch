@@ -10,8 +10,8 @@ import {
   ART_FILTER_TOOLTIPS,
   artFilterMatches,
   parseArtFilter,
-} from "@/lib/arte/url"
-import { ART_BAND_CUTOFFS, ART_BAND_LABELS } from "@/lib/arte/bands"
+} from "@/lib/art/url"
+import { ART_BAND_CUTOFFS, ART_BAND_LABELS } from "@/lib/art/bands"
 import { CRITERION_SLUGS } from "@/types/domain"
 
 const raiz = process.cwd()

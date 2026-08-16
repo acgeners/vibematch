@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { render, cleanup } from "@testing-library/react"
 import { useEffect } from "react"
-import { buildChromeAlerts, alertDotTone } from "@/lib/curadoria/chrome-alerts"
+import { buildChromeAlerts, alertDotTone } from "@/lib/curation/chrome-alerts"
 import { LOW_BALANCE_USD } from "@/lib/ai-usage/balance"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
 

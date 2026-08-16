@@ -34,7 +34,7 @@ import { after } from "next/server"
 import { recordRankingSnapshots } from "@/lib/server/predictions/record-prediction"
 import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 import { readStatusFilter } from "@/lib/status-filter-toggle"
-import { parseArtFilter } from "@/lib/arte/url"
+import { parseArtFilter } from "@/lib/art/url"
 import { getScoresReader } from "@/server/queries/user-scores"
 
 interface RankingPageProps {
@@ -236,7 +236,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   const adultParam = str("adult")
   const adultFilter = adultParam === "hide" || adultParam === "only" ? adultParam : undefined
 
-  // Estimativa de arte (?art=forte|sem_fraca). Faixa, nunca pontos — ver lib/arte/url.ts.
+  // Estimativa de arte (?art=forte|sem_fraca). Faixa, nunca pontos — ver lib/art/url.ts.
   const artFilter = parseArtFilter(str("art"))
   // 🔴 Quem NÃO é o dono não tem estimativa de arte (o overlay a anula), então o controle
   // não pode aparecer: "Forte" devolveria vazio, indistinguível de "não há obra com arte

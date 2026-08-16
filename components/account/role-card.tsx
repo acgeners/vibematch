@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { RoleBadge } from "@/components/conta/role-badge"
+import { RoleBadge } from "@/components/account/role-badge"
 import { cn } from "@/lib/utils"
 import type { Role } from "@/lib/plans/roles"
 

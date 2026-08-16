@@ -10,7 +10,7 @@ const TABS = [
   { href: "/account/taste-profile", icon: Sparkles, label: "Perfil" },
 ]
 
-export function ContaTabs() {
+export function AccountTabs() {
   const pathname = usePathname()
 
   return (
