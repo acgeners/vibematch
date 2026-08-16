@@ -258,11 +258,24 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
       {/* Elástica: cresce até 460px e é a PRIMEIRA a ceder quando a barra aperta — os
           destinos e os contadores não cedem nunca (ver a régua em top-nav.tsx). O
           placeholder longo só entra quando cabe inteiro; truncá-lo diria menos que o
-          texto curto. Era `md:min-w-[168px]` fixo, o menor elemento da barra. */}
+          texto curto. Era `md:min-w-[168px]` fixo, o menor elemento da barra.
+
+          🔴 O degrau é `xl:`, não `md:` — e isso foi MEDIDO, não escolhido por gosto.
+          "Ceder" só funciona até o `min-w-[190px]`; abaixo dele o botão não encolhe, ele
+          TRANSBORDA pra esquerda por cima do nav, e o contêiner é `min-w-0`, então nada
+          corta, nada rola e `scrollWidth - clientWidth` continua 0. Medido em 2026-08-16
+          no browser com o curador logado: com 5 destinos a barra já invadia 16px a 980px;
+          com o 6º ("Minha lista", +98px) passa a invadir 113px. A "ordem do sacrifício"
+          do CLAUDE.md sempre prometeu que a busca vira ícone quando aperta — mas o único
+          degrau era `md:` (768px), muito abaixo de onde a barra de fato aperta.
+
+          ⚠️ O preço é real e conhecido: entre 768 e 1280 a busca perde o campo e vira só
+          o ícone (o ⌘K segue funcionando). A alternativa era manter o campo e deixá-lo
+          pintar por cima dos destinos sem nada acusar. */}
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="hidden h-9 w-full min-w-[190px] max-w-[460px] items-center gap-2 rounded-lg border border-border/70 bg-card/50 px-3 text-sm text-muted-foreground transition-colors hover:border-primary/45 hover:text-foreground md:flex"
+        className="hidden h-9 w-full min-w-[190px] max-w-[460px] items-center gap-2 rounded-lg border border-border/70 bg-card/50 px-3 text-sm text-muted-foreground transition-colors hover:border-primary/45 hover:text-foreground xl:flex"
       >
         <Search className="size-4 shrink-0" />
         <span className="truncate">
@@ -274,12 +287,13 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
         </kbd>
       </button>
 
-      {/* Ícone só, no mobile — não há largura pro botão com rótulo. */}
+      {/* Ícone só, abaixo de `xl` — não há largura pro botão com rótulo. Ver o 🔴 acima:
+          o degrau subiu de `md:` pra `xl:` quando o 6º destino entrou na barra. */}
       <button
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Buscar"
-        className="grid size-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
+        className="grid size-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground xl:hidden"
       >
         <Search className="size-[18px]" />
       </button>

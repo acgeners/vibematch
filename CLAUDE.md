@@ -592,6 +592,68 @@ recalcularia as notas dele **sem a calibração dele** — sem erro, sem log, s�
 `signOutAction`). Quem autoriza é o **papel** (`user_settings.role` → `lib/plans/roles.ts`,
 `ensureAdmin`/`roleAllows`), verificado dentro das actions.
 
+### `/my-list` é a lista do LEITOR — e a régua de pertencimento não pode olhar o rótulo
+
+Criada em 2026-08-16. Mesma estrutura de produto do MyAnimeList e do AnimePlanet: catálogo
+público compartilhado **+** uma lista por pessoa, definida pelo status que ela deu. O que
+faltava aqui não era o dado — era o LUGAR.
+
+Medido no clone local, 988 obras do catálogo:
+
+| | obras | onde aparecia antes |
+|---|---|---|
+| **Untracked** (nunca tocada) | **697 · 70,5%** | só filtrando `/catalog` |
+| **com status seu** = a lista | **291 · 29,5%** | — |
+| ↳ em `/reading` (`Reading` + `Hiatus`) | 38 | Acompanhamento |
+| ↳ **sem página nenhuma** | **253 · 87% da lista** | só filtrando `/catalog` |
+
+🔴 **O gap não era de organização, era de função:** o banco marca `tracks_progress` em **8**
+status e a `/reading` pede **2**. `Started` (40 obras, **39 com capítulos lidos**), `On-hold`
+(37) e `Stalled` (28) — 105 obras que o app considera em progresso — não estavam em lugar
+nenhum.
+
+⚠️ **Ela NÃO absorve `/reading`, `/ranking` nem `/recommendations`** (decisão da Ana).
+`/reading` responde **ritmo** ("saiu capítulo? estou em dia?", bandas + calendário);
+`/my-list` responde **estado** ("o que eu já disse sobre esta obra?"). Se cruzam de propósito.
+
+🔴 **A regra de pertencimento tem que ver o id CRU, nunca o rótulo resolvido.**
+`is_default_unset` está em **"Want to Read"**, não em Untracked — obra sem linha no espelho
+APARENTA "Want to Read" (é o que `personalStatusNameOrDefault` faz, e é correto em outros
+lugares). Medido: o curador tem **988 linhas** em `user_work_state`, a conta leitora tem **0**.
+Uma régua sobre o rótulo daria à conta nova uma lista com **as 988 obras, todas "Quero ler"** —
+cheia, plausível e falsa. Dono: `belongsToMyList` (`lib/my-list/shelves.ts`), que recebe
+`personalStatusId` cru e por isso dispensa um campo `hasRow`: sem linha o id é `null`, não tem
+prateleira, e a obra cai fora sozinha.
+
+⚠️ **O ramo da NOTA não é enfeite:** 4 obras estão em Untracked **com nota pessoal**. Entram na
+lista e em prateleira nenhuma — por isso a soma das prateleiras é menor que o total, e a tela
+imprime "4 com nota e sem status" em vez de esconder a diferença.
+
+🔴 **As prateleiras são conferidas no LOAD.** Seis (`lendo`, `pausadas`, `terminadas`, `quero`,
+`descartadas`, `reler`), derivadas dos flags de `personal_status` — menos duas uniões que a
+tabela não descreve e que são nomeadas por SLUG com falha alta: `pausadas` (`on-hold` +
+`stalled`, porque nenhum flag as separa de Reading/Started) e `reler` (`read_again`, que é
+`tracks_progress` e cairia em "lendo"). O risco não é o rename: é o status NOVO, que sem a
+conferência sumiria da página **em silêncio** — presente no total, ausente de toda prateleira.
+
+⚠️ **A contagem do chip sai das MESMAS obras que a lista abre**, nunca de um `count` à parte:
+chip dizendo 78 sobre uma prateleira que abre com 71 é "dois critérios pro mesmo fato" a dois
+centímetros um do outro. Conferido no app: cada prateleira abre exatamente o número do chip.
+
+🔴 **Untracked é ZONA DE ENTRADA, não prateleira.** 693 contra 292 — como aba irmã de
+"Terminadas (87)" ela dominaria a página e inverteria o significado dela. MAL e AnimePlanet
+também não têm essa aba: obra nunca tocada está no catálogo, não na lista. Aqui ela existe
+porque o catálogo já vem populado, mas o gesto é **dar status** (via `setReadingStatusForWorks`,
+que já existia), não percorrer a pilha. Ordenada por "chegou por último no catálogo" — ordenar
+por Nota Prevista exigiria carregar as ~693 com os joins de nota só pra escolher 12, e triagem
+não precisa das melhores.
+
+⚠️ A ordem da lista usa **`roundToDisplayScore`**, não o decimal cru — a mesma invariante que
+custou 19.624 pares de empate na Prioridade. E nota ausente vai pro FIM, nunca conta como zero.
+
+Guardado por `tests/unit/my-list/prateleiras.test.ts`, que **enumera a tabela** em vez de listar
+os 12 status de hoje.
+
 ### As rotas são em INGLÊS, e o nome descreve a PERGUNTA da página
 
 Padronizado em 2026-08-16. A URL era metade em português (`/curadoria`, `/leitura`,
@@ -624,7 +686,7 @@ isto como "tradução":
   rótulo mudou junto em **quatro** superfícies — aba do browser, `<h1>`, menu do avatar e
   índice da busca —, porque num item de menu é o rótulo que a pessoa lê, não a URL.
   ⚠️ A aba **Untracked** continua lá e não pertence ao nome (é triagem de status, não nota de
-  IA). Fica por ora, por decisão da Ana — sai quando houver superfície própria pra triagem.
+  IA). Fica por ora, por decisão da Ana; o destino natural é a zona de entrada da `/my-list`.
 - **`/settings` → `/curation/settings`.** Em inglês, `/settings` e `/preferences` viram um par
   quase sinônimo — e são coisas opostas: config do CATÁLOGO (curador) × gosto PESSOAL. O
   aninhamento diz de quem é cada uma sem depender de ninguém lembrar.
@@ -747,15 +809,31 @@ sidebar de 13 itens foi removida. A régua original ("o topo é sobre obras, o a
 
 | Zona | Pergunta | O que entra |
 |---|---|---|
-| Esquerda | "pra onde eu vou?" | destinos, máx. 5, **todos planos** — sem dropdown |
+| Esquerda | "pra onde eu vou?" | destinos, hoje **6**, **todos planos** — sem dropdown |
 | Centro | "onde está aquilo?" | a busca (⌘K), elástica 190–460px |
 | Direita | "o que está acontecendo?" | só o que tem **número ou estado** |
 | Avatar | "coisas minhas" | conta, preferências, importar, painel, **a fila de recomendação** |
 
-Hoje: `Acompanhamento · Favoritos · Catálogo · Ranking · Recomendações`, com **o logo fazendo o
-papel de Início** (`aria-current` + estado ativo). Saíram: "Minha lista ▾" (enterrava os destinos
-nº 1 e nº 2 um clique abaixo), "Explorar ▾" (menu de UM item) e o relógio da fila (que duplicava
-um item que já estava dentro do menu).
+Hoje: `Minha lista · Acompanhamento · Favoritos · Catálogo · Ranking · Recomendações`, com **o
+logo fazendo o papel de Início** (`aria-current` + estado ativo). Saíram: "Explorar ▾" (menu de
+UM item) e o relógio da fila (que duplicava um item que já estava dentro do menu).
+
+⚠️ **"Minha lista" já esteve aqui como DROPDOWN e foi removido em 2026-08-07** — ele enterrava
+Acompanhamento e Favoritos um clique abaixo. Voltou em 16/08 como **destino plano**, apontando
+pra `/my-list`, que é outra coisa: uma rota de verdade, não um menu.
+
+🔴 **O teto de 5 caiu por MEDIÇÃO, e ela achou um defeito que já existia.** Playwright, curador
+logado, fonte real, 20 combinações: o nav vai de **531 → 629px (+98)**. Mas "quem encolhe é a
+busca" só vale até o `min-w-[190px]` dela — abaixo disso o gatilho **transborda pra esquerda por
+cima do nav**, e como o contêiner é `min-w-0` o `scrollWidth − clientWidth` fica **0** nas 20
+combinações: invade sem corte, sem rolagem, sem erro. **Com 5 destinos isso já acontecia a 980px
+(16px);** com 6 seriam 113px.
+
+✅ **Consertado subindo o degrau do ícone da busca de `md:` (768px) para `xl:`** — a "ordem do
+sacrifício" abaixo sempre prometeu esse degrau, mas ele estava ~500px abaixo de onde a barra de
+fato aperta. Remedido no app depois: 1600/1440/1280 com o campo (460/441/281px) e 1100/980 com
+o ícone (36px), **zero invasão em todas**. ⚠️ O preço é real: entre 768 e 1280 a busca perde o
+campo e vira só o ícone (o ⌘K segue).
 
 ⚠️ **Destino que não funciona pra quem está vendo não ocupa vaga.** `/recommendations` é per-user
 do topo ao rodapé e `/ranking` ordena pela Nota Prevista com presets de alguém — então os dois
@@ -3666,11 +3744,11 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.082 passando (+24 pulados) em 296 arquivos** (291 passando + 5 pulados);
-medido em 2026-08-16 depois da padronização das rotas pra inglês (1 arquivo novo:
-`ui/console-nav-rota-ativa`, 6 casos), com `find tests -name '*.test.ts*'` = 296 conferido
-contra os 296 executados.
-Base: **3.076 em 295**, antes **3.053 em 292**, **3.043 em 291** e **3.021 em 290**.
+`npm run test` → **3.088 passando (+24 pulados) em 297 arquivos** (292 passando + 5 pulados);
+medido em 2026-08-16 depois da `/my-list` (1 arquivo novo: `my-list/prateleiras`, 6 casos), com
+`find tests -name '*.test.ts*'` = 297 conferido contra os 297 executados.
+Base: **3.082 em 296** (padronização das rotas pra inglês), antes **3.076 em 295**,
+**3.053 em 292**, **3.043 em 291** e **3.021 em 290**.
 
 ⚠️ **A renomeação tocou ~40 arquivos de teste e não somou nenhum caso** — os testes de
 arquitetura DERIVAM o que checam (rotas do filesystem, prefixos do middleware, escritores

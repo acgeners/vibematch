@@ -403,8 +403,8 @@ async function MarkReadControl() {
  * antes: *"mantém suas notas pessoais em dia"*.
  *
  * ⚠️ A aba **Untracked** continua aqui e não pertence ao nome — é triagem de status pessoal,
- * não nota de IA. Decisão da Ana em 2026-08-16: fica por ora, sai quando houver superfície
- * própria pra triagem de status.
+ * não nota de IA. Decisão da Ana em 2026-08-16: fica por ora, sai depois (o destino natural é
+ * a zona de entrada da `/my-list`, que já existe e faz esse gesto).
  */
 export const metadata = { title: "Suas notas de IA" }
 
