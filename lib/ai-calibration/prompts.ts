@@ -4,6 +4,7 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import { AUDITABLE_CRITERIA, AUDIT_OUT_OF_SCOPE, isAuditableCriterion } from "./policy"
 import type {
   AuditWorkInput,
+  CriterionAnchor,
   BiasCorrelationEntry,
   BiasResidualExample,
   BiasStatsByCriterion,
@@ -33,7 +34,10 @@ ${Object.entries(AUDIT_OUT_OF_SCOPE)
 2. Só emita uma sugestão quando o ajuste for ≥ 0.5 ponto em valor absoluto. Mudanças menores que isso são ruído.
 3. \`confidence\` ∈ [0,1]: 0.9+ = certeza forte com evidência múltipla; 0.7–0.89 = boa evidência; 0.5–0.69 = palpite informado. Não retorne sugestões com confidence < 0.5.
 4. \`justification\` em português brasileiro, 1–2 frases citando tags/sinopse/observação específicas que sustentam o ajuste. Cite o critério pelo nome quando útil.
-5. Mantenha o \`user_score\` como sinal forte: se ele é 9 mas vários critérios estão baixos sem motivo, provavelmente os critérios estão subestimados. Inverso também vale.
+5. Mantenha o \`user_score\` como sinal forte: se ele é 9 mas vários critérios estão baixos sem motivo, provavelmente os critérios estão subestimados. Inverso também vale. ⚠️ Ele diz o quanto a pessoa GOSTOU, não a intensidade de um atributo — não use um user_score alto para subir um critério que a evidência textual não sustenta.
+5b. O bloco \`reviews (consenso)\` é o que os LEITORES observaram, destilado. Ele tem precedência sobre inferência a partir de tag: tag diz que um elemento EXISTE na obra, o consenso diz como ele se MANIFESTA. Contradizer o consenso exige dizer, na justificativa, que você está contradizendo e por quê.
+5c. Tag nomeia um elemento, não atribui SUJEITO nem VALÊNCIA. "Toxic Character/s" não diz de quem, e um content_indicator pode se referir a qualquer personagem — nada disso, sozinho, descreve a relação entre os protagonistas.
+5d. As ÂNCORAS DO CATÁLOGO abaixo dizem como cada critério é usado aqui. Uma nota só faz sentido em relação a elas: propor 3,0 num critério cuja mediana é 8,0 é afirmar que a obra está entre as mais fracas do acervo naquele eixo, e isso precisa estar na justificativa.
 6. Os 8 \`post_*_score\` são sinais auxiliares do usuário pós-leitura, em escala diferente (2/4/6.5/8/10). Use-os como contexto, não como verdade absoluta. Mapeamentos esperados:
    - post_story ↔ qualidade geral da narrativa
    - post_pacing ↔ inversamente correlacionado com slow burn / fortemente com action_adventure
@@ -128,8 +132,45 @@ function formatPostScores(scores: Partial<Record<string, number>>): string {
   return entries.length ? entries.join(", ") : "(sem critérios pós-leitura)"
 }
 
-export function buildAuditUserPrompt(works: AuditWorkInput[]): string {
+/** Consenso + divergência + traços, compacto. ~600 tokens por obra (medido: 2.406 chars). */
+function formatDigest(d: AuditWorkInput["digest"]): string[] {
+  const linhas: string[] = []
+  if (d.consensus) linhas.push(`reviews (consenso): ${truncate(d.consensus, 700)}`)
+  if (d.divergence) linhas.push(`reviews (divergência): ${truncate(d.divergence, 400)}`)
+  if (d.traits.length) {
+    // Eixo na frente porque é o que casa com o critério; polaridade no fim, entre colchetes,
+    // pra não ser lida como parte do traço.
+    const t = d.traits.slice(0, 10).map((x) => `${x.axis}: ${x.trait} [${x.polarity}]`)
+    linhas.push(`reviews (traços): ${t.join(" · ")}`)
+  }
+  return linhas
+}
+
+/**
+ * A tabela de âncoras — uma linha por critério, com a distribuição do catálogo.
+ *
+ * ⚠️ Vai no USER prompt, não no system: ela muda a cada recalibração do catálogo, e o system
+ * prompt é o bloco com `cache_control`. Enfiá-la lá invalidaria o cache a cada run.
+ */
+function formatAnchors(anchors: CriterionAnchor[]): string[] {
+  if (anchors.length === 0) return []
+  const linhas = ["ÂNCORAS DO CATÁLOGO (como cada critério é usado nas obras já avaliadas):",
+    "slug | média | σ | p25 | mediana | p75 | n"]
+  for (const a of anchors) {
+    linhas.push(
+      `${a.slug} | ${a.mean.toFixed(1)} | ${a.stdev.toFixed(1)} | ${a.p25.toFixed(1)} | ${a.p50.toFixed(1)} | ${a.p75.toFixed(1)} | ${a.n}`,
+    )
+  }
+  linhas.push("")
+  return linhas
+}
+
+export function buildAuditUserPrompt(
+  works: AuditWorkInput[],
+  anchors: CriterionAnchor[] = [],
+): string {
   const lines: string[] = [
+    ...formatAnchors(anchors),
     `Lote de ${works.length} obra(s) pra auditoria. Cada bloco tem todos os sinais: tags, sinopse, observações do usuário, user_score (anchor principal), post_*_score (sinal auxiliar) e os 9 category_scores com seu source atual.`,
     "",
     `Para cada obra, avalie os critérios cujo source ∉ {manual, ai_edited} (os com source manual/ai_edited são âncoras travadas — não sugira ajuste). Emita uma entrada em \`audits\` apenas quando achar inconsistência ≥ 0.5 ponto E confidence ≥ 0.5.`,
@@ -144,6 +185,7 @@ export function buildAuditUserPrompt(works: AuditWorkInput[]): string {
     lines.push(`tags: ${formatTagsByGroup(w.tags)}`)
     if (w.synopsis) lines.push(`sinopse: ${truncate(w.synopsis, 600)}`)
     if (w.observation) lines.push(`observação do usuário: ${truncate(w.observation, 400)}`)
+    lines.push(...formatDigest(w.digest))
     lines.push(`post_*: ${formatPostScores(w.postScores)}`)
     const { lockedLines, openLines, outOfScopeLines } = formatCategoryScores(w)
     if (lockedLines.length) {

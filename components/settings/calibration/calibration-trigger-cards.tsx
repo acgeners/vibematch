@@ -27,14 +27,20 @@ function auditSummary(d: {
   nWorksScanned: number
   nAutoApplied: number
   nSuggestions: number
+  nSkippedNoDigest: number
   scope: string
 }): string {
-  if (d.nWorksScanned === 0) return "Nada mudou desde a última auditoria — nenhum run criado."
+  // "Nada a auditar" precisa dizer POR QUÊ quando o motivo é ausência de evidência — senão
+  // parece que a fila esvaziou, e o que houve foi obra ficando de fora.
+  const foraPorDigest = d.nSkippedNoDigest > 0 ? ` ${d.nSkippedNoDigest} fora (sem síntese de reviews).` : ""
+  if (d.nWorksScanned === 0) {
+    return `Nada mudou desde a última auditoria — nenhum run criado.${foraPorDigest}`
+  }
   const label = d.scope === "full" ? "Varredura completa" : "Incremental"
   // Com o auto-apply desligado o termo não aparece: "0 auto-aplicadas" anuncia um caminho
   // que não existe mais e faz procurar defeito onde há política.
   const aplicadas = AUTO_APPLY_ENABLED ? `${d.nAutoApplied} auto-aplicadas · ` : ""
-  return `${label}: ${d.nWorksScanned} obras · ${aplicadas}${d.nSuggestions - d.nAutoApplied} pendentes pra revisar.`
+  return `${label}: ${d.nWorksScanned} obras · ${aplicadas}${d.nSuggestions - d.nAutoApplied} pendentes pra revisar.${foraPorDigest}`
 }
 
 /**

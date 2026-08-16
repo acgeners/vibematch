@@ -13,6 +13,7 @@ import { AUDITABLE_CRITERIA, isAuditableCriterion } from "./policy"
 import type {
   AuditSuggestionFromModel,
   AuditWorkInput,
+  CriterionAnchor,
   BiasCorrelationEntry,
   BiasReport,
   BiasResidualExample,
@@ -23,6 +24,10 @@ import { SONNET_MODEL } from "@/lib/ai/models"
 
 export const MODEL = SONNET_MODEL
 /**
+ * v3 (2026-08-16): o auditor passou a receber o DIGEST das reviews e as ÂNCORAS de
+ * distribuição do catálogo — as duas causas dos erros de 85% (juiz sem evidência e juiz sem
+ * escala). Obra sem digest sai do run.
+ *
  * v2 (2026-08-16): `adult_content` e `couple_dynamics` saíram do escopo da auditoria
  * (ver `policy.ts`). O prompt e o enum da tool mudaram junto, então a versão sobe — ela é
  * gravada em `calibration_runs.prompt_version` e é o que `loadLastRun` compara para
@@ -31,7 +36,7 @@ export const MODEL = SONNET_MODEL
  *
  * ⚠️ Consequência esperada: o primeiro run depois desta mudança é uma varredura COMPLETA.
  */
-export const PROMPT_VERSION = "v2"
+export const PROMPT_VERSION = "v3"
 
 /** Universo do relatório de VIÉS — diagnóstico cobre os 9, inclusive os fora da auditoria. */
 const CRITERION_SLUG_ENUM = [...CRITERION_SLUGS]
@@ -136,6 +141,7 @@ export interface AuditCallMeta {
 export async function requestCalibrationAudit(
   works: AuditWorkInput[],
   callMeta: AuditCallMeta = {},
+  anchors: CriterionAnchor[] = [],
 ): Promise<AuditResult> {
   if (works.length === 0) {
     return {
@@ -153,7 +159,7 @@ export async function requestCalibrationAudit(
 
   let lastError: unknown = null
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const userPrompt = buildAuditUserPrompt(works)
+    const userPrompt = buildAuditUserPrompt(works, anchors)
     const { message, apiCallId, usage } = await createLoggedMessage(
       client,
       {
