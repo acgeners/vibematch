@@ -24,7 +24,7 @@ import {
 import type { LucideIcon } from "lucide-react"
 import { ACCENT_STYLES } from "@/components/console/console-registry"
 import { Button } from "@/components/ui/button"
-import { decisionCountsByHref } from "@/lib/curadoria/decision-queues"
+import { decisionCountsByHref } from "@/lib/curation/decision-queues"
 import type { SettingsAccent } from "@/lib/settings-accent"
 import { useChromeBadges } from "@/components/layout/chrome-badges"
 import { cn } from "@/lib/utils"
@@ -240,7 +240,7 @@ export function ConsoleNav({ settingsGroups, defaultSettingsGroup }: ConsoleNavP
  * botão fica visível no pé em vez de sumir junto com o resto.
  *
  * Sem gate próprio: quem renderiza esta sidebar já passou pelo `isCurrentUserAdmin()`
- * da `CuradoriaConsole` — o mesmo papel que `/catalog/new` exige pra salvar.
+ * da `CurationConsole` — o mesmo papel que `/catalog/new` exige pra salvar.
  */
 function NewWorkShortcut() {
   return (

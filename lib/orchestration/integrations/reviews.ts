@@ -19,7 +19,7 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { readCanonicalReviewCorpus, readSummaryReviewInputs } from "@/lib/synopsis-interest/digest-corpus"
-import { refreshArtSignalForWork } from "@/lib/arte/refresh"
+import { refreshArtSignalForWork } from "@/lib/art/refresh"
 import { computeCostUsd } from "@/lib/ai/pricing"
 import {
   consolidateReviewsDetailed,

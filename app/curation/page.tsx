@@ -11,8 +11,8 @@ import { countOpenCurationRequests } from "@/server/queries/curation-requests"
 import { getRecalcPendingState } from "@/server/recalc/queue"
 import { getComixStatus } from "@/lib/external/comix-gate"
 import { balanceTone } from "@/lib/ai-usage/balance"
-import { DECISION_QUEUES } from "@/lib/curadoria/decision-queues"
-import type { DecisionQueueKey } from "@/lib/curadoria/decision-queues"
+import { DECISION_QUEUES } from "@/lib/curation/decision-queues"
+import type { DecisionQueueKey } from "@/lib/curation/decision-queues"
 import { cn } from "@/lib/utils"
 
 export const metadata = { title: "Curadoria" }

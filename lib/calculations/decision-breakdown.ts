@@ -110,7 +110,7 @@ export interface DecisionBreakdownInput {
  * 🔴 A comparação mora no TESTE, não aqui, por peso de BUNDLE: quem consome este
  * módulo é `"use client"`, e importar `lib/calculations/expected` levaria
  * `lib/ml/{ridge,preprocessing}` junto pro navegador. Mesmo motivo pelo qual os
- * cortes de arte saíram de `lib/arte/model.ts` para `lib/arte/bands.ts`.
+ * cortes de arte saíram de `lib/art/model.ts` para `lib/art/bands.ts`.
  */
 export const RIDGE_FEATURE_BY_SIGNAL = {
   attributes: "IA(n)",

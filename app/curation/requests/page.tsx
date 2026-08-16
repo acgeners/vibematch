@@ -2,7 +2,7 @@ import Link from "next/link"
 import { Inbox } from "lucide-react"
 import { getCurationQueue } from "@/server/queries/curation-requests"
 import type { CurationRequestKind } from "@/server/queries/curation-requests"
-import { ResolveRequestButtons } from "@/components/curadoria/resolve-request-buttons"
+import { ResolveRequestButtons } from "@/components/curation/resolve-request-buttons"
 
 /**
  * A fila de pedidos do leitor.

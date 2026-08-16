@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 import { UserCircle } from "lucide-react"
 import { Header } from "@/components/layout/header"
-import { ContaTabs } from "@/components/conta/conta-tabs"
+import { AccountTabs } from "@/components/account/conta-tabs"
 
 // `mx-auto` porque /account navega por ABAS horizontais, não por sidebar própria: sem ele o
 // conteúdo encostava à esquerda e deixava ~350px de vão só à direita — o buraco que a sidebar
@@ -15,7 +15,7 @@ export default function ContaLayout({ children }: { children: ReactNode }) {
         description="Sua identidade, seu papel e seu perfil de gosto num só lugar."
         icon={<UserCircle />}
       />
-      <ContaTabs />
+      <AccountTabs />
       <div className="space-y-4">{children}</div>
     </div>
   )

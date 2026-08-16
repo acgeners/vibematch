@@ -38,7 +38,7 @@ vi.mock("@/components/layout/chrome-badges", () => ({
   }),
 }))
 
-import { ConsoleNav } from "@/components/curadoria/console-nav"
+import { ConsoleNav } from "@/components/curation/console-nav"
 
 const GROUPS = [
   { id: "calibracao", label: "Calibração das notas", iconName: "Gauge", accent: "violet" as const },

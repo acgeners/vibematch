@@ -18,7 +18,7 @@ import { signOutAction } from "@/server/actions/auth"
 import { useChromeData } from "@/lib/use-refresh"
 import { useChromeBadges } from "@/components/layout/chrome-badges"
 import { useIsSignedIn } from "@/components/layout/admin-context"
-import { RoleBadge } from "@/components/conta/role-badge"
+import { RoleBadge } from "@/components/account/role-badge"
 import {
   DropdownMenu,
   DropdownMenuContent,

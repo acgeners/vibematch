@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { CuradoriaConsole } from "@/components/curadoria/console-shell"
+import { CurationConsole } from "@/components/curation/console-shell"
 
 /**
  * O layout de TODA a console de curadoria — a raiz (`/curation`) e os quatro membros
@@ -19,5 +19,5 @@ import { CuradoriaConsole } from "@/components/curadoria/console-shell"
  * e por isso continua dona da própria camada 2.
  */
 export default function CurationLayout({ children }: { children: ReactNode }) {
-  return <CuradoriaConsole>{children}</CuradoriaConsole>
+  return <CurationConsole>{children}</CurationConsole>
 }

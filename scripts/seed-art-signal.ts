@@ -27,7 +27,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { exigeAlvoNuvem } from "./lib/exige-alvo-nuvem"
 import { getOwnerUserId } from "@/server/queries/current-user"
-import { computeArtForCatalog } from "@/lib/arte/model"
+import { computeArtForCatalog } from "@/lib/art/model"
 import {
   ART_SIGNAL_VERSION,
   ART_TAG_SLUGS,
@@ -35,7 +35,7 @@ import {
   hasArtEvidence,
   isArtSignalStale,
   parseArtSignal,
-} from "@/lib/arte/signal"
+} from "@/lib/art/signal"
 
 const EXECUTE = process.argv.includes("--execute")
 /**

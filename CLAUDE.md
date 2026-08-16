@@ -710,10 +710,20 @@ ordem das regras é significativa: `?fav=1` e `/settings/calibration` vêm ANTES
 engoliriam. Conferidas as 25 no app rodando. E `/preferences → /preferencias` foi **invertido**,
 não apagado.
 
-⚠️ **Os diretórios de MÓDULO ficaram como estavam** (`components/curadoria/`, `components/conta/`,
-`components/titles/`, `lib/curadoria/`) — renomear rota é mudar contrato com o browser; renomear
-módulo é churn de import sem nada em jogo. É por isso que o replace desta leva casava só
-`"/titles`, nunca `@/components/titles`: o caractere ANTES da barra é o que separa os dois.
+⚠️ **Os diretórios de MÓDULO foram numa leva SEPARADA, e a separação é o ponto.** O replace das
+rotas casava só `"/titles`, nunca `@/components/titles` — o caractere ANTES da barra é o que
+distingue referência de rota de caminho de import, e sem essa distinção o mesmo `sed` que
+renomeia a URL quebra 92 imports. Depois, num PR próprio, os quatro diretórios em português
+viraram inglês: `components/conta` → `components/account`, `components/curadoria` →
+`components/curation`, `lib/curadoria` → `lib/curation` e **`lib/arte` → `lib/art`** (esse
+escapava da varredura por não parecer português a quem lê rápido). Junto foram os dois símbolos
+que sobravam — `CuradoriaConsole` → `CurationConsole` e `ContaTabs` → `AccountTabs`.
+
+🔴 **`components/titles/` (92 arquivos) NÃO foi renomeado, e não é esquecimento.** "titles" já é
+inglês, mas o nome está errado por outro motivo: a rota virou `/catalog`, os componentes ali
+descrevem uma OBRA, e já existem `components/works/` e `lib/works/`. São três nomes para o mesmo
+domínio, e escolher entre eles é decisão de arquitetura, não de idioma — o que esta leva fez foi
+só tirar o português da frente.
 
 **O `middleware.ts` gateia DUAS famílias, com exigências diferentes.** Ele refresca a sessão em
 toda rota e, só nesses prefixos, decide:
@@ -923,7 +933,7 @@ nativo dizia *"saldo ou fonte externa precisando de atenção"* — uma frase qu
 problemas e não identifica nenhum. Hoje um tooltip nomeia cada alerta **com o número**
 (`Saldo da Anthropic: −$11,10`), e o `aria-label` carrega o mesmo texto.
 
-⚠️ **A COR e o TEXTO saem da mesma lista** (`lib/curadoria/chrome-alerts.ts`): `alertDotTone`
+⚠️ **A COR e o TEXTO saem da mesma lista** (`lib/curation/chrome-alerts.ts`): `alertDotTone`
 reduz exatamente os alertas que o tooltip imprime. Um `if` de cor escrito à parte no JSX é como
 o ponto fica vermelho e a explicação fala do problema âmbar — a família "dois critérios pro
 mesmo fato", aqui a dois centímetros um do outro.
@@ -968,7 +978,7 @@ Três coisas convergiram:
 Visão geral **obrigada a explicar o badge inteiro** — ela é a única superfície de triagem que
 sobrou. Duas consequências que se pagam caro se forem esquecidas:
 
-- As parcelas do badge saem de **`lib/curadoria/decision-queues.ts`**, iterada pelos DOIS lados
+- As parcelas do badge saem de **`lib/curation/decision-queues.ts`**, iterada pelos DOIS lados
   (soma do gatilho e `buildDecisions` da página). Enumerar de novo é como os **Pedidos entraram
   no badge e nunca chegaram na página** — um "3" no botão que podia ser 3 pedidos de leitor, com
   a página que devia explicá-lo sem mencionar nenhum. O tipo `Record<DecisionQueueKey, number>`
@@ -994,7 +1004,7 @@ Comix instável) fecha em 968 de 978px.
 **"Ação lenta tem DUAS cores"** — inclusive por que `components/tasks/sidebar-tasks.tsx` foi
 apagado (ficou órfão quando a sidebar saiu, e o feedback sumiu sem nada acusar).
 
-**A console `/curation`** (`components/curadoria/console-shell.tsx`) é o terceiro braço dessa régua,
+**A console `/curation`** (`components/curation/console-shell.tsx`) é o terceiro braço dessa régua,
 desde 2026-08-03 — o 🛠 da barra aponta pra ela. Sidebar PRÓPRIA de dois níveis com Visão geral ·
 Curadoria da Obra · Configurações (+ os 4 tópicos) · Uso da API IA · Métricas do modelo. Cada rota
 membro entra por um `layout.tsx` de 3 linhas que renderiza a shell — o gate e a sidebar vêm dela.
@@ -2186,7 +2196,7 @@ os dois números são o mesmo).
 
 ## A `/account/taste-profile` PROVA que entende você — e três números mentem se forem "melhorados"
 
-`components/conta/taste-profile-panel.tsx` + `lib/ai-recommendation/profile-tag-origin.ts`
+`components/account/taste-profile-panel.tsx` + `lib/ai-recommendation/profile-tag-origin.ts`
 (v3, 2026-08-09). A página responde UMA pergunta — "o quanto vocês entendem meu gosto?" — e a v2
 respondia em **4.020px com a prova em 6º lugar**. Hoje é **hero + 4 abas** (A prova · Seus
 critérios · Tags e temas · O que isso muda). O estado das abas mora no componente PAI: os painéis
@@ -2319,7 +2329,7 @@ foram medidas clonando a linha vizinha no browser, com a fonte real, e a árvore
 guardada por `tests/unit/ranking/filtro-de-arte-render.test.tsx` (que monta o segmentado pelo
 MESMO `ART_FILTER_ORDER.map` do painel: uma cópia dos três botões passaria verde com o painel
 enumerando à mão de novo).
-⚠️ Os cortes saíram de `lib/arte/model.ts` para **`lib/arte/bands.ts`** por peso de bundle: o
+⚠️ Os cortes saíram de `lib/art/model.ts` para **`lib/art/bands.ts`** por peso de bundle: o
 painel é `"use client"` e importar o modelo levaria `lib/ml/{ridge,logistic,preprocessing}` junto.
 
 ⚠️ **O chip de ordenação escala com a quantidade de níveis** (`SORT_CHIP_SCALE`): 1 nível ocupa
@@ -2432,7 +2442,7 @@ triviais.
 | `lib/avatar/render.ts` | renderizador ÚNICO: `config → SVG`. Paletas, 12 personagens + 12 símbolos |
 | `lib/avatar/url.ts` | fronteira de confiança: `sanitize`, `config ↔ URL`, `isValidAvatarUrl` |
 | `app/avatar.svg/route.ts` | redesenha a partir da query string, `immutable` por 1 ano |
-| `components/conta/avatar-picker.tsx` | o painel (estilo, cabelo, pele, olhos, fundo, sortear, upload) |
+| `components/account/avatar-picker.tsx` | o painel (estilo, cabelo, pele, olhos, fundo, sortear, upload) |
 
 🔴 **Preset É uma configuração — não um segundo conjunto de arquivos.** As miniaturas da grade são
 desenhadas com a config ATUAL do usuário, pelo mesmo `renderAvatar`. Se a galeria tivesse imagens

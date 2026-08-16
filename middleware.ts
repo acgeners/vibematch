@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server"
 
 /**
  * Rotas da console de curadoria — as ferramentas do dono do catálogo.
- * Tem que casar com as `ENTRIES` de `components/curadoria/console-nav.tsx`.
+ * Tem que casar com as `ENTRIES` de `components/curation/console-nav.tsx`.
  *
  * 🔴 É UM prefixo só desde 2026-08-16, e essa é a metade que importa da renomeação.
  * Antes eram cinco rotas irmãs (`/curadoria`, `/ai-evaluation`, `/settings`,

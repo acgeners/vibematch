@@ -9,7 +9,7 @@ import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { useRerankSingleWork } from "@/components/ranking/use-rerank-single-work"
 import { AlignmentTooltipContent, VerdictTooltipContent } from "@/components/ranking/score-tooltip-content"
 import type { AlignmentPayload } from "@/components/ranking/score-tooltip-content"
-import { ART_BAND_LABELS, artBandFromPercentile } from "@/lib/arte/bands"
+import { ART_BAND_LABELS, artBandFromPercentile } from "@/lib/art/bands"
 
 /**
  * Botão pequeno que substitui o "—" da `AlignmentScoreCell` quando há um
@@ -504,7 +504,7 @@ export function AlignmentCell({
  *
  * 🔴 A estimativa em pontos é comprimida a ~0,49× a escala do rótulo, então um número
  * em pontos convida à comparação errada com uma nota de critério; a posição relativa é
- * a única coisa que significa algo (ver lib/arte/model.ts). Por isso a coluna mostra
+ * a única coisa que significa algo (ver lib/art/model.ts). Por isso a coluna mostra
  * percentil e o nome da faixa vive no tooltip.
  *
  * ⚠️ Ela existe nas listas desde 2026-08-15 porque é um dos separadores mais fortes

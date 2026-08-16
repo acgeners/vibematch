@@ -131,7 +131,7 @@ export interface CalculatedScore {
   /**
    * Posição da estimativa de ARTE no catálogo (0–1). É esta a grandeza que ordena e
    * filtra — a estimativa em pontos é comprimida a ~0,49× a escala do rótulo, então
-   * um limiar em pontos devolve a fatia errada (ver lib/arte/model.ts).
+   * um limiar em pontos devolve a fatia errada (ver lib/art/model.ts).
    *
    * NULL = sem estimativa. Terceiro estado, nunca "média": obra sem sinal de arte não
    * pode afundar num desempate por causa de dado que falta.

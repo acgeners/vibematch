@@ -1,6 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { extractArtSignal, isArtSignalStale, parseArtSignal, type ArtSignal } from "@/lib/arte/signal"
+import { extractArtSignal, isArtSignalStale, parseArtSignal, type ArtSignal } from "@/lib/art/signal"
 
 /**
  * Reextrai `works.art_signal` de UMA obra.

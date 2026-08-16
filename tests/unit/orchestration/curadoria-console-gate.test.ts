@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { existsSync, readFileSync, readdirSync } from "node:fs"
-import { DECISION_QUEUES } from "@/lib/curadoria/decision-queues"
+import { DECISION_QUEUES } from "@/lib/curation/decision-queues"
 
 /**
  * Invariante arquitetural: TODA rota que aparece na sidebar da console `/curation`
@@ -22,9 +22,9 @@ import { DECISION_QUEUES } from "@/lib/curadoria/decision-queues"
  * aqui: as duas camadas juntas.
  */
 
-const NAV = "components/curadoria/console-nav.tsx"
+const NAV = "components/curation/console-nav.tsx"
 const MIDDLEWARE = "middleware.ts"
-const SHELL = "components/curadoria/console-shell.tsx"
+const SHELL = "components/curation/console-shell.tsx"
 
 /** Os `href:` declarados no array ENTRIES da sidebar da console. */
 function consoleHrefs(): string[] {
@@ -40,7 +40,7 @@ function shellLayouts(): string[] {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = `${dir}/${entry.name}`
       if (entry.isDirectory()) walk(path)
-      else if (entry.name === "layout.tsx" && /CuradoriaConsole/.test(readFileSync(path, "utf8"))) {
+      else if (entry.name === "layout.tsx" && /CurationConsole/.test(readFileSync(path, "utf8"))) {
         found.push(path)
       }
     }
@@ -81,8 +81,8 @@ describe("arquitetura: a console /curation é gateada no proxy", () => {
         missing.push(`${layout} (ausente)`)
         continue
       }
-      if (!/CuradoriaConsole/.test(readFileSync(layout, "utf8"))) {
-        missing.push(`${layout} (não renderiza CuradoriaConsole)`)
+      if (!/CurationConsole/.test(readFileSync(layout, "utf8"))) {
+        missing.push(`${layout} (não renderiza CurationConsole)`)
       }
     }
     expect(missing, `prefixos gateados sem a shell: ${missing.join(", ")}`).toEqual([])

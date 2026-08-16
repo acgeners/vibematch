@@ -52,7 +52,7 @@ import {
   ART_FILTER_SEGMENT_LABELS,
   ART_FILTER_TOOLTIPS,
   parseArtFilter,
-} from "@/lib/arte/url"
+} from "@/lib/art/url"
 
 interface SavedFilterPreset {
   id: string

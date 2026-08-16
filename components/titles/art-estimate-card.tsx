@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { AiProvenanceSeal } from "@/components/ui/ai-provenance"
-import { ART_TAG_SLUGS } from "@/lib/arte/signal"
-import { ART_BAND_LABELS } from "@/lib/arte/model"
+import { ART_TAG_SLUGS } from "@/lib/art/signal"
+import { ART_BAND_LABELS } from "@/lib/art/model"
 import type { ArtEvidenceForWork } from "@/server/queries/art-evidence"
 
 /**

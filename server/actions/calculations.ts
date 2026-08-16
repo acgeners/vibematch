@@ -58,8 +58,8 @@ import {
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import type { DeclaredTagPref } from "@/server/queries/tag-preferences"
 import { loadArtLabels } from "@/server/queries/pilot-taste"
-import { computeArtForCatalog } from "@/lib/arte/model"
-import { parseArtSignal } from "@/lib/arte/signal"
+import { computeArtForCatalog } from "@/lib/art/model"
+import { parseArtSignal } from "@/lib/art/signal"
 import type { TasteProfilePayload } from "@/lib/ai-recommendation/types"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import {
@@ -121,7 +121,7 @@ export interface RawWork {
   work_tags?: any[]
   /**
    * `works.art_signal` cru (jsonb). NÃO entra em nenhum cálculo de nota — alimenta só o
-   * estimador de arte, que é critério de ordenação/filtro. Ver `lib/arte/`.
+   * estimador de arte, que é critério de ordenação/filtro. Ver `lib/art/`.
    */
   art_signal?: unknown
 }

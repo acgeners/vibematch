@@ -1,6 +1,6 @@
 import { getCurrentUserProfile } from "@/server/queries/current-user"
-import { IdentityCard } from "@/components/conta/identity-card"
-import { RoleCard } from "@/components/conta/role-card"
+import { IdentityCard } from "@/components/account/identity-card"
+import { RoleCard } from "@/components/account/role-card"
 
 // Plano e perfil podem mudar em runtime — limita a staleness do snapshot.
 export const revalidate = 60
