@@ -15,6 +15,13 @@ import {
   loadLastRun,
   loadWorksForAudit,
 } from "@/server/queries/calibration"
+import {
+  AUTO_APPLY_MAX_DELTA,
+  AUTO_APPLY_MIN_CONFIDENCE,
+  STALE_RUN_HOURS,
+  isAuditableCriterion,
+  shouldAutoApply,
+} from "@/lib/ai-calibration/policy"
 import { markRecalcPending, recalculateScoresNowResult } from "@/server/recalc/queue"
 import { generateTasteProfileAction } from "@/server/actions/recommendations"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
@@ -33,9 +40,27 @@ import { ensureAdmin } from "@/server/queries/current-user"
 // stop_reason="max_tokens" em lib/ai-calibration/service.ts.
 const AUDIT_CHUNK_SIZE = 10
 const AUDIT_PARALLEL = 3
-const DEFAULT_AUTO_APPLY_MIN_CONFIDENCE = 0.8
-const DEFAULT_AUTO_APPLY_MAX_DELTA = 1.5
 const LOCKED_SOURCES: ReadonlySet<ScoreSource> = new Set(["manual", "ai_edited"])
+
+/**
+ * Runs presos em `processing` são processo morto — o caller caiu antes do `failed`.
+ * Expira ANTES de criar o run novo: é o único momento em que se sabe que ninguém está
+ * mais esperando por eles, e é write path (leitura não deve consertar dado).
+ */
+async function expireStaleRuns(): Promise<void> {
+  const supabase = createAdminClient()
+  const cutoff = new Date(Date.now() - STALE_RUN_HOURS * 3600_000).toISOString()
+  const { error } = await supabase
+    .from("calibration_runs")
+    .update({
+      status: "failed",
+      error_message: `Run abandonado: seguia "processing" após ${STALE_RUN_HOURS}h.`,
+      completed_at: new Date().toISOString(),
+    })
+    .eq("status", "processing")
+    .lt("created_at", cutoff)
+  if (error) console.error("[calibration] erro expirando runs presos:", error.message)
+}
 
 interface RunUsageAccumulator {
   inputTokens: number
@@ -100,6 +125,7 @@ export async function runCalibrationAuditAction(
   const gate = await ensureAdmin()
   if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
+  await expireStaleRuns()
 
   // ── Escopo: incremental (só as obras que mudaram) por padrão; varredura COMPLETA quando o
   // chamador pede `full`, quando a régua mudou (modelo/prompt) ou quando nunca rodou — nesses
@@ -147,8 +173,10 @@ export async function runCalibrationAuditAction(
       model_name: MODEL,
       prompt_version: PROMPT_VERSION,
       taste_profile_id: tasteProfile?.id ?? null,
-      auto_apply_min_confidence: DEFAULT_AUTO_APPLY_MIN_CONFIDENCE,
-      auto_apply_max_delta: DEFAULT_AUTO_APPLY_MAX_DELTA,
+      // Gravados mesmo com o auto-apply desligado: descrevem o gate que voltaria a valer.
+      // Com `AUTO_APPLY_ENABLED = false`, `n_auto_applied` do run é sempre 0.
+      auto_apply_min_confidence: AUTO_APPLY_MIN_CONFIDENCE,
+      auto_apply_max_delta: AUTO_APPLY_MAX_DELTA,
     })
     .select("id")
     .single()
@@ -185,6 +213,9 @@ export async function runCalibrationAuditAction(
     for (const sug of allSuggestions) {
       const work = worksById.get(sug.workId)
       if (!work) continue
+      // Fora do escopo não entra nem como pendente — persistir sugestão que ninguém pode
+      // aplicar é encher a fila com trabalho impossível. 3ª camada (enum + filtro + aqui).
+      if (!isAuditableCriterion(sug.criterionSlug)) continue
       const current = work.categoryScores[sug.criterionSlug]
       if (!current) continue
       // Nunca toca em scores travados pelo usuário, mesmo que o prompt tenha
@@ -194,13 +225,11 @@ export async function runCalibrationAuditAction(
       const delta = sug.suggestedScore - current.score
       if (Math.abs(delta) < 0.5) continue
 
-      const shouldAutoApply =
-        sug.confidence >= DEFAULT_AUTO_APPLY_MIN_CONFIDENCE &&
-        Math.abs(delta) <= DEFAULT_AUTO_APPLY_MAX_DELTA
+      const autoApply = shouldAutoApply(sug.confidence, delta)
 
-      const status: SuggestionRow["status"] = shouldAutoApply ? "auto_applied" : "pending"
-      const appliedScore = shouldAutoApply ? sug.suggestedScore : null
-      const appliedAt = shouldAutoApply ? new Date().toISOString() : null
+      const status: SuggestionRow["status"] = autoApply ? "auto_applied" : "pending"
+      const appliedScore = autoApply ? sug.suggestedScore : null
+      const appliedAt = autoApply ? new Date().toISOString() : null
 
       // Substitui a pendente ANTERIOR do mesmo (obra, atributo): esta run é um
       // julgamento mais fresco. Sem isso, rodar a auditoria de novo empilha
@@ -237,7 +266,7 @@ export async function runCalibrationAuditAction(
       }
       nInserted += 1
 
-      if (shouldAutoApply) {
+      if (autoApply) {
         const { error: updError } = await supabase
           .from("category_scores")
           .update({
@@ -309,6 +338,7 @@ export async function runBiasReportAction(): Promise<{
   const gate = await ensureAdmin()
   if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
+  await expireStaleRuns()
   const tasteProfile = await loadCurrentTasteProfile()
 
   const { data: runRow, error: insertError } = await supabase
@@ -413,6 +443,29 @@ async function applySuggestionWithConflictCheck(
     return {
       ok: false,
       error: `Conflito: score virou "${current.source}" (edição manual). Sugestão marcada como rejeitada.`,
+    }
+  }
+
+  // 🔴 Guarda de VALOR, e ela é separada da guarda de SOURCE de propósito: uma reavaliação
+  // da obra reescreve a nota mantendo o source `ai_accepted`, então checar só a procedência
+  // deixa passar o caso mais comum. Medido em 2026-08-16: 132 das 583 pendentes (23%) já
+  // tinham baseline morto — aceitar qualquer uma delas jogaria a nota de volta a partir de
+  // um "de X" que ninguém mais vê na tela, sem erro nenhum.
+  //
+  // `superseded` (e não `rejected`): a sugestão não estava errada, ela envelheceu. Sai da
+  // fila porque a ação que ela oferece é impossível — o julgamento dela é sobre outro número.
+  const currentScore = Number(current.score)
+  const baseline = Number(sug.previous_score)
+  if (Number.isFinite(currentScore) && Number.isFinite(baseline) && currentScore !== baseline) {
+    await supabase
+      .from("score_calibration_suggestions")
+      .update({ status: "superseded", reviewed_at: new Date().toISOString() })
+      .eq("id", suggestionId)
+    return {
+      ok: false,
+      error:
+        `A nota mudou de ${baseline.toFixed(1)} para ${currentScore.toFixed(1)} depois desta sugestão — ` +
+        `ela julgou outro número. Marcada como substituída; rode a auditoria de novo pra reavaliar esta obra.`,
     }
   }
 

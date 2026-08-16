@@ -9,6 +9,7 @@ import {
   buildBiasUserPrompt,
 } from "./prompts"
 import { auditToolPayloadSchema, biasToolPayloadSchema } from "./schema"
+import { AUDITABLE_CRITERIA, isAuditableCriterion } from "./policy"
 import type {
   AuditSuggestionFromModel,
   AuditWorkInput,
@@ -21,9 +22,21 @@ import type { CriterionSlug } from "@/types/domain"
 import { SONNET_MODEL } from "@/lib/ai/models"
 
 export const MODEL = SONNET_MODEL
-export const PROMPT_VERSION = "v1"
+/**
+ * v2 (2026-08-16): `adult_content` e `couple_dynamics` saíram do escopo da auditoria
+ * (ver `policy.ts`). O prompt e o enum da tool mudaram junto, então a versão sobe — ela é
+ * gravada em `calibration_runs.prompt_version` e é o que `loadLastRun` compara para
+ * detectar drift de régua. Não subir faria o rótulo do run mentir E o próximo run rodar
+ * incremental sobre uma régua diferente da anterior.
+ *
+ * ⚠️ Consequência esperada: o primeiro run depois desta mudança é uma varredura COMPLETA.
+ */
+export const PROMPT_VERSION = "v2"
 
+/** Universo do relatório de VIÉS — diagnóstico cobre os 9, inclusive os fora da auditoria. */
 const CRITERION_SLUG_ENUM = [...CRITERION_SLUGS]
+/** Universo da AUDITORIA — o modelo não consegue sequer nomear um critério fora do escopo. */
+const AUDITABLE_SLUG_ENUM = [...AUDITABLE_CRITERIA]
 
 const AUDIT_TOOL: Anthropic.Messages.Tool = {
   name: "submit_audits",
@@ -38,7 +51,7 @@ const AUDIT_TOOL: Anthropic.Messages.Tool = {
           type: "object",
           properties: {
             work_id: { type: "string" },
-            criterion_slug: { type: "string", enum: CRITERION_SLUG_ENUM },
+            criterion_slug: { type: "string", enum: AUDITABLE_SLUG_ENUM },
             current_score: { type: "number", minimum: 0, maximum: 10 },
             suggested_score: { type: "number", minimum: 0, maximum: 10 },
             confidence: { type: "number", minimum: 0, maximum: 1 },
@@ -137,7 +150,6 @@ export async function requestCalibrationAudit(
 
   const client = getAnthropicClient({ maxRetries: 6 })
   const workIdSet = new Set(works.map((w) => w.workId))
-  const validSlugs = new Set<string>(CRITERION_SLUG_ENUM)
 
   let lastError: unknown = null
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -200,7 +212,9 @@ export async function requestCalibrationAudit(
     const filtered: AuditSuggestionFromModel[] = []
     for (const a of parsed.data.audits) {
       if (!workIdSet.has(a.work_id)) continue
-      if (!validSlugs.has(a.criterion_slug)) continue
+      // O enum da tool já barra critério fora do escopo; isto é a 2ª camada, do mesmo
+      // desenho de `LOCKED_SOURCES` (o prompt pede, o código garante).
+      if (!isAuditableCriterion(a.criterion_slug)) continue
       if (Math.abs(a.suggested_score - a.current_score) < 0.5) continue
       if (a.confidence < 0.5) continue
       filtered.push({

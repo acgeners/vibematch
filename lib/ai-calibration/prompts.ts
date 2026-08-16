@@ -1,6 +1,7 @@
 import { CRITERIA_INFO, CRITERIA_RUBRICS } from "@/lib/constants/criteria"
 import { POST_READING_WEIGHT_LABELS, type PostReadingScoreField } from "@/lib/constants/post-reading-criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
+import { AUDITABLE_CRITERIA, AUDIT_OUT_OF_SCOPE, isAuditableCriterion } from "./policy"
 import type {
   AuditWorkInput,
   BiasCorrelationEntry,
@@ -8,8 +9,10 @@ import type {
   BiasStatsByCriterion,
 } from "./types"
 
+/** Só os auditáveis: ensinar a rubrica de um critério que a tool não aceita é convidar o
+ *  modelo a gastar a saída num alvo que vai ser descartado no filtro. */
 function rubricsBlock(): string {
-  return CRITERION_SLUGS
+  return AUDITABLE_CRITERIA
     .map((slug) => {
       const info = CRITERIA_INFO[slug]
       const rubric = CRITERIA_RUBRICS[slug]
@@ -22,6 +25,10 @@ function rubricsBlock(): string {
 export const AUDIT_SYSTEM_PROMPT = `Você é um auditor das notas de critério (category_scores) de obras catalogadas (manhwa, anime, manga). Sua tarefa é detectar inconsistências entre os scores atuais e os outros sinais disponíveis (tags, sinopse, user_score do usuário, critérios pós-leitura, observações), sugerindo ajustes pontuais.
 
 REGRAS GERAIS:
+0. Os critérios FORA DO ESCOPO abaixo não podem receber sugestão em nenhuma hipótese — eles têm régua própria fora daqui. Aparecem no input como contexto (ajudam a ler a obra), nunca como alvo:
+${Object.entries(AUDIT_OUT_OF_SCOPE)
+  .map(([slug, motivo]) => `   - ${slug}: ${motivo}`)
+  .join("\n")}
 1. NUNCA sugira ajuste pra critérios cujo source seja "manual" ou "ai_edited" — esses estão travados pelo usuário e são âncoras. Eles aparecem no input pra contexto, mas não em audits[].
 2. Só emita uma sugestão quando o ajuste for ≥ 0.5 ponto em valor absoluto. Mudanças menores que isso são ruído.
 3. \`confidence\` ∈ [0,1]: 0.9+ = certeza forte com evidência múltipla; 0.7–0.89 = boa evidência; 0.5–0.69 = palpite informado. Não retorne sugestões com confidence < 0.5.
@@ -78,11 +85,22 @@ function formatTagsByGroup(tags: AuditWorkInput["tags"]): string {
   return parts.join("; ")
 }
 
-function formatCategoryScores(work: AuditWorkInput): { lockedLines: string[]; openLines: string[] } {
+function formatCategoryScores(work: AuditWorkInput): {
+  lockedLines: string[]
+  openLines: string[]
+  outOfScopeLines: string[]
+} {
   const lockedLines: string[] = []
   const openLines: string[] = []
+  const outOfScopeLines: string[] = []
   for (const slug of CRITERION_SLUGS) {
     const entry = work.categoryScores[slug]
+    // Fora do escopo vem ANTES do teste de source: um `adult_content` com source aberto
+    // continua fora, senão ele reapareceria na lista de alvos por outro caminho.
+    if (!isAuditableCriterion(slug)) {
+      outOfScopeLines.push(entry ? `${slug}=${entry.score.toFixed(1)}` : `${slug}: ausente`)
+      continue
+    }
     if (!entry) {
       openLines.push(`${slug}: ausente`)
       continue
@@ -94,7 +112,7 @@ function formatCategoryScores(work: AuditWorkInput): { lockedLines: string[]; op
       openLines.push(tag)
     }
   }
-  return { lockedLines, openLines }
+  return { lockedLines, openLines, outOfScopeLines }
 }
 
 function formatPostScores(scores: Partial<Record<string, number>>): string {
@@ -127,16 +145,19 @@ export function buildAuditUserPrompt(works: AuditWorkInput[]): string {
     if (w.synopsis) lines.push(`sinopse: ${truncate(w.synopsis, 600)}`)
     if (w.observation) lines.push(`observação do usuário: ${truncate(w.observation, 400)}`)
     lines.push(`post_*: ${formatPostScores(w.postScores)}`)
-    const { lockedLines, openLines } = formatCategoryScores(w)
+    const { lockedLines, openLines, outOfScopeLines } = formatCategoryScores(w)
     if (lockedLines.length) {
       lines.push(`category_scores ÂNCORAS (não sugerir mudança): ${lockedLines.join(", ")}`)
+    }
+    if (outOfScopeLines.length) {
+      lines.push(`category_scores FORA DO ESCOPO (contexto, ver regra 0): ${outOfScopeLines.join(", ")}`)
     }
     lines.push(`category_scores ABERTOS PRA AUDITORIA: ${openLines.join(", ")}`)
     lines.push("")
   })
 
   lines.push(
-    `Use a tool \`submit_audits\`. Cada entry referencia work_id exato + criterion_slug. Limite cada justificativa a 1–2 frases concretas em português brasileiro.`,
+    `Use a tool \`submit_audits\`. Cada entry referencia work_id exato + criterion_slug — e \`criterion_slug\` só aceita: ${AUDITABLE_CRITERIA.join(", ")}. Limite cada justificativa a 1–2 frases concretas em português brasileiro.`,
   )
 
   return lines.join("\n")

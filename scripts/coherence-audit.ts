@@ -23,7 +23,7 @@
  */
 import { createClient } from "@supabase/supabase-js"
 import { CRITERION_SLUGS } from "@/types/domain"
-import { bandForScore } from "@/lib/criteria/justification"
+import { bandCoherence } from "@/lib/criteria/justification"
 import fs from "node:fs"
 
 interface Item { workId: string; titulo: string; slug: string; nota: number; just: string }
@@ -45,10 +45,13 @@ const CHECKS: Check[] = [
     porque:
       "o modelo escreve 'Faixa 4-6' e a nota cai em 7-8. Ou ele se contradisse, ou um pós-processamento mudou a nota sem reescrever a prosa. Nos dois casos, quem lê a ficha vê texto e número discordando.",
     slugs: null,
-    viola: (it) => {
-      const citada = it.just.match(/Faixa\s+(\d+-\d+)/i)?.[1]
-      return Boolean(citada) && citada !== bandForScore(it.nota)
-    },
+    // 🔴 A comparação era `citada !== bandForScore(nota)` sobre o PRIMEIRO par de números
+    // da prosa, e isso tem dois falsos positivos grandes: citação composta ("Faixa 7-8/9")
+    // e nota de meio ponto na borda (8,5 contra "7-8" — os bins da rubrica são de inteiros
+    // e não se tocam). Medido em 2026-08-16 no catálogo: 483 acusações, das quais 226 eram
+    // borda e 6 de 6 amostradas eram citação composta. A régua real é 71 casos, e agora ela
+    // tem dono e teste (`bandCoherence`) em vez de um regex por script.
+    viola: (it) => bandCoherence(it.nota, it.just) === "divergente",
   },
 ]
 
