@@ -74,6 +74,25 @@ export function shouldAutoApply(confidence: number, delta: number): boolean {
 }
 
 /**
+ * Obra sem consenso de reviews destilado fica FORA do run (2026-08-16).
+ *
+ * 🔴 Sem digest o auditor volta a ser o juiz cego que produziu os dois erros de 85%: ele
+ * julga com tag e sinopse e contradiz uma evidência que não viu. Medido na pool: **196 das
+ * 212 têm digest**, então o corte custa 16 obras e compra evidência nas outras 196.
+ *
+ * ⚠️ Mora aqui, e não na query, porque é a mesma classe de decisão que `AUDITABLE_CRITERIA`
+ * — o que a auditoria pode julgar. Na query viraria um `.filter()` que ninguém lê como
+ * política, e o próximo caller a esqueceria.
+ */
+export function temEvidenciaParaAuditar(digest: {
+  consensus: string | null
+  divergence: string | null
+  traits: unknown[]
+}): boolean {
+  return Boolean(digest.consensus || digest.divergence || digest.traits.length > 0)
+}
+
+/**
  * Run em `processing` mais velho que isto está morto — o processo caiu sem gravar
  * `failed`. Medido em 2026-08-16: 5 runs presos desde maio/junho, o mais novo com 69 dias.
  * Nenhum envenena o escopo (`loadLastRun` filtra `completed`), mas eles poluem a aba Runs

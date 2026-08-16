@@ -4,6 +4,7 @@ import { getOwnerUserId } from "@/server/queries/current-user"
 import { MODEL, PROMPT_VERSION } from "@/lib/ai-calibration/service"
 import { pickPrimarySynopsis } from "@/lib/work-derived"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
+import { temEvidenciaParaAuditar } from "@/lib/ai-calibration/policy"
 import { CRITERION_SLUGS, type CriterionSlug, type ScoreSource } from "@/types/domain"
 import type {
   AuditStaleness,
@@ -14,6 +15,8 @@ import type {
   BiasStatsByCriterion,
   CalibrationMode,
   CalibrationRunRow,
+  CriterionAnchor,
+  ReviewDigestForAudit,
   SuggestionRow,
   SuggestionStatus,
   SuggestionWithWork,
@@ -44,6 +47,7 @@ const AUDIT_WORK_SELECT = `
   post_art_visual_score,
   post_impact_immersion_score,
   post_originality_score,
+  review_digest,
   category_scores(criterion_slug, score, source),
   work_tags(tag_id, tags(name, tag_group_id)),
   work_synopses(text, is_primary, position)
@@ -92,6 +96,30 @@ function buildTags(rows: RawTagRow[] | null | undefined): Array<{ name: string; 
     }))
 }
 
+/**
+ * Recorta do `works.review_digest` só o que o auditor precisa julgar: o consenso, a
+ * divergência e os traços com eixo. Fora ficam `execution` e os campos de contagem — eles
+ * descrevem a QUALIDADE da obra, não a intensidade dos atributos, e cada campo a mais é
+ * token pago em toda obra do lote.
+ */
+function mapDigest(raw: unknown): ReviewDigestForAudit | null {
+  if (!raw || typeof raw !== "object") return null
+  const d = raw as Record<string, unknown>
+  const traits = Array.isArray(d.salient_traits)
+    ? (d.salient_traits as Array<Record<string, unknown>>)
+        .filter((t) => typeof t?.trait === "string")
+        .map((t) => ({
+          axis: String(t.axis ?? "geral"),
+          trait: String(t.trait),
+          polarity: String(t.polarity ?? "mixed"),
+        }))
+    : []
+  const consensus = typeof d.consensus === "string" ? d.consensus : null
+  const divergence = typeof d.divergence === "string" ? d.divergence : null
+  if (!consensus && !divergence && traits.length === 0) return null
+  return { consensus, divergence, traits }
+}
+
 function mapAuditRow(row: unknown): AuditWorkInput {
   const work = row as Record<string, unknown>
   const categoryScores: AuditWorkInput["categoryScores"] = {}
@@ -124,6 +152,10 @@ function mapAuditRow(row: unknown): AuditWorkInput {
     tags: buildTags(work.work_tags as RawTagRow[] | null),
     categoryScores,
     postScores,
+    // Não-nulo por construção: `loadWorksForAudit` descarta quem não tem digest antes de
+    // chegar aqui. O `!` seria mentira se algum caller pulasse aquele filtro, então o mapa
+    // devolve um vazio inofensivo e o filtro é quem garante.
+    digest: mapDigest(work.review_digest) ?? { consensus: null, divergence: null, traits: [] },
   } satisfies AuditWorkInput
 }
 
@@ -134,13 +166,36 @@ function mapAuditRow(row: unknown): AuditWorkInput {
  * ⚠️ `onlyIds` vai em LOTES: `.in("id")` + os embeds (category_scores/work_tags/work_synopses)
  * acima de ~300 ids vira `fetch failed` (o mesmo buraco de `selectByIdsInChunks`).
  */
+export interface AuditPool {
+  works: AuditWorkInput[]
+  /** Obras que entrariam no escopo mas não têm digest — ficam de fora, e a UI diz quantas. */
+  semDigest: number
+}
+
+/**
+ * 🔴 Obra SEM digest fica de fora do run (decisão de 2026-08-16).
+ *
+ * Sem o consenso das reviews o auditor volta a ser o juiz cego que produziu os dois erros de
+ * 85% — ele julga com tag e sinopse enquanto contradiz uma evidência que não viu. Auditar
+ * assim é pagar por palpite. Medido na pool: **195 das 211 obras têm digest**, então o corte
+ * custa 16 obras e compra a evidência nas outras 195.
+ *
+ * ⚠️ Elas não somem em silêncio: `semDigest` sobe até o resumo do run. Obra sem digest não é
+ * um defeito da auditoria — é o piso de 4 reviews úteis do `digest-gate` fazendo o trabalho
+ * dele numa obra com pouca evidência.
+ */
+function comDigest(works: AuditWorkInput[]): AuditPool {
+  const out = works.filter((w) => temEvidenciaParaAuditar(w.digest))
+  return { works: out, semDigest: works.length - out.length }
+}
+
 export async function loadWorksForAudit(
   opts: { limit?: number; onlyIds?: string[] } = {},
-): Promise<AuditWorkInput[]> {
+): Promise<AuditPool> {
   const supabase = createAdminClient()
 
   if (opts.onlyIds) {
-    if (opts.onlyIds.length === 0) return []
+    if (opts.onlyIds.length === 0) return { works: [], semDigest: 0 }
     const out: AuditWorkInput[] = []
     for (let i = 0; i < opts.onlyIds.length; i += 150) {
       const idChunk = opts.onlyIds.slice(i, i + 150)
@@ -153,7 +208,7 @@ export async function loadWorksForAudit(
       if (error) throw new Error(`Falha lendo obras pra audit (incremental): ${error.message}`)
       for (const row of data ?? []) out.push(mapAuditRow(row))
     }
-    return out
+    return comDigest(out)
   }
 
   const { data, error } = await supabase
@@ -165,7 +220,7 @@ export async function loadWorksForAudit(
     .limit(opts.limit ?? 1000)
 
   if (error) throw new Error(`Falha lendo obras pra audit: ${error.message}`)
-  return (data ?? []).map(mapAuditRow)
+  return comDigest((data ?? []).map(mapAuditRow))
 }
 
 function quantile(sorted: number[], q: number): number {
@@ -722,4 +777,32 @@ export async function getCalibrationProvenanceForWork(
     })
   }
   return out
+}
+
+/**
+ * Âncoras de calibração: como cada critério é USADO no catálogo (média, σ, quartis).
+ *
+ * 🔴 É o reaproveitamento que fecha a Decisão 3 — estes números já eram computados por
+ * `loadInputsForBias` e serviam só pra alimentar um relatório de LLM que ninguém consome.
+ * Aqui eles viram o contexto que faltava ao auditor: sem saber que `fantasy_nobility` tem
+ * mediana 8,0 no catálogo, ele propõe 3,0 pra uma obra com nobreza clara e a empata com as
+ * que não têm nada.
+ *
+ * ⚠️ A distribuição sai da MESMA pool que está sendo auditada (obras com nota pessoal), não
+ * do catálogo inteiro — é a régua contra a qual as notas dela serão comparadas. Medir num
+ * conjunto e julgar noutro é a família "mesma função, CONJUNTOS diferentes".
+ */
+export async function loadCriterionAnchors(): Promise<CriterionAnchor[]> {
+  const { stats } = await loadInputsForBias()
+  return stats
+    .filter((s) => s.n > 0)
+    .map((s) => ({
+      slug: s.slug,
+      mean: s.mean,
+      stdev: s.stdev,
+      p25: s.p25,
+      p50: s.p50,
+      p75: s.p75,
+      n: s.n,
+    }))
 }

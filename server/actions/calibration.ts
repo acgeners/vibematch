@@ -11,9 +11,11 @@ import {
 } from "@/lib/ai-calibration/service"
 import {
   changedAuditWorkIdsSince,
+  loadCriterionAnchors,
   loadInputsForBias,
   loadLastRun,
   loadWorksForAudit,
+  type AuditPool,
 } from "@/server/queries/calibration"
 import {
   AUTO_APPLY_MAX_DELTA,
@@ -106,6 +108,8 @@ export interface RunAuditResult {
   nWorksScanned: number
   nSuggestions: number
   nAutoApplied: number
+  /** Obras que entrariam no escopo mas ficaram de fora por não terem digest de reviews. */
+  nSkippedNoDigest: number
   usage: RunUsageAccumulator
 }
 
@@ -137,9 +141,9 @@ export async function runCalibrationAuditAction(
   const fullScan = opts.full === true || driftOrNever
   const scope: RunAuditResult["scope"] = fullScan ? "full" : "incremental"
 
-  let works: AuditWorkInput[]
+  let pool: AuditPool
   if (fullScan) {
-    works = await loadWorksForAudit()
+    pool = await loadWorksForAudit()
   } else {
     // O MESMO conjunto que o nudge conta em `loadAuditStaleness` (score ∪ critério na pool).
     // Cadeia completa: cada run varre tudo que mudou desde o run anterior e avança `completed_at`,
@@ -151,16 +155,21 @@ export async function runCalibrationAuditAction(
     if (changedIds.length === 0) {
       // Nada mudou desde o último run — não cria run vazio.
       return {
-        data: { runId: null, scope, nWorksScanned: 0, nSuggestions: 0, nAutoApplied: 0, usage: EMPTY_USAGE },
+        data: { runId: null, scope, nWorksScanned: 0, nSuggestions: 0, nAutoApplied: 0, nSkippedNoDigest: 0, usage: EMPTY_USAGE },
       }
     }
-    works = await loadWorksForAudit({ onlyIds: changedIds })
+    pool = await loadWorksForAudit({ onlyIds: changedIds })
   }
 
+  const works = pool.works
   if (works.length === 0) {
-    // Pool vazia (full scan sem obras avaliadas) — nada a fazer, sem run.
+    // Pool vazia — ou não há obra avaliada, ou todas as que mudaram estão sem digest. O
+    // segundo caso precisa chegar na tela, senão "nada a auditar" mente sobre o motivo.
     return {
-      data: { runId: null, scope, nWorksScanned: 0, nSuggestions: 0, nAutoApplied: 0, usage: EMPTY_USAGE },
+      data: {
+        runId: null, scope, nWorksScanned: 0, nSuggestions: 0, nAutoApplied: 0,
+        nSkippedNoDigest: pool.semDigest, usage: EMPTY_USAGE,
+      },
     }
   }
 
@@ -197,8 +206,10 @@ export async function runCalibrationAuditAction(
 
     const allSuggestions: AuditSuggestionFromModel[] = []
     const apiCallIds: string[] = []
+    // Uma leitura por run, não por lote: a distribuição é a mesma pros 22 chunks.
+    const anchors = await loadCriterionAnchors()
     const results = await runWithLimit(chunks, AUDIT_PARALLEL, (group, idx) =>
-      requestCalibrationAudit(group, { runId, chunkIndex: idx }),
+      requestCalibrationAudit(group, { runId, chunkIndex: idx }, anchors),
     )
     for (const r of results) {
       allSuggestions.push(...r.suggestions)
@@ -314,6 +325,7 @@ export async function runCalibrationAuditAction(
         nWorksScanned: works.length,
         nSuggestions: nInserted,
         nAutoApplied: nAutoApplied,
+        nSkippedNoDigest: pool.semDigest,
         usage,
       },
     }

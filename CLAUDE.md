@@ -235,12 +235,12 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**97 arquivos, remedidos em 2026-08-16**):
+banco declara um dos dois (**98 arquivos, remedidos em 2026-08-16**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **44** | só LÊ ⇒ vai pro local, de graça |
-| `ALVO: NUVEM` no cabeçalho | **47** | GRAVA ⇒ tem que ir pra nuvem |
+| `ALVO: NUVEM` no cabeçalho | **48** | GRAVA ⇒ tem que ir pra nuvem |
 | (não tocam o banco) | 6 | fora da régua |
 
 🔴 **ESTES TRÊS NÚMEROS SÃO CONFERIDOS PELA SUÍTE**, e não por quem editar esta seção —
@@ -3067,16 +3067,19 @@ escala), e a outra derrubou `couple_dynamics` para 3,0 lendo `Villain Couple` + 
 personagem tóxico como se descrevessem o vínculo ENTRE os protagonistas, **contra o consenso
 das reviews**, que chamava o casal de *"match made in heaven"*.
 
-⚠️ **O auditor é MENOS informado que o avaliador que ele corrige.** O input dele
-(`AUDIT_WORK_SELECT`) tem tags, sinopse, `user_score` e os `post_*` — **zero reviews, zero
-digest** —, enquanto a avaliação original lê até 30 reviews de 8 fontes. Um juiz com menos
-evidência sobrescrevendo um com mais é o desenho, não um acidente.
+✅ **O auditor ERA menos informado que o avaliador que ele corrige** — tinha tags, sinopse,
+`user_score` e os `post_*`, e **zero reviews**, enquanto a avaliação lê até 30 de 8 fontes.
+Corrigido na v3 (ver abaixo): ele recebe o digest e as âncoras de distribuição.
 
 🔴 **As 3 auto-aplicações do último run mostram os dois vieses de uma vez:** duas subiram
 `adult_content` por tag de circunstância (`Doggy Style` → 9,0 → 10,0) — o mecanismo que a
 **migration 182 rebaixou de propósito** —, e a terceira subiu `protagonist` de 7,0 para 8,5
 justificando com *"user_score altíssimo (9.4)"*, que é a **feature sendo empurrada na direção
 do rótulo**.
+
+**A fila hoje tem 504 pendentes, não 765** — 261 foram fechadas como `superseded` pela
+varredura de `scripts/limpar-fila-calibracao.ts` (204 fora de escopo · 52 baseline morto ·
+5 score travado). Os motivos têm precedência, então não somam em paralelo.
 
 **Escopo por critério, também em `policy.ts`.** `AUDITABLE_CRITERIA` é **derivado** de
 `CRITERION_SLUGS` menos `AUDIT_OUT_OF_SCOPE` — critério novo entra como auditável sozinho, e
@@ -3093,10 +3096,52 @@ pendente. Guardado por `tests/unit/ai-calibration/politica-de-auditoria.test.ts`
 grade inteira de (confiança, Δ) em vez de conferir a constante — conferido com sonda: religar
 o auto-apply reprova.
 
-🔴 **`PROMPT_VERSION` foi pra `v2` junto, e isso tem consequência operacional:** a versão
+🔴 **`PROMPT_VERSION` sobe junto com a régua (hoje `v3`), e isso tem consequência operacional:** a versão
 entra em `calibration_runs.prompt_version` e é o que `loadLastRun` compara pra detectar drift
 ⇒ **o primeiro run depois desta mudança é uma varredura COMPLETA**. Não subir faria o rótulo
 do run mentir e o run seguinte rodar incremental sobre régua diferente.
+
+### v3: o auditor ganhou evidência e escala — e a confiança CAIU
+
+Piloto de 16/08/2026 (`scripts/pilot-audit.ts`, 30 obras, **US$0,1778 medidos em
+`ai_api_calls`**), depois de o prompt passar a receber o **digest das reviews** e as
+**âncoras de distribuição** do catálogo:
+
+| | v2 (sem evidência) | **v3 (com digest + âncoras)** |
+|---|---|---|
+| confiança máxima | 0,85 | **0,65** |
+| mediana | 0,60 | 0,55 |
+| sugestões ≥ 0,80 | 6 de 765 | **0 de 38** |
+| justificativas citando o consenso | — | **30 de 38** |
+
+🔴 **Dar evidência ao modelo o deixou MENOS confiante, não mais — e isso encerra a questão
+do auto-apply.** Não é regressão: com o consenso das reviews na frente, ele para de afirmar
+a partir de tag. Mas significa que o gate de 0,8 não é alcançável **nem no melhor cenário
+construído pra alcançá-lo**. A auditoria é, por medição, uma fila revisada por humano — e a
+"confiança" do modelo não é sinal utilizável pra automatizar escrita neste desenho.
+
+⚠️ **O que MELHOROU não é contável, é lido.** As justificativas passaram de inferência a
+partir de tag para citação verificável: *"Reviews destacam 'tom geral leve, evitando drama
+pesado'"* sobre um `drama` 5,0 → 3,5. Isso é falsificável abrindo a obra — a régua antiga
+("Tags indicam 'Villain Couple'…") não era.
+
+⚠️ **`drama` (12) e `tragedy` (8) concentram 53% das sugestões**, e são justo os dois com
+viés positivo medido na fila anterior (+1,03 e +1,72). O sinal é consistente entre as duas
+versões do prompt, o que é evidência a favor de ele ser real.
+
+**Duas escolhas de desenho, as duas medidas:**
+
+- 🔴 **Digest, não review crua.** As reviews da pool somam **20.023 chars por obra** (94k no
+  pior caso) — no lote de 10 seriam ~50k tokens por chamada, forçando lote de 1–2. O digest
+  cabe em **2.406** e é o mesmo consenso, já destilado. Custo real do run completo,
+  extrapolado do piloto: **~US$1,16** para as 196 obras.
+- 🔴 **Obra sem digest fica FORA do run** (`temEvidenciaParaAuditar`, em `policy.ts`). São
+  **16 de 212**. Auditar sem o consenso é reproduzir o juiz cego que errou as duas de 85%.
+  Elas não somem caladas: `nSkippedNoDigest` sobe até o resumo do run.
+
+⚠️ **As âncoras vão no USER prompt, nunca no system** — o system tem `cache_control`, e a
+distribuição muda a cada recalibração do catálogo. No system, ela invalidaria o cache a cada
+run.
 
 ### A nota calibrada agora diz que é calibrada — e a prosa segue o número
 
@@ -3861,9 +3906,9 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.119 passando (+24 pulados) em 299 arquivos** (294 passando + 5 pulados);
-medido em 2026-08-16 depois de desligar o auto-apply da auditoria (2 arquivos novos:
-`ai-calibration/politica-de-auditoria` com 9 casos e `criteria/band-coherence` com 22), com
+`npm run test` → **3.125 passando (+24 pulados) em 299 arquivos** (294 passando + 5 pulados);
+medido em 2026-08-16 depois da v3 da auditoria (+6 casos em
+`ai-calibration/politica-de-auditoria`, que foi de 9 para 15), com
 `find tests -name '*.test.ts*'` = 299 conferido contra os 299 executados.
 ⚠️ Esta rodada precisou de `--maxWorkers=4`: com o pool default duas rodadas cheias
 acusaram **1 falha cada, em arquivos DIFERENTES** (`recalibrar-limpa-recalc-pendente` e
