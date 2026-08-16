@@ -235,13 +235,13 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**98 arquivos, remedidos em 2026-08-16**):
+banco declara um dos dois (**99 arquivos, remedidos em 2026-08-16**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **44** | só LÊ ⇒ vai pro local, de graça |
 | `ALVO: NUVEM` no cabeçalho | **48** | GRAVA ⇒ tem que ir pra nuvem |
-| (não tocam o banco) | 6 | fora da régua |
+| (não tocam o banco) | 7 | fora da régua |
 
 🔴 **ESTES TRÊS NÚMEROS SÃO CONFERIDOS PELA SUÍTE**, e não por quem editar esta seção —
 `scripts-apontam-pro-local.test.ts` lê a tabela daqui e a compara com a varredura real. É a
@@ -3339,6 +3339,58 @@ oposto. Só sobrevive a checagem **estrutural**: extrair `Faixa X-Y` da prosa e 
 `bandForScore`. ⚠️ **Sempre rode `--sample` e conte falso positivo antes de usar qualquer
 número deste script numa decisão.**
 
+## O dicionário dos atributos: a rubrica finalmente tem uma TELA
+
+`/guide/attributes` (2026-08-16). A régua que decide o que "romance 7,5" quer dizer existia em
+DOIS lugares e nenhum era interface: a tabela `criteria` no Supabase e o prompt da avaliação.
+Na tela só apareciam pedaços — a página da obra mostra a faixa **daquela** obra, o formulário
+pós-leitura mostra a da nota que você arrasta, e `/preferences` mostra a `description` sem as
+faixas. Quem quisesse a diferença entre 6 e 8 em drama não tinha onde ler.
+
+🔴 **Tudo DERIVA de `CRITERIA_INFO` + `CRITERIA_RUBRICS`** (`lib/criteria/glossary.ts`), e isso
+não é preciosismo: a página existe para responder o que o MODELO leu ao pontuar. Uma cópia em
+prosa envelheceria em silêncio e a página passaria a ensinar uma régua que não está em vigor —
+pior que não existir. Mesma família do `CRITERIA_SCALE_LEGEND` dos prompts de ranking.
+
+⚠️ **As 5 ressalvas de uso são escritas à mão, e ficam FORA do banco de propósito**
+(`lib/criteria/glossary-notes.ts`): o texto de `criteria.ranges` vai para o PROMPT, então cada
+linha nova ali muda a régua da IA e obriga a subir `PROMPT_VERSION`. Explicação para humano não
+pode custar uma reavaliação do catálogo. O teste reprova nota cujo slug não exista.
+
+⚠️ **A cobertura impressa ("cobre 7,0–8,9") sai de `bandBarBounds`, nunca do rótulo.** O rótulo
+"7-8" não cobre 8,5 e o BIN cobre; imprimir o rótulo cru faria a página contradizer a nota que a
+obra exibe — que é justamente o mal-entendido que ela existe para desfazer.
+
+🔴 **Três defeitos que só apareceram no APP, e que um mockup não tem como reproduzir:**
+
+| o que | por quê |
+|---|---|
+| o índice marcava o ÚLTIMO verbete em qualquer posição | o `AppShell` põe `overflow: hidden` no body e quem rola é um **div interno** — `window.scrollY` fica preso em 0 e a condição de fim-de-página é sempre verdadeira |
+| o índice nascia **cortado pela metade** | o `<header>` gruda em `top: 0` com `z-40`; o índice em `top-0` fica embaixo dele. Hoje `top-[57px]` = `h-14` + 1px de borda |
+| o índice marcava o verbete ANTERIOR ao clicado | a linha de leitura do spy era 30% da janela (300px) e a barra mede 288px: o alvo parava a 304px e ainda não tinha cruzado. Ela sai da BORDA da barra |
+
+⚠️ **As artes vêm de `Imagens/Atributos/Fundo Branco` e essa pasta MENTE no nome:** as nove
+trazem o xadrez de transparência **rasterizado** (dois cinzas neutros, rgb 253 e 246 — 2,7% de
+diferença, invisível num pixel e evidente em bloco). `scripts/preparar-artes-atributos.mjs` limpa
+o xadrez, tira o fundo por preenchimento **a partir da borda** (só o que liga ao exterior; os
+brancos internos — dentes do emoji, brilhos das gemas — ficam) e recupera o alfa com curva
+γ=1,8, sem a qual o glow quase-branco volta como **névoa cinza** sobre o fundo escuro. Saída em
+WebP q85, três tamanhos: **13.342 KB → 471 KB** em 27 arquivos.
+
+🔴 **A ENTRADA não está no git** (`Imagens/` está no `.gitignore` e no `.dockerignore`) e a SAÍDA
+está (`public/attributes/`, 528 KB). Num clone novo o script falha por falta da pasta — o certo,
+mas significa que **se as artes originais de 1254² se perderem, o que resta são os WebP de 480px**.
+
+⚠️ **Nada disso roda em runtime.** Com `output: "standalone"` o otimizador de imagem do Next roda
+no servidor do Fly, e estas artes são imutáveis: pagar CPU por elas a cada request seria trocar
+400 KB de disco por latência permanente. Por isso `<img>` cru, não `next/image`.
+
+Guardado por `tests/unit/guide/dicionario-de-atributos.test.ts`, que **deriva de
+`CRITERION_SLUGS`** (critério novo no Supabase entra na página sozinho, ou reprova) e foi
+conferido com **5 sondas**. Uma delas pegou um caso fraco: a versão inicial checava só que a
+cobertura impressa CAI na faixa, e "0,0–3" também cai — passava verde escondendo o meio ponto.
+Hoje o limite é testado pelos dois lados.
+
 ## Quem escreve prosa sobre uma obra precisa saber o que os números dela QUEREM DIZER
 
 Ranking e Deep Dive recebem `category_scores: tragedy=6.0, couple_dynamics=8.0, …` como números
@@ -3906,10 +3958,10 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.125 passando (+24 pulados) em 299 arquivos** (294 passando + 5 pulados);
-medido em 2026-08-16 depois da v3 da auditoria (+6 casos em
-`ai-calibration/politica-de-auditoria`, que foi de 9 para 15), com
-`find tests -name '*.test.ts*'` = 299 conferido contra os 299 executados.
+`npm run test` → **3.148 passando (+24 pulados) em 300 arquivos** (295 passando + 5 pulados);
+medido em 2026-08-16 depois do dicionário dos atributos (+23 casos em
+`guide/dicionario-de-atributos`), com `find tests -name '*.test.ts*'` = 300 conferido contra
+os 300 executados. Antes: **3.125 em 299** (v3 da auditoria).
 ⚠️ Esta rodada precisou de `--maxWorkers=4`: com o pool default duas rodadas cheias
 acusaram **1 falha cada, em arquivos DIFERENTES** (`recalibrar-limpa-recalc-pendente` e
 `ranking-status-exclusao`), os dois passando isolados e com a árvore limpa — é a flakiness
