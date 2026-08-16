@@ -42,7 +42,7 @@ export function BatchCreatedNavigator({ currentId }: BatchCreatedNavigatorProps)
     const params = new URLSearchParams()
     params.set("batch", JSON.stringify(batch))
     params.set("batchIndex", String(index))
-    router.push(`/titles/${titleToSlug(nextItem.title)}?${params.toString()}`)
+    router.push(`/catalog/${titleToSlug(nextItem.title)}?${params.toString()}`)
   }
 
   return (

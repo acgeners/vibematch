@@ -139,7 +139,7 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
 
   // Métrica PRINCIPAL honesta (F4): prospectiva > CV/OOF > indisponível. Nunca
   // a in-sample. A prospectiva (prediction_ledger) ainda não é alimentada aqui
-  // — vive na página técnica /admin/model-metrics; aqui a principal é a CV/OOF.
+  // — vive na página técnica /curation/model-metrics; aqui a principal é a CV/OOF.
   const primaryMetric = selectPrimaryModelMetric(metrics)
   const metricCopy = describeMetricSource(primaryMetric.source)
   const primaryMae = primaryMetric.mae
@@ -326,7 +326,7 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
             O ajuste <span className="font-medium text-muted-foreground">Pesos automáticos</span> agora
             fica em{" "}
             <Link
-              href="/settings?g=avancado#card-on-create"
+              href="/curation/settings?g=avancado#card-on-create"
               className="font-medium text-foreground underline-offset-2 hover:underline"
             >
               Comportamento na criação
@@ -539,7 +539,7 @@ function toneClasses(tone: "primary" | "muted" | "personal" | "neutral"): string
  * mapa do painel de Calibração"). Duas cópias do nome da MESMA feature é a armadilha do
  * `LOW_BALANCE_USD`: em 2026-08-13 `SinopseScore` foi renomeado de "Qualidade da sinopse"
  * para "Interesse na obra" (o valor vem de `synopsis_quality`, o ♥ do Interesse), e sem
- * este import esta tela continuaria com o nome velho enquanto a `/conta/perfil` mostrava o
+ * este import esta tela continuaria com o nome velho enquanto a `/account/taste-profile` mostrava o
  * novo — duas telas discordando sobre a mesma linha do modelo.
  */
 

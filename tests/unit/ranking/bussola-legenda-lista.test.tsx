@@ -83,7 +83,7 @@ describe("BussolaPlane — tooltip: Nota Prevista no topo", () => {
     expect(notaDe(semFaixas.container, "8,4").className).toContain(getScoreTextColor(8.4, undefined))
     semFaixas.unmount()
 
-    // As faixas de /preferencias mudam o tier da MESMA nota — se a prop fosse
+    // As faixas de /preferences mudam o tier da MESMA nota — se a prop fosse
     // ignorada, a cor ficaria parada no fallback fixo e ninguém perceberia.
     const faixas = { p_top: 8.0, p_high: 7.0, p_mid: 6.0, p_low: 5.0 }
     const comFaixas = render(<BussolaPlane entries={OBRAS} thresholds={faixas} />)

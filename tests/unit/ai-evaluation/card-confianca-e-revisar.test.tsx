@@ -25,7 +25,7 @@ import { render, screen } from "@testing-library/react"
 import { AiEvaluationPanel } from "@/components/ai-evaluation/ai-evaluation-panel"
 
 /**
- * Dois defeitos MEDIDOS no `/ai-evaluation` em 2026-08-14, os dois invisíveis a
+ * Dois defeitos MEDIDOS no `/curation/works` em 2026-08-14, os dois invisíveis a
  * `tsc` e à suíte inteira:
  *
  * 🔴 **A confiança sumiu do card** no commit `73a9510`, quando as ações viraram

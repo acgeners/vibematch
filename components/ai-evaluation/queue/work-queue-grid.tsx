@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
 
 /**
- * Grid padrão das filas de /ai-evaluation. `dense` (Untracked, sem ação por
+ * Grid padrão das filas de /curation/works. `dense` (Untracked, sem ação por
  * card) adensa as colunas em telas largas; o default é 2 colunas.
  */
 export function WorkQueueGrid({ dense, children }: { dense?: boolean; children: ReactNode }) {

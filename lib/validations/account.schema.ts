@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { isValidAvatarUrl } from "@/lib/avatar/url"
 
-// Campos do perfil editável em /conta. Todos são strings no form (inputs de
+// Campos do perfil editável em /account. Todos são strings no form (inputs de
 // texto): vazio é permitido; quando preenchido, email/URL precisam ser válidos.
 // A conversão "" → null (pra não gravar "" no banco) é feita no server action.
 export const accountProfileSchema = z.object({

@@ -11,7 +11,7 @@ import { join } from "node:path"
  * um pelo outro não quebra build, não quebra tipo, não gera erro em runtime e não aparece em
  * review: a página renderiza normalmente, só que com o dado de outra pessoa. Foi assim que o
  * visitante anônimo passou a ver a Nota Prevista, os favoritos, o status de leitura e os
- * capítulos lidos do dono como se fossem a avaliação do acervo — e o /ranking e o /titles
+ * capítulos lidos do dono como se fossem a avaliação do acervo — e o /ranking e o /catalog
  * ordenam por `expected_score` por padrão, então era a ordem do catálogo inteiro que vinha
  * daí. Um erro que produz resultado, que é a classe mais cara deste projeto.
  */
@@ -57,7 +57,7 @@ describe("arquitetura: leitores per-usuário não caem no dono quando não há s
    * mas DENTRO do ramo do anônimo devolvia `userId: await getOwnerUserId()`, com um comentário
    * dizendo que era "só para satisfazer o tipo". Não era: `resolvePersonalFilterIds` filtrava
    * `user_work_state` por esse campo e `getFavoritesSummary` o usava como chave de cache, então
-   * um visitante sem conta via em `/leitura` a lista das obras que o dono acompanha.
+   * um visitante sem conta via em `/reading` a lista das obras que o dono acompanha.
    *
    * `getCurrentUserId` não estava envolvido — o id do dono entrou por uma função diferente e
    * legítima em outros contextos. Por isso a regra aqui é sobre o RESULTADO do ramo, não sobre
@@ -125,7 +125,7 @@ const JUSTIFICADOS: Record<string, string> = {
   "server/queries/tag-preferences.ts":
     "getTagPreferenceRows aceita userIdOverride (recalc per-user usa); consumo na página da obra medido junto com o taste_profile, sem vazamento",
   "server/queries/attribute-bias.ts":
-    "getAttributeBiasOverview só renderiza em /settings (console), gateada no middleware",
+    "getAttributeBiasOverview só renderiza em /curation/settings (console), gateada no middleware",
   "server/queries/calibration-guards.ts": "métricas do modelo: rota de console, gateada no middleware",
 }
 

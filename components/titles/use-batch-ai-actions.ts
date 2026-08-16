@@ -17,7 +17,7 @@ import {
  * As DUAS ações de IA em lote que agem sobre uma seleção de obras — Veredito IA
  * e Prever Interesse — num lugar só.
  *
- * Elas nasceram dentro das filas de `/fila-recomendacao` (`stale-rerank-panel`,
+ * Elas nasceram dentro das filas de `/my-ai-scores` (`stale-rerank-panel`,
  * `synopsis-predict-panel`) e agora também saem da seleção do /ranking. Cada
  * uma carrega detalhes que não sobrevivem a uma segunda cópia:
  *

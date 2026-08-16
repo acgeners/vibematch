@@ -94,7 +94,7 @@ export async function deepDiveWorkAction(
       }
     }
 
-    revalidatePath(`/titles/${workId}`)
+    revalidatePath(`/catalog/${workId}`)
 
     return {
       data: {

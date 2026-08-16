@@ -6,7 +6,7 @@ import { sanitizeAvatarConfig } from "@/lib/avatar/url"
  *
  * A imagem é DERIVADA da URL, e é isso que dispensa Storage, coluna nova e um arquivo
  * por usuário: `user_settings.avatar_url` guarda `/avatar.svg?estilo=…&cabelo=…`, e
- * todo consumidor (`components/layout/account-chip.tsx`, o card de /conta, qualquer
+ * todo consumidor (`components/layout/account-chip.tsx`, o card de /account, qualquer
  * `<img>` futuro) continua recebendo uma URL comum.
  *
  * ⚠️ O nome do diretório é literalmente `avatar.svg`, e não é estética. O matcher do

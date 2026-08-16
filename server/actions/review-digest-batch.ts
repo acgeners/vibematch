@@ -22,7 +22,7 @@ export interface DigestBatchProgress {
  * Gera o digest de uma seleção de obras — o lote da aba "Digests".
  *
  * 🔴 **Passa por `ensureReviewDigest`, e isso é o ponto.** O lote anterior
- * (`consolidatePendingReviewDigests`, no /settings) chamava o consolidador DIRETO:
+ * (`consolidatePendingReviewDigests`, no /curation/settings) chamava o consolidador DIRETO:
  * tinha corpus próprio (só `work_reviews`, ignorando as reviews manuais externas
  * que o caminho por obra inclui), nenhum gate de readiness e nenhuma dedup de job.
  * Eram dois caminhos para o mesmo artefato, divergindo em silêncio — e o piso de
@@ -83,6 +83,6 @@ export async function generateDigestsForWorks(
     }
   }
 
-  if (progress.generated > 0) revalidatePath("/ai-evaluation")
+  if (progress.generated > 0) revalidatePath("/curation/works")
   return { data: progress }
 }

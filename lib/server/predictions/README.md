@@ -23,7 +23,7 @@ não devem ser misturadas; não criar uma terceira sem revisitar este doc.
 - **Métricas puras**: `lib/metrics/prediction-metrics.ts` (por obra × por snapshot,
   baselines, cobertura) e `lib/metrics/ranking-metrics.ts` (Spearman/Kendall/
   pairwise/NDCG/Precision/regret, por `ranking_snapshot_id`).
-- **Leitura/painel**: `server/queries/prediction-metrics.ts` → `/admin/model-metrics`
+- **Leitura/painel**: `server/queries/prediction-metrics.ts` → `/curation/model-metrics`
   (usa **apenas** `prediction_snapshots`).
 
 ## Regra de deduplicação (`dedup_key`)

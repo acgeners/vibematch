@@ -242,7 +242,7 @@ export async function maybeTriggerStaleRecalc(): Promise<RecalcPendingState> {
  * "Recalcular agora" — recálculo completo AGUARDADO via orquestração (job global
  * free, deduplicado: duplo-clique/callers concorrentes ⇒ uma execução). Limpa o
  * flag pendente (recalculateAll zera ao persistir o formula_config). recalculateAll
- * já revalida /ranking, /titles, /settings e / por dentro. Devolve estado tipado.
+ * já revalida /ranking, /catalog, /curation/settings e / por dentro. Devolve estado tipado.
  */
 export async function triggerRecalcNow() {
   // "Recalcular agora" reescreve calculated_scores (compartilhado) → gate de admin.

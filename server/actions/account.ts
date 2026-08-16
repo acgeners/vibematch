@@ -69,7 +69,7 @@ export async function updateProfile(
     return { error: err instanceof Error ? err.message : "Erro ao salvar perfil." }
   }
 
-  revalidatePath("/conta")
+  revalidatePath("/account")
   revalidatePath("/") // saudação + avatar no Header do dashboard
   return {}
 }
@@ -119,7 +119,7 @@ export async function uploadAvatar(
       .eq("id", id)
     if (updErr) return { error: updErr.message }
 
-    revalidatePath("/conta")
+    revalidatePath("/account")
     revalidatePath("/") // avatar no Header do dashboard
     return { url }
   } catch (err) {
@@ -131,7 +131,7 @@ export async function uploadAvatar(
 //
 // Elas gravavam `user_settings.user_plan` — coluna que virou LEGADO: o acesso agora sai
 // de `role`, e `getCurrentPlan()` o DERIVA. Ou seja, depois da 140 os botões "Cancelar /
-// Reativar plano" do /conta viraram no-ops silenciosos: mudavam uma coluna que ninguém
+// Reativar plano" do /account viraram no-ops silenciosos: mudavam uma coluna que ninguém
 // mais lê. Um botão que finge funcionar é pior que um botão morto.
 //
 // Não há billing. Enquanto não houver, papel se atribui no banco:
@@ -203,7 +203,7 @@ export async function setAnthropicBalance(amountUsd: number): Promise<{ error?: 
     return { error: err instanceof Error ? err.message : "Erro ao salvar saldo." }
   }
 
-  revalidatePath("/ai-usage")
+  revalidatePath("/curation/ai-usage")
   return {}
 }
 

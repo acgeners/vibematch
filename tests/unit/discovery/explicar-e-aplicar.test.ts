@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
 /**
- * Invariantes de "Explicar" / "Aplicar ao catálogo" (`/descobrir`, Fase 2).
+ * Invariantes de "Explicar" / "Aplicar ao catálogo" (`/discover`, Fase 2).
  *
  * Teste de ARQUITETURA (lê o source) porque as três coisas guardadas aqui não quebram
  * build nem runtime — elas produzem gravação errada, silenciosa, no Veredito que TODAS as

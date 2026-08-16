@@ -163,7 +163,7 @@ export function SuggestionRow({
             <div className="flex items-center gap-2">
               <WorkTitleHover
                 title={suggestion.work_title}
-                href={`/titles/${titleToSlug(suggestion.work_title)}`}
+                href={`/catalog/${titleToSlug(suggestion.work_title)}`}
                 coverUrl={suggestion.work_cover_url}
                 userScore={suggestion.work_user_score}
                 isFavorite={suggestion.work_is_favorite}

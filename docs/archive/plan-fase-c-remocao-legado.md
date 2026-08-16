@@ -99,7 +99,7 @@ Campos TS / símbolos: `predictedScore`, `finalScore`, `knnScore`, `predictionDi
   expected) e os grupos novos.
 
 ### 3. App pages — listas de coluna
-- **`app/ranking/page.tsx`**, **`app/favorites/page.tsx`**, **`app/titles/page.tsx`**: remover
+- **`app/ranking/page.tsx`**, **`app/favorites/page.tsx`**, **`app/catalog/page.tsx`**: remover
   `"knn_score"` (e quaisquer `final_score`/`predicted_score`) das listas de colunas default.
 
 ### 4. Actions
@@ -163,11 +163,11 @@ Criar `supabase/migrations/NNN_drop_legacy_score_columns.sql`:
 - `npx tsc --noEmit` limpo.
 - `npx eslint .` sem `no-unused-vars` novos.
 - `npx vitest run` (ajustar/remover testes dos lib deletados).
-- **Recalcular** pelo painel `/settings/calibration` e conferir: headline da Nota Prevista
+- **Recalcular** pelo painel `/curation/settings/calibration` e conferir: headline da Nota Prevista
   segue ~0.58; ranking ordena por `expected_score`; nenhuma coluna "Nota.Final/Nota.Pr/knn"
   sobrando; tela de detalhe sem o "Pipeline legado".
-- Abrir no navegador: `/`, `/ranking`, `/titles`, `/titles/[id]`, `/favorites`,
-  `/settings/calibration` — sem erro de render.
+- Abrir no navegador: `/`, `/ranking`, `/catalog`, `/catalog/[id]`, `/favorites`,
+  `/curation/settings/calibration` — sem erro de render.
 
 ## Gotchas
 - **`mapper.ts`/`normalizer.ts`/`criteria.ts` são GERADOS** — não hand-editar; ver seção

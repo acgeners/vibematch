@@ -537,7 +537,7 @@ export interface AlignmentQueueWork {
 }
 
 /**
- * Fila de Veredito IA pra aba /fila-recomendacao?tab=ia-rk. Dois estados:
+ * Fila de Veredito IA pra aba /my-ai-scores?tab=ia-rk. Dois estados:
  *   - "stale": tem alignment_score mas alignment_stale=true (re-rank velho)
  *   - "unranked": ainda não tem alignment_score (nunca passou pelo re-rank)
  * Filtra por status (publicação/leitura) em SQL e por estado em JS. Sort é no
@@ -654,7 +654,7 @@ export interface UntrackedWork extends HiatusFields {
 
 /**
  * Obras com personal_status = "Untracked" (id 10 — sem status de leitura ativo),
- * pra a aba /fila-recomendacao?tab=untracked, onde se atribui um status em lote.
+ * pra a aba /my-ai-scores?tab=untracked, onde se atribui um status em lote.
  * Filtra por publicação + Interesse na sinopse em SQL (o filtro de Leitura não se
  * aplica: todas são Untracked). Espelha `getAlignmentQueueWorks`.
  */
@@ -748,7 +748,7 @@ export async function getStaleAlignmentCandidates(limit = 200): Promise<Favorite
 
 /**
  * IDs marcados como "lidos" na fila `veredito` (silenciados sem resolver, via
- * "Marcar como lido" em /ai-evaluation). Escopo só nesta fila — mais barato que
+ * "Marcar como lido" em /curation/works). Escopo só nesta fila — mais barato que
  * `getReadAckSets` (que lê todas). Tolera a tabela ausente (migration 125 não
  * aplicada): nada lido. Inline aqui de propósito — importar de `ai-eval-read.ts`
  * criaria import circular (ele já importa deste módulo).
@@ -785,7 +785,7 @@ async function getVeredictoReadAckIds(): Promise<Set<string>> {
  * link/badge da fila no header do ranking só quando há o que processar.
  */
 export async function countStaleAlignmentWorks(): Promise<number> {
-  // Mesma definição da fila /fila-recomendacao?tab=ia-rk: view works_owner, exclui
+  // Mesma definição da fila /my-ai-scores?tab=ia-rk: view works_owner, exclui
   // arquivadas e ai_eval_status="skipped", E subtrai as obras marcadas como lidas
   // na fila `veredito` — como faz o contador da aba (page.tsx: `!ackVer.has(id)`) e
   // o badge da sidebar. Sem isto, marcar um veredito como lido sumia do badge lateral
@@ -844,7 +844,7 @@ export interface SynopsisQueueWork {
 }
 
 /**
- * Fila da aba /fila-recomendacao?tab=sinopse: obras com `canonical_synopsis` que
+ * Fila da aba /my-ai-scores?tab=sinopse: obras com `canonical_synopsis` que
  * precisam de estimativa de Interesse Sinopse. Três estados (espelha a fila de
  * Veredito IA):
  *   - "stale": já têm previsão mas marcada desatualizada (perfil/sinopse mudou)

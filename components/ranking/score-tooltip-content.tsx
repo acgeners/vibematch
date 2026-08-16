@@ -9,7 +9,7 @@
  *
  * ⚠️ **Uma linha do Alinhamento é condicional ao DADO, e isso não quebra a fonte
  * única.** O nº de tags (e a ressalva que depende dele) só sai onde `tagCount`
- * chega: página da obra, /titles e o heatmap. O /ranking não embute `work_tags` no
+ * chega: página da obra, /catalog e o heatmap. O /ranking não embute `work_tags` no
  * payload de propósito — corte de egress —, então lá a linha some. É a MESMA função
  * decidindo com menos entrada, não um segundo texto escrito à parte; se um dia
  * alguém redigir a explicação de novo no consumidor, aí sim vira a família "dois
@@ -99,7 +99,7 @@ export function AlignmentTooltipContent({
   // quando não há percentil, e as duas escalas não são comparáveis: o `personal_fit` cru
   // tem teto ~0,55 (é a razão de o percentil existir), então "< 30" corta perto da MEDIANA
   // lá e perto do fundo aqui. Aplicar o mesmo número às duas é a família "dois critérios
-  // pro mesmo fato" — a mesma que o percentil do /descobrir já cobrou. Sem percentil a
+  // pro mesmo fato" — a mesma que o percentil do /discover já cobrou. Sem percentil a
   // ressalva não sai; o nº de tags continua saindo, que é o fato bruto e não depende de
   // régua nenhuma.
   const sparse =

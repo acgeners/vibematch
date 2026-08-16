@@ -33,7 +33,7 @@ Por que vale separar do Shortlist:
 ## Arquitetura
 
 ```
-User clica "Deep Dive" em /titles/[id]
+User clica "Deep Dive" em /catalog/[id]
    │
    ▼
 [server action] deepDiveWork(workId, userContext?)
@@ -68,7 +68,7 @@ User clica "Deep Dive" em /titles/[id]
    - created_at
    │
    ▼
-[UI] revalidatePath(`/titles/{workId}`)
+[UI] revalidatePath(`/catalog/{workId}`)
      Modal/Drawer renderiza payload
 ```
 
@@ -182,7 +182,7 @@ User clica "Deep Dive" em /titles/[id]
 
 | Arquivo | Mudança |
 |---|---|
-| `app/titles/[id]/page.tsx` | Adicionar `<DeepDiveButton workId={work.id} />` e carregar último deep dive existente |
+| `app/catalog/[id]/page.tsx` | Adicionar `<DeepDiveButton workId={work.id} />` e carregar último deep dive existente |
 | `lib/ai-recommendation/types.ts` | Tipos `DeepDiveResult`, `DeepDivePayload` |
 | `types/domain.ts` | (opcional) Re-export do `DeepDiveResult` |
 
@@ -226,7 +226,7 @@ ALTER TABLE deep_dive_results ENABLE ROW LEVEL SECURITY;
 
 ## UI — Design
 
-### Botão CTA em `/titles/[id]`
+### Botão CTA em `/catalog/[id]`
 
 Posicionamento: header da página, ao lado do botão "Avaliar IA" ou
 abaixo do `expected_score`. Visual: secondary button com ícone Sparkles.
@@ -293,9 +293,9 @@ recommendation acionável).
 
 ## Decisões abertas (resolver antes de implementar)
 
-1. **Onde colocar o botão**: header de `/titles/[id]` ou inline com `expected_score`?
+1. **Onde colocar o botão**: header de `/catalog/[id]` ou inline com `expected_score`?
 2. **Modal vs drawer vs página dedicada**: drawer parece melhor (não bloqueia leitura
-   do resto da página), mas modal pode ser mais imersivo. Página dedicada (`/titles/[id]/deep-dive`)
+   do resto da página), mas modal pode ser mais imersivo. Página dedicada (`/catalog/[id]/deep-dive`)
    permite link direto.
 3. **Histórico de dives**: cap em quantos guardar? (proposta: últimos 10 por obra)
 4. **Re-uso entre Deep Dive e Smart Shortlist**: quando user pede shortlist após
@@ -321,7 +321,7 @@ psql ... -f supabase/migrations/071_deep_dive_results.sql
 npx vitest run tests/unit/ai-recommendation/deep-dive.test.ts
 
 # 3. Smoke test manual
-# - Abrir /titles/<id-de-obra-lida>
+# - Abrir /catalog/<id-de-obra-lida>
 # - Clicar "Consultor IA — Deep Dive"
 # - Preencher mood: "quero algo curto pra fim de semana"
 # - Confirmar análise gerada (15-30s)

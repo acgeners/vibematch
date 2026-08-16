@@ -191,7 +191,7 @@ export interface ExternalWorkData {
   /**
    * Metadata da avaliação IA usada pra popular criteriaScores/Justifications.
    * Plumbada até works.ts pra preencher ai_evaluations.input_hash, permitindo
-   * cache hit no Path A (página /ai-evaluation) do mesmo título.
+   * cache hit no Path A (página /curation/works) do mesmo título.
    */
   aiMeta?: {
     inputHash: string

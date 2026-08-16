@@ -1,20 +1,20 @@
 import { Suspense } from "react"
 import { notFound } from "next/navigation"
 import type { ReactNode } from "react"
-import { SETTINGS_GROUPS, DEFAULT_GROUP_ID } from "@/app/settings/sections"
+import { SETTINGS_GROUPS, DEFAULT_GROUP_ID } from "@/app/curation/settings/sections"
 import { ConsoleNav, ConsoleMobileNav } from "@/components/curadoria/console-nav"
 import type { ConsoleSettingsGroup } from "@/components/curadoria/console-nav"
 import { isCurrentUserAdmin } from "@/server/queries/current-user"
 
 /**
- * A shell da console `/curadoria` — o layout compartilhado das rotas do Curador
- * (`/curadoria`, `/ai-evaluation`, `/settings`, `/ai-usage`, `/admin/model-metrics`).
+ * A shell da console `/curation` — o layout compartilhado das rotas do Curador
+ * (`/curation`, `/curation/works`, `/curation/settings`, `/curation/ai-usage`, `/curation/model-metrics`).
  *
  * ## O gate aqui é a SEGUNDA linha — a primeira está no proxy
  *
  * Quem barra de verdade é `middleware.ts`, que roda ANTES de qualquer renderização.
  * Um `notFound()` só aqui não basta: o Next renderiza layout e página em PARALELO, e
- * o `notFound()` chega depois de o stream ter começado — medido em dev, `GET /settings`
+ * o `notFound()` chega depois de o stream ter começado — medido em dev, `GET /curation/settings`
  * anônimo devolvia **200** com o HTML da página protegida no corpo. Status errado e
  * vazamento do markup que se queria esconder.
  *
@@ -28,7 +28,7 @@ import { isCurrentUserAdmin } from "@/server/queries/current-user"
  * curadoria não é informação que um leitor precise ter.
  *
  * ⚠️ Isto gateia APENAS estas rotas. A matriz de acesso do app inteiro (`/import`,
- * `/painel`, `/conta`…) continua em aberto — ver o plano do redesenho de navegação.
+ * `/dashboard`, `/account`…) continua em aberto — ver o plano do redesenho de navegação.
  *
  * ⚠️ `isCurrentUserAdmin()` e não `getCurrentRole() === "curador"`: é o MESMO predicado
  * do `useIsAdmin()` que decide mostrar o ícone 🛠 na barra — se os dois divergissem,
@@ -48,7 +48,7 @@ export async function CuradoriaConsole({ children }: { children: ReactNode }) {
 
   // Os `md:-m-7` cancelam o padding do <main> pra a sidebar encostar na borda e
   // ocupar a altura toda; o conteúdo reganha o padding. Mesmo truque que o layout
-  // de /settings usava antes de delegar pra cá.
+  // de /curation/settings usava antes de delegar pra cá.
   return (
     <div className="md:-mx-7 md:-my-7 md:flex md:min-h-dvh md:items-stretch">
       <Suspense>

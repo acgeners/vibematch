@@ -67,9 +67,9 @@ interface NavLink {
  * transbordava por cima dos vizinhos sem que nada acusasse.
  */
 const NAV: NavLink[] = [
-  { href: "/leitura", label: "Acompanhamento", requiresSignedIn: true },
+  { href: "/reading", label: "Acompanhamento", requiresSignedIn: true },
   { href: "/favorites", label: "Favoritos", requiresSignedIn: true },
-  { href: "/titles", label: "Catálogo" },
+  { href: "/catalog", label: "Catálogo" },
   { href: "/ranking", label: "Ranking", requiresSignedIn: true },
   { href: "/recommendations", label: "Recomendações", requiresSignedIn: true },
 ]

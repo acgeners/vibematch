@@ -9,7 +9,7 @@ testes unitários sem um arranhão.
 ```bash
 npm run dev                                     # precisa do app em pé (:3001)
 node scripts/e2e/verify-fatia1.mjs              # acompanhamento: favorito, status, capítulo
-node scripts/e2e/verify-reads.mjs               # /leitura, /favoritos, home — cada um vê o seu
+node scripts/e2e/verify-reads.mjs               # /reading, /favoritos, home — cada um vê o seu
 node scripts/e2e/verify-fatia2a.mjs             # nota, ♥, anotações, pós-leitura
 node scripts/e2e/verify-writers.mjs             # o espelho não apodrece (882 obras, 0 divergências)
 node scripts/e2e/verify-2b-reads.mjs            # a Nota Prevista do dono não vaza

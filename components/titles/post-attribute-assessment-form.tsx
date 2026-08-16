@@ -186,7 +186,7 @@ export function PostAttributeAssessmentForm({
               calibrar como você viu os atributos depois de ler.
             </p>
             <Button asChild variant="outline" size="sm">
-              <Link href={`/ai-evaluation?work=${workId}`}>
+              <Link href={`/curation/works?work=${workId}`}>
                 <Sparkles className="h-4 w-4" />
                 Avaliar com IA
               </Link>

@@ -779,9 +779,9 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   // missing"). O recálculo em si — escritas + limpeza de recalc_pending — já
   // ocorreu acima; o cache do app revalida no próximo page-load/gatilho normal.
   if (!headless) {
-    revalidatePath("/titles")
+    revalidatePath("/catalog")
     revalidatePath("/ranking")
-    revalidatePath("/settings")
+    revalidatePath("/curation/settings")
     revalidatePath("/")
     revalidateTag("score-color-thresholds", "max")
     revalidateTag("low-coverage", "max")

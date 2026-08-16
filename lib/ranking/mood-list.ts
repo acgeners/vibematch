@@ -12,7 +12,7 @@
  * DIVERGE em até 17 de 25 janelas (combo de 4 dimensões; 14/25 com dois
  * atributos). Ou seja, se a lista ordenar por um conjunto e o comparador
  * recalcular por outro, as duas telas discordam sobre a mesma pergunta — a
- * família "mesma função, CONJUNTOS diferentes" do `/descobrir`.
+ * família "mesma função, CONJUNTOS diferentes" do `/discover`.
  *
  * Daí este módulo devolver, além da ordem, o MAPA de valores ajustados: quem
  * abrir o comparador a partir da lista herda os números daqui em vez de

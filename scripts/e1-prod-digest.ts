@@ -4,7 +4,7 @@
  * entra na input_signature; consolidar DEPOIS deixaria as previsões stale).
  *
  * Casca fina: reusa `consolidateReviewsDigestDetailed` (mesma função do painel
- * /settings) e o filtro canônico de `computeE1ProdScope`. PADRÃO = dry-run.
+ * /curation/settings) e o filtro canônico de `computeE1ProdScope`. PADRÃO = dry-run.
  * Execução paga exige --execute --max-cost-usd=<v>.
  *
  * ✅ Consertado em 2026-08-10, junto com `e1-prod-scope.ts` — o defeito era de lá: a Fase F

@@ -10,7 +10,7 @@ import type { ChromePatch } from "@/lib/chrome-refresh"
 /**
  * Os contadores do chrome, buscados UMA VEZ e compartilhados.
  *
- * Nasceu da console `/curadoria`: a barra superior e a sidebar da console mostram
+ * Nasceu da console `/curation`: a barra superior e a sidebar da console mostram
  * os mesmos números, e cada uma com o seu `useChromeData` faria DUAS chamadas por
  * navegação — o coalescing do hook é por instância, não global. Não seria só
  * desperdício: `getSidebarBadgeCounts` lê `getSettingsItemPending`, que puxa linhas

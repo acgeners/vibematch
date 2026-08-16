@@ -519,7 +519,7 @@ export function MoreActionsMenu({
         return
       }
       toast.success("Obra excluída.")
-      router.push("/titles")
+      router.push("/catalog")
     })
   }
 
@@ -537,7 +537,7 @@ export function MoreActionsMenu({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
           <DropdownMenuItem asChild>
-            <Link href={`/titles/${workSlug ?? workId}/edit`}>
+            <Link href={`/catalog/${workSlug ?? workId}/edit`}>
               <Edit className="h-4 w-4" />
               Editar obra
             </Link>

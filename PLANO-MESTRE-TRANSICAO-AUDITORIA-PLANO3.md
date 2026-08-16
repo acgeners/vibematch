@@ -593,7 +593,7 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 | L13 | mudança de tags → staleness da previsão | **completed (superseded)** | `input_signature` (mig 111) **inclui tags** ⇒ tags mudam → stale | — | não | resolvido (supera AUDITORIA §11 caso 15) | — |
 | L14 | lote legado de digest bypassa o gate | partial / legacy | `consolidatePendingReviewDigests` sem gate | backfill final / pós-Plano 3 | não | migrar p/ `runDigestBatch` OU aposentar | após winner |
 | C1 | **mismatch de constructo** (sinopse-only × contextual) | **completed** | B2.1D: golden contextual único; synopsis-only superseded | Plano 3 | não | constructo = Potencial de Interesse na Obra; candidatos S0..e1 | rotular contextual (após 51 digests) |
-| C2 | **visibilidade de obras sem reviews** | **completed** | aba "Sem reviews" em `/ai-evaluation` (diagnóstico read-only) | operação recorrente | não | obras com 0 review útil visíveis + ação manual | usar p/ priorizar inclusão manual |
+| C2 | **visibilidade de obras sem reviews** | **completed** | aba "Sem reviews" em `/curation/works` (diagnóstico read-only) | operação recorrente | não | obras com 0 review útil visíveis + ação manual | usar p/ priorizar inclusão manual |
 | C3 | **ausência de reviews como risco de qualidade** | **partial** | `no_reviews_available` explícito; análise separada; aviso de custo×qualidade | Plano 3 / operação recorrente | não | grupo sem reviews analisado à parte; não escondido na métrica | medir no experimento |
 
 ### 23.3 Resumo
@@ -653,12 +653,12 @@ n=90; CI overall ainda **⊃0** (sinal robusto = correção de viés, não MAE p
 3. **Peça 1 (compilador-LLM) POR ÚLTIMO** — regras cruas→artefato, recompila só no edit, cacheado (`user_settings.compiled_preferences`), com **preview/aprovação** na UI. Só necessário p/ edits frequentes ou multi-user; o meta-prompt embute os princípios (drop-meta/split/merge/trait-vs-plot/existência≠aprovação/teto-configurável/err-high) = o ativo.
 
 <a id="24o"></a>
-## 24o. Addendum — Console /settings + trava de recálculo + poda de branches (2026-06-30)
+## 24o. Addendum — Console /curation/settings + trava de recálculo + poda de branches (2026-06-30)
 
 > Addendum **mais recente**. Trabalho de **UI/ops** — não mexe na ciência/roadmap de notas; por isso o §24m
 > segue como estado autoritativo da frente de dados. Detalhe completo em **[STATUS-2026-06-28.md §0](STATUS-2026-06-28.md)**.
 
-- **PR #26 merjado** (`feat/pag-titles` → `main`, `f781b68`): console **`/settings` reorganizado por natureza**
+- **PR #26 merjado** (`feat/pag-titles` → `main`, `f781b68`): console **`/curation/settings` reorganizado por natureza**
   em 4 grupos ordenados por frequência (Calibração das notas → Gerado por IA → Fontes externas/Comix →
   Avançado/recolhido); 1 accent por grupo, **chips de custo/cadência**, **tooltips (ⓘ) por grupo**, card
   **Comix unificado**, toggles de criação reunidos. **Trava de recálculo** (`AiPendingGuardDialog`): "Recalibrar
@@ -924,7 +924,7 @@ n=90; CI overall ainda **⊃0** (sinal robusto = correção de viés, não MAE p
 - **Reviews pós-snapshot ⇒ nova versão** (`base-2` + novo corpus signature + novo plano/pacote); nada silencioso.
 - **Fallback:** digest fresh → digest; `digest_failed` explícito; sem reviews → `no_reviews_available`; **sem** summary silencioso.
 
-**Parte B — aba "Sem reviews" (`/ai-evaluation`):**
+**Parte B — aba "Sem reviews" (`/curation/works`):**
 - Aba diagnóstica read-only listando obras ativas com **0 review útil** (regra centralizada `isUsefulReviewText` = trim≥40, reusada pelos gates de summary/digest). Filtros: busca/status/fonte-externa/golden (URL params, Server Component). Badges (Golden pilot-1 + aviso de imutabilidade de base-1), aviso de custo/qualidade, links p/ "Abrir obra"/"Adicionar review manualmente". **Não** gera reviews/summary/digest/avaliação/previsão.
 
 **Validação:** base-1 reverificado inalterado; `tsc` limpo; testes verdes; lint 0 nos novos; build exit 0. Zero escrita no banco, zero LLM, zero migration.

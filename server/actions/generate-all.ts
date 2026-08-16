@@ -240,14 +240,14 @@ export async function generateAllWorkData(
     const r = await step.run()
     if (r.fatal) {
       await setCascadeStatus(workId, "failed")
-      revalidatePath(`/titles/${workId}`)
+      revalidatePath(`/catalog/${workId}`)
       return { status: "failed", failed: step.action, error: r.error ?? "erro desconhecido" }
     }
     ran.push(step.action)
   }
 
   await setCascadeStatus(workId, "done")
-  revalidatePath(`/titles/${workId}`)
+  revalidatePath(`/catalog/${workId}`)
   return { status: "ready", ran }
 }
 

@@ -81,7 +81,7 @@ export async function analyzeOpeningStructureAction(
     const err = await persist(workId, result)
     if (err) return { error: `Falha ao salvar: ${err}` }
 
-    revalidatePath(`/titles/${workId}`)
+    revalidatePath(`/catalog/${workId}`)
     return {
       ok: true,
       verdict: result.verdict,
@@ -111,7 +111,7 @@ export async function analyzeOpeningStructureWebAction(
     const err = await persist(workId, result)
     if (err) return { error: `Falha ao salvar: ${err}` }
 
-    revalidatePath(`/titles/${workId}`)
+    revalidatePath(`/catalog/${workId}`)
     return {
       ok: true,
       verdict: result.verdict,
@@ -154,6 +154,6 @@ export async function setOpeningStructureOverrideAction(
     .eq("id", workId)
   if (error) return { error: error.message }
 
-  revalidatePath(`/titles/${workId}`)
+  revalidatePath(`/catalog/${workId}`)
   return { ok: true }
 }

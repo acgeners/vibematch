@@ -140,5 +140,5 @@ async function applyTasteDerivedUserScore(
       }
     })
   }
-  revalidatePath(`/titles/${workId}`)
+  revalidatePath(`/catalog/${workId}`)
 }

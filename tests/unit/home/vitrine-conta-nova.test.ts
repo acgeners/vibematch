@@ -93,7 +93,7 @@ describe("vitrine da home, conta nova", () => {
     const { getDashboardStats } = await import("@/server/queries/dashboard")
     const stats = await getDashboardStats()
 
-    // O default continua valendo pra DISTRIBUIÇÃO (o /painel mostra "o catálogo, visto por
+    // O default continua valendo pra DISTRIBUIÇÃO (o /dashboard mostra "o catálogo, visto por
     // status") — é o contador de ATIVIDADE que não pode herdá-lo.
     expect(stats.byPersonalStatus["Want to Read"]).toBe(ACTIVE_WORKS)
     expect(

@@ -57,7 +57,7 @@ function knownTotal(totalChapters: number | null | undefined): number | null {
 /**
  * O teto HONESTO de capítulos: o maior entre o total do catálogo e o que já está gravado.
  *
- * `works.total_chapters` é curadoria e atrasa — a `/leitura` marca "até o último lançado" a
+ * `works.total_chapters` é curadoria e atrasa — a `/reading` marca "até o último lançado" a
  * partir da checagem externa, e é normal ter 132 lidos numa obra cujo catálogo ainda diz 120.
  * Um teto cru no total transformaria a próxima edição de status num APAGAMENTO silencioso de
  * 12 capítulos de progresso real. Limitar o que a pessoa acabou de digitar é correção; reduzir

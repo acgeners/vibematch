@@ -10,7 +10,7 @@ import { markSettingsSectionRead, unmarkSettingsSectionRead } from "@/server/act
 type Mode = "unread" | "read" | "none"
 
 /**
- * Controle de "lido" no cabeçalho de um card AGREGADO (batch) de /settings —
+ * Controle de "lido" no cabeçalho de um card AGREGADO (batch) de /curation/settings —
  * Embeddings, Sinopse canônica, Síntese de reviews, Comix. A pendência é uma
  * CONTAGEM; marcar como lido grava um snapshot dela (silencia sem resolver).
  *

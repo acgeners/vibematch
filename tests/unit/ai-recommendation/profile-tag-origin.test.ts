@@ -11,7 +11,7 @@ const decl = (
 ): DeclaredTagLite => ({ name, stance, source })
 
 /**
- * A manchete "X de Y" da /conta/perfil sai daqui. Um erro nesta função não quebra nada:
+ * A manchete "X de Y" da /account/taste-profile sai daqui. Um erro nesta função não quebra nada:
  * ele imprime um número plausível e maior, afirmando um entendimento que não houve.
  */
 describe("classifyProfileTagOrigin", () => {

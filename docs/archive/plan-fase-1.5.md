@@ -31,7 +31,7 @@ A Fase 1 (re-arquitetura 4 camadas) está operacional. O Ridge (`expected_score`
 | 3 | Threshold de aplicação | Bayesian shrinkage `bias_applied = bias_raw × n / (n+10)` |
 | 4 | Storage | Nova tabela `attribute_bias` com `user_id` fixo (vindo de `user_settings`) — **Opção B** |
 | 5 | Naming | `manual_score → user_score`, labels "Atributos da obra" / "Critérios de avaliação" |
-| 6 | Exposição do bias | Card em `/settings/calibration` |
+| 6 | Exposição do bias | Card em `/curation/settings/calibration` |
 | 7 | Multi-tenant | `user_id` é coluna desde já, single-user usa um UUID fixo. Migração trivial pra multi-user. |
 | 8 | Fonte do bias signal | **Opção 1**: só pós-leitura conta. `ai_edited` (pré-leitura) NÃO entra no cálculo. Pode revisitar se cobertura for baixa. |
 | 9 | Aplicação do bias | **Source-aware**: bias só corrige `category_scores` com `source IN ('ai_only', 'ai_accepted')`. Pula `ai_edited` e `manual` (user já corrigiu). |
@@ -97,7 +97,7 @@ Mantidos sem renomeação:
 | Tabela heatmap | "Critérios" | **"Atributos"** |
 | Form pós-leitura | "Critérios pós-leitura" | **"Critérios de avaliação"** |
 | /preferences | mistura | distinguir "Pesos dos atributos" vs "Pesos dos critérios" |
-| /settings/calibration | "Critérios" | "Atributos" no contexto da IA |
+| /curation/settings/calibration | "Critérios" | "Atributos" no contexto da IA |
 
 Arquivos a atualizar:
 - [components/titles/calculation-breakdown.tsx](components/titles/calculation-breakdown.tsx)
@@ -355,7 +355,7 @@ export async function submitPostReadingAttributes(
   // 2. UPSERT 9 rows em user_attribute_assessment
   // 3. recomputeAttributeBias(currentUserId)
   // 4. recalculateWork(workId)
-  // 5. revalidatePath(`/titles/${workId}`)
+  // 5. revalidatePath(`/catalog/${workId}`)
 ```
 
 #### Testes (`tests/unit/calculations/attribute-bias.test.ts`)
@@ -426,7 +426,7 @@ export function PostAttributeAssessmentForm(props): JSX.Element
 ```
 "Esta obra ainda não foi avaliada pela IA.
  Rode a avaliação primeiro pra poder calibrar."
-[ Avaliar com IA → ]  → link pra /ai-evaluation?work={workId}
+[ Avaliar com IA → ]  → link pra /curation/works?work={workId}
 ```
 
 #### Integração: `components/titles/work-status-form.tsx`
@@ -461,7 +461,7 @@ export async function getExistingPostReadingAssessment(
 ): Promise<Record<CriterionSlug, number> | null>
 ```
 
-Carregadas em paralelo em [app/titles/[id]/page.tsx](app/titles/[id]/page.tsx) e passadas pro work-status-form via props.
+Carregadas em paralelo em [app/catalog/[id]/page.tsx](app/catalog/[id]/page.tsx) e passadas pro work-status-form via props.
 
 #### Validações
 
@@ -669,9 +669,9 @@ export async function getAttributeBiasOverview(userId: string): Promise<{
   // Calcula shrinkagePct = (n / (n + BIAS_SHRINKAGE_K)) × 100
 ```
 
-#### Integração em `/settings/calibration`
+#### Integração em `/curation/settings/calibration`
 
-Card adicional após o card do MAE existente em [app/settings/calibration/page.tsx](app/settings/calibration/page.tsx).
+Card adicional após o card do MAE existente em [app/curation/settings/calibration/page.tsx](app/curation/settings/calibration/page.tsx).
 
 **Empty state** (todos `nSamples == 0`):
 > "Bias ainda não calibrado. Marque obras como Completed/Dropped e preencha o questionário pós-leitura pra começar a coletar dados."
@@ -684,14 +684,14 @@ Card adicional após o card do MAE existente em [app/settings/calibration/page.t
 
 #### Critério de fim
 
-- Card aparece em `/settings/calibration` com estado correto (empty inicialmente)
+- Card aparece em `/curation/settings/calibration` com estado correto (empty inicialmente)
 - Após 1.5.2 popular dados: linhas refletem `attribute_bias`
 - Coluna "Aplicação" matematicamente correta: `n / (n+10) × 100` arredondado
 
 #### Commit
 
 ```
-feat: card de bias dos atributos em /settings/calibration (Fase 1.5.4)
+feat: card de bias dos atributos em /curation/settings/calibration (Fase 1.5.4)
 ```
 
 ---
@@ -738,7 +738,7 @@ export function RegenerateCalibratedArtifactsButton() {
 }
 ```
 
-Coloca em `/settings/calibration` próximo ao card de bias.
+Coloca em `/curation/settings/calibration` próximo ao card de bias.
 
 #### Auto-detection de stale em Smart Shortlist
 
@@ -1019,7 +1019,7 @@ npm run build && npm run test
 # - Logs do Deep Dive idem
 
 # 5. Smoke 3 — UI calibração
-# - /settings/calibration → card "Bias dos Atributos" com dados
+# - /curation/settings/calibration → card "Bias dos Atributos" com dados
 # - Tooltip mostra "Aplicando 9% (1 amostra)"
 
 # 6. Smoke 4 — regeneração

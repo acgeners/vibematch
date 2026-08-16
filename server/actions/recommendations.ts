@@ -202,15 +202,15 @@ export async function getTasteProfileStatusAction(): Promise<ProfileStatus> {
    * `loadCurrentTasteProfile()` e `getRatedWorksForProfile()` resolvem por
    * `getCurrentUserId()`, que sem sessão cai no singleton — o DONO. Isso é o
    * comportamento certo em background (o recalc precisa do bias dele) e errado numa
-   * função que TRÊS páginas renderizam: `/painel`, `/recommendations` e
-   * `/conta/perfil`.
+   * função que TRÊS páginas renderizam: `/dashboard`, `/recommendations` e
+   * `/account/taste-profile`.
    *
-   * Medido em 2026-08-09: `/painel` anônimo devolvia 200 imprimindo o
+   * Medido em 2026-08-09: `/dashboard` anônimo devolvia 200 imprimindo o
    * `taste_profile.summary` do dono em prosa ("…o coração do gosto é o romance de
    * fantasia/rofan…"), mais os temas e as tags amadas dele. Sem erro e sem log — a
    * página tinha um sujeito, o errado.
    *
-   * O gate de rota (`/painel` e `/conta` no proxy) é a 2ª camada. Esta é a 1ª, e é a
+   * O gate de rota (`/dashboard` e `/account` no proxy) é a 2ª camada. Esta é a 1ª, e é a
    * que protege o próximo consumidor: um leitor novo desta action herda o vazamento
    * sem que nada acuse.
    */
@@ -542,7 +542,7 @@ export async function runRecommendationAction(
       }
       revalidatePath("/ranking")
       revalidatePath("/favorites")
-      revalidatePath("/titles")
+      revalidatePath("/catalog")
 
       // P1: registra snapshots prospectivos (prediction_snapshots) das obras
       // recomendadas ainda SEM nota — agrupadas sob esta run (ranking_snapshot_id).
@@ -891,7 +891,7 @@ export async function rerankWorksBatchAction(
     revalidatePath("/ranking")
     revalidatePath("/ranking/desatualizados")
     revalidatePath("/favorites")
-    revalidatePath("/fila-recomendacao")
+    revalidatePath("/my-ai-scores")
     revalidateTag("ai-eval-tab-counts", "max")
 
     return {
@@ -1059,7 +1059,7 @@ export interface RankSpecificWorksResult {
  * "avaliar 1 obra (fit)" e "recomendar entre estas obras". Espelha o
  * `rerankClusterAction`: roda `rankFavorites` (mode "ranking") numa única
  * chamada e PERSISTE o alignment_score em `calculated_scores` (Veredito IA fica
- * visível em /ranking, /favorites, /titles). Não cria `recommendation_runs` —
+ * visível em /ranking, /favorites, /catalog). Não cria `recommendation_runs` —
  * é ação pontual, como os botões de re-rank. Devolve itens prontos pro card do
  * chat (título, capa, score, justificativa), ordenados por Veredito IA desc.
  */
@@ -1133,7 +1133,7 @@ export async function rankSpecificWorksForChat(args: {
       }
       revalidatePath("/ranking")
       revalidatePath("/favorites")
-      revalidatePath("/titles")
+      revalidatePath("/catalog")
     }
 
     const items: ChatRecommendationItem[] = result.rankings
@@ -1158,11 +1158,11 @@ export async function rankSpecificWorksForChat(args: {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
-// "Mais como estas" (/descobrir) — explicar sob demanda, aplicar sob confirmação
+// "Mais como estas" (/discover) — explicar sob demanda, aplicar sob confirmação
 //
 // 🔴 A separação entre EXPLICAR e APLICAR é o desenho, não um passo a mais por precaução.
 //
-// O ranking de `/descobrir` é aritmética (percentis de parecença × alinhamento) e não custa
+// O ranking de `/discover` é aritmética (percentis de parecença × alinhamento) e não custa
 // nada. Só a PROSA custa — e ela é escrita sob o contexto daquelas sementes, então não é a
 // mesma coisa que o Veredito IA que o /ranking mostra. Gravá-la direto em
 // `calculated_scores.alignment_*` publicaria em todas as telas um julgamento feito para uma
@@ -1189,7 +1189,7 @@ export interface ExplainSeedsResult {
 }
 
 /**
- * Roda o consultor sobre as obras que `/descobrir` encontrou, no contexto das sementes.
+ * Roda o consultor sobre as obras que `/discover` encontrou, no contexto das sementes.
  *
  * Cria a run (mode `seeds`) e devolve o resultado — sem tocar em `calculated_scores`.
  */
@@ -1365,7 +1365,7 @@ export async function applySeedVerdictAction(
 
     revalidatePath("/ranking")
     revalidatePath("/favorites")
-    revalidatePath("/descobrir")
+    revalidatePath("/discover")
 
     return { data: { applied: rows.length } }
   } catch (err) {

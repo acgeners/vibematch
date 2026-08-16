@@ -14,7 +14,7 @@ import { Header } from "@/components/layout/header"
  *    kicker herdado imprime a 3ª cópia da mesma palavra na dobra — e imprimia em
  *    5 `loading.tsx` que nunca pediram por ele.
  * 2. **Descrição curta é APOSTO do título** (mesma linha), longa desce. A régua é
- *    comprimento, não rota: `/ranking` tem 34 caracteres e `/leitura` tem 200.
+ *    comprimento, não rota: `/ranking` tem 34 caracteres e `/reading` tem 200.
  *    Um `<p>` mudo abaixo do título custa ~28px em toda página do app.
  * 3. **Descrição rica sempre desce.** `ReactNode` não tem `.length`; medir um
  *    `<span>` de chips como se fosse string acharia "curto" e tentaria encaixá-lo
@@ -23,7 +23,7 @@ import { Header } from "@/components/layout/header"
 
 const CURTA = "Obras ordenadas pela Nota Prevista" // 34 — a de /ranking
 const LONGA =
-  "Obras que você acompanha. Separadas entre publicação em andamento e concluídas/outras — verifique nas fontes externas se saíram capítulos novos." // a de /leitura
+  "Obras que você acompanha. Separadas entre publicação em andamento e concluídas/outras — verifique nas fontes externas se saíram capítulos novos." // a de /reading
 
 /** O `<div>` que o componente Header desenha (ancestral comum do h1 e da descrição). */
 function blocoDo(h1: HTMLElement): HTMLElement {

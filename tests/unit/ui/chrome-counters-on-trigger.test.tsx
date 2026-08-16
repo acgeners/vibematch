@@ -2,7 +2,7 @@ import { vi, describe, it, expect, afterEach } from "vitest"
 import { render, cleanup, screen } from "@testing-library/react"
 
 vi.mock("server-only", () => ({}))
-vi.mock("next/navigation", () => ({ usePathname: () => "/titles" }))
+vi.mock("next/navigation", () => ({ usePathname: () => "/catalog" }))
 vi.mock("@/server/actions/auth", () => ({ signOutAction: vi.fn() }))
 vi.mock("@/server/actions/account", () => ({
   getAccountSummary: vi.fn(),
@@ -42,7 +42,7 @@ import { CurationMenu } from "@/components/layout/curation-menu"
  * dentro de um dropdown o número não é visto") continua verdadeira, e o que a resolve
  * é o badge subir pro gatilho. Se o badge sumir, os ícones soltos têm que voltar.
  *
- * ⚠️ O dropdown de Curadoria já nem existe mais — virou botão-link pra `/curadoria`,
+ * ⚠️ O dropdown de Curadoria já nem existe mais — virou botão-link pra `/curation`,
  * porque curadoria é MODO e não ação pontual. Isso não afrouxa a invariante, aperta:
  * sem menu pra abrir, o badge é o único aviso de que há trabalho lá dentro. (O avatar
  * segue sendo dropdown, e para ele a regra vale na forma original.)

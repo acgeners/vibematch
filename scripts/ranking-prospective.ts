@@ -6,7 +6,7 @@
  * (obras que estavam sem nota no snapshot e foram avaliadas DEPOIS).
  *
  * READ-ONLY: apenas SELECT. Não altera fórmula, ranking, UI, dados nem snapshots.
- * Reusa as funções PURAS de lib/metrics/* (as mesmas do /admin/model-metrics).
+ * Reusa as funções PURAS de lib/metrics/* (as mesmas do /curation/model-metrics).
  *
  * Uso: npm run prospective:ranking
  *   (contexto padrão = ranking_snapshot; `--context=recommendation` para o path pago,

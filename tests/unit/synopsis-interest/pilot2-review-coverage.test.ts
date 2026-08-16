@@ -27,7 +27,7 @@ describe("pilot2-review-coverage — painel das obras com <2 úteis", () => {
     expect(byId.w0.missingToTarget).toBe(2)
     expect(byId.w1.missingToTarget).toBe(1)
     expect(byId.w2.missingToTarget).toBe(0) // 23. duas úteis satisfazem a cobertura
-    expect(byId.w0.localRoute).toBe("/titles/w0")
+    expect(byId.w0.localRoute).toBe("/catalog/w0")
     expect(byId.w1.availableExternalSources).toEqual(["anilist", "comix"])
     expect(panel.summary).toMatchObject({ zeroUseful: 1, oneUseful: 1, total: 3, totalMissing: 3 })
   })

@@ -82,7 +82,7 @@ export function ImportModes({
         />
       </div>
 
-      {/* ── Abas: nível 1 = segmentado preenchido (padrão /leitura) ──── */}
+      {/* ── Abas: nível 1 = segmentado preenchido (padrão /reading) ──── */}
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="h-10 w-fit rounded-xl p-1">
           <TabsTrigger value="import" className="flex-none rounded-lg px-4 font-semibold">

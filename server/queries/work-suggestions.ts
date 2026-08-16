@@ -8,7 +8,7 @@ import { getPublicationStatusNameById } from "@/lib/constants/status-lookups"
 import { getHideAdultContent } from "@/server/queries/current-user"
 import { titleTokens, workMatchesQuery, matchedAliasFor, matchTier } from "@/lib/title-match"
 
-/** Uma sugestão do dropdown de busca ao vivo de /titles. */
+/** Uma sugestão do dropdown de busca ao vivo de /catalog. */
 export interface WorkSuggestion {
   id: string
   title: string
@@ -71,7 +71,7 @@ const getSuggestionIndex = unstable_cache(
 const DEFAULT_LIMIT = 8
 
 /**
- * Busca incremental por nome, para o dropdown de /titles. Casa title,
+ * Busca incremental por nome, para o dropdown de /catalog. Casa title,
  * original_title E alternative_titles com a normalização compartilhada
  * (lib/title-match.ts) — a mesma da detecção de duplicata.
  *

@@ -53,10 +53,10 @@ export function PublicHome({
             <Link href="/signup">Criar conta grátis</Link>
           </Button>
           <Button asChild variant="outline" size="lg">
-            <Link href="/titles">Explorar o catálogo</Link>
+            <Link href="/catalog">Explorar o catálogo</Link>
           </Button>
           <Link
-            href="/sobre#como"
+            href="/about#como"
             className="text-sm font-semibold text-primary hover:underline"
           >
             Como funciona →
@@ -83,7 +83,7 @@ export function PublicHome({
               média de MangaUpdates, AniList, MyAnimeList e outras — com o número de votos à vista
             </p>
             <Link
-              href="/titles"
+              href="/catalog"
               className="ml-auto inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-primary hover:underline"
             >
               Ver catálogo
@@ -95,7 +95,7 @@ export function PublicHome({
             {works.map((w) => (
               <li key={w.id}>
                 <Link
-                  href={`/titles/${titleToSlug(w.title)}`}
+                  href={`/catalog/${titleToSlug(w.title)}`}
                   className="group flex h-full flex-col gap-2 rounded-lg border border-border/65 bg-background/40 p-3 transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:bg-card hover:shadow-md"
                 >
                   <div className="relative overflow-hidden rounded-md">
@@ -145,15 +145,15 @@ export function PublicHome({
         </div>
       </section>
 
-      {/* Sem menu de usuário para quem não tem conta, /sobre e /guia ficariam inalcançáveis. */}
+      {/* Sem menu de usuário para quem não tem conta, /about e /guide ficariam inalcançáveis. */}
       <nav
         aria-label="Rodapé"
         className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-border pt-5 text-sm"
       >
-        <Link href="/sobre" className="font-semibold text-muted-foreground hover:text-foreground">
+        <Link href="/about" className="font-semibold text-muted-foreground hover:text-foreground">
           Sobre a SatorIA
         </Link>
-        <Link href="/guia" className="font-semibold text-muted-foreground hover:text-foreground">
+        <Link href="/guide" className="font-semibold text-muted-foreground hover:text-foreground">
           Guia
         </Link>
         <span className="ml-auto text-xs text-muted-foreground">

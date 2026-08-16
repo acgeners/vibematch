@@ -1,5 +1,5 @@
 /**
- * A régua de "Mais como estas" (`/descobrir`): combina PARECENÇA com as obras-semente e
+ * A régua de "Mais como estas" (`/discover`): combina PARECENÇA com as obras-semente e
  * ALINHAMENTO com o perfil de quem olha, num número só.
  *
  * Puro de propósito (sem `server-only`, sem I/O): o mesmo cálculo roda no servidor, na

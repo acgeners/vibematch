@@ -367,7 +367,7 @@ custoEstimado · custoReal · tempo · ultimoErro(sanitizado)
 
 Erro sempre **sanitizado** (🟦 `sanitizeErrorMessage`, [jobs.ts:79](lib/orchestration/jobs.ts#L79)).
 **Sem redesign de UI nesta etapa** — só retorno tipado / painel mínimo (reusar o de
-`/admin/model-metrics` ou `/settings`).
+`/curation/model-metrics` ou `/curation/settings`).
 
 ---
 

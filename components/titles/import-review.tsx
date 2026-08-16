@@ -89,7 +89,7 @@ export function ImportReview({
   const [states, setStates] = useState<Record<string, RowState>>({})
   const [running, setRunning] = useState(false)
   // Obras já revisadas nesta sessão — somem da lista mesmo após reload (ainda
-  // ficam 'pending' no banco até serem avaliadas em /ai-evaluation).
+  // ficam 'pending' no banco até serem avaliadas em /curation/works).
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const [selected, setSelected] = useState<Set<string>>(new Set())
   // Puladas na fila: continuam pendentes, só ganham um selo na linha.
@@ -106,7 +106,7 @@ export function ImportReview({
   /** Link da obra pelo SLUG quando o título é conhecido; UUID só como último recurso. */
   const hrefDaObra = (id: string) => {
     const t = byId.get(id)?.title
-    return t ? `/titles/${titleToSlug(t)}` : `/titles/${id}`
+    return t ? `/catalog/${titleToSlug(t)}` : `/catalog/${id}`
   }
   const visibleWorks = useMemo(() => works.filter((w) => !dismissed.has(w.id)), [works, dismissed])
   const coverless = useMemo(() => visibleWorks.filter((w) => w.coverCount === 0), [visibleWorks])
@@ -414,7 +414,7 @@ export function ImportReview({
             </Button>
           )}
           <Button asChild variant="outline">
-            <Link href="/ai-evaluation">
+            <Link href="/curation/works">
               <Sparkles className="h-4 w-4" /> Avaliar notas
             </Link>
           </Button>
@@ -462,7 +462,7 @@ export function ImportReview({
 
               {/* título + meta */}
               <div className="min-w-0 flex-1">
-                <Link href={`/titles/${titleToSlug(work.title)}`} className="block truncate font-medium hover:underline">
+                <Link href={`/catalog/${titleToSlug(work.title)}`} className="block truncate font-medium hover:underline">
                   {work.title}
                 </Link>
                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">

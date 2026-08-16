@@ -180,7 +180,7 @@ export function TagsReviewsTab({
             // compacto — claramente clicável, mas secundário às ações de IA.
             const details = (
               <Button variant="outline" size="xs" className="w-fit gap-1.5" asChild>
-                <Link href={`/titles/${slug}/edit`}>
+                <Link href={`/catalog/${slug}/edit`}>
                   <SquarePen className="h-3.5 w-3.5" />
                   Editar obra
                 </Link>

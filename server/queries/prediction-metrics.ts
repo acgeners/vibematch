@@ -157,7 +157,7 @@ function emptyDashboard(status: CollectionStatus, cvMae: number | null): ModelMe
 export async function getModelMetricsDashboard(): Promise<ModelMetricsDashboard> {
   const supabase = createAdminClient()
 
-  // CV-MAE honesta (mesma da headline de /settings) pra comparar com a prospectiva.
+  // CV-MAE honesta (mesma da headline de /curation/settings) pra comparar com a prospectiva.
   const configRes = await supabase
     .from("formula_config")
     .select("cv_mae_expected_stage1")

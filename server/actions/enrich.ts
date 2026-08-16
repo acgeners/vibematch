@@ -165,7 +165,7 @@ export async function getImportReviewWorks(ids: string[]): Promise<ReviewWork[]>
 
 // Revisão de importação: obras CRIADAS por uma importação que ainda não foram
 // avaliadas pela IA. Só as provenientes de import (import_rows.status = "imported")
-// — obras criadas em /titles/new já vêm com dados e NÃO entram aqui, mesmo sem
+// — obras criadas em /catalog/new já vêm com dados e NÃO entram aqui, mesmo sem
 // avaliação IA. Uma obra sai daqui quando é avaliada (vira 'done'/'skipped').
 export async function getPendingReviewWorks(limit = 300): Promise<ReviewWork[]> {
   const supabase = createAdminClient()

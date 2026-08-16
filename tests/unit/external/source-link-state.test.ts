@@ -6,7 +6,7 @@ import { classifySourceLink } from "@/lib/external/source-link-state"
 /**
  * `work_external_ids` tem TRÊS estados (migration 038) e DOIS lugares os leem: a fila da
  * aba "Fontes" (`getSourceGapQueue`, as 9 fontes) e o card de cobertura do Comix em
- * /settings (`getComixCoverageLists`, só a Comix). Eram duas cópias do mesmo `if`.
+ * /curation/settings (`getComixCoverageLists`, só a Comix). Eram duas cópias do mesmo `if`.
  *
  * 🔴 O modo de falha não é o `if` estar errado — é ele DIVERGIR. As duas telas falam da
  * mesma linha do banco: uma diria "pendente" e a outra "resolvida" sobre a mesma obra,

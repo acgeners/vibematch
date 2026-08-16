@@ -46,7 +46,7 @@ afterEach(() => {
 })
 
 describe("zona de IA", () => {
-  it("não existe na página que não passa os callbacks (o /titles)", () => {
+  it("não existe na página que não passa os callbacks (o /catalog)", () => {
     renderBar()
     expect(screen.queryByRole("button", { name: "Veredito IA" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Prever interesse" })).toBeNull()

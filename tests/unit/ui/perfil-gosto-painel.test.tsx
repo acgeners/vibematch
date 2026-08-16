@@ -14,7 +14,7 @@ import type { TasteProfileRow } from "@/lib/ai-recommendation/types"
 import type { DeclaredTagLite } from "@/lib/ai-recommendation/profile-tag-origin"
 
 /**
- * O painel da /conta/perfil, em RENDER — de propósito.
+ * O painel da /account/taste-profile, em RENDER — de propósito.
  *
  * O que regride nesta classe é ESCOPO, e escopo não aparece em função pura. Os três
  * defeitos que motivaram a v3 passariam verdes num teste que lesse o objeto do perfil:
@@ -177,7 +177,7 @@ describe("hero: as duas provas", () => {
   it("oferece caminho pra discordar do que a página afirma", () => {
     renderPanel()
     const link = screen.getByRole("link", { name: /corrigir em Prefer/i })
-    expect(link.getAttribute("href")).toBe("/preferencias")
+    expect(link.getAttribute("href")).toBe("/preferences")
   })
 
   it("carrega o selo de procedência de IA", () => {

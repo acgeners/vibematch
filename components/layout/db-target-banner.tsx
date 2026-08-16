@@ -10,7 +10,7 @@ import { isLocalSupabaseUrl, supabaseTargetLabel } from "@/lib/db-target"
  * gastaram limpando; nada na tela dizia com qual banco se estava falando.
  *
  * 🔴 Mora no layout RAIZ, acima do `AppShell`, e não dentro dele. As rotas full-bleed
- * (`/login`, `/signup`, `/sobre`, `/bem-vindo`) retornam antes da barra de navegação — e o
+ * (`/login`, `/signup`, `/about`, `/welcome`) retornam antes da barra de navegação — e o
  * login é exatamente onde saber o alvo mais importa, porque as contas dos dois bancos são
  * diferentes e entrar no errado parece "minha senha não funciona".
  *

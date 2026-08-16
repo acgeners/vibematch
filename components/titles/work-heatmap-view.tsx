@@ -52,7 +52,7 @@ interface WorkHeatmapViewProps {
    * Garante as 9 colunas de critério na matriz mesmo que o namespace as esconda
    * por padrão.
    *
-   * Existe por causa de /titles: lá o default de coluna foi escrito pra LISTA
+   * Existe por causa de /catalog: lá o default de coluna foi escrito pra LISTA
    * ("visão enxuta") e esconde os 9 critérios. A matriz herdava esse default e
    * abria mostrando Nota Prevista/Média/Votos — ou seja, uma matriz de atributos
    * sem nenhum atributo. Ela ainda respeita a ORDEM e as colunas não-critério da

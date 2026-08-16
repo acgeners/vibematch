@@ -163,7 +163,7 @@ export function AiEvaluationFilters({
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
-  // Colapso por PÁGINA: este painel serve /ai-evaluation e /fila-recomendacao, e
+  // Colapso por PÁGINA: este painel serve /curation/works e /my-ai-scores, e
   // recolher os filtros de uma não pode recolher os da outra.
   const [collapsed, setCollapsed] = useCollapsedFilters(`ai-eval:${pathname}`)
   /** Um só alvo para os três gatilhos do cabeçalho: o ícone, o título e o ⌃. */

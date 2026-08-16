@@ -62,7 +62,7 @@ export default async function RecommendationsPage() {
         icon={<Sparkles />}
         actions={
           <Link
-            href="/conta/perfil"
+            href="/account/taste-profile"
             className="inline-flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground"
           >
             Perfil de gosto
@@ -153,7 +153,7 @@ export default async function RecommendationsPage() {
                 </div>
               </div>
               <Button asChild variant="outline" className="w-full shrink-0 sm:w-auto">
-                <Link href="/descobrir">Escolher sementes</Link>
+                <Link href="/discover">Escolher sementes</Link>
               </Button>
             </CardContent>
           </Card>

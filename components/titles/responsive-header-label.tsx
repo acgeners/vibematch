@@ -6,7 +6,7 @@
 // nome da coluna no DB (col.key). Colunas sem entrada no LABELS (estruturais como
 // "#"/select, e critérios `crit_*` que são emoji) usam o rótulo único e não trocam.
 //
-// Usado por ranking-table (/ranking) e work-table (/titles, /favorites, /batch).
+// Usado por ranking-table (/ranking) e work-table (/catalog, /favorites, /batch).
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { ChevronDown, ChevronUp } from "lucide-react"

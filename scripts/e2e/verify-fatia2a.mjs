@@ -67,7 +67,7 @@ async function actionIds(paths) {
 
 const call = async (id, args, cookie) =>
   (
-    await fetch(`${APP}/titles`, {
+    await fetch(`${APP}/catalog`, {
       method: "POST",
       headers: {
         "Next-Action": id,
@@ -111,7 +111,7 @@ const owner = await session(OWNER.email)
 const reader = await session(OTHER.email)
 
 const { data: firstWork } = await admin.from("works").select("id").limit(1).single()
-const ids = await actionIds(["/titles", `/titles/${firstWork.id}`])
+const ids = await actionIds(["/catalog", `/catalog/${firstWork.id}`])
 if (!ids.updateWorkStatus) throw new Error("não achei o id de updateWorkStatus no bundle")
 console.log(`updateWorkStatus: ${ids.updateWorkStatus}\n`)
 
@@ -203,7 +203,7 @@ const slug = cand.title
   .replace(/[^a-z0-9]+/g, "-")
   .replace(/^-|-$/g, "")
 const page = async (cookie) =>
-  (await (await fetch(`${APP}/titles/${slug}`, { headers: { cookie } })).text()).replace(/\\"/g, '"')
+  (await (await fetch(`${APP}/catalog/${slug}`, { headers: { cookie } })).text()).replace(/\\"/g, '"')
 const [pOwner, pReader] = await Promise.all([page(owner.cookie), page(reader.cookie)])
 const scoreIn = (html) => [...html.matchAll(/"userScore":([^,}]+)/g)].map((m) => m[1])
 check(pReader.includes("ANOTACAO DA LEITORA"), "a página DELA mostra a observação dela")

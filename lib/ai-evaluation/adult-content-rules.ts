@@ -15,7 +15,7 @@
  * migrou 1:1 os nomes que já estavam nos Sets antigos (zero mudança); (2) o
  * enricher de IA, pra tags NOVAS (fecha o vazamento daqui pra frente); (3) revisão
  * humana via `setTagScoreTier`, pra tags antigas que nunca foram avaliadas nesse
- * eixo (fila em /settings). Deliberadamente DESACOPLADA de adult_indicator_strong:
+ * eixo (fila em /curation/settings). Deliberadamente DESACOPLADA de adult_indicator_strong:
  * tag "strong" o suficiente pra marcar a obra como 18+ (ex. BDSM, Big Breasts,
  * Pedophilia) não implica necessariamente cena sexual EXPLÍCITA mostrada — são
  * eixos diferentes, e a colisão dos dois é exatamente o que causava nota baixa +

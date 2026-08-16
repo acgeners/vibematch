@@ -51,9 +51,9 @@ const BALANCE_TTL_MS = 120_000
  * — a MESMA lista que a Visão geral detalha, então o número sempre tem destino.
  *
  * ⚠️ **O ponto colorido virou o único portador do alerta de saldo/fonte.** O VALOR
- * ("$3,10", "Comix instável") desceu pra `/curadoria`; aqui fica só "algo lá precisa de
+ * ("$3,10", "Comix instável") desceu pra `/curation`; aqui fica só "algo lá precisa de
  * você". Se o tile de saldo sair da Visão geral, este ponto passa a apontar pro nada —
- * ver o cabeçalho de `app/curadoria/page.tsx`.
+ * ver o cabeçalho de `app/curation/page.tsx`.
  *
  * 🔴 **O ponto SOZINHO não funcionou** (2026-08-14). Um círculo de 8px sem rótulo
  * provoca a pergunta "o que é isso?" e cobra uma navegação pra respondê-la; o
@@ -93,14 +93,14 @@ export function CurationMenu() {
   const pending = totalPendingDecisions({ curadoria, requests })
 
   // Ativo em toda rota membro da console: o botão é a porta do MODO, então ele fica
-  // aceso enquanto se está lá dentro — mesmo em `/settings`, que não tem "curadoria"
+  // aceso enquanto se está lá dentro — mesmo em `/curation/settings`, que não tem "curadoria"
   // no caminho.
   const active =
-    pathname.startsWith("/curadoria") ||
-    pathname.startsWith("/ai-evaluation") ||
-    pathname.startsWith("/settings") ||
-    pathname.startsWith("/ai-usage") ||
-    pathname.startsWith("/admin/model-metrics")
+    pathname.startsWith("/curation") ||
+    pathname.startsWith("/curation/works") ||
+    pathname.startsWith("/curation/settings") ||
+    pathname.startsWith("/curation/ai-usage") ||
+    pathname.startsWith("/curation/model-metrics")
 
   return (
     <>
@@ -108,12 +108,12 @@ export function CurationMenu() {
         <Tooltip>
           <TooltipTrigger asChild>
             <Link
-              href="/curadoria"
-              // `aria-current="page"` só na PRÓPRIA `/curadoria`. O destaque visual é largo de
+              href="/curation"
+              // `aria-current="page"` só na PRÓPRIA `/curation`. O destaque visual é largo de
               // propósito (o botão é a porta do modo, fica aceso lá dentro), mas anunciar
-              // "página atual" em `/settings` num link que leva pra outro lugar é mentira pra
+              // "página atual" em `/curation/settings` num link que leva pra outro lugar é mentira pra
               // quem navega por leitor de tela.
-              aria-current={pathname === "/curadoria" ? "page" : undefined}
+              aria-current={pathname === "/curation" ? "page" : undefined}
               // Sem `title=`: o nativo abriria um SEGUNDO balão por cima do tooltip, com
               // o texto achatado numa linha só. O `aria-label` continua carregando tudo
               // pra leitor de tela, que não recebe o conteúdo do tooltip do Radix.

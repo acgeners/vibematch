@@ -35,7 +35,7 @@ import type { WorkStatusValues } from "@/lib/validations/work.schema"
  *  - status    → `setReadingStatusForWorks` (só `personal_status_id`, sem tocar em capítulos,
  *                notas ou observações — o form completo continua sendo o lugar disso);
  *  - capítulos → `setChaptersRead` (só `chapters_read` + `last_read_at` quando cresce — a
- *                mesma action do stepper de /leitura, sem promover status);
+ *                mesma action do stepper de /reading, sem promover status);
  *  - ♥         → `setSynopsisQualityAction`, que é feature do Ridge e marca recálculo pendente.
  * Todos usam o MESMO gate (`ensureReadingStateWriter`): dado pessoal, qualquer usuário
  * logado. O que é restrito é PREVER o interesse por IA, não declará-lo.
@@ -48,7 +48,7 @@ import type { WorkStatusValues } from "@/lib/validations/work.schema"
  */
 const GATE_THRESHOLD_PCT = 20
 
-/** Mesmo layout das demais células da faixa — mantido em sincronia com app/titles/[id]/page.tsx. */
+/** Mesmo layout das demais células da faixa — mantido em sincronia com app/catalog/[id]/page.tsx. */
 const CELL_CLASS = "flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5"
 const LABEL_CLASS =
   "text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
@@ -192,7 +192,7 @@ export function QuickChaptersCell({
     if (issue?.kind === "finish-suggested") requestOpen({ chapters_read: next })
   }
 
-  // Teto = maior entre o total do catálogo e o que já está lido. A /leitura marca "até o último
+  // Teto = maior entre o total do catálogo e o que já está lido. A /reading marca "até o último
   // lançado" pela checagem externa, então 132 lidos numa obra que o catálogo diz ter 120 é um
   // estado REAL — e limitar no total puxaria o número pra baixo no primeiro clique daqui.
   const ceiling = chapterCeiling(totalChapters, chaptersRead)

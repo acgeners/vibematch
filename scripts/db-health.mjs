@@ -349,7 +349,7 @@ try {
 
 // ── slug duplicado ─────────────────────────────────────────────────────────────────────
 // 🔴 Desde 2026-08-12 os links internos de obra apontam para o SLUG, não para o UUID (PR
-// #381) — foi assim que o `redirect()` de `/titles/[id]` deixou de disparar na navegação
+// #381) — foi assim que o `redirect()` de `/catalog/[id]` deixou de disparar na navegação
 // normal, e com ele o "Rendered more hooks" que estourava o Router do Next.
 //
 // O preço é esta invariante: **dois títulos que geram o mesmo slug quebram o link em

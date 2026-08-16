@@ -113,8 +113,8 @@ export async function getSourceGapQueue(
   // 🔴 O caminho do CONTADOR pede só `id` — medido em 2026-08-15 contra o clone local,
   // 978 obras: a projeção dos cards custa **857 KB** e a de id custa **46 KB** (18×).
   // Não é detalhe: quem chama com `countOnly` é `getCuradoriaTabCounts`, cujo cache é
-  // invalidado pela tag `ai-eval-tab-counts` — compartilhada por /ai-evaluation E
-  // /fila-recomendacao —, então toda mutação em qualquer das duas repaga isto contra a
+  // invalidado pela tag `ai-eval-tab-counts` — compartilhada por /curation/works E
+  // /my-ai-scores —, então toda mutação em qualquer das duas repaga isto contra a
   // NUVEM. As colunas de status não entram na projeção de propósito: elas são filtro
   // `.in()` resolvido no SQL, e o filtro de Interesse só precisa dos ids.
   const selectCols = opts.countOnly

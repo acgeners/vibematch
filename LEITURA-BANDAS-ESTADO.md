@@ -6,7 +6,7 @@
 > - **Em andamento** (publicação *Ongoing*) → **6 bandas de RITMO** (% × recência 30d × hiato).
 > - **Concluída & outras** (completa · **hiato** · cancelada) → **3 bandas de TRIAGEM** (Continuar / Definir / Parado).
 >
-> **Escopo:** página `/leitura` (Acompanhamento) · arquivo único `components/reading/reading-list.tsx`
+> **Escopo:** página `/reading` (Acompanhamento) · arquivo único `components/reading/reading-list.tsx`
 > **Marcação:** ✅ verificado no código/app · ⚡ virada de decisão · ⚠️ armadilha registrada
 >
 > ⚠️ **O desenho das faixas é móvel** — mudou 4× em sequência (ver §3). Antes de mexer, peça a matriz
@@ -115,7 +115,7 @@ Cortes: `CONTINUE_PCT 0.5` · `STALLED_DAYS 45`.
 
 **Ações do "Parado"** (nada automático — o dono rejeitou troca de status automática):
 - **On-hold** → `setReadingStatusForWorks([id], personalStatusNameBySlugOrThrow("on-hold"))`. Muda o status
-  pessoal pra `On-hold`; como `/leitura` só lista *reading* + *hiatus* pessoal, a obra **sai da lista**.
+  pessoal pra `On-hold`; como `/reading` só lista *reading* + *hiatus* pessoal, a obra **sai da lista**.
 - **Arquivar** → `archiveWork(id)`.
 
 ## 5. Navegação (v4 — faixa por seção, **sem sticky**)
@@ -160,7 +160,7 @@ Tudo em `components/reading/reading-list.tsx` (client). **Sem migration/sem muda
 ## 7. Verificação
 
 - `tsc` + `eslint` limpos.
-- Rota `/leitura` compila (HTTP 200) e o componente monta sem erro de runtime (shell anônimo).
+- Rota `/reading` compila (HTTP 200) e o componente monta sem erro de runtime (shell anônimo).
 - Visual com dados reais logado: **conferir no app** (a sessão do dono não é acessível fora do browser dele).
 
 ## 8. Ideias futuras (não são pendências)

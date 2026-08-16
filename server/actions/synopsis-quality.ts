@@ -70,10 +70,10 @@ export async function predictSynopsisQualityForWorkAction(
     })
 
     if (outcome.status === "succeeded") {
-      revalidatePath("/titles")
-      revalidatePath(`/titles/${workId}`)
-      revalidatePath("/ai-evaluation")
-      revalidatePath("/fila-recomendacao")
+      revalidatePath("/catalog")
+      revalidatePath(`/catalog/${workId}`)
+      revalidatePath("/curation/works")
+      revalidatePath("/my-ai-scores")
       revalidateTag("ai-eval-tab-counts", "max")
     }
 
@@ -152,8 +152,8 @@ export async function applySynopsisPredictionAction(
     // ou no auto-recalc (≥1h sem novas edições). Antes era um recalc-all inteiro.
     await markRecalcPending("applySynopsisPrediction")
 
-    revalidatePath("/titles")
-    revalidatePath(`/titles/${workId}`)
+    revalidatePath("/catalog")
+    revalidatePath(`/catalog/${workId}`)
     revalidatePath("/ranking")
 
     return { data: { applied: prediction.predictedQuality } }
@@ -247,10 +247,10 @@ export async function applySynopsisPredictionForWorks(
   }
 
   if (applied > 0) await markRecalcPending("applySynopsisPredictionBatch")
-  revalidatePath("/ai-evaluation")
-  revalidatePath("/fila-recomendacao")
+  revalidatePath("/curation/works")
+  revalidatePath("/my-ai-scores")
   revalidateTag("ai-eval-tab-counts", "max")
-  revalidatePath("/titles")
+  revalidatePath("/catalog")
   revalidatePath("/ranking")
 
   return {
@@ -287,8 +287,8 @@ export async function skipSynopsisInterestAction(
       }
       return { error: `Falha ao pular: ${mirror.error}` }
     }
-    revalidatePath("/ai-evaluation")
-    revalidatePath("/fila-recomendacao")
+    revalidatePath("/curation/works")
+    revalidatePath("/my-ai-scores")
     revalidateTag("ai-eval-tab-counts", "max")
     return { data: { skipped } }
   } catch (err) {
@@ -299,7 +299,7 @@ export async function skipSynopsisInterestAction(
 /**
  * Atribui (ou limpa) o Interesse Sinopse MANUAL (`synopsis_quality`) diretamente — sem
  * passar pela previsão IA. É o caminho GRÁTIS de triagem manual (fila
- * /fila-recomendacao?tab=sinopse e os corações da faixa na página da obra).
+ * /my-ai-scores?tab=sinopse e os corações da faixa na página da obra).
  * `quality = null` limpa o campo ("Não avaliada").
  *
  * ⚠️ NÃO é `ensureAdmin()`, e a distinção importa: PREVER o interesse por IA é que é
@@ -348,13 +348,13 @@ export async function setSynopsisQualityAction(
       })
     }
 
-    revalidatePath("/titles")
-    // Por ROTA, não por caminho: o `/titles/${workId}` que estava aqui usava o UUID, e a
+    revalidatePath("/catalog")
+    // Por ROTA, não por caminho: o `/catalog/${workId}` que estava aqui usava o UUID, e a
     // página é servida pelo SLUG — ou seja, revalidava um caminho que ninguém visita.
-    revalidatePath("/titles/[id]", "page")
+    revalidatePath("/catalog/[id]", "page")
     revalidatePath("/ranking")
-    revalidatePath("/ai-evaluation")
-    revalidatePath("/fila-recomendacao")
+    revalidatePath("/curation/works")
+    revalidatePath("/my-ai-scores")
     revalidateTag("ai-eval-tab-counts", "max")
 
     return { data: { synopsisQuality: quality } }
@@ -380,7 +380,7 @@ export type BatchPlanResult =
 
 /**
  * Decisão central de PERFIL para os fluxos de LOTE gated por custo (o "Prever
- * Interesse" do painel e o "Reprocessar Interesse" do /ai-evaluation). Lê o perfil
+ * Interesse" do painel e o "Reprocessar Interesse" do /curation/works). Lê o perfil
  * atual + a biblioteca UMA vez e resolve:
  *  - `readinessState`: fresh | stale | absent | stub (materialidade, não hash cru);
  *  - `driftPct`: quanto o gosto se moveu (0 quando fresh/legado/sem perfil);
@@ -540,10 +540,10 @@ export async function runSynopsisInterestBatchAction(
       acceptStaleProfile: !planned.regenProfile,
     })
 
-    revalidatePath("/ai-evaluation")
-    revalidatePath("/fila-recomendacao")
+    revalidatePath("/curation/works")
+    revalidatePath("/my-ai-scores")
     revalidateTag("ai-eval-tab-counts", "max")
-    revalidatePath("/titles")
+    revalidatePath("/catalog")
     return { status: "ok", report }
   } catch (err) {
     return { status: "failed", error: err instanceof Error ? err.message : "Erro desconhecido" }

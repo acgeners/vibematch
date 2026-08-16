@@ -8,7 +8,7 @@
 // e o chip da conta mostraria outra, sem erro e sem log.
 //
 // Puro (sem `server-only`, sem I/O) de propósito: a rota `/avatar.svg` e o painel
-// de /conta importam o MESMO código, então o que a pessoa vê montando é byte a byte
+// de /account importam o MESMO código, então o que a pessoa vê montando é byte a byte
 // o que fica salvo. Quem valida entrada é `lib/avatar/url.ts` — nada aqui interpola
 // string sem passar por lá.
 // ============================================================================

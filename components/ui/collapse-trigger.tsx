@@ -16,8 +16,8 @@ import { cn } from "@/lib/utils"
  * mouse (`role="presentation"`), e quem carrega `aria-expanded` é o título.
  *
  * O layout NÃO é prescrito aqui de propósito: os painéis têm anatomias diferentes (no
- * /ranking e no /titles o ícone e o título são separados por um bloco de badges; no
- * /ai-evaluation são irmãos diretos, num cabeçalho compacto). Cada um posiciona; o que
+ * /ranking e no /catalog o ícone e o título são separados por um bloco de badges; no
+ * /curation/works são irmãos diretos, num cabeçalho compacto). Cada um posiciona; o que
  * se compartilha é a regra.
  */
 export function CollapseIconTrigger({

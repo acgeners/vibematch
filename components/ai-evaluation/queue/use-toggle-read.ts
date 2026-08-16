@@ -8,7 +8,7 @@ import { unmarkAiEvalWork } from "@/server/actions/ai-eval-read"
 import type { ReadQueue } from "@/server/queries/ai-eval-read"
 
 /**
- * Helper das filas de /ai-evaluation pra desmarcar UMA obra como lida (clicar no
+ * Helper das filas de /curation/works pra desmarcar UMA obra como lida (clicar no
  * selo "Lida" do card). `readIds` chega como array (props RSC não serializam Set).
  *
  * Feedback OTIMISTA no SELO: some na hora (`useOptimistic`) sem esperar o round-trip;

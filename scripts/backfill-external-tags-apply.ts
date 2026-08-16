@@ -167,7 +167,7 @@ async function main() {
   console.log(`gêneros na fila ...... ${propRows.length}`)
   console.log(`chamadas de IA ....... ${dCalls} (in=${dIn} out=${dOut} tokens)`)
   console.log(`custo real ........... $${cost.toFixed(2)}`)
-  console.log("\n→ revise em /settings?g=avancado → Consolidação → Tags novas / Gêneros propostos.")
+  console.log("\n→ revise em /curation/settings?g=avancado → Consolidação → Tags novas / Gêneros propostos.")
 }
 
 main()

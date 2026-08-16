@@ -1,6 +1,6 @@
 /**
- * Normalização ÚNICA de títulos, compartilhada pela busca de /titles e pela
- * detecção de duplicata de /titles/new.
+ * Normalização ÚNICA de títulos, compartilhada pela busca de /catalog e pela
+ * detecção de duplicata de /catalog/new.
  *
  * Por que existe: as duas coisas tinham normalização própria (`normalizeTitleMatch`
  * em server/actions/works.ts e `normalizeTitleSearchMatch` em server/queries/works.ts,

@@ -9,12 +9,12 @@ import {
 } from "@/server/queries/settings-read"
 
 /**
- * Ações de "marcar pendências de /settings como lidas". "Lida" silencia a
+ * Ações de "marcar pendências de /curation/settings como lidas". "Lida" silencia a
  * pendência (sai do badge) SEM resolvê-la. Ver migration 134 e
  * `server/queries/settings-read.ts`.
  *
  * Não há `revalidateTag`/`revalidatePath` aqui: o `router.refresh()` do cliente
- * (via `useRefresh`) re-renderiza os Server Components de /settings (pílulas dos
+ * (via `useRefresh`) re-renderiza os Server Components de /curation/settings (pílulas dos
  * cards + badge do tópico) e o badge da sidebar re-busca no refresh do chrome.
  * As leituras de ack não são cacheadas, então o refresh já reconcilia.
  */

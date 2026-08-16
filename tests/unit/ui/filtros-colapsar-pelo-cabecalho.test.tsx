@@ -6,7 +6,7 @@ vi.mock("server-only", () => ({}))
 const nav = { replace: vi.fn(), push: vi.fn() }
 vi.mock("next/navigation", () => ({
   useRouter: () => nav,
-  usePathname: () => "/ai-evaluation",
+  usePathname: () => "/curation/works",
   useSearchParams: () => new URLSearchParams(""),
 }))
 vi.mock("@/components/layout/admin-context", () => ({
@@ -40,7 +40,7 @@ const icone = () => document.querySelector('[role="presentation"]') as HTMLEleme
  * cabeçalho — um teste de source veria `toggleCollapsed` declarado e passaria verde
  * com ele não ligado em lugar nenhum. O que regride aqui é o ESCOPO.
  */
-describe("/titles — o painel já colapsava pelo ⌃; agora também pelo cabeçalho", () => {
+describe("/catalog — o painel já colapsava pelo ⌃; agora também pelo cabeçalho", () => {
   const renderTitles = () =>
     render(<TitleFilters availableGenres={[]} availableTags={[]} />)
 
@@ -79,7 +79,7 @@ describe("/titles — o painel já colapsava pelo ⌃; agora também pelo cabeç
   })
 })
 
-describe("/ai-evaluation e /fila-recomendacao — o painel GANHOU colapso", () => {
+describe("/curation/works e /my-ai-scores — o painel GANHOU colapso", () => {
   const renderAi = () =>
     render(
       <AiEvaluationFilters

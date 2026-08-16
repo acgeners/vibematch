@@ -13,7 +13,7 @@ import { useCanWriteOwnState } from "@/components/layout/admin-context"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 
 /**
- * Barra flutuante da seleção em massa (/titles, /ranking, /favorites).
+ * Barra flutuante da seleção em massa (/catalog, /ranking, /favorites).
  *
  * QUATRO ZONAS, e a régua de cada uma:
  *   1. contexto  — quantas estão selecionadas + como limpar (o X mora junto do contador)
@@ -24,7 +24,7 @@ import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
  * A zona 2b existe separada de propósito: ela não é "mais uma ação". Comparar e Favoritar
  * respondem na hora e de graça; Veredito IA e Prever interesse consomem saldo e rodam por
  * minutos no indicador azul. Misturá-las na mesma fileira convidaria ao clique acidental
- * numa ação paga. Páginas que não passam os callbacks (o /titles) não ganham a zona.
+ * numa ação paga. Páginas que não passam os callbacks (o /catalog) não ganham a zona.
  *
  * Arquivo próprio (e não mais dentro do work-table) porque a régua da zona 3 é testada por
  * RENDER: o que regride aqui não é a fórmula, é o escopo — qual ação ficou vermelha, e se a

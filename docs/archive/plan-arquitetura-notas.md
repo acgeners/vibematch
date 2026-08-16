@@ -76,7 +76,7 @@ efetivamente o Free (sem L0+).
 | L3 Smart Shortlist (Modo A) | Vivo | alignment_score, [llm-reranker.ts](lib/ai-recommendation/llm-reranker.ts) |
 | **Bias calibration** (= "Fase 1.6" do plano) | Vivo, **versão superior** | migrations 074–077; ver §6 |
 | **Form pós-leitura dos 9 atributos** (= UX "Fase 1.6") | Vivo (parcial) | [post-attribute-assessment-form.tsx](components/titles/post-attribute-assessment-form.tsx) |
-| UI calibração (offset + 4 guards) | Vivo | [/settings/calibration](app/settings/calibration/page.tsx) |
+| UI calibração (offset + 4 guards) | Vivo | [/curation/settings/calibration](app/curation/settings/calibration/page.tsx) |
 | ranking-config já marca legado | Vivo | [ranking-table-config.ts](components/ranking/ranking-table-config.ts) |
 
 ### ⚠️ Divergiu do plano
@@ -118,7 +118,7 @@ Fases marcadas conforme estado real. Ordem por valor/dependência.
 L1 expected_score, decomposição, pesos auto, fit_score+percentil, Deep Dive, bias calibration, form 9-atributos, UI calibração.
 
 ### 🔜 Fase A — Honestidade da métrica *(baixo risco, só medição)*
-- Computar **MAE out-of-fold do expected_score** (via `ridgeOutOfFoldPredictions`) e torná-lo o headline "Precisão" em [/settings/calibration](app/settings/calibration/page.tsx).
+- Computar **MAE out-of-fold do expected_score** (via `ridgeOutOfFoldPredictions`) e torná-lo o headline "Precisão" em [/curation/settings/calibration](app/curation/settings/calibration/page.tsx).
 - Rebaixar calc/pred/final-MAE e o RATIO L1/FINAL pra um bloco "Legado (diagnóstico)".
 - **Critério:** painel mostra a precisão real pra não-lidas (provavelmente pior que 0.12 — e tudo bem).
 

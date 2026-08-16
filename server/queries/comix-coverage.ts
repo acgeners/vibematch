@@ -24,7 +24,7 @@ export interface ComixCoverageLists {
  * `work_external_ids` (source='comix'):
  *   - ATIVO    → is_rejected=false E external_id preenchido (hid válido; reviews funcionam)
  *   - AUSENTE  → is_rejected=true  E external_id NULL ("não existe no Comix" — semântica da
- *                migration 038: rejeitado sem match válido). Marcado à mão em /settings.
+ *                migration 038: rejeitado sem match válido). Marcado à mão em /curation/settings.
  *   - PENDENTE → sem linha, ou linha que não é nem ativa nem ausente (ex.: rejeitou um
  *                candidato específico mas ainda cabe um hid certo).
  *
@@ -80,7 +80,7 @@ const loadComixCoverage = cache(async (): Promise<ComixCoverageLists> => {
 
 /**
  * Obras (ativas) pendentes de hid do Comix — sem hid ativo E sem o marcador de
- * "não existe". Usada no badge/contador de /settings e na lista de preenchimento manual.
+ * "não existe". Usada no badge/contador de /curation/settings e na lista de preenchimento manual.
  */
 export async function getWorksMissingComixHid(): Promise<WorkMissingComix[]> {
   return (await loadComixCoverage()).missing

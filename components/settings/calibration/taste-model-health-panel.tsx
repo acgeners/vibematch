@@ -249,7 +249,7 @@ export function TasteModelHealthPanel({ health }: { health: TasteModelHealth }) 
           <b className="font-semibold text-muted-foreground">Como é medido:</b> pesos aprendidos por Ridge
           + bootstrap sobre as {health.trainSize} notas; a confiança é a estabilidade do coeficiente
           (sinal/ruído). <b className="font-semibold text-muted-foreground">Como agir:</b> em{" "}
-          <Link href="/preferencias#pesos" className="font-medium text-foreground underline-offset-2 hover:underline">
+          <Link href="/preferences#pesos" className="font-medium text-foreground underline-offset-2 hover:underline">
             Preferências → Pesos sugeridos
           </Link>{" "}
           você aceita ou rejeita cada ajuste.

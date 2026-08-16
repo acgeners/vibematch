@@ -109,12 +109,12 @@ console.log(
   `  baseline (espelho cru): ${hisReading.length} "Reading" · ${hisFavs.length} favoritas · ${hisRated} avaliadas\n`,
 )
 
-// ── /leitura — TODAS as obras que ele está lendo têm que aparecer ──────────────────────
-const leitura = norm(await page("/leitura", cookie))
+// ── /reading — TODAS as obras que ele está lendo têm que aparecer ──────────────────────
+const leitura = norm(await page("/reading", cookie))
 const faltandoLeitura = hisReading.filter((w) => !leitura.includes(norm(w.title)))
 check(
   faltandoLeitura.length === 0,
-  `/leitura traz as ${hisReading.length} obras "Reading" dele` +
+  `/reading traz as ${hisReading.length} obras "Reading" dele` +
     (faltandoLeitura.length ? ` — FALTAM ${faltandoLeitura.length}: ${faltandoLeitura.slice(0, 3).map((w) => w.title).join(" · ")}` : ""),
 )
 
@@ -129,7 +129,7 @@ check(
 
 // ── home — os números que passam por `personal.get()` ──────────────────────────────────
 //
-// 🔴 ESTES são os asserts que valem. Os de cima (títulos em /leitura e /favoritos) passam pela
+// 🔴 ESTES são os asserts que valem. Os de cima (títulos em /reading e /favoritos) passam pela
 // resolução de IDS, que consulta `user_work_state` DIRETO — eles ficariam verdes mesmo com o
 // `get()` devolvendo estado vazio. Descobri isso sabotando o reader de propósito: a suíte
 // continuou 100% verde. Uma suíte que não fica vermelha quando o código quebra não testa nada.
@@ -175,12 +175,12 @@ check(
   "/ranking do dono NÃO está vazio (o filtro pessoal padrão continua achando obra)",
 )
 
-// ── /titles com filtro de status — o caminho que saiu do SQL e foi pra memória ─────────
-const titlesReading = norm(await page("/titles?personalStatus=Reading", cookie))
+// ── /catalog com filtro de status — o caminho que saiu do SQL e foi pra memória ─────────
+const titlesReading = norm(await page("/catalog?personalStatus=Reading", cookie))
 const faltandoTitles = hisReading.filter((w) => !titlesReading.includes(norm(w.title)))
 check(
   hisReading.length === 0 || faltandoTitles.length < hisReading.length,
-  `/titles?personalStatus=Reading traz obra dele (o filtro pessoal sobreviveu à ida pra memória)`,
+  `/catalog?personalStatus=Reading traz obra dele (o filtro pessoal sobreviveu à ida pra memória)`,
 )
 
 console.log(

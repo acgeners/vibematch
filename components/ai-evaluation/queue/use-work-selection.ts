@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react"
 
 /**
- * Estado de seleção em lote para as filas de /ai-evaluation. Compartilhado por
+ * Estado de seleção em lote para as filas de /curation/works. Compartilhado por
  * todas as abas (todas ganham checkbox + ação em lote). A seleção vive no painel
  * (client), então trocar de aba desmonta o painel e zera naturalmente.
  *

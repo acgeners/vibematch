@@ -67,7 +67,7 @@ const page = async (cookie, path) =>
   (await (await fetch(`${APP}${path}`, { headers: { cookie } })).text()).replace(/\\"/g, '"')
 
 console.log("1) A PÁGINA DA OBRA — o card de SIMILARES é onde o vazamento se escondia")
-const [pOwner, pReader] = await Promise.all([page(owner.cookie, `/titles/${slug}`), page(reader.cookie, `/titles/${slug}`)])
+const [pOwner, pReader] = await Promise.all([page(owner.cookie, `/catalog/${slug}`), page(reader.cookie, `/catalog/${slug}`)])
 
 // ⚠️ NÃO procure o score da própria obra no payload: ali só vêm os das obras SIMILARES (o da
 // obra é renderizado como texto). E foi justamente nos similares que a Nota Prevista DELE

@@ -49,7 +49,7 @@ describe("tagStanceTitle", () => {
 
   it("não afirma 'você marcou' sobre tag que veio do perfil inferido", () => {
     // A stance do perfil é inferência do modelo. Dizer que a pessoa a declarou é
-    // uma mentira plausível — e ela manda a pessoa procurar em /preferencias uma
+    // uma mentira plausível — e ela manda a pessoa procurar em /preferences uma
     // linha que não existe.
     const tip = tagStanceTitle({ stance: "love", strong: false, source: "profile" })
     expect(tip).toMatch(/perfil de gosto/)
@@ -62,7 +62,7 @@ describe("cobertura das superfícies", () => {
   // o modo de falha real: a lógica continua devolvendo `strong: true` e a tela
   // simplesmente não o desenha.
   const SURFACES = [
-    "app/titles/[id]/page.tsx", // card Tags da página da obra
+    "app/catalog/[id]/page.tsx", // card Tags da página da obra
     "components/titles/work-compare-drawer.tsx", // prévia e popover do comparador
     "components/ai-evaluation/synopsis-inputs-popover.tsx", // "Informações sobre a obra"
   ]

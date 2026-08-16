@@ -12,7 +12,7 @@ import { markAllSettingsRead } from "@/server/actions/settings-read"
 const BADGE_CLEAR_DELTA = -1_000_000
 
 /**
- * Botão global no cabeçalho de /settings. Só é renderizado quando HÁ pendências
+ * Botão global no cabeçalho de /curation/settings. Só é renderizado quando HÁ pendências
  * não-lidas (ver `showMarkAll` em page.tsx) — silencia todas de uma vez (as 4
  * seções agregadas + as sugestões pendentes da auditoria) sem resolver. O
  * "desmarcar" por card continua no selo "Lida → Desfazer" de cada item; não faz

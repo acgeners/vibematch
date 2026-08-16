@@ -53,7 +53,7 @@ describe("isolamento — canal único de review manual (externas)", () => {
     for (const f of [
       "components/titles/reviews-editor.tsx",
       "components/titles/ai-evaluation-button.tsx",
-      "app/titles/[id]/edit/page.tsx",
+      "app/catalog/[id]/edit/page.tsx",
     ]) {
       const src = code(f)
       expect(src.includes("review-drafts-field"), `${f}`).toBe(false)

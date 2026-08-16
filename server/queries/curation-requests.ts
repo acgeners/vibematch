@@ -106,7 +106,7 @@ export async function getMyOpenRequestsForWork(workId: string): Promise<Curation
  *
  * Lê o universo inteiro pela service role de propósito — é a única leitura deste módulo que
  * não é "minhas linhas". Quem chama tem de estar atrás de `ensureAdmin`; a página da console
- * já está, e o `middleware.ts` gateia o prefixo `/curadoria` antes de qualquer renderização.
+ * já está, e o `middleware.ts` gateia o prefixo `/curation` antes de qualquer renderização.
  */
 export async function getCurationQueue(limit = 200): Promise<CurationQueueItem[]> {
   const supabase = createAdminClient()

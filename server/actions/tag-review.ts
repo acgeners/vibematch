@@ -106,7 +106,7 @@ export async function confirmNewTags(tagIds: string[]): Promise<{ ok: boolean }>
     console.error("[confirmNewTags] falhou", error.message)
     return { ok: false }
   }
-  revalidatePath("/settings")
+  revalidatePath("/curation/settings")
   return { ok: true }
 }
 
@@ -131,7 +131,7 @@ export async function setTagAdult(tagId: string, level: AdultLevel): Promise<{ o
     const workIds = [...new Set((wt ?? []).map((r) => r.work_id as string))]
     for (const w of workIds) await recomputeAdultAuto(supabase, w)
   }
-  revalidatePath("/settings")
+  revalidatePath("/curation/settings")
   return { ok: true }
 }
 
@@ -223,7 +223,7 @@ export async function setTagScoreTier(tagId: string, tier: AdultScoreTier): Prom
     console.error("[setTagScoreTier] falhou", error.message)
     return { ok: false }
   }
-  revalidatePath("/settings")
+  revalidatePath("/curation/settings")
   return { ok: true }
 }
 
@@ -239,7 +239,7 @@ export async function changeTagGroup(tagId: string, groupSlug: string): Promise<
     console.error("[changeTagGroup] falhou", error.message)
     return { ok: false }
   }
-  revalidatePath("/settings")
+  revalidatePath("/curation/settings")
   return { ok: true }
 }
 
@@ -341,7 +341,7 @@ export async function approveGenreProposal(id: string): Promise<{ ok: boolean; e
     .from("genre_proposal")
     .update({ status: "approved", updated_at: new Date().toISOString() })
     .eq("id", id)
-  revalidatePath("/settings")
+  revalidatePath("/curation/settings")
   revalidatePath("/ranking")
   return { ok: true }
 }
@@ -359,6 +359,6 @@ export async function rejectGenreProposal(id: string): Promise<{ ok: boolean }> 
     console.error("[rejectGenreProposal] falhou", error.message)
     return { ok: false }
   }
-  revalidatePath("/settings")
+  revalidatePath("/curation/settings")
   return { ok: true }
 }

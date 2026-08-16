@@ -40,7 +40,7 @@
 | Build/typecheck/testes | **Verdes** 🟥 | build exit 0; tsc limpo; 117/117 testes; lint 444 (29 err) |
 | Exposição se publicado | **Crítica** 🟥 | ~30 arquivos de Server Action com service role, sem auth → mutação e gasto de IA por qualquer visitante |
 
-**Maior alavanca:** assumir **bandas de prioridade** (largura a validar, não decretada), **componentes separados** e **medir prospectivamente** contra baselines — a infra de medição já foi construída (§1B: `prediction_snapshots` + `/admin/model-metrics`), faltando acumular dado prospectivo real.
+**Maior alavanca:** assumir **bandas de prioridade** (largura a validar, não decretada), **componentes separados** e **medir prospectivamente** contra baselines — a infra de medição já foi construída (§1B: `prediction_snapshots` + `/curation/model-metrics`), faltando acumular dado prospectivo real.
 
 ---
 
@@ -82,9 +82,9 @@ Correções já aplicadas nesta sessão (diagnóstico → código). **Não alter
 - ⚠️ Medido (724 obras): banda 0,5 → 11 tiers, **1º tier grande (225) e top-3 = 76%**. A largura segue **PROVISÓRIA, a validar** (fixa × percentil × cluster) — ver §20.
 
 ### F4 — MAE de vitrine in-sample → ✅ CORRIGIDO
-- **Diagnóstico (mapa antes de mexer):** a headline de `/settings` **já usava** `cv_mae_expected_stage1` (CV honesta) + baseline. O gap real era o **toast de "Recalibrar agora"**, que mostrava `expectedPredictor.model.cvMAE` — o cvMAE **interno** do RidgeCV (só seleciona α por fold → otimista/vazado, ~0,55), rotulado "MAE CV". A in-sample (`mae_expected`) só aparecia no BucketDiagnostic, já rotulada in-sample.
+- **Diagnóstico (mapa antes de mexer):** a headline de `/curation/settings` **já usava** `cv_mae_expected_stage1` (CV honesta) + baseline. O gap real era o **toast de "Recalibrar agora"**, que mostrava `expectedPredictor.model.cvMAE` — o cvMAE **interno** do RidgeCV (só seleciona α por fold → otimista/vazado, ~0,55), rotulado "MAE CV". A in-sample (`mae_expected`) só aparecia no BucketDiagnostic, já rotulada in-sample.
 - **Núcleo puro** `lib/metrics/model-evaluation.ts` (+ Zod no boundary): `ModelEvaluationMetrics` (rejeita `0`/`""`/`NaN`/negativo como MAE), `selectPrimaryModelMetric` (prioridade **prospectiva > CV/OOF > indisponível**; in-sample **nunca** é vitrine), `calculateRelativeErrorReduction` ("redução de erro vs baseline", não "acurácia"), `describeMetricSource` (rótulo+tooltip honestos por fonte), `MIN_PROSPECTIVE_SAMPLE_SIZE = 30` (provisório).
-- **Fix do toast:** `recalculateAll` agora retorna `expectedHonestCvMAE` (= CV honesta); toast/lastRun em `calibration-panel.tsx` passaram a usá-la. Headline reescrita via `selectPrimaryModelMetric`; badge → "X% menos erro que o baseline". `app/settings/page.tsx` monta o `ModelEvaluationMetrics` validado por Zod.
+- **Fix do toast:** `recalculateAll` agora retorna `expectedHonestCvMAE` (= CV honesta); toast/lastRun em `calibration-panel.tsx` passaram a usá-la. Headline reescrita via `selectPrimaryModelMetric`; badge → "X% menos erro que o baseline". `app/curation/settings/page.tsx` monta o `ModelEvaluationMetrics` validado por Zod.
 - Teste: `tests/unit/metrics/model-evaluation.test.ts` (17 casos).
 
 ### P1 (parcial) — Validação prospectiva: `prediction_snapshots` → ✅ CAMADA FEITA (migration 105 **a aplicar**)
@@ -93,8 +93,8 @@ Correções já aplicadas nesta sessão (diagnóstico → código). **Não alter
 - **Dedup dependente de contexto:** ranking → `ranking::{ranking_snapshot_id}::work::{work}` (a mesma obra em rankings diferentes no mesmo dia gera 2 snapshots — necessário pras métricas de ordenação); evento → `event::user::work::formula::context::mood::{dia America/Sao_Paulo}` (timezone explícito, não da máquina).
 - **Métricas (puras):** principal = **1 previsão por obra** (sem pseudorreplicação); por fórmula = **1 por obra × fórmula** (pareada); diagnóstica = "por snapshot"; ordenação por `ranking_snapshot_id` (Spearman/Kendall/pairwise/NDCG/Precision/regret). **Stub** (`predicted_is_stub`) e `superseded` **excluídos** de todas. Baselines (média/calc/expected/decision) na própria cobertura **e** no subconjunto comum.
 - **No-op visível:** `collection-status.ts` distingue tabela ausente (migration 105) × erro de conexão × inesperado × sem dados × ativa, com warn-once por processo.
-- **Hooks:** record em `runRecommendationAction` (só obras SEM nota = leak-free, agrupadas por run); resolve nos 2 paths de save de nota em `works.ts`. **Painel** técnico `/admin/model-metrics` (status, cobertura/viés de seleção, principal × diagnóstica × ranking) usando `selectPrimaryModelMetric` (F4).
-- Arquivos: `supabase/migrations/105_prediction_snapshots.sql` (**não aplicada**), `lib/server/predictions/*`, `lib/metrics/{prediction,ranking}-metrics.ts`, `server/queries/prediction-metrics.ts`, `app/admin/model-metrics/page.tsx`. Testes: `tests/unit/predictions/*` (65 casos) + `tests/unit/metrics/model-evaluation.test.ts`.
+- **Hooks:** record em `runRecommendationAction` (só obras SEM nota = leak-free, agrupadas por run); resolve nos 2 paths de save de nota em `works.ts`. **Painel** técnico `/curation/model-metrics` (status, cobertura/viés de seleção, principal × diagnóstica × ranking) usando `selectPrimaryModelMetric` (F4).
+- Arquivos: `supabase/migrations/105_prediction_snapshots.sql` (**não aplicada**), `lib/server/predictions/*`, `lib/metrics/{prediction,ranking}-metrics.ts`, `server/queries/prediction-metrics.ts`, `app/curation/model-metrics/page.tsx`. Testes: `tests/unit/predictions/*` (65 casos) + `tests/unit/metrics/model-evaluation.test.ts`.
 
 ### Verificação
 **230/230 testes** ✅ (eram 148; +82: F4 + ledger) · `tsc --noEmit` limpo ✅ · `next build` exit 0 ✅ · lint 0 problema nos arquivos alterados.
@@ -386,7 +386,7 @@ Perfil real: loved=50, avoided=13, crit_prefs=9.
 ## 15. Auditoria de testes
 - 🟥 117 testes passam, mas cobrem **só matemática determinística**.
 - 🟦 **Ausentes:** regressão de ranking, **golden dataset humano de avaliação IA** + **teste de repetibilidade** (rodar a mesma avaliação N× e medir variância das notas — prova que a IA é estável, não só estruturada), RLS, E2E, snapshot de prompt.
-- 🟥 ⏳ A validação prospectiva é o ativo que faltava: a **camada foi construída** (§1B: `prediction_snapshots` + métricas + `/admin/model-metrics`); falta aplicar a migration 105 e acumular dado. O `prediction_ledger` (101) permanece como anchor legado da 1ª nota.
+- 🟥 ⏳ A validação prospectiva é o ativo que faltava: a **camada foi construída** (§1B: `prediction_snapshots` + métricas + `/curation/model-metrics`); falta aplicar a migration 105 e acumular dado. O `prediction_ledger` (101) permanece como anchor legado da 1ª nota.
 
 ---
 
@@ -436,7 +436,7 @@ Perfil real: loved=50, avoided=13, crit_prefs=9.
 3. 🟥 ✅ **Corrigir os 18% de 400 (capa)** — feito (§1B: pré-fetch base64). *(P)*
 
 **P1 — qualidade da recomendação**
-4. 🟥 ⏳ Separar o número único em **componentes** (§20) e ligar a medição prospectiva vs baselines. **Infra feita** (§1B: `prediction_snapshots` + métricas por obra/fórmula/snapshot/ranking + `/admin/model-metrics`); falta **aplicar a migration 105** e acumular dado prospectivo. *(M–G)*
+4. 🟥 ⏳ Separar o número único em **componentes** (§20) e ligar a medição prospectiva vs baselines. **Infra feita** (§1B: `prediction_snapshots` + métricas por obra/fórmula/snapshot/ranking + `/curation/model-metrics`); falta **aplicar a migration 105** e acumular dado prospectivo. *(M–G)*
 5. 🟥 Decidir o destino do Ridge por **head-to-head OOF limpo** (perfil por fold) — se não superar o `calc` com significância, simplificar para o `calc`. *(M)*
 6. 🟥 Unificar a semântica de mood (blunt × nuançado). *(M)*
 7. 🟧 `personal_fit`: como é redundante hoje, repensar (percentil/robusto/calibrado) e/ou buscar sinal ortogonal. *(P–M)*

@@ -1656,7 +1656,7 @@ export function ExternalSearch({
                       </Badge>
                       <div className="flex flex-wrap justify-end gap-2">
                         <Button type="button" variant="outline" size="sm" asChild>
-                          <a href={`/titles/${titleToSlug(dup.title)}`} target="_blank" rel="noreferrer">
+                          <a href={`/catalog/${titleToSlug(dup.title)}`} target="_blank" rel="noreferrer">
                             Ver
                           </a>
                         </Button>

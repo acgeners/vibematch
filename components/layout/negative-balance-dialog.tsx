@@ -173,7 +173,7 @@ export function NegativeBalanceDialog({ balance }: { balance: BalanceStatus | nu
             </a>
           </Button>
           <Button asChild variant="secondary" className="w-full">
-            <Link href="/ai-usage" onClick={() => handleOpenChange(false)}>
+            <Link href="/curation/ai-usage" onClick={() => handleOpenChange(false)}>
               Reinformar o saldo
             </Link>
           </Button>

@@ -38,7 +38,7 @@ export interface SynopsisQualityPickerProps {
  * Seletor rápido do Interesse Sinopse MANUAL (♥..♥♥♥♥) — 4 corações estilo
  * rating + limpar. É o caminho GRÁTIS de triagem: grava direto em
  * works.synopsis_quality via setSynopsisQualityAction (sem IA). Clicar no nível
- * atual limpa; o "x" também limpa. Usado nos cards da fila /fila-recomendacao?tab=sinopse
+ * atual limpa; o "x" também limpa. Usado nos cards da fila /my-ai-scores?tab=sinopse
  * e na faixa de stats da página da obra.
  */
 export function SynopsisQualityPicker({

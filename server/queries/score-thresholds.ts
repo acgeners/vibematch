@@ -51,7 +51,7 @@ function computeColumn(
  *
  * Cache com tag `score-color-thresholds`. Invalidar via revalidateTag
  * quando obras forem criadas/editadas/arquivadas ou quando os percentis
- * forem alterados em /preferencias.
+ * forem alterados em /preferences.
  */
 export const getScoreColorThresholds = unstable_cache(
   async (): Promise<ColumnThresholds | null> => {

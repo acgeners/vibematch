@@ -402,11 +402,11 @@ export async function commitExternalListImport(
       }
     }
 
-    revalidatePath("/titles")
+    revalidatePath("/catalog")
     revalidatePath("/")
     revalidatePath("/ranking")
-    revalidatePath("/ai-evaluation")
-    revalidatePath("/fila-recomendacao")
+    revalidatePath("/curation/works")
+    revalidatePath("/my-ai-scores")
     revalidatePath("/import")
     revalidateTag("ai-eval-tab-counts", "max")
 

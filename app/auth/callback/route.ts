@@ -15,7 +15,7 @@ import { createClient } from "@/lib/supabase/server"
  * jogando a pessoa em `https://0.0.0.0:3000/` — sessão criada com sucesso e usuária em lugar
  * nenhum. Ninguém tinha percebido porque ninguém nunca havia logado em prod.
  *
- * No `middleware.ts` o mesmo padrão funciona (medido: `/curadoria` → `https://satoria.fly.dev/login`):
+ * No `middleware.ts` o mesmo padrão funciona (medido: `/curation` → `https://satoria.fly.dev/login`):
  * lá o Next preenche a URL a partir dos headers do proxy. A diferença é entre middleware e route
  * handler, não entre um jeito certo e um errado de escrever — por isso o middleware fica como está.
  *
@@ -49,6 +49,6 @@ export async function GET(request: Request) {
   // Este callback atende dois fluxos, e mandar os dois pro mesmo lugar mente pra um deles:
   // quem clicou num link de redefinição expirado cairia no /login lendo "oauth", palavra que
   // não tem nada a ver com o que a pessoa estava fazendo.
-  if (next === "/nova-senha") return redirectTo("/recuperar-senha?error=link")
+  if (next === "/reset-password") return redirectTo("/forgot-password?error=link")
   return redirectTo("/login?error=oauth")
 }

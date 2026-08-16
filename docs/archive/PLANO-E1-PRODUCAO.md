@@ -11,7 +11,7 @@
   "CONTEXTO DE LEITORES"; o digest entra na `input_signature` (staleness correta);
   `interest-backfill.ts` (`planInterestBackfill`/`runInterestBackfill`) está ciente.
 - ✅ **Ferramentas de preparação** (PR desta sessão — ops de avaliação IA): em
-  `/ai-evaluation`, abas **"Sem reviews"** e **"Sem tags"** têm botões de
+  `/curation/works`, abas **"Sem reviews"** e **"Sem tags"** têm botões de
   **buscar reviews+digest** e **inferir tags** (individual e em fila).
 - ⚠️ **Pendente = OPERAÇÃO** (não há código novo do e1 a escrever).
 
@@ -41,20 +41,20 @@ reviews  ──▶  digest  ──▶  tags  ──▶  backfill do Interesse (e
 - `migrations/120_works_ai_eval_reviews_stale.sql` (flag de avaliação desatualizada por reviews)
 
 ### 1. Maximizar reviews + digest
-- `/ai-evaluation` → aba **"Sem reviews"** → filtrar (ex.: com fontes externas aceitas) →
+- `/curation/works` → aba **"Sem reviews"** → filtrar (ex.: com fontes externas aceitas) →
   **"Buscar reviews em fila"** (teto 8/execução; repetir). Gera reviews + resumo + digest.
-- Obras que já têm reviews mas sem digest: painel **"Digest de reviews"** em `/settings`
+- Obras que já têm reviews mas sem digest: painel **"Digest de reviews"** em `/curation/settings`
   (`consolidatePendingReviewDigests`, ~10/clique) até zerar.
 - ⚠️ Scraping depende de **FlareSolverr (Docker)** pro Comix/ComicK — ligar antes.
 
 ### 2. Maximizar tags
-- `/ai-evaluation` → aba **"Sem tags"** → **"Inferir tags em fila"** (teto 25/execução; repetir).
+- `/curation/works` → aba **"Sem tags"** → **"Inferir tags em fila"** (teto 25/execução; repetir).
   Usa sinopse + digest/resumo (review-aware). Grava `source='ai_inferred'` (reversível).
 - Alternativa em massa/CLI: `npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/infer-tags.ts --with-reviews --from-csv=...`
 - Rodar **`npm run recalc:scores`** depois (tags entram nas features).
 
 ### 3. (Opcional) Re-avaliar atributos desatualizados por reviews
-- `/ai-evaluation` → aba "IA atributos" → filtro **"Reviews novas"** lista as obras cujo pool
+- `/curation/works` → aba "IA atributos" → filtro **"Reviews novas"** lista as obras cujo pool
   de reviews mudou após a avaliação. Re-avaliar incorpora as reviews novas nos
   `category_scores` (→ Nota Prevista). **Opcional** e custa Sonnet — só onde valer.
 
@@ -66,7 +66,7 @@ reviews  ──▶  digest  ──▶  tags  ──▶  backfill do Interesse (e
 - Re-rodar até zerar os "absent/stale".
 
 ### 5. Verificar
-- Painel **`/admin/model-metrics`** (métricas/shadow).
+- Painel **`/curation/model-metrics`** (métricas/shadow).
 - Spot-check: obras com digest devem ter Interesse previsto; conferir que a faixa ♥ mudou
   sensatamente (no smoke 2026-06-27, e1 ficou mais conservador que b1: 2/5 baixaram).
 

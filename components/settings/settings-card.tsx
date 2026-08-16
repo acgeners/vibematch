@@ -10,8 +10,8 @@ import {
 import { ItemHelpPopover } from "@/components/settings/item-help-popover"
 import { CollapsibleCardInner } from "@/components/settings/collapsible-card"
 import type { SettingsAccent } from "@/lib/settings-accent"
-import type { SettingsChip, SettingsSection } from "@/app/settings/sections"
-import { panelTitleOf } from "@/app/settings/sections"
+import type { SettingsChip, SettingsSection } from "@/app/curation/settings/sections"
+import { panelTitleOf } from "@/app/curation/settings/sections"
 import { cn } from "@/lib/utils"
 
 // Ring de accent quando o card está EXPANDIDO (#4). Aplicado via `:has()` no
@@ -76,7 +76,7 @@ export function SettingsCard({
    * redundante). Tem precedência sobre `collapsible` (a setinha client).
    */
   serverCollapse?: { open: boolean; href: string }
-  /** Prefixo da chave do localStorage — separa /settings de /preferencias. */
+  /** Prefixo da chave do localStorage — separa /curation/settings de /preferences. */
   storageKeyPrefix?: string
   /** Pendências deste item — mostra uma pílula no cabeçalho quando > 0. */
   pending?: number

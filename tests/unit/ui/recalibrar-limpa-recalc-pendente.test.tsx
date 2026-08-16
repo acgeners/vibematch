@@ -3,7 +3,7 @@ import { render, cleanup, screen, fireEvent, waitFor } from "@testing-library/re
 
 vi.mock("server-only", () => ({}))
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/settings",
+  usePathname: () => "/curation/settings",
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))

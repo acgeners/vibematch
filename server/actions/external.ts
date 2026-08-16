@@ -369,7 +369,7 @@ export interface CandidateAiNeedsReviewConfirmation {
  * pre-filled with the 9 criterion scores by the time the user clicks "Salvar".
  *
  * The existing post-save evaluation flow ([triggerAiEvaluation] in server/actions/ai.ts,
- * used by /ai-evaluation and the "Reavaliar AI" button) converges on the same
+ * used by /curation/works and the "Reavaliar AI" button) converges on the same
  * [requestAiEvaluation] with the same [AI_EVAL_REVIEW_CAPS], so a given input
  * produces the same hash and hits the same cache entry across both flows.
  *
@@ -1113,6 +1113,6 @@ export async function saveWorkSourceSelections(
     if (upError) return { error: `Erro ao salvar seleções: ${upError.message}` }
   }
 
-  revalidatePath(`/titles/${workId}`)
+  revalidatePath(`/catalog/${workId}`)
   return {}
 }

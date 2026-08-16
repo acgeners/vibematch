@@ -69,7 +69,7 @@ export function TagSubgroupsPanel({
   subgroups,
   subgroupsWithTags,
   unassignedTags,
-  basePath = "/settings/tag-consolidation",
+  basePath = "/curation/settings/tag-consolidation",
 }: Props) {
   const router = useRouter() // mantido pro router.replace em updateQuery
   const doRefresh = useRefresh()

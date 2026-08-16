@@ -259,7 +259,7 @@ export interface RankingFilters {
   onlyWorkIds?: string[]
   /** Quando true, não aplica o hard filter que esconde obras Completed/Dropped.
    *  Default false (mantém semântica de "ranking de o que ler"). Páginas tipo
-   *  /titles e /favorites devem passar true. */
+   *  /catalog e /favorites devem passar true. */
   includeFinishedDropped?: boolean
   /**
    * Filtro por ESTIMATIVA DE ARTE (?art=). Nunca em pontos — a estimativa é comprimida a
@@ -279,7 +279,7 @@ export interface RankingFilters {
    * (`sortLevels: [{ field: "groups" }]`). Não filtra nada.
    *
    * Vem de fora porque é dado de OUTRA tabela (`work_list_items`) e per-usuário: o
-   * `getRanking` serve /titles e /ranking também, e ali ninguém paga essa leitura. Ausente,
+   * `getRanking` serve /catalog e /ranking também, e ali ninguém paga essa leitura. Ausente,
    * a contagem é 0 para todos e ordenar por "groups" não muda nada — o que é o correto,
    * já que nessas telas a coluna nem é oferecida.
    *
@@ -783,7 +783,7 @@ export async function getRanking(
   }
 
   // Hard filter: ranking/recomendações escondem obras já finalizadas/dropadas.
-  // Páginas tipo /titles e /favorites passam includeFinishedDropped=true. "Só
+  // Páginas tipo /catalog e /favorites passam includeFinishedDropped=true. "Só
   // avaliadas" também desliga isto (avaliar ≈ terminou → esconder terminais
   // apagaria quase todo o conjunto que o filtro quer mostrar).
   if (!filters.includeFinishedDropped && !filters.onlyRated) {

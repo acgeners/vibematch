@@ -49,7 +49,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
 interface SubnavProps {
   groups: SubnavGroup[]
   defaultGroup: string
-  /** Base da rota do console (ex.: "/settings", "/preferencias"). */
+  /** Base da rota do console (ex.: "/curation/settings", "/preferences"). */
   basePath: string
   /** Cabeçalho da sub-camada. */
   title: string
@@ -61,10 +61,10 @@ interface SubnavProps {
  * Camada 2 — a sub-camada de um console. Colada na borda (o layout quebra o padding
  * do <main>). Lista os tópicos do console, parametrizada por `basePath`.
  *
- * Hoje só `/preferencias` usa. `/settings` usou até 2026-08-03, quando entrou na
- * console `/curadoria`: os quatro tópicos dele viraram o ramo "Configurações" da
+ * Hoje só `/preferences` usa. `/curation/settings` usou até 2026-08-03, quando entrou na
+ * console `/curation`: os quatro tópicos dele viraram o ramo "Configurações" da
  * sidebar de lá, porque duas sub-navs empilhadas dariam duas sidebars lado a lado.
- * `/preferencias` continua aqui porque é do USUÁRIO (mora no menu do avatar) e nunca
+ * `/preferences` continua aqui porque é do USUÁRIO (mora no menu do avatar) e nunca
  * entrou na console — segue dona da própria camada 2. Segue genérico de propósito:
  * o `basePath` é o que torna o padrão reaproveitável se surgir um terceiro console.
  */

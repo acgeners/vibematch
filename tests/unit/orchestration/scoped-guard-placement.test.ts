@@ -47,7 +47,7 @@ const SCOPED_ACTIONS = [
   "components/favorites/lists/suggest-groups-dialog.tsx",
   "components/settings/weight-suggestions-panel.tsx",
   "components/settings/post-reading-weight-suggestions-panel.tsx",
-  // "Explicar" de /descobrir: a prosa custa ~5¢ e vive só na tela até a pessoa
+  // "Explicar" de /discover: a prosa custa ~5¢ e vive só na tela até a pessoa
   // clicar em "Aplicar ao catálogo" — sair antes disso joga o resultado pago fora.
   "components/discovery/explain-panel.tsx",
 ]

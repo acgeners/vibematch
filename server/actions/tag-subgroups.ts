@@ -7,7 +7,7 @@ import { TAG_GROUP_IDS } from "@/lib/constants/tag-groups"
 import { moveTagToGroup } from "@/server/actions/tag-consolidation"
 import { ensureAdmin } from "@/server/queries/current-user"
 
-const PATH = "/settings/tag-consolidation"
+const PATH = "/curation/settings/tag-consolidation"
 
 export type SubgroupStatus = "pending" | "approved" | "rejected"
 export type AssignmentStatus = "pending" | "approved" | "rejected" | "applied"

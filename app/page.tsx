@@ -21,7 +21,7 @@ import { WorkShelf } from "@/components/home/work-shelf"
  * A home — a VITRINE.
  *
  * Até 2026-08-02 esta rota era o painel de KPIs (fila de IA, custo de API, saúde das fontes).
- * Os números não sumiram: mudaram de endereço para `/painel`. A troca é de primeira tela — o
+ * Os números não sumiram: mudaram de endereço para `/dashboard`. A troca é de primeira tela — o
  * produto é o catálogo, e era o catálogo que não aparecia até rolar meio dashboard.
  *
  * As prateleiras saem do modelo de quem olha, não de popularidade: o SatorIA não tem sinal
@@ -97,15 +97,15 @@ export default async function HomePage() {
           {
             value: stats.followingWithPending,
             label: "com capítulo novo",
-            href: "/leitura",
+            href: "/reading",
             accent: stats.followingWithPending > 0,
           },
-          { value: stats.following, label: "em leitura", href: "/leitura" },
+          { value: stats.following, label: "em leitura", href: "/reading" },
           // `stats.wantToRead` conta só marcação EXPLÍCITA. O antigo
           // `byPersonalStatus[DEFAULT_PERSONAL_STATUS]` herdava o default de obra sem estado, e
           // pra conta nova anunciava o catálogo inteiro ("957 quero ler").
-          { value: stats.wantToRead, label: "quero ler", href: "/titles" },
-          { value: stats.rated, label: "avaliadas por você", href: "/titles" },
+          { value: stats.wantToRead, label: "quero ler", href: "/catalog" },
+          { value: stats.rated, label: "avaliadas por você", href: "/catalog" },
         ]}
       />
 
@@ -144,7 +144,7 @@ export default async function HomePage() {
             não um palpite.
           </p>
           <Link
-            href="/titles"
+            href="/catalog"
             className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline"
           >
             Avaliar o que já li

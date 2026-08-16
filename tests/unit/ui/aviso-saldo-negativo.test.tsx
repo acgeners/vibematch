@@ -51,7 +51,7 @@ describe("aviso de saldo negativo", () => {
     expect(screen.getByText("−$11,10")).toBeDefined()
   })
 
-  it("leva pros dois lugares que resolvem: a Anthropic e o /ai-usage", () => {
+  it("leva pros dois lugares que resolvem: a Anthropic e o /curation/ai-usage", () => {
     render(<NegativeBalanceDialog balance={status(-11.1)} />)
     const billing = screen.getByRole("link", { name: /Adicionar créditos/ })
     expect(billing.getAttribute("href")).toBe("https://platform.claude.com/settings/billing")
@@ -59,7 +59,7 @@ describe("aviso de saldo negativo", () => {
     expect(billing.getAttribute("rel")).toContain("noopener")
     expect(
       screen.getByRole("link", { name: /Reinformar o saldo/ }).getAttribute("href"),
-    ).toBe("/ai-usage")
+    ).toBe("/curation/ai-usage")
   })
 
   it("saldo BAIXO não abre modal — âmbar informa, vermelho interrompe", () => {

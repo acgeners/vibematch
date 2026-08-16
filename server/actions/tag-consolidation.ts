@@ -86,7 +86,7 @@ export async function approveProposal(id: string): Promise<{ error?: string }> {
     .eq("id", id)
     .eq("status", "pending")
   if (error) return { error: error.message }
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return {}
 }
 
@@ -115,7 +115,7 @@ export async function bulkSetProposalStatus(
     .in("status", fromStatuses)
     .select("id")
   if (error) return { updated: 0, error: error.message }
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return { updated: data?.length ?? 0 }
 }
 
@@ -136,7 +136,7 @@ export async function bulkDeleteClusterProposals(
     console.error("[bulkDeleteClusterProposals] failed", { ids, error })
     return { deleted: 0, error: error.message }
   }
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return { deleted: data?.length ?? 0 }
 }
 
@@ -150,7 +150,7 @@ export async function rejectProposal(id: string): Promise<{ error?: string }> {
     .eq("id", id)
     .in("status", ["pending", "approved"])
   if (error) return { error: error.message }
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return {}
 }
 
@@ -164,7 +164,7 @@ export async function reopenProposal(id: string): Promise<{ error?: string }> {
     .eq("id", id)
     .in("status", ["approved", "rejected"])
   if (error) return { error: error.message }
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return {}
 }
 
@@ -194,7 +194,7 @@ export async function editProposal(
         .eq("id", id)
         .in("status", ["pending", "approved"])
       if (error) return { error: error.message }
-      revalidatePath("/settings/tag-consolidation")
+      revalidatePath("/curation/settings/tag-consolidation")
       return { autoRejected: true }
     }
     updates.member_tag_ids = patch.member_tag_ids
@@ -207,7 +207,7 @@ export async function editProposal(
     .eq("id", id)
     .in("status", ["pending", "approved"])
   if (error) return { error: error.message }
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return {}
 }
 
@@ -289,7 +289,7 @@ export async function applyApprovedProposals(groupSlug?: string): Promise<ApplyR
     }
   }
 
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   revalidatePath("/ranking")
   revalidateTag("tags-catalog", "max")
   return result
@@ -391,7 +391,7 @@ export async function createManualCluster(input: {
     .select("id")
     .single()
   if (error) return { error: error.message }
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return { id: data.id as string }
 }
 
@@ -474,7 +474,7 @@ export async function moveTagBetweenProposals(
     if (sErr) return { error: sErr.message }
   }
 
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return { sourceAutoRejected }
 }
 
@@ -524,7 +524,7 @@ export async function addTagToProposal(
     .update({ member_tag_ids: [...members, tagId] })
     .eq("id", proposalId)
   if (uErr) return { error: uErr.message }
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return {}
 }
 
@@ -669,14 +669,14 @@ export async function moveTagToGroup(
     autoRejectedProposals,
   })
 
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   revalidatePath("/ranking")
   revalidateTag("tags-catalog", "max")
   return { removedFromProposals, autoRejectedProposals }
 }
 
 // ============================================================
-// Group move proposals (audit-tag-groups.js → /settings/tag-consolidation tab)
+// Group move proposals (audit-tag-groups.js → /curation/settings/tag-consolidation tab)
 // ============================================================
 
 export type GroupMoveStatus = "pending" | "approved" | "rejected" | "applied"
@@ -755,7 +755,7 @@ export async function approveGroupMove(id: string): Promise<{ error?: string }> 
     .eq("id", id)
     .eq("status", "pending")
   if (error) return { error: error.message }
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return {}
 }
 
@@ -784,7 +784,7 @@ export async function bulkSetGroupMoveStatus(
     .in("status", fromStatuses)
     .select("id")
   if (error) return { updated: 0, error: error.message }
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return { updated: data?.length ?? 0 }
 }
 
@@ -805,7 +805,7 @@ export async function bulkDeleteGroupMoves(
     console.error("[bulkDeleteGroupMoves] failed", { ids, error })
     return { deleted: 0, error: error.message }
   }
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return { deleted: data?.length ?? 0 }
 }
 
@@ -819,7 +819,7 @@ export async function rejectGroupMove(id: string): Promise<{ error?: string }> {
     .eq("id", id)
     .in("status", ["pending", "approved"])
   if (error) return { error: error.message }
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return {}
 }
 
@@ -833,7 +833,7 @@ export async function reopenGroupMove(id: string): Promise<{ error?: string }> {
     .eq("id", id)
     .in("status", ["approved", "rejected"])
   if (error) return { error: error.message }
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return {}
 }
 
@@ -854,7 +854,7 @@ export async function editGroupMove(
     .eq("id", id)
     .in("status", ["pending", "approved"])
   if (error) return { error: error.message }
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return {}
 }
 
@@ -895,7 +895,7 @@ export async function applyApprovedGroupMoves(): Promise<ApplyGroupMovesResult> 
     }
   }
 
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   revalidatePath("/ranking")
   revalidateTag("tags-catalog", "max")
   return result
@@ -934,6 +934,6 @@ export async function deleteClusterProposal(
   }
 
   console.log("[deleteClusterProposal] deleted", { id, canonical_name: proposal.canonical_name })
-  revalidatePath("/settings/tag-consolidation")
+  revalidatePath("/curation/settings/tag-consolidation")
   return { ok: true }
 }

@@ -1,4 +1,4 @@
-# Plano — Melhorias de Layout nas tabelas `/titles` e `/ranking`
+# Plano — Melhorias de Layout nas tabelas `/catalog` e `/ranking`
 
 > Trabalho de UI em paralelo com a Fase 1.5 (branch separada). Lista viva — ir adicionando, priorizando, e commitar em sub-grupos.
 
@@ -6,7 +6,7 @@
 
 ## Contexto
 
-Branch dedicada pra trabalhar polish e melhorias de layout nas tabelas das páginas `/titles`, `/favorites`, `/ranking`, `/recommendations` (que compartilham o `WorkTable` em 3 delas, e usam `RankingTable` em uma).
+Branch dedicada pra trabalhar polish e melhorias de layout nas tabelas das páginas `/catalog`, `/favorites`, `/ranking`, `/recommendations` (que compartilham o `WorkTable` em 3 delas, e usam `RankingTable` em uma).
 
 Objetivo: melhorar **descobribilidade**, **densidade**, **consistência** e **responsividade** sem mudar lógica de cálculo. Itens conceituais profundos (filtros, ordenação) ficam fora — esses já foram cobertos pelo plano `recursive-starfish` (8/8 ✅).
 
@@ -16,7 +16,7 @@ Objetivo: melhorar **descobribilidade**, **densidade**, **consistência** e **re
 - [components/titles/work-status-form.tsx](components/titles/work-status-form.tsx) — Fase 1.5.2 adiciona sub-aba inteira
 - [components/titles/calculation-breakdown.tsx](components/titles/calculation-breakdown.tsx) — Fase 1.5.0 já mudou labels; Fase 1.5.3 adiciona tooltip de bias
 - [components/titles/work-form.tsx](components/titles/work-form.tsx)
-- [app/settings/calibration/page.tsx](app/settings/calibration/page.tsx) — Fase 1.5.4 e 1.5.7 adicionam cards
+- [app/curation/settings/calibration/page.tsx](app/curation/settings/calibration/page.tsx) — Fase 1.5.4 e 1.5.7 adicionam cards
 - [components/settings/calibration-panel.tsx](components/settings/calibration-panel.tsx)
 - [components/ai-evaluation/ai-evaluation-review-form.tsx](components/ai-evaluation/ai-evaluation-review-form.tsx)
 - Settings forms (post-reading-weights, score-weights, ranking-preferences)
@@ -25,7 +25,7 @@ Objetivo: melhorar **descobribilidade**, **densidade**, **consistência** e **re
 - [components/titles/work-table-config.ts](components/titles/work-table-config.ts) — Fase 1.5.0 já mexeu nos labels
 - [components/ranking/ranking-table-config.ts](components/ranking/ranking-table-config.ts) — idem
 - [components/ranking/ranking-table.tsx](components/ranking/ranking-table.tsx) — Fase 1.5.7 vai adicionar badge sutil
-- [app/titles/[id]/page.tsx](app/titles/[id]/page.tsx) — Fase 1.5.7 vai adicionar ícone perto do botão "Avaliar IA"
+- [app/catalog/[id]/page.tsx](app/catalog/[id]/page.tsx) — Fase 1.5.7 vai adicionar ícone perto do botão "Avaliar IA"
 
 **Arquivos seguros** (Fase 1.5 não toca):
 - [components/titles/work-table.tsx](components/titles/work-table.tsx)
@@ -37,7 +37,7 @@ Objetivo: melhorar **descobribilidade**, **densidade**, **consistência** e **re
 - [components/ranking/surprise-me-button.tsx](components/ranking/surprise-me-button.tsx)
 - [components/ui/column-picker.tsx](components/ui/column-picker.tsx)
 - [components/ui/score-badge.tsx](components/ui/score-badge.tsx)
-- Páginas: [app/titles/page.tsx](app/titles/page.tsx), [app/favorites/page.tsx](app/favorites/page.tsx), [app/ranking/page.tsx](app/ranking/page.tsx), [app/recommendations/page.tsx](app/recommendations/page.tsx)
+- Páginas: [app/catalog/page.tsx](app/catalog/page.tsx), [app/favorites/page.tsx](app/favorites/page.tsx), [app/ranking/page.tsx](app/ranking/page.tsx), [app/recommendations/page.tsx](app/recommendations/page.tsx)
 - Componentes NOVOS que você criar
 
 ---
@@ -144,7 +144,7 @@ Objetivo: melhorar **descobribilidade**, **densidade**, **consistência** e **re
 
 > Adicione aqui os itens da sua lista de mudanças de layout.
 
-### Página `/titles`
+### Página `/catalog`
 
 - [ ] (a preencher)
 

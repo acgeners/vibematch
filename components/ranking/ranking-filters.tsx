@@ -1832,7 +1832,7 @@ function AdultContentSegment({
         onClick={() => onChange("all")}
         aria-pressed={value === "all"}
         className={seg(value === "all", false)}
-        title="Mostra todas as obras (respeita sua preferência global de 18+ em /preferencias)."
+        title="Mostra todas as obras (respeita sua preferência global de 18+ em /preferences)."
       >
         Tudo
       </button>
@@ -3799,7 +3799,7 @@ export function RankingFilters({
                       <div className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 ${roomy ? "justify-between" : ""}`}>
                         <Label
                           className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground leading-tight"
-                          title="Esconde obras com tags que você declarou evitar (em /preferencias). Fortes = só as marcadas 2×."
+                          title="Esconde obras com tags que você declarou evitar (em /preferences). Fortes = só as marcadas 2×."
                         >
                           Esconder<br />tags evitadas
                         </Label>

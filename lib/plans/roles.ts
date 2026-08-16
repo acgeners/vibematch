@@ -127,7 +127,7 @@ export function deniedMessage(permission: Permission): string {
 
 // ── Plano (free/pago) — VISTA derivada do papel, não uma segunda verdade ─────
 //
-// Sobrevive só porque a UI e o /conta falam "plano". NÃO gateia nada: quem decide é
+// Sobrevive só porque a UI e o /account falam "plano". NÃO gateia nada: quem decide é
 // `roleAllows(role, verbo)`. Antes disto, `lib/plans/capabilities.ts` era um segundo
 // sistema de permissão em paralelo — dois lugares para responder "quem pode o quê",
 // que é uma pergunta que aceita exatamente uma resposta.

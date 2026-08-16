@@ -784,7 +784,7 @@ function VerdictCard({ item, position }: { item: VerdictItem; position: number }
     </div>
   )
   return item.slug ? (
-    <Link href={`/titles/${item.slug}`} target="_blank" rel="noreferrer" className="block">
+    <Link href={`/catalog/${item.slug}`} target="_blank" rel="noreferrer" className="block">
       {card}
     </Link>
   ) : (
@@ -1643,7 +1643,7 @@ function CompareHeaderCell({
                 de 24px entre o nome e a Sinopse, com 2 linhas sobravam 8px — medido, e as
                 colunas vizinhas nunca casavam. */}
             <Link
-              href={`/titles/${work.slug}`}
+              href={`/catalog/${work.slug}`}
               target="_blank"
               rel="noreferrer"
               title={titleTooltip(work)}

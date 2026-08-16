@@ -81,7 +81,7 @@ async function actionIds(paths) {
   return found
 }
 
-const call = async (id, args, cookie, referer = "/titles/new") =>
+const call = async (id, args, cookie, referer = "/catalog/new") =>
   (
     await fetch(`${APP}${referer}`, {
       method: "POST",
@@ -113,7 +113,7 @@ console.log("\n── A obra que a LEITORA cadastra: de quem é a nota?\n")
   if (sobras?.length) console.log(`  (limpei ${sobras.length} obra(s) de uma execução anterior)\n`)
 }
 
-const ids = await actionIds(["/titles/new"])
+const ids = await actionIds(["/catalog/new"])
 if (!ids.createWork) {
   console.log("  ❌ não achei o id da action createWork no bundle — o app está de pé?")
   process.exit(1)

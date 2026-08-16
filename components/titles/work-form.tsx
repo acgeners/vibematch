@@ -141,7 +141,7 @@ const FIELD_TAB_MAP: Record<string, EditTab> = {
   genres: "tags", tags: "tags",
 }
 
-// Mesmo visual das abas da página de exibição (app/titles/[id]/page.tsx).
+// Mesmo visual das abas da página de exibição (app/catalog/[id]/page.tsx).
 const EDIT_TABS_LIST_CLASS =
   "h-auto w-full flex flex-wrap justify-start gap-2 bg-transparent rounded-none p-0"
 const EDIT_TAB_TRIGGER_CLASS =
@@ -757,7 +757,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
   useEffect(() => {
     if (!pendingCreateNav) return
     const timer = setTimeout(() => {
-      window.location.assign(`/titles/${pendingCreateNav}`)
+      window.location.assign(`/catalog/${pendingCreateNav}`)
     }, 1200)
     return () => clearTimeout(timer)
   }, [pendingCreateNav])
@@ -1107,7 +1107,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     // e é engolida — deixando ou a URL antiga presa em 404 (slug renomeado não
     // resolve mais), ou o usuário parado no form. A recarga total ignora a corrida.
     window.location.assign(
-      `/titles/${finalTitle ? titleToSlug(finalTitle) : (result.data?.id ?? duplicateResolution.existing.id)}`,
+      `/catalog/${finalTitle ? titleToSlug(finalTitle) : (result.data?.id ?? duplicateResolution.existing.id)}`,
     )
   }
 
@@ -1323,7 +1323,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
 
     toast.success(workId ? "Obra atualizada!" : "Obra criada!")
     // Navegar SEMPRE pelo slug canônico novo (devolvido pela action). Antes, no
-    // update, navegava pelo UUID e deixava /titles/{uuid} fazer um redirect()
+    // update, navegava pelo UUID e deixava /catalog/{uuid} fazer um redirect()
     // server-side pro slug — mas esse redirect falha numa navegação soft (RSC),
     // mostrando "This page couldn't load"; só funcionava após refresh (hard nav).
     // Ir direto no slug elimina o redirect. getWorkBySlug tem fallback direto no
@@ -1332,15 +1332,15 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     const destination = newSlug || result.data?.id || workSlug || workId
     if (workId) {
       // UPDATE: hard-nav. Como a URL é o slug DERIVADO do título, renomear muda o
-      // slug — e o `revalidatePath(/titles/<slug-antigo>/edit)` da action re-renderiza
+      // slug — e o `revalidatePath(/catalog/<slug-antigo>/edit)` da action re-renderiza
       // a ROTA ATUAL (onde estamos) na resposta. Com o título já trocado, o slug
       // antigo não resolve mais → `notFound()` → 404. Um `router.push` soft pro slug
       // novo CORRE com esse refresh e é engolido, deixando a URL velha presa em 404.
       // A recarga total ignora a corrida e cai direto no slug novo (resolve 200).
-      window.location.assign(`/titles/${destination}`)
+      window.location.assign(`/catalog/${destination}`)
       return
     }
-    router.push(`/titles/${destination}`)
+    router.push(`/catalog/${destination}`)
     // Chrome (badge "Avaliação IA" / footer de recálculo): atualiza pelo barramento,
     // SEM router.refresh(). Chamar router.refresh() logo ANTES do push() cria uma
     // corrida que ENGOLE a navegação — o WorkForm não desmonta e o overlay
@@ -1349,7 +1349,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     // chips persistentes do chrome (client) precisam do nudge.
     refreshChrome()
     // Mas o `revalidatePath()` da própria createWork dispara um refresh IMPLÍCITO
-    // da rota atual (/titles/new) que às vezes ENGOLE este push soft — o form não
+    // da rota atual (/catalog/new) que às vezes ENGOLE este push soft — o form não
     // desmonta e o overlay "Criando obra..." trava (o sintoma reportado). Não dá
     // pra remover esse refresh (as revalidações são necessárias). Arma o fallback:
     // o effect de `pendingCreateNav` faz hard-nav em 1.2s se o form ainda estiver
@@ -1678,7 +1678,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
           toast.warning(firstError ?? "Obras criadas, mas houve um aviso ao finalizar.")
           refresh()
           const idsParam = result.data.created.map((c) => c.id).join(",")
-          router.push(`/titles/batch?ids=${idsParam}`)
+          router.push(`/catalog/batch?ids=${idsParam}`)
           return
         }
         toast.error(firstError ?? "Erro ao criar lote")
@@ -1694,7 +1694,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
       refresh()
       if (created[0]) {
         const idsParam = created.map((c) => c.id).join(",")
-        router.push(`/titles/batch?ids=${idsParam}`)
+        router.push(`/catalog/batch?ids=${idsParam}`)
       }
     } finally {
       setBatchSubmitting(false)
@@ -1798,7 +1798,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
         variant="outline"
         onClick={() => {
           if (workSlug || workId) {
-            router.push(`/titles/${workSlug ?? workId}`)
+            router.push(`/catalog/${workSlug ?? workId}`)
           } else {
             router.back()
           }
@@ -2415,7 +2415,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                       variant="outline"
                       size="sm"
                       className="w-full gap-1.5 text-xs sm:w-auto"
-                      onClick={() => router.push("/settings")}
+                      onClick={() => router.push("/curation/settings")}
                     >
                       <Settings2 className="h-3.5 w-3.5" />
                       Editar pesos
@@ -2719,7 +2719,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
               variant="outline"
               size="sm"
               className="w-full gap-1.5 text-xs sm:w-auto"
-              onClick={() => router.push("/settings")}
+              onClick={() => router.push("/curation/settings")}
             >
               <Settings2 className="h-3.5 w-3.5" />
               Editar pesos e limites

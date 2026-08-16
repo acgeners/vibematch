@@ -114,7 +114,7 @@ describe("os cinco sinais 'já dentro da Prevista'", () => {
   /**
    * 🔴 A ênfase dos 9 atributos tem DOIS donos possíveis, e a tela precisa dizer qual
    * está valendo. Medido em 2026-08-15: com `score_weights_auto` LIGADO (o estado de
-   * hoje) os pesos declarados em `/preferencias` são só fallback, e os dois divergem
+   * hoje) os pesos declarados em `/preferences` são só fallback, e os dois divergem
    * em 7 dos 9 — `tragedy` declarado −15 contra +11,4 inferido, sinal INVERTIDO.
    * Omitir isso deixa quem declarou um peso achando que ele está em vigor.
    */
@@ -123,9 +123,9 @@ describe("os cinco sinais 'já dentro da Prevista'", () => {
     const manual = buildDecisionBreakdown({ ...BASE, weightsAuto: false }).weightsNote
     expect(auto).toMatch(/autom/i)
     // Não basta dizer "automática": tem que dizer que a SUA declaração não está valendo.
-    expect(auto).toMatch(/não a de \/preferencias/i)
+    expect(auto).toMatch(/não a de \/preferences/i)
     expect(manual).toMatch(/a sua/i)
-    expect(manual).toMatch(/preferencias/i)
+    expect(manual).toMatch(/preferences/i)
     // E a ênfase NÃO polui o valor por-obra da linha de atributos.
     const valor = (a: boolean) =>
       buildDecisionBreakdown({ ...BASE, weightsAuto: a }).insideExpected.find((s) => s.key === "attributes")!.value

@@ -2,7 +2,7 @@ import Link from "next/link"
 import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
 
-/** Aba de topo compartilhada por /ai-evaluation e /fila-recomendacao. */
+/** Aba de topo compartilhada por /curation/works e /my-ai-scores. */
 export function EvalTabLink({
   href,
   active,

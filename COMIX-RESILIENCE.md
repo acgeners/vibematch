@@ -17,7 +17,7 @@ Fluxo antigo ao adicionar/atualizar uma obra:
 1. Você cola o hid (ou URL) da Comix e manda salvar.
 2. `validateComixHid()` valida o hid chamando `fetchComixById()` via FlareSolverr.
 3. FlareSolverr fora → retorna `null` → **`toast.error("Falha ao validar o hid da Comix")`**.
-4. Você ia em **/settings → "Testar agora"** (que reaquece a sessão), manualmente, até
+4. Você ia em **/curation/settings → "Testar agora"** (que reaquece a sessão), manualmente, até
    voltar a funcionar, e só então re-tentava salvar.
 
 Ou seja: um erro bloqueante + um loop manual de "testa, espera, tenta de novo".
@@ -96,7 +96,7 @@ Comportamento novo:
 ## 5. Verificação
 
 - `npx tsc --noEmit` + `npx eslint` nos arquivos tocados → **limpos**.
-- Dev real na `:3005` (worktree própria) → `GET /titles/new` = **HTTP 200, sem erro de
+- Dev real na `:3005` (worktree própria) → `GET /catalog/new` = **HTTP 200, sem erro de
   compile** (o `"use server"` do `comix-resolver.ts` passou — só funções `async`
   exportadas).
 - ⚠️ **Não exercitado ponta-a-ponta com o FlareSolverr fora** (difícil simular pelo

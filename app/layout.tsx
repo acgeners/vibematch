@@ -39,7 +39,7 @@ const geistMono = Geist_Mono({
  * apontasse para ela. Esta linha existe para que a garantia pare de depender de um efeito
  * colateral que qualquer refatoração inocente derruba.
  *
- * O preço: as institucionais (`/sobre`, `/guia`, `/login`, `/signup`) perdem prerender. Para
+ * O preço: as institucionais (`/about`, `/guide`, `/login`, `/signup`) perdem prerender. Para
  * liberar essas, o caminho é MEDIR — rodar `next build`, ler a tabela `ƒ`/`○` e marcar rota a
  * rota — nunca simplesmente apagar esta linha.
  */
@@ -79,7 +79,7 @@ export default async function RootLayout({
           precisa ficar ACIMA dele, não ao lado. Com um filho só o eixo era indiferente. */}
       <body className="h-dvh overflow-hidden flex flex-col bg-background text-foreground">
         <ThemeProvider>
-          {/* Fora do AppShell de propósito: as rotas full-bleed (/login, /sobre) retornam antes
+          {/* Fora do AppShell de propósito: as rotas full-bleed (/login, /about) retornam antes
               da barra de navegação, e o login é onde saber o banco mais importa — as contas dos
               dois são diferentes. Devolve null quando o alvo é a nuvem. */}
           <DbTargetBanner />

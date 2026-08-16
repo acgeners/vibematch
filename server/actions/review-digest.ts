@@ -29,7 +29,7 @@ export async function generateWorkReviewDigest(
   if (!workId) return { ok: false, status: "error", message: "Obra inválida." }
 
   const outcome = await ensureReviewDigest(workId, { allowPaid: true, force: opts.force })
-  revalidatePath(`/titles/${workId}`)
+  revalidatePath(`/catalog/${workId}`)
 
   switch (outcome.status) {
     case "succeeded":

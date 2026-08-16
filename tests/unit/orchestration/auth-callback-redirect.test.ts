@@ -34,8 +34,8 @@ describe("callback do OAuth: destino é sempre caminho interno", () => {
   })
 
   it("honra ?next quando é caminho interno", async () => {
-    const res = await chamar("https://satoria.fly.dev/auth/callback?code=abc&next=/leitura")
-    expect(res.headers.get("Location")).toBe("/leitura")
+    const res = await chamar("https://satoria.fly.dev/auth/callback?code=abc&next=/reading")
+    expect(res.headers.get("Location")).toBe("/reading")
   })
 
   for (const hostil of ["https://malicioso.example", "//malicioso.example", "http://0.0.0.0:3000/x"]) {

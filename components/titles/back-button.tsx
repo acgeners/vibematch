@@ -8,7 +8,7 @@ interface BackButtonProps {
   fallbackHref?: string
 }
 
-export function BackButton({ fallbackHref = "/titles" }: BackButtonProps) {
+export function BackButton({ fallbackHref = "/catalog" }: BackButtonProps) {
   const router = useRouter()
 
   const handleClick = () => {

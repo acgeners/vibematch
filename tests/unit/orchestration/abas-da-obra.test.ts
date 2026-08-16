@@ -20,7 +20,7 @@ import { describe, it, expect } from "vitest"
  * Geral e o Veredito sairia de perto da Nota Prevista — os dois contra o que se quer.
  */
 
-const RAW = readFileSync(resolve(__dirname, "../../../app/titles/[id]/page.tsx"), "utf8")
+const RAW = readFileSync(resolve(__dirname, "../../../app/catalog/[id]/page.tsx"), "utf8")
 
 /**
  * Sem comentários. Eles CITAM o que foi movido ("as datas saíram daqui pro painel"), e um

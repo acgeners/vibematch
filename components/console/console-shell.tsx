@@ -8,8 +8,8 @@ import type { ConsoleGroup, ConsoleSection } from "@/components/console/console-
 import { cn } from "@/lib/utils"
 
 /**
- * Casca do padrão "console" (drill-in card-grid), compartilhada entre /settings
- * e /preferencias. Sem `?s=` → OVERVIEW (grid de cards full-width, sem 2ª barra).
+ * Casca do padrão "console" (drill-in card-grid), compartilhada entre /curation/settings
+ * e /preferences. Sem `?s=` → OVERVIEW (grid de cards full-width, sem 2ª barra).
  * Com `?s=` → PAINEL (children) precedido de uma TAB-STRIP compacta com TODOS os
  * tópicos no topo (ativo expandido com rótulo, inativos só ícone), pra trocar de
  * seção em 1 clique sem perder a lista de vista.

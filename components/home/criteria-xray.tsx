@@ -19,7 +19,7 @@ export function CriteriaXray({ work }: { work: SpotlightWork }) {
   return (
     <figure className="m-0 flex gap-4 rounded-2xl border border-border/70 bg-card p-4 shadow-lg sm:gap-5 sm:p-5">
       <div className="w-[112px] shrink-0 sm:w-[132px]">
-        <Link href={`/titles/${titleToSlug(work.title)}`}>
+        <Link href={`/catalog/${titleToSlug(work.title)}`}>
           <CoverImage
             url={work.coverUrl}
             alt={work.title}
@@ -36,7 +36,7 @@ export function CriteriaXray({ work }: { work: SpotlightWork }) {
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         <figcaption className="flex flex-col gap-0.5">
           <Link
-            href={`/titles/${titleToSlug(work.title)}`}
+            href={`/catalog/${titleToSlug(work.title)}`}
             className="truncate text-[15px] font-bold tracking-tight hover:underline"
           >
             {work.title}

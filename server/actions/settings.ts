@@ -46,9 +46,9 @@ export async function setStackerEnabled(enabled: boolean) {
   if (error) throw new Error(error.message)
 
   const result = await recalculateScoresNowResult()
-  revalidatePath("/settings")
+  revalidatePath("/curation/settings")
   revalidatePath("/ranking")
-  revalidatePath("/titles")
+  revalidatePath("/catalog")
   return result
 }
 
@@ -76,10 +76,10 @@ export async function setScoreWeightsAuto(enabled: boolean) {
   if (error) throw new Error(error.message)
 
   const result = await recalculateScoresNowResult()
-  revalidatePath("/settings")
-  revalidatePath("/preferencias")
+  revalidatePath("/curation/settings")
+  revalidatePath("/preferences")
   revalidatePath("/ranking")
-  revalidatePath("/titles")
+  revalidatePath("/catalog")
   return result
 }
 
@@ -124,9 +124,9 @@ export async function updateScoreWeights(updates: ScoreWeightUpdate[]) {
 
   const result = await recalculateScoresNowResult()
 
-  revalidatePath("/settings")
+  revalidatePath("/curation/settings")
   revalidatePath("/ranking")
-  revalidatePath("/titles")
+  revalidatePath("/catalog")
   return result
 }
 
@@ -170,8 +170,8 @@ export async function updateAiEvalPreferences(update: AiEvalPreferencesUpdate) {
 
   if (error) return { error: error.message }
 
-  revalidatePath("/settings")
-  revalidatePath("/ai-evaluation")
+  revalidatePath("/curation/settings")
+  revalidatePath("/curation/works")
   revalidateTag("ai-eval-tab-counts", "max")
   return { error: null }
 }
@@ -192,8 +192,8 @@ export async function setAiEvalOnCreate(enabled: boolean) {
 
   if (error) return { error: error.message }
 
-  revalidatePath("/settings")
-  revalidatePath("/titles/new")
+  revalidatePath("/curation/settings")
+  revalidatePath("/catalog/new")
   return { error: null }
 }
 
@@ -209,8 +209,8 @@ export async function setSynopsisCanonicalOnCreate(enabled: boolean) {
 
   if (error) return { error: error.message }
 
-  revalidatePath("/settings")
-  revalidatePath("/titles/new")
+  revalidatePath("/curation/settings")
+  revalidatePath("/catalog/new")
   return { error: null }
 }
 
@@ -231,7 +231,7 @@ export async function setReviewSummaryEnabled(enabled: boolean) {
 
   if (error) return { error: error.message }
 
-  revalidatePath("/settings")
+  revalidatePath("/curation/settings")
   return { error: null }
 }
 
@@ -252,7 +252,7 @@ export async function setReviewDigestEnabled(enabled: boolean) {
 
   if (error) return { error: error.message }
 
-  revalidatePath("/settings")
+  revalidatePath("/curation/settings")
   return { error: null }
 }
 
@@ -273,8 +273,8 @@ export async function setTagInferenceOnCreate(enabled: boolean) {
 
   if (error) return { error: error.message }
 
-  revalidatePath("/settings")
-  revalidatePath("/titles/new")
+  revalidatePath("/curation/settings")
+  revalidatePath("/catalog/new")
   return { error: null }
 }
 
@@ -296,7 +296,7 @@ export async function setInterestShadowOnCreate(enabled: boolean) {
 
   if (error) return { error: error.message }
 
-  revalidatePath("/settings")
+  revalidatePath("/curation/settings")
   return { error: null }
 }
 
@@ -317,8 +317,8 @@ export async function setGenerateAllOnCreate(enabled: boolean) {
 
   if (error) return { error: error.message }
 
-  revalidatePath("/settings")
-  revalidatePath("/titles/new")
+  revalidatePath("/curation/settings")
+  revalidatePath("/catalog/new")
   return { error: null }
 }
 
@@ -340,7 +340,7 @@ export async function setHideAdultContent(enabled: boolean) {
 
   if (error) return { error: error.message }
 
-  revalidatePath("/preferencias")
+  revalidatePath("/preferences")
   return { error: null }
 }
 
@@ -387,9 +387,9 @@ export async function updateScoreColorPercentiles(update: ScoreColorPercentilesU
   if (error) return { error: error.message }
 
   revalidateTag("score-color-thresholds", "max")
-  revalidatePath("/preferencias")
+  revalidatePath("/preferences")
   revalidatePath("/ranking")
-  revalidatePath("/titles")
+  revalidatePath("/catalog")
   revalidatePath("/")
   return { error: null }
 }
@@ -458,9 +458,9 @@ export async function updateCriterionColorPcts(
   if (error) return { error: error.message }
 
   revalidateTag("score-color-thresholds", "max")
-  revalidatePath("/preferencias")
+  revalidatePath("/preferences")
   revalidatePath("/ranking")
-  revalidatePath("/titles")
+  revalidatePath("/catalog")
   revalidatePath("/")
   return { error: null }
 }
@@ -494,8 +494,8 @@ export async function updateRankingPreferences(update: RankingPreferencesUpdate)
 
   if (error) return { error: error.message }
 
-  revalidatePath("/settings")
-  revalidatePath("/preferencias")
+  revalidatePath("/curation/settings")
+  revalidatePath("/preferences")
   revalidatePath("/ranking")
   // getPreferences (app/ranking/page.tsx) é um unstable_cache que revalidatePath
   // NÃO derruba (entradas de unstable_cache só caem por TTL ou tag). Sem isto a
@@ -506,7 +506,7 @@ export async function updateRankingPreferences(update: RankingPreferencesUpdate)
 
 /**
  * Lê uma "fotografia" da calibração atual diretamente do estado do DB —
- * sem retreinar nada. Útil pra exibir métricas em /settings.
+ * sem retreinar nada. Útil pra exibir métricas em /curation/settings.
  */
 const DISTANCE_BUCKETS = [
   { label: "< 0.5", min: 0, max: 0.5 },
@@ -647,7 +647,7 @@ export async function getCalibrationSnapshot() {
  *
  * Mesmo job global de `recalculateScoresNow` (single-flight, force=true),
  * desembrulhando o resultado completo (MAE CV etc.) pro painel de calibração. O
- * `recalculateAll` já revalida /settings, /titles, /ranking e / por dentro — não
+ * `recalculateAll` já revalida /curation/settings, /catalog, /ranking e / por dentro — não
  * precisa repetir aqui.
  */
 export async function recalculateNow() {
@@ -756,7 +756,7 @@ export async function consolidatePendingSynopses(maxWorks = 10): Promise<{
       progress.tokensOut += result.tokensOut
     }
 
-    revalidatePath("/settings")
+    revalidatePath("/curation/settings")
     return { data: progress }
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Erro ao consolidar sinopses" }
@@ -880,7 +880,7 @@ export async function consolidatePendingReviewSummaries(maxWorks = 10): Promise<
       progress.tokensOut += result.tokensOut
     }
 
-    revalidatePath("/settings")
+    revalidatePath("/curation/settings")
     return { data: progress }
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Erro ao resumir reviews" }
@@ -899,8 +899,8 @@ export async function syncConstantsNow() {
       maxBuffer: 1024 * 1024 * 10,
     })
 
-    revalidatePath("/settings")
-    revalidatePath("/titles")
+    revalidatePath("/curation/settings")
+    revalidatePath("/catalog")
     revalidatePath("/ranking")
     revalidatePath("/")
 

@@ -582,7 +582,7 @@ const PLAN = [
       on conflict (work_id) do update set ${upsertSet("work_embeddings", ["work_id"])}`,
   },
   {
-    // Ledger de custo por job — é o que o /ai-usage soma. Sem ele a nuvem não mostra o que
+    // Ledger de custo por job — é o que o /curation/ai-usage soma. Sem ele a nuvem não mostra o que
     // esta curadoria gastou.
     table: "work_processing_jobs",
     where: `work_id = any(${idArray})`,

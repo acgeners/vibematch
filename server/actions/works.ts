@@ -233,7 +233,7 @@ async function filterKnownGenres(supabase: SupabaseAdminClient, values: string[]
 
 // As chaves de duplicata (normalização + descarte de alias genérico) moram em
 // lib/title-match.ts, junto com a normalização da BUSCA. Divergir das duas era o
-// que produzia "não acha em /titles mas acusa duplicata em /titles/new".
+// que produzia "não acha em /catalog mas acusa duplicata em /catalog/new".
 function getComparableNames(values: Pick<WorkFormValues, "title" | "original_title" | "alternative_titles">) {
   return duplicateKeys({
     title: values.title,
@@ -905,7 +905,7 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
 
 /**
  * Contagem de tags + reviews úteis de UMA obra, para o hover do título.
- * Reusa a RPC agregada `work_card_counts` (mesma regra do /ai-evaluation), então
+ * Reusa a RPC agregada `work_card_counts` (mesma regra do /curation/works), então
  * os números batem com os cards da fila. Chamada sob demanda no hover (1 por obra).
  */
 export async function getWorkHoverCounts(
@@ -920,8 +920,8 @@ export async function getWorkHoverCounts(
  *
  * A detecção de duplicata compara o pacote INTEIRO de aliases que veio da fonte
  * externa contra o título salvo. A busca não tem esse pacote: ela só olha os
- * nomes guardados na linha da obra. É daí que vinha o "não acha em /titles mas
- * acusa duplicata em /titles/new" — a duplicata enxerga um nome que a busca
+ * nomes guardados na linha da obra. É daí que vinha o "não acha em /catalog mas
+ * acusa duplicata em /catalog/new" — a duplicata enxerga um nome que a busca
  * nunca teve.
  *
  * Então, no exato momento em que descobrimos que aquele nome identifica a obra,
@@ -1355,7 +1355,7 @@ async function persistNewWork(
   const synopsesResult = await syncWorkSynopses(supabase, workId, normalizeFormSynopses(data))
   if (synopsesResult.error) return { ok: false as const, error: { synopses: [synopsesResult.error] } }
   // Gate por configuração: gerar a canônica na criação é opcional (toggle em
-  // /settings). Desligado, adia pra depois do save (painel/edição). Tolerante:
+  // /curation/settings). Desligado, adia pra depois do save (painel/edição). Tolerante:
   // default true preserva o comportamento histórico.
   if (!opts?.skipAiCascade && (await getSynopsisCanonicalOnCreate(supabase))) {
     scheduleSynopsisConsolidation(workId)
@@ -1454,7 +1454,7 @@ export async function createWork(
   // recalc pendente.
   const inferTagsForNewWork = async (workId: string) => {
     if (skipAi) return
-    // Gate por configuração (toggle em /settings). Desligado, a obra nasce sem
+    // Gate por configuração (toggle em /curation/settings). Desligado, a obra nasce sem
     // tags ai_inferred e você as gera depois. Default true preserva o histórico.
     if (!(await getTagInferenceOnCreate())) return
     // Lacuna #4: `inferAndPersistTagsForWork` lê `canonical_synopsis`; se a
@@ -1491,7 +1491,7 @@ export async function createWork(
       m.quickResolveComixHidForWork(result.workId),
     ))
 
-  // Cascata "gerar todos os dados" (toggle /settings, default off). Quando ligada,
+  // Cascata "gerar todos os dados" (toggle /curation/settings, default off). Quando ligada,
   // a cascata (server/actions/generate-all.ts) faz a aquisição de reviews + tags +
   // resto em ordem — então pulamos aqui o fluxo leve de reviews/tags pra não
   // duplicar. Fica só o saveWorkReviews do Path B (persiste as reviews do eval).
@@ -1563,8 +1563,8 @@ export async function createWork(
   // agora" ou o recalc do aceite da IA). Mesmo padrão que updateWork/createWorksBatch.
   await markRecalcPending("createWork")
 
-  revalidatePath("/titles")
-  revalidatePath(`/titles/${slug}`)
+  revalidatePath("/catalog")
+  revalidatePath(`/catalog/${slug}`)
   revalidateTag("works-slug-index", "max")
   revalidatePath("/ranking")
   revalidateTag("tags-catalog", "max")
@@ -1584,7 +1584,7 @@ export async function createWork(
  * A regra que você definiu: o free pode criar obra nova, mas só com a BUSCA DE DADOS externa
  * (scraping das 8 fontes — não passa por `ensureAiConsumption`, não custa nada). O resto —
  * as 9 notas de atributo, a sinopse canônica, a inferência de tags — fica PENDENTE pro Curador
- * acionar. A obra nasce `ai_eval_status = "pending"` e cai na fila de /ai-evaluation.
+ * acionar. A obra nasce `ai_eval_status = "pending"` e cai na fila de /curation/works.
  *
  * ⚠️ O gate saiu de `ensureAdmin` para `own_state` + sessão. E o `skipAiCascade` não é
  * decoração: sem ele, esta função disparava a consolidação de sinopse por LLM em `after()` —
@@ -1609,9 +1609,9 @@ export async function createWorkPending(values: WorkFormValues) {
   })
   if (!result.ok) return { error: result.error }
 
-  revalidatePath("/titles")
+  revalidatePath("/catalog")
   revalidateTag("works-slug-index", "max")
-  revalidatePath("/titles/new")
+  revalidatePath("/catalog/new")
   revalidateFavorites()
   return { data: { id: result.workId } }
 }
@@ -1696,9 +1696,9 @@ export async function createWorksBatch(
   // aceite da IA). Mesmo padrão que updateWork usa.
   await markRecalcPending("createWorksBatch")
 
-  revalidatePath("/titles")
+  revalidatePath("/catalog")
   revalidateTag("works-slug-index", "max")
-  revalidatePath("/titles/new")
+  revalidatePath("/catalog/new")
   revalidatePath("/ranking")
   revalidatePath("/")
   revalidateFavorites()
@@ -1741,9 +1741,9 @@ export async function finalizePendingBatch() {
   const finalizeRecalc = await recalculateScoresNow()
   if (finalizeRecalc.status === "failed") throw new Error(finalizeRecalc.error)
 
-  revalidatePath("/titles")
+  revalidatePath("/catalog")
   revalidateTag("works-slug-index", "max")
-  revalidatePath("/titles/new")
+  revalidatePath("/catalog/new")
   revalidatePath("/ranking")
   revalidatePath("/")
   revalidateFavorites()
@@ -2066,15 +2066,15 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
   ])
   await markRecalcPending("updateWork", { changed: changedForRecalc, actorId: editorId ?? ownerId })
 
-  revalidatePath(`/titles/${id}`)
-  revalidatePath(`/titles/${id}/edit`)
+  revalidatePath(`/catalog/${id}`)
+  revalidatePath(`/catalog/${id}/edit`)
   if (previousSlug) {
-    revalidatePath(`/titles/${previousSlug}`)
-    revalidatePath(`/titles/${previousSlug}/edit`)
+    revalidatePath(`/catalog/${previousSlug}`)
+    revalidatePath(`/catalog/${previousSlug}/edit`)
   }
-  revalidatePath(`/titles/${nextSlug}`)
-  revalidatePath(`/titles/${nextSlug}/edit`)
-  revalidatePath("/titles")
+  revalidatePath(`/catalog/${nextSlug}`)
+  revalidatePath(`/catalog/${nextSlug}/edit`)
+  revalidatePath("/catalog")
   revalidateTag("works-slug-index", "max")
   revalidatePath("/ranking")
   revalidateTag("tags-catalog", "max")
@@ -2111,8 +2111,8 @@ export async function setWorkApproval(id: string, aprovar: boolean) {
     .eq("id", id)
 
   if (error) return { error: error.message }
-  revalidatePath(`/titles/${id}`)
-  revalidatePath("/titles")
+  revalidatePath(`/catalog/${id}`)
+  revalidatePath("/catalog")
   revalidateTag("works-slug-index", "max")
   revalidatePath("/")
   revalidateFavorites()
@@ -2129,7 +2129,7 @@ export async function archiveWork(id: string) {
     .eq("id", id)
 
   if (error) return { error: error.message }
-  revalidatePath("/titles")
+  revalidatePath("/catalog")
   revalidateTag("works-slug-index", "max")
   revalidateTag("score-color-thresholds", "max")
   revalidatePath("/")
@@ -2147,8 +2147,8 @@ export async function unarchiveWork(id: string) {
     .eq("id", id)
 
   if (error) return { error: error.message }
-  revalidatePath(`/titles/${id}`)
-  revalidatePath("/titles")
+  revalidatePath(`/catalog/${id}`)
+  revalidatePath("/catalog")
   revalidateTag("works-slug-index", "max")
   revalidateTag("score-color-thresholds", "max")
   revalidateFavorites()
@@ -2167,8 +2167,8 @@ export async function setAdultOverride(id: string, value: boolean | null) {
   const supabase = createAdminClient()
   const { error } = await supabase.from("works").update({ adult_override: value }).eq("id", id)
   if (error) return { error: error.message }
-  revalidatePath(`/titles/${id}`)
-  revalidatePath("/titles")
+  revalidatePath(`/catalog/${id}`)
+  revalidatePath("/catalog")
   revalidatePath("/")
   return { data: null }
 }
@@ -2177,7 +2177,7 @@ export async function setAdultOverride(id: string, value: boolean | null) {
  * Recalcula o piso/teto de `adult_content` (adult-content-rules.ts) com as tags
  * ATUAIS da obra e ajusta a nota persistida se estiver fora da faixa — a versão
  * "por obra, sob demanda" do que `scripts/adult-content-retroactive-bounds.ts`
- * faz em lote. Alimenta a fila de drift em /settings (getAdultBoundsDriftQueue).
+ * faz em lote. Alimenta a fila de drift em /curation/settings (getAdultBoundsDriftQueue).
  */
 function toAdultScoreTier(v: string | null | undefined): "label" | "explicit" | null {
   return v === "label" || v === "explicit" ? v : null
@@ -2222,8 +2222,8 @@ export async function applyAdultContentBoundsClamp(workId: string): Promise<{ ok
   const { error } = await supabase.from("category_scores").update({ score: newScore }).eq("id", cs.id)
   if (error) return { ok: false, error: error.message }
   await markRecalcPending("adult-content-bounds-clamp")
-  revalidatePath(`/titles/${workId}`)
-  revalidatePath("/settings")
+  revalidatePath(`/catalog/${workId}`)
+  revalidatePath("/curation/settings")
   return { ok: true }
 }
 
@@ -2271,8 +2271,8 @@ export async function toggleFavorite(id: string, isFavorite: boolean) {
   if (error) return { error }
   if (!isFavorite) await purgeFoldersOnUnfavorite([id])
 
-  revalidatePath(`/titles/${id}`)
-  revalidatePath("/titles")
+  revalidatePath(`/catalog/${id}`)
+  revalidatePath("/catalog")
   revalidatePath("/ranking")
   revalidatePath("/favorites")
   revalidateTag("works-slug-index", "max")
@@ -2290,7 +2290,7 @@ export async function setFavoriteMany(ids: string[], isFavorite: boolean) {
   if (error) return { error }
   if (!isFavorite) await purgeFoldersOnUnfavorite(filtered)
 
-  revalidatePath("/titles")
+  revalidatePath("/catalog")
   revalidatePath("/ranking")
   revalidatePath("/favorites")
   revalidateTag("works-slug-index", "max")
@@ -2299,7 +2299,7 @@ export async function setFavoriteMany(ids: string[], isFavorite: boolean) {
 }
 
 /**
- * Escrita ENXUTA do progresso de leitura, disparada in-loco pelo card da /leitura
+ * Escrita ENXUTA do progresso de leitura, disparada in-loco pelo card da /reading
  * (stepper − / + e "Marcar até o último"). Grava só `chapters_read` (+ carimba
  * `last_read_at` quando o número CRESCE) — nada de nota, status ou pós-leitura, ao
  * contrário do `updateWorkStatus` completo. Sem recalc: `chapters_read` não é feature
@@ -2313,7 +2313,7 @@ export async function setFavoriteMany(ids: string[], isFavorite: boolean) {
  * qualquer número) e o fato de server action ser endpoint público fazem disto obrigação, não
  * conveniência: o clamp do cliente é conforto, este aqui é a regra.
  *
- * ⚠️ `clampToTotal: false` existe pra UM caso REAL: a `/leitura` marca "até o último lançado",
+ * ⚠️ `clampToTotal: false` existe pra UM caso REAL: a `/reading` marca "até o último lançado",
  * que vem da checagem externa (`latestExternal`) e legitimamente PASSA de `works.total_chapters`
  * quando o catálogo está defasado — é o cenário do capítulo agregado velho. Com o teto ligado ali,
  * "Marcar até o 132" gravaria 120 em silêncio, com o botão dizendo 132.
@@ -2373,9 +2373,9 @@ export async function setChaptersRead(
   const { error } = await applyReadingState(gate, [id], patch)
   if (error) return { error }
 
-  revalidatePath("/leitura")
-  revalidatePath("/titles")
-  revalidatePath("/titles/[id]", "page")
+  revalidatePath("/reading")
+  revalidatePath("/catalog")
+  revalidatePath("/catalog/[id]", "page")
   revalidatePath("/ranking")
   revalidatePath("/")
   revalidateFavorites()
@@ -2519,7 +2519,7 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
   const catalogTotal = (sharedRow?.total_chapters as number | null | undefined) ?? null
   if (data.chapters_read != null) {
     // `chapterCeiling` e não `catalogTotal` cru: quem já marcou 132 numa obra cujo catálogo diz
-    // 120 (via "marcar até o último lançado" da /leitura) não pode perder 12 capítulos só por
+    // 120 (via "marcar até o último lançado" da /reading) não pode perder 12 capítulos só por
     // salvar o status. O teto limita o que foi digitado agora, não o que já estava lá.
     const ceiling = chapterCeiling(catalogTotal, current?.chapters_read ?? null)
     data.chapters_read = clampChaptersRead(data.chapters_read, ceiling).value
@@ -2604,10 +2604,10 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
       }
     })
 
-    revalidatePath("/titles/[id]", "page")
-    revalidatePath("/titles")
+    revalidatePath("/catalog/[id]", "page")
+    revalidatePath("/catalog")
     revalidatePath("/ranking")
-    revalidatePath("/leitura")
+    revalidatePath("/reading")
     revalidatePath("/")
     revalidateFavorites()
     return { data: { id } }
@@ -2668,12 +2668,12 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
   )
   await markRecalcPending("updateWorkStatus", { changed: changedInputsFromStatus })
 
-  revalidatePath("/titles/[id]", "page")
-  revalidatePath("/titles")
+  revalidatePath("/catalog/[id]", "page")
+  revalidatePath("/catalog")
   revalidateTag("works-slug-index", "max")
   revalidatePath("/ranking")
   revalidateTag("tags-catalog", "max")
-  revalidatePath("/leitura")
+  revalidatePath("/reading")
   revalidatePath("/")
   revalidateFavorites()
   return { data: { id } }
@@ -2681,7 +2681,7 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
 
 /**
  * Troca o status de leitura (personal_status) de VÁRIAS obras de uma vez —
- * action enxuta pra aba "Untracked" do /ai-evaluation e pro atalho da faixa da página da obra.
+ * action enxuta pra aba "Untracked" do /curation/works e pro atalho da faixa da página da obra.
  * Ao contrário de `updateWorkStatus` (form completo), não toca notas nem observações; de
  * capítulos só mexe pra manter a coerência de "Finished" (ver abaixo).
  */
@@ -2705,7 +2705,7 @@ export async function setReadingStatusForWorks(ids: string[], status: string) {
   //
   // Escreve em grupos por total: um patch só não serve, cada obra tem o seu. E NÃO carimba
   // `last_read_at` de propósito — marcar 50 obras antigas como lidas em lote não é "li hoje", e
-  // a data alimenta as bandas de ritmo da /leitura (lib/reading/pace-bands.ts).
+  // a data alimenta as bandas de ritmo da /reading (lib/reading/pace-bands.ts).
   let syncedChapters = 0
   if (isFullyReadPersonalStatus(statusId)) {
     const idsByTotal = new Map<number, string[]>()
@@ -2740,14 +2740,14 @@ export async function setReadingStatusForWorks(ids: string[], status: string) {
   // do Ridge nem rótulo — ver `lib/calculations/recalc-inputs.ts`. Marcava antes, e
   // 100% dos disparos eram inócuos: badge aceso, recálculo devolvendo os mesmos números.
 
-  revalidatePath("/leitura")
-  revalidatePath("/ai-evaluation")
-  revalidatePath("/fila-recomendacao")
+  revalidatePath("/reading")
+  revalidatePath("/curation/works")
+  revalidatePath("/my-ai-scores")
   revalidateTag("ai-eval-tab-counts", "max")
-  revalidatePath("/titles")
+  revalidatePath("/catalog")
   // A própria página da obra: desde os controles rápidos da faixa (status/♥), esta action é
   // chamada de DENTRO dela — sem isto o badge voltaria ao valor antigo no refresh.
-  revalidatePath("/titles/[id]", "page")
+  revalidatePath("/catalog/[id]", "page")
   revalidateTag("works-slug-index", "max")
   revalidatePath("/ranking")
   revalidatePath("/")
@@ -2779,10 +2779,10 @@ export async function setPublicationStatusForWork(id: string, status: string) {
     .eq("id", id)
   if (error) return { error: error.message }
 
-  revalidatePath("/titles/[id]", "page")
-  revalidatePath("/titles")
+  revalidatePath("/catalog/[id]", "page")
+  revalidatePath("/catalog")
   revalidatePath("/ranking")
-  revalidatePath("/leitura")
+  revalidatePath("/reading")
   revalidateFavorites()
   return { data: { publicationStatusId: statusId } }
 }
@@ -2794,7 +2794,7 @@ export async function deleteWork(id: string) {
   const { error } = await supabase.from("works").delete().eq("id", id)
 
   if (error) return { error: error.message }
-  revalidatePath("/titles")
+  revalidatePath("/catalog")
   revalidateTag("works-slug-index", "max")
   revalidatePath("/")
   revalidateFavorites()
@@ -3036,14 +3036,14 @@ async function doUpdateWorkExternalData(
         ? updates.title
         : existingWork?.title ?? ""
     )
-    revalidatePath(`/titles/${id}`)
+    revalidatePath(`/catalog/${id}`)
     if (previousSlug) {
-      revalidatePath(`/titles/${previousSlug}`)
-      revalidatePath(`/titles/${previousSlug}/edit`)
+      revalidatePath(`/catalog/${previousSlug}`)
+      revalidatePath(`/catalog/${previousSlug}/edit`)
     }
-    revalidatePath(`/titles/${nextSlug}`)
-    revalidatePath(`/titles/${nextSlug}/edit`)
-    revalidatePath("/titles")
+    revalidatePath(`/catalog/${nextSlug}`)
+    revalidatePath(`/catalog/${nextSlug}/edit`)
+    revalidatePath("/catalog")
     revalidateTag("works-slug-index", "max")
     revalidatePath("/")
     return { data: { id, slug: nextSlug } }

@@ -151,7 +151,7 @@ function buildEvaluationSnapshot(
     scores,
     summary: evaluation.summary,
     confidence: evaluation.confidence,
-    reviewHref: "/ai-evaluation",
+    reviewHref: "/curation/works",
   }
 }
 

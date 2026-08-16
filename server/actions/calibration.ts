@@ -277,7 +277,7 @@ export async function runCalibrationAuditAction(
       await markRecalcPending("calibration-auto-apply")
     }
 
-    revalidatePath("/settings/calibration")
+    revalidatePath("/curation/settings/calibration")
     return {
       data: {
         runId,
@@ -364,7 +364,7 @@ export async function runBiasReportAction(): Promise<{
       return { error: updError?.message ?? "Falha gravando relatório." }
     }
 
-    revalidatePath("/settings/calibration")
+    revalidatePath("/curation/settings/calibration")
     return { data: updated as unknown as CalibrationRunRow }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erro desconhecido"
@@ -454,7 +454,7 @@ export async function acceptSuggestionAction(id: string): Promise<{ ok: boolean;
   const res = await applySuggestionWithConflictCheck(id, Number(sug.suggested_score), "accepted")
   if (!res.ok) return { ok: false, error: res.error }
   await markRecalcPending("calibration-accept")
-  revalidatePath("/settings/calibration")
+  revalidatePath("/curation/settings/calibration")
   return { ok: true }
 }
 
@@ -470,7 +470,7 @@ export async function editSuggestionAction(
   const res = await applySuggestionWithConflictCheck(id, score, "edited")
   if (!res.ok) return { ok: false, error: res.error }
   await markRecalcPending("calibration-edit")
-  revalidatePath("/settings/calibration")
+  revalidatePath("/curation/settings/calibration")
   return { ok: true }
 }
 
@@ -487,7 +487,7 @@ export async function rejectSuggestionAction(id: string): Promise<{ ok: boolean;
     .eq("id", id)
     .eq("status", "pending")
   if (error) return { ok: false, error: error.message }
-  revalidatePath("/settings/calibration")
+  revalidatePath("/curation/settings/calibration")
   return { ok: true }
 }
 
@@ -524,7 +524,7 @@ export async function revertSuggestionAction(id: string): Promise<{ ok: boolean;
     .eq("id", id)
 
   await markRecalcPending("calibration-revert")
-  revalidatePath("/settings/calibration")
+  revalidatePath("/curation/settings/calibration")
   return { ok: true }
 }
 
@@ -580,7 +580,7 @@ export async function bulkAcceptAction(args: {
     await markRecalcPending("calibration-bulk")
   }
 
-  revalidatePath("/settings/calibration")
+  revalidatePath("/curation/settings/calibration")
   return { accepted, failed, errors }
 }
 
@@ -627,7 +627,7 @@ export async function bulkAcceptByIdsAction(
     await markRecalcPending("calibration-bulk-ids")
   }
 
-  revalidatePath("/settings/calibration")
+  revalidatePath("/curation/settings/calibration")
   return { accepted, failed, errors }
 }
 
@@ -649,7 +649,7 @@ export async function bulkRejectByIdsAction(
     .eq("status", "pending")
     .select("id")
   if (error) return { rejected: 0, error: error.message }
-  revalidatePath("/settings/calibration")
+  revalidatePath("/curation/settings/calibration")
   return { rejected: data?.length ?? 0 }
 }
 
@@ -716,7 +716,7 @@ export async function regenerateCalibratedArtifacts(): Promise<
   // 3. Recalcula tudo com o bias atual.
   const recalc = await recalculateScoresNowResult()
 
-  revalidatePath("/settings/calibration")
+  revalidatePath("/curation/settings/calibration")
   revalidatePath("/ranking")
 
   return {

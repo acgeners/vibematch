@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils"
 import type { Role } from "@/lib/plans/roles"
 
 /**
- * "Seu papel" no /conta — a escada, com o usuário marcado.
+ * "Seu papel" no /account — a escada, com o usuário marcado.
  *
  * Substitui o PlanCard, que mostrava "Cancelar plano" / "Reativar plano Pago" pra
  * TODO MUNDO. Aqueles botões estavam errados por dois motivos, e o segundo é pior:

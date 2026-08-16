@@ -111,7 +111,7 @@ o maior**. O maior ninguém tinha visto: **um visitante anônimo escrevia nas li
 > válidos. Marcação: ✅ verificado no app rodando (Playwright) · 📊 medido.
 
 **O fio condutor:** o app tinha auth há semanas e **não tinha porta de saída**. O único "Sair" morava
-dentro de `/conta`, uma página que ninguém abre sem motivo. A pergunta que abriu a sessão foi
+dentro de `/account`, uma página que ninguém abre sem motivo. A pergunta que abriu a sessão foi
 literalmente *"existe botão de deslogar em algum lugar?"* — e a resposta honesta era "existe, mas
 escondido".
 
@@ -140,7 +140,7 @@ escondido".
 
 - **`cookies()` no layout raiz tornou TODAS as rotas dinâmicas (`ƒ`).** Conferido no build **antes**
   de escolher o caminho: só **7** rotas ainda prerenderizavam (`/login`, `/signup`, dois redirects,
-  `/_not-found`, `/ranking/desatualizados`, `/settings/calibration`) e **nenhuma faz trabalho de
+  `/_not-found`, `/ranking/desatualizados`, `/curation/settings/calibration`) e **nenhuma faz trabalho de
   banco**. Custo aceito em troca de matar o mismatch **e** o pulo visual. Se um dia houver landing
   pública, é este `cookies()` que estará no caminho.
 - **A Fase 1 do PLANO-MULTIUSER (auth + identidade) está fechada** com o logout. O que **não** existe
@@ -171,7 +171,7 @@ HTML válido, um resultado plausível, e está errado. Nenhum log dispara. Só s
 | # | O quê | PR |
 |---|-------|-----|
 | 1 | **Fontes param de se disfarçar de match.** Fonte fora do ar e palpite de slug (AnimePlanet) viravam "match 95–100% com capa" — indistinguíveis de um match real. Conceito novo: `SourceCandidateOption.unconfirmed: "source-down" \| "slug-guess"`. | #102 #105 |
-| 2 | **Canário das fontes atrás do Cloudflare** (`/settings`). Pergunta "os dados chegam agora?", não "o container respira?". Mangago e AnimePlanet dão `403 cf-mitigated` no fetch direto — **dependem** do bypass. | #107 |
+| 2 | **Canário das fontes atrás do Cloudflare** (`/curation/settings`). Pergunta "os dados chegam agora?", não "o container respira?". Mangago e AnimePlanet dão `403 cf-mitigated` no fetch direto — **dependem** do bypass. | #107 |
 | 3 | **MyAnimeList voltou.** A causa nunca foi o MAL: era o **Jikan** (scraper de terceiros) em 504 enquanto `myanimelist.net` respondia 200. Metadados → **API oficial v2** (`MAL_CLIENT_ID`, ~250ms); reviews → **scraping direto** (a v2 não tem reviews). **`jikan.ts` foi apagado.** | #101 #108 #109 |
 | 4 | **Sidecar `comix-render` funciona.** Ele **já existia** (23 testes) e nunca resolveu nada: faltavam 2 linhas. Destrava o hid automático da Comix E **substitui o FlareSolverr**. | #111 #112 |
 | 5 | **Backfill do apagão do Jikan.** 31 notas + 229 reviews recuperadas. Custo de IA: zero. | #113 |
@@ -259,7 +259,7 @@ HTML válido, um resultado plausível, e está errado. Nenhum log dispara. Só s
 | **Colisão de número na migration 132** | ⚠️ ✅ dois arquivos: `132_chance_score.sql` + `132_criterion_score_presets.sql` | Renumerar uma para `133b`/próximo livre **antes de mais qualquer migration**. Ambas já aplicadas em prod → é higiene de histórico, mas quebra replay limpo. | **P0** |
 | Migrations não auto-suficientes (D1) | 📄 `criteria`/`publication_status`/etc. criadas fora de migration | Versionar os `CREATE TABLE` faltantes numa migration idempotente. Sem isso, ninguém reconstrói o banco. | **P0** |
 | Aplicar mig **126** (labels) + `sync-constants` | 📄 arquivo existe, aplicação pendente | Rodar no SQL editor; diff do sync deve sair limpo. | P1 |
-| Aplicar mig **134** (pendências lidas /settings) | 📄 arquivo existe, aplicação pendente | Idem; valida badge some. | P2 |
+| Aplicar mig **134** (pendências lidas /curation/settings) | 📄 arquivo existe, aplicação pendente | Idem; valida badge some. | P2 |
 | CHECK `category_scores.source` atrás do enum TS (D2) | 📄 | Alinhar enum ↔ CHECK num sweep. | P3 |
 
 ### D. Medição prospectiva & decisão de modelo

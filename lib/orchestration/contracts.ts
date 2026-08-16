@@ -239,7 +239,7 @@ export const ACTION_CONTRACTS: Record<ActionName, ActionContract> = {
     inputs: [{ dataKey: "external_ids_accepted", requirement: "required_manual" }],
     estimate: { model: SONNET, base: tokens(6000, 1500) },
     manualInstruction:
-      "A avaliação IA completa é manual: rode em /ai-evaluation ou no botão da página da obra.",
+      "A avaliação IA completa é manual: rode em /curation/works ou no botão da página da obra.",
   },
   recalculate_scores: {
     action: "recalculate_scores",
@@ -329,7 +329,7 @@ export const MANUAL_DATA_INSTRUCTIONS: Partial<Record<DataKey, string>> = {
   tags: "Adicione tags à obra.",
   external_ids_accepted: "Atribua fontes externas aceitas (Revalidar fontes / Buscar dados).",
   category_scores_ai:
-    "Rode a Avaliação IA completa (manual) em /ai-evaluation ou no botão da página da obra.",
+    "Rode a Avaliação IA completa (manual) em /curation/works ou no botão da página da obra.",
   comix_hid: "Cole o hid do Comix na página da obra (Revalidar fontes).",
 }
 

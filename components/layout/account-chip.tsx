@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element -- avatar pequeno com URL do usuário + fallback próprio; next/image não cabe (sem images config). */
 
 // O `avatarUrl` daqui tem três formas, e as três são só uma URL pro `<img>`:
-// vazio (cai no ícone), `/avatar.svg?…` (montado em /conta, desenhado pela rota a
+// vazio (cai no ícone), `/avatar.svg?…` (montado em /account, desenhado pela rota a
 // partir da query string) ou a URL do upload no bucket `avatars`. Guardar a
 // configuração numa coluna à parte obrigaria este componente a saber montar avatar —
 // hoje ele não sabe, e é isso que o mantém trivial. Ver `lib/avatar/url.ts`.
@@ -28,23 +28,23 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 
-// Mesmos ícones das abas de /conta e do item "Preferências" da sidebar — o menu
+// Mesmos ícones das abas de /account e do item "Preferências" da sidebar — o menu
 // não inventa um vocabulário próprio pros mesmos destinos.
 // Coisas do USUÁRIO, nunca das obras — é o que separa este menu da barra de cima.
 // Importar entrou aqui (e não na console de curadoria) porque o gate virou
 // `ensureReadingStateWriter`: importar é ação sobre a SUA lista, não sobre o catálogo.
 const MENU_LINKS = [
-  { href: "/conta", icon: UserCircle, label: "Minha conta" },
-  { href: "/conta/perfil", icon: Sparkles, label: "Perfil de gosto" },
-  { href: "/preferencias", icon: SlidersHorizontal, label: "Preferências" },
+  { href: "/account", icon: UserCircle, label: "Minha conta" },
+  { href: "/account/taste-profile", icon: Sparkles, label: "Perfil de gosto" },
+  { href: "/preferences", icon: SlidersHorizontal, label: "Preferências" },
   { href: "/import", icon: Upload, label: "Importar minha lista" },
-  { href: "/painel", icon: Gauge, label: "Painel de métricas" },
+  { href: "/dashboard", icon: Gauge, label: "Painel de métricas" },
 ]
 
 /**
  * Chip de conta no rodapé da sidebar: avatar + nome + papel, abrindo um menu com
  * os destinos da conta e o "Sair". Busca o resumo no client (como os badges) e
- * re-busca a cada navegação pra refletir edições feitas em /conta. Falha
+ * re-busca a cada navegação pra refletir edições feitas em /account. Falha
  * silenciosa → cai pro placeholder.
  */
 export function AccountChip({ compact = false }: { compact?: boolean }) {
@@ -52,7 +52,7 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
   const [summary, setSummary] = useState<AccountSummary | null>(null)
   const [imgError, setImgError] = useState(false)
   const [signingOut, startSignOut] = useTransition()
-  // A fila de recomendação mora AQUI e só aqui (antes: também como relógio na barra).
+  // "Suas notas de IA" mora AQUI e só aqui (antes: também como relógio na barra).
   // O contador tem que aparecer no gatilho — dentro do menu ele só existe pra quem já
   // abriu, e aí o item não convoca ninguém.
   const { recQueue } = useChromeBadges()
@@ -65,13 +65,13 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
   const sessionKnown = useIsSignedIn()
 
   // Re-busca o resumo da conta a cada navegação e quando uma mutação atualiza o
-  // chrome (ex.: editar perfil/plano em /conta). Coalescing/lifecycle no hook.
+  // chrome (ex.: editar perfil/plano em /account). Coalescing/lifecycle no hook.
   useChromeData(getAccountSummary, (s) => {
     setSummary(s)
     setImgError(false)
   })
 
-  const active = pathname === "/conta" || pathname.startsWith("/conta/")
+  const active = pathname === "/account" || pathname.startsWith("/account/")
   const signedIn = summary?.signedIn ?? false
   // Enquanto o resumo não chega não dá pra saber se há sessão: mostramos os links
   // (inofensivos) mas NENHUMA ação de auth — um "Entrar" piscando pra quem já está
@@ -106,8 +106,8 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          title={compact ? (recQueue > 0 ? `${name} — ${recQueue} na fila de recomendação` : name) : undefined}
-          aria-label={compact ? (recQueue > 0 ? `${name}, ${recQueue} na fila de recomendação` : name) : undefined}
+          title={compact ? (recQueue > 0 ? `${name} — ${recQueue} nota(s) de IA a revisar` : name) : undefined}
+          aria-label={compact ? (recQueue > 0 ? `${name}, ${recQueue} nota(s) de IA a revisar` : name) : undefined}
           className={cn(
             "group relative flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors",
             compact && "justify-center gap-0 px-0",
@@ -133,7 +133,7 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
                 {name}
               </span>
               {/* O papel é o único lugar SEMPRE visível — sem isto ele fica invisível até
-                  alguém abrir /conta. Enquanto o resumo não chega, não chuta um papel. */}
+                  alguém abrir /account. Enquanto o resumo não chega, não chuta um papel. */}
               <span className="mt-0.5 block">
                 {summary ? (
                   <RoleBadge role={summary.role} size="sm" />
@@ -189,9 +189,9 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
         {sessionKnown && (
           <>
             <DropdownMenuItem asChild>
-              <Link href="/fila-recomendacao">
+              <Link href="/my-ai-scores">
                 <Clock />
-                <span className="flex-1">Fila de recomendação</span>
+                <span className="flex-1">Suas notas de IA</span>
                 {recQueue > 0 && (
                   <span className="rounded-full bg-primary px-1.5 font-mono text-[11px] font-bold leading-5 text-primary-foreground tabular-nums">
                     {recQueue > 99 ? "99+" : recQueue}
@@ -255,13 +255,13 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <Link href="/guia">
+              <Link href="/guide">
                 <BookOpenText />
                 Guia do app
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href="/sobre">
+              <Link href="/about">
                 <Info />
                 Sobre a SatorIA
               </Link>

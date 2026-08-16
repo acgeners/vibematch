@@ -60,7 +60,7 @@ export async function createCurationRequest(input: {
     return { ok: false, error: "Não consegui registrar o pedido." }
   }
 
-  if (workId) revalidatePath(`/titles/${workId}`)
+  if (workId) revalidatePath(`/catalog/${workId}`)
   return { ok: true }
 }
 
@@ -85,7 +85,7 @@ export async function cancelCurationRequest(id: string): Promise<{ ok: boolean; 
     return { ok: false, error: "Não consegui cancelar o pedido." }
   }
   const workId = data?.[0]?.work_id as string | undefined
-  if (workId) revalidatePath(`/titles/${workId}`)
+  if (workId) revalidatePath(`/catalog/${workId}`)
   return { ok: true }
 }
 
@@ -114,6 +114,6 @@ export async function resolveCurationRequest(
     console.warn("[resolveCurationRequest] falhou:", error.message)
     return { ok: false, error: "Não consegui fechar o pedido." }
   }
-  revalidatePath("/curadoria/pedidos")
+  revalidatePath("/curation/requests")
   return { ok: true }
 }

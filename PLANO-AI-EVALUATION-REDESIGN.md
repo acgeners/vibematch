@@ -1,4 +1,4 @@
-# PLANO — Redesign da página `/ai-evaluation`
+# PLANO — Redesign da página `/curation/works`
 
 > Rastreamento da reforma da página de Avaliação IA (6 abas). Iniciado 2026-07-01.
 > Fonte de verdade do progresso desta frente. Ver também memória
@@ -6,7 +6,7 @@
 
 ## Contexto & objetivos
 
-A página `/ai-evaluation` tem 6 abas criadas em momentos diferentes → despadronizadas,
+A página `/curation/works` tem 6 abas criadas em momentos diferentes → despadronizadas,
 não intuitivas, com excesso de peso visual. Objetivos do usuário:
 
 1. **Padronizar** as abas o máximo possível (todas = filtro + cards de obra) — sem
@@ -233,7 +233,7 @@ tags, 1 com ambos; badge = activeCount bate; tsc+lint+1089 testes).
   `getWorksWithout{Tags,Reviews}`.
 - Tags & Reviews reaproveita as contagens já computadas nos scans (dispensa re-scan);
   `getWorkTagReviewCounts` e scan de previsões paralelizados.
-- Resultado: /ai-evaluation ~3.9s→~0.56s (parte da queda também é a migração do DB
+- Resultado: /curation/works ~3.9s→~0.56s (parte da queda também é a migração do DB
   Ohio→São Paulo, ver `project_supabase_region`).
 
 ## Notas de rastreamento

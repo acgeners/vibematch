@@ -2,8 +2,8 @@
  * BACKFILL de `works.alternative_titles` a partir das fontes externas já linkadas.
  *
  * Por que existe: 402 das 906 obras (44%) não guardavam NENHUM título alternativo.
- * A busca de /titles só enxerga os nomes salvos na linha da obra, enquanto a
- * detecção de duplicata de /titles/new compara o pacote inteiro de aliases que a
+ * A busca de /catalog só enxerga os nomes salvos na linha da obra, enquanto a
+ * detecção de duplicata de /catalog/new compara o pacote inteiro de aliases que a
  * fonte externa trouxe. Daí o sintoma: "pesquiso e não acha, mas ao cadastrar
  * diz que já existe". Este script fecha o buraco do passado; a auto-cura em
  * `absorbIncomingAliases` (server/actions/works.ts) impede que ele volte.

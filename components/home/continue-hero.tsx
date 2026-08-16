@@ -35,7 +35,7 @@ function bandLabel(publicationStatusId: number | null): string {
 
 /**
  * Separa "Também em leitura" entre o que ainda publica e o resto, na mesma divisão que a
- * /leitura usa ("Em andamento" × "Concluída & outras").
+ * /reading usa ("Em andamento" × "Concluída & outras").
  *
  * O motivo é que "1 não lido" quer dizer coisas diferentes nos dois casos: numa obra em
  * publicação é o capítulo desta semana, e amanhã tem mais; numa concluída é o que falta para
@@ -58,7 +58,7 @@ function groupByPublication(
 /**
  * Escolhe a obra em destaque e a ordem das demais.
  *
- * O destaque sai da banda **Acompanhando** da /leitura (≥85% lido e leitura recente) — não do
+ * O destaque sai da banda **Acompanhando** da /reading (≥85% lido e leitura recente) — não do
  * "li por último". Uma obra em que faltam 37 de 51 capítulos não é o que a pessoa está prestes
  * a terminar; ocupar o hero com ela desperdiça o espaço mais valioso da home. Entre as que se
  * qualificam, vence a de capítulo mais novo: é a que tem algo esperando agora.
@@ -139,7 +139,7 @@ export function ContinueHero({
           faltam e a previsão do próximo.
         </p>
         <Button asChild size="sm">
-          <Link href="/titles">
+          <Link href="/catalog">
             Procurar no catálogo
             <ArrowRight className="size-3.5" />
           </Link>
@@ -195,7 +195,7 @@ export function ContinueHero({
             {onPace && (
               <span
                 className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[9px] text-emerald-600 dark:text-emerald-400"
-                title="Mesma regra da /leitura: 85–99% lido e leitura recente"
+                title="Mesma regra da /reading: 85–99% lido e leitura recente"
               >
                 {bandLabel(main.publicationStatusId)}
               </span>
@@ -266,7 +266,7 @@ export function ContinueHero({
               </Button>
             ) : (
               <Button asChild size="sm">
-                <Link href={`/titles/${titleToSlug(main.title)}`}>
+                <Link href={`/catalog/${titleToSlug(main.title)}`}>
                   Abrir obra
                   <ArrowRight className="size-3.5" />
                 </Link>
@@ -288,7 +288,7 @@ export function ContinueHero({
         <div className="flex items-baseline justify-between gap-2 px-1 pb-1">
           <p className="text-xs font-bold">Também em leitura</p>
           <Link
-            href="/leitura"
+            href="/reading"
             className="font-mono text-[11px] text-muted-foreground transition-colors hover:text-foreground"
           >
             {following}
@@ -314,7 +314,7 @@ export function ContinueHero({
                 return (
                   <Link
                     key={item.id}
-                    href={`/titles/${titleToSlug(item.title)}`}
+                    href={`/catalog/${titleToSlug(item.title)}`}
                     className="flex items-center gap-3 rounded-lg p-1.5 transition-colors hover:bg-muted/50"
                   >
                     <CoverImage
@@ -351,7 +351,7 @@ export function ContinueHero({
 
         {items.length > 4 && (
           <Link
-            href="/leitura"
+            href="/reading"
             className="mt-auto inline-flex items-center gap-1 px-1 pt-2 text-xs font-semibold text-primary hover:underline"
           >
             Ver todas

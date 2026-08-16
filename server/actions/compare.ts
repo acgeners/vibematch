@@ -73,7 +73,7 @@ export interface CompareWork extends HiatusFields {
   predictedSynopsisQuality: string | null
   /**
    * `formula_config.score_weights_auto` — se a ênfase dos 9 atributos em vigor é a
-   * INFERIDA do histórico (true) ou a declarada em `/preferencias` (false). Igual pra
+   * INFERIDA do histórico (true) ou a declarada em `/preferences` (false). Igual pra
    * todas as obras da comparação; vive aqui porque quem consome é a linha da obra.
    */
   weightsAuto: boolean
@@ -125,7 +125,7 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
     // tabela inteira contra a NUVEM, que é onde o app aponta.
     getSynopsisPredictionsByWorkIds(unique),
     // Qual ênfase dos 9 atributos está EM VIGOR: a inferida do histórico ou a que a
-    // pessoa declarou em `/preferencias`. Uma coluna de uma linha — e sem ela o painel
+    // pessoa declarou em `/preferences`. Uma coluna de uma linha — e sem ela o painel
     // deixaria implícito um fato que a pessoa acredita conhecer (ver o breakdown).
     supabase.from("formula_config").select("score_weights_auto").limit(1).maybeSingle(),
   ])

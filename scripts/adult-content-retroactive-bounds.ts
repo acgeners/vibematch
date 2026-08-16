@@ -10,7 +10,7 @@
  *
  * Escopo desta rodada: só as tags que JÁ têm `adult_score_tier` decidido (as 53
  * migradas em 174) + a tag especial R15-based-on-R19-novel. As ~119 tags no backlog
- * de revisão (/settings → "Piso de nota 18+ (tags)") NÃO entram até serem revisadas
+ * de revisão (/curation/settings → "Piso de nota 18+ (tags)") NÃO entram até serem revisadas
  * — script determinístico não deve decidir por curadoria pendente.
  *
  * Uso:

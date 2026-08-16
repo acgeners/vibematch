@@ -89,7 +89,7 @@ async function actionIds(pagePath) {
   return found
 }
 
-async function callAction(id, args, cookie, referer = "/titles") {
+async function callAction(id, args, cookie, referer = "/catalog") {
   const res = await fetch(`${APP}${referer}`, {
     method: "POST",
     headers: {
@@ -142,8 +142,8 @@ async function main() {
   // `updateWorkStatus` só é referenciado no form da página da obra — daí varrer as duas.
   const { data: firstWork } = await admin.from("works").select("id").limit(1).single()
   const ids = {
-    ...(await actionIds("/titles")),
-    ...(await actionIds(`/titles/${firstWork.id}`)),
+    ...(await actionIds("/catalog")),
+    ...(await actionIds(`/catalog/${firstWork.id}`)),
   }
   for (const name of ["toggleFavorite", "updateWorkStatus", "setFavoriteMany"]) {
     console.log(`   ${name}: ${ids[name] ?? "NÃO ENCONTRADO"}`)
@@ -274,7 +274,7 @@ async function main() {
 
   // ═════════════════════════════════════════════════════════════════════════════════
   console.log("\n6) O CATÁLOGO é o mesmo pros dois (título, capa, sinopse, notas da IA)")
-  // ⚠️ A rota da obra resolve por SLUG. `/titles/<uuid>` devolve 200 — mas uma casca vazia
+  // ⚠️ A rota da obra resolve por SLUG. `/catalog/<uuid>` devolve 200 — mas uma casca vazia
   // (115 KB contra 454 KB), sem capa, sem sinopse, sem tags. Um teste que fetch-asse o UUID
   // "passaria" comparando duas páginas igualmente vazias.
   const slug = workA.title
@@ -284,9 +284,9 @@ async function main() {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
   const page = async (cookie) => {
-    const res = await fetch(`${APP}/titles/${slug}`, { headers: cookie ? { cookie } : {} })
+    const res = await fetch(`${APP}/catalog/${slug}`, { headers: cookie ? { cookie } : {} })
     const html = await res.text()
-    if (html.length < 200_000) throw new Error(`página /titles/${slug} veio vazia (${html.length} bytes)`)
+    if (html.length < 200_000) throw new Error(`página /catalog/${slug} veio vazia (${html.length} bytes)`)
     return html
   }
   const [htmlOwner, htmlReader] = await Promise.all([page(owner.cookie), page(reader.cookie)])

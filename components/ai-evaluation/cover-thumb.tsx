@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
  * (`url`) ou várias candidatas (`urls`, primária primeiro): ao falhar uma
  * (link morto, hotlink bloqueado, CDN fora), tenta a próxima automaticamente.
  * Só mostra o placeholder "—" quando TODAS falham. Usado nos cards das filas de
- * /ai-evaluation (atributos, IA Rk, Interesse Sinopse).
+ * /curation/works (atributos, IA Rk, Interesse Sinopse).
  */
 export function CoverThumb({
   url,

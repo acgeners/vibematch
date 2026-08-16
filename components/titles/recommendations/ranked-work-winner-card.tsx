@@ -31,7 +31,7 @@ function quality(score: number): { label: string; scoreClass: string; badgeClass
 export function RankedWorkWinnerCard({ ranked, totalCount }: RankedWorkWinnerCardProps) {
   const { work, coverUrl, alignment_score, justification, top_match_factors } = ranked
   const risks = ranked.risks ?? []
-  const href = `/titles/${titleToSlug(work.title)}`
+  const href = `/catalog/${titleToSlug(work.title)}`
   const q = quality(alignment_score)
 
   return (

@@ -120,7 +120,7 @@ export async function saveQuickScore(
         }
       })
     }
-    revalidatePath(`/titles/${workId}`)
+    revalidatePath(`/catalog/${workId}`)
   }
 
   return { ok: true }

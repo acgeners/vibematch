@@ -9,9 +9,9 @@ import type { WorkWithRelations } from "@/types/domain"
 /**
  * O selo 🔞 18+ nas views DENSAS (2026-08-14).
  *
- * Ele já existia nos Cards, na prévia de hover, na /leitura e no /descobrir — e
+ * Ele já existia nos Cards, na prévia de hover, na /reading e no /discover — e
  * faltava exatamente onde a obra aparece como LINHA: Lista do /ranking, Lista do
- * /titles e /favorites, matriz de atributos (esta) e Bússola. O modo de falha é o
+ * /catalog e /favorites, matriz de atributos (esta) e Bússola. O modo de falha é o
  * mais barato de todos: some sem quebrar nada, e a tela continua plausível.
  *
  * Aqui é a matriz porque ela tem uma armadilha própria: a coluna 🔞 do heatmap é a

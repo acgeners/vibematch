@@ -3,17 +3,17 @@
 import { getCuradoriaBadgeUnreadCount, getRecommendationBadgeUnreadCount } from "@/server/queries/ai-eval-read"
 import { getSettingsItemUnread } from "@/server/queries/settings-read"
 import { countOpenCurationRequests } from "@/server/queries/curation-requests"
-import { SETTINGS_GROUPS } from "@/app/settings/sections"
+import { SETTINGS_GROUPS } from "@/app/curation/settings/sections"
 import { maybeTriggerStaleRecalc } from "@/server/recalc/queue"
 import { getComixStatus } from "@/lib/external/comix-gate"
 import type { ComixHealthState } from "@/lib/external/comix-gate"
 
 export interface SidebarBadgeCounts {
-  /** Obras NÃO-LIDAS na fila de atributos de /ai-evaluation ("Curadoria da Obra"). */
+  /** Obras NÃO-LIDAS na fila de atributos de /curation/works ("Curadoria da Obra"). */
   curadoria: number
-  /** Obras NÃO-LIDAS em Veredito IA + Interesse de /fila-recomendacao, união distinta. */
+  /** Obras NÃO-LIDAS em Veredito IA + Interesse de /my-ai-scores, união distinta. */
   recQueue: number
-  /** Soma de todas as pendências acionáveis de /settings (todos os tópicos). */
+  /** Soma de todas as pendências acionáveis de /curation/settings (todos os tópicos). */
   settings: number
   /**
    * Pedidos do leitor em aberto (atualizar dados, revisar avaliação, cadastrar pelo nome).
@@ -23,7 +23,7 @@ export interface SidebarBadgeCounts {
    */
   requests: number
   /**
-   * O mesmo não-lido, QUEBRADO por tópico de /settings (`grupo -> contagem`).
+   * O mesmo não-lido, QUEBRADO por tópico de /curation/settings (`grupo -> contagem`).
    *
    * Sai da MESMA leitura que o total — `getSettingsItemUnread()` é uma só, e
    * agrupá-la custa zero query. Existe porque a sidebar da console mostra o badge
@@ -43,14 +43,14 @@ export interface SidebarBadgeCounts {
  *
  * - curadoria / recQueue: as duas metades do antigo badge único "Avaliação IA"
  *   (união distinta attr+veredito+interesse), separadas quando a página virou
- *   /ai-evaluation (Curadoria da Obra, só-curador) + /fila-recomendacao (qualquer
+ *   /curation/works (Curadoria da Obra, só-curador) + /my-ai-scores (qualquer
  *   logado). "Marcar como lido" em cada página silencia pendências sem resolvê-las.
  *   Ver `getCuradoriaBadgeUnreadCount`/`getRecommendationBadgeUnreadCount`. A
  *   sidebar oculta cada badge quando o valor é 0.
- * - settings: soma do NÃO-LIDO de todas as pendências de /settings (sugestões de
+ * - settings: soma do NÃO-LIDO de todas as pendências de /curation/settings (sugestões de
  *   critérios + embeddings + sinopse + resumo + comix), via `getSettingsItemUnread`
  *   — as MESMAS contagens por-item que a página e a sub-nav usam, então sidebar →
- *   tópico → card batem. "Marcar como lido" em /settings silencia sem resolver
+ *   tópico → card batem. "Marcar como lido" em /curation/settings silencia sem resolver
  *   (migration 134), igual às filas de avaliação. A sidebar oculta o badge no 0.
  *
  * Cada parcela falha silenciosa em 0 pra nunca derrubar o layout.
@@ -105,7 +105,7 @@ export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
 }
 
 /**
- * Não-lido de /settings, no total e por tópico, de uma leitura só.
+ * Não-lido de /curation/settings, no total e por tópico, de uma leitura só.
  *
  * A contagem por-item vem de `getSettingsItemUnread` (as MESMAS da página e dos
  * badges da console, já descontando os "lidos"); o registry `SETTINGS_GROUPS` diz

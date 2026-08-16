@@ -40,7 +40,7 @@ export function FavoriteCell({
       return
     }
     // Sem router.refresh() aqui: toggleFavorite já chama revalidatePath das rotas
-    // afetadas (/ranking, /titles, /favorites, /titles/:id) e o App Router aplica
+    // afetadas (/ranking, /catalog, /favorites, /catalog/:id) e o App Router aplica
     // esse re-render à rota atual na resposta da action. O router.refresh() extra
     // era um SEGUNDO re-render pesado por clique (re-roda getRanking/getWorks). O
     // estado otimista acima mantém o coração instantâneo; em /favorites a linha

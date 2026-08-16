@@ -730,8 +730,8 @@ export async function setComixHidManually(input: {
     )
   if (error) return { ok: false, error: error.message }
 
-  revalidatePath("/settings")
-  revalidatePath("/titles")
+  revalidatePath("/curation/settings")
+  revalidatePath("/catalog")
   return validated
 }
 

@@ -6,7 +6,7 @@ import { getInterestReader } from "@/server/queries/user-interest"
 
 /**
  * Filtro de Interesse na obra (manual + previsão da IA) aplicado como PÓS-FETCH
- * uniforme, pra as filas de /ai-evaluation cujas queries não filtram por isso de
+ * uniforme, pra as filas de /curation/works cujas queries não filtram por isso de
  * forma consistente (atributos, Veredito IA, Untracked, Tags & Reviews). A aba
  * "Interesse" já filtra internamente (`getSynopsisQueueWorks`) e não usa isto.
  *

@@ -16,7 +16,7 @@ interface ActivityItem {
  * Deliberadamente diferente dos StatCards que moravam aqui: aqueles misturavam atividade
  * (acompanhando, avaliadas) com operação (custo de IA em 30 dias, pendências de avaliação), e
  * era essa mistura que fazia a primeira tela parecer console. Aqui entra só o que descreve a
- * leitura de quem olha; custo, filas e saúde do sistema vivem em `/painel`.
+ * leitura de quem olha; custo, filas e saúde do sistema vivem em `/dashboard`.
  *
  * Uma faixa, não cartões: a vitrine abaixo é que deve carregar o peso visual.
  */
@@ -49,7 +49,7 @@ export function ActivityStrip({ items }: { items: ActivityItem[] }) {
       ))}
 
       <Link
-        href="/painel"
+        href="/dashboard"
         className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/70 px-3 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
       >
         Painel completo

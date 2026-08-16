@@ -64,7 +64,7 @@ const semNovidade = (ids: string[]) =>
  * `useTransition` local continua "funcionando" (o botão gira, a ação roda), só que o
  * feedback morre na primeira navegação — numa ação de ~40s, que é o caso todo.
  */
-describe("/leitura: a checagem de capítulos é tarefa durável (azul) com contador", () => {
+describe("/reading: a checagem de capítulos é tarefa durável (azul) com contador", () => {
   beforeEach(() => {
     checkReadingUpdates.mockReset()
     for (const t of readTasks()) dismissTask(t.id)

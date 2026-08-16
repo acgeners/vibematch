@@ -45,7 +45,7 @@ export function LoginForm({ defaultEmail = "", defaultRemember = true }: LoginFo
           <div className="flex items-baseline justify-between gap-3">
             <Label htmlFor="password">Senha</Label>
             <Link
-              href="/recuperar-senha"
+              href="/forgot-password"
               className="text-[13px] text-muted-foreground hover:text-foreground hover:underline"
             >
               Esqueci minha senha

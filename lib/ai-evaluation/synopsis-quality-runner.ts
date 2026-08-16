@@ -65,7 +65,7 @@ export async function autoPredictSynopsisQuality(workId: string): Promise<void> 
     const { isInterestShadowEnabled, COMPILED_PREFERENCES_V4_SHADOW } = await import(
       "@/lib/ai-evaluation/compiled-preferences"
     )
-    // Liga o arm B por env (INTEREST_SHADOW=1) OU pelo toggle em /settings
+    // Liga o arm B por env (INTEREST_SHADOW=1) OU pelo toggle em /curation/settings
     // (interest_shadow_on_create). Default false — só roda se um dos dois pedir.
     const { getInterestShadowOnCreate } = await import("@/server/queries/current-user")
     const shadowOn = isInterestShadowEnabled() || (await getInterestShadowOnCreate())

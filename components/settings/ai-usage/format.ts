@@ -1,5 +1,5 @@
 /**
- * Formatadores compartilhados do painel /ai-usage. Centralizados aqui pra não
+ * Formatadores compartilhados do painel /curation/ai-usage. Centralizados aqui pra não
  * duplicar entre a página (server) e os componentes interativos (client).
  *
  * ⚠️ **Dinheiro NÃO mora aqui** — mora em `lib/format/money.ts`, e o app inteiro

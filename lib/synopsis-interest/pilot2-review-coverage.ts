@@ -120,7 +120,7 @@ export function buildPilot2CoveragePanel(inputs: CoverageRowInput[]): CoveragePa
     .map((r) => ({
       title: r.title,
       workId: r.workId,
-      localRoute: `/titles/${r.workId}`,
+      localRoute: `/catalog/${r.workId}`,
       usefulReviewCount: r.usefulReviewCount,
       missingToTarget: Math.max(0, MIN_USEFUL_TARGET - r.usefulReviewCount),
       availableExternalSources: [...r.acceptedExternalSources],

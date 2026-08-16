@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 /**
- * A trilha "O que o modelo previu, ao lado do que você deu" (`/conta/perfil`, aba "A prova")
+ * A trilha "O que o modelo previu, ao lado do que você deu" (`/account/taste-profile`, aba "A prova")
  * é uma COMPARAÇÃO: o card inteiro pareia a Nota Prevista com a nota que a pessoa deu. Obra
  * lida SEM nota não tem o segundo lado — renderizaria só a capa e o título, um buraco no
  * meio da prova.

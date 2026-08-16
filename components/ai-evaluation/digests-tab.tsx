@@ -12,7 +12,7 @@ import type { DigestQueueWork } from "@/server/queries/review-digest-queue"
 
 /**
  * Aba "Digests" — a fila do digest estruturado que morava como painel cego em
- * `/settings?g=ia`.
+ * `/curation/settings?g=ia`.
  *
  * O painel antigo sabia dizer só "125 pendentes" e processava 10 que ninguém
  * escolhia nem via. Aqui cada obra mostra quantas reviews ÚTEIS tem, que é o

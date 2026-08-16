@@ -7,7 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
  * Existe por causa de uma falha real: entre 2026-07-31 e 08-03 produção ficou inteira no ar
  * respondendo HTTP 200 enquanto TODA leitura do banco falhava com `Invalid API key` — o
  * `SUPABASE_SERVICE_ROLE_KEY` da Fly não valia para o projeto. Ninguém percebeu por três dias
- * porque o smoke da época testava `/sobre` e `/`, as duas rotas que não tocam o banco.
+ * porque o smoke da época testava `/about` e `/`, as duas rotas que não tocam o banco.
  *
  * ⚠️ Por que `curl -o /dev/null -w %{http_code}` numa página normal NÃO serve de monitor: com
  * Suspense o Next envia o shell com 200 e só depois falha durante o streaming. O status já foi

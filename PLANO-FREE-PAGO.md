@@ -70,7 +70,7 @@ capa; e **campo em conflito é pulado**.
 
 1. **Curadoria do catálogo = Curador, nunca plano.** Um Assinante **não** edita o catálogo.
 2. **"Mora em `user_settings`" NÃO quer dizer "é pessoal".** `formula_config` e `score_weights` são
-   **globais** — e metade de `/preferencias` escreve neles. Antes de classificar uma action como
+   **globais** — e metade de `/preferences` escreve neles. Antes de classificar uma action como
    pessoal, olhe **a tabela que ela grava**, não o nome dela.
 3. **Sem billing, ninguém troca o próprio papel.** `setPlan`/`cancelPlan`/`reactivatePlan` foram
    **removidas** (pós-mig 140 viraram no-op: gravavam `user_plan`, que ninguém mais lê).
@@ -229,11 +229,11 @@ público**. Foi assim que se confirmou que as 10 funções de background sumiram
 |---|-------|--------|
 | 1 | `ensureAdmin` nas mutações de catálogo / gastos de IA / config global | ✅ #115 |
 | 2 | Tirar do `"use server"` o que a UI não chama | ✅ #116 |
-| 3 | Esconder na UI o que o não-curador não pode salvar (`/preferencias`) | ✅ #115 |
+| 3 | Esconder na UI o que o não-curador não pode salvar (`/preferences`) | ✅ #115 |
 | 4 | Fechar o resíduo (scraping externo, histórico compartilhado) | ✅ #117 |
 | 5 | **Papéis** — escada `role` + permissões por verbo (mig 140) | ✅ #118 |
 | 6 | Assinante atualiza obras (automático, sem escolher conteúdo) | ✅ #119 |
-| 7 | Badge do papel + card da escada no `/conta` | ✅ #121 |
+| 7 | Badge do papel + card da escada no `/account` | ✅ #121 |
 | 8 | 🔴 **Rate-limit por usuário/IP** (§6) — precisa da decisão de cotas | **P0 — o ÚNICO que falta** |
 | 9 | Crédito + débito (Leitor consome IA pagando por uso) | falta |
 | 10 | Limpar `capabilities.ts` (§5: chaves mortas) + migrar pra `consume_ai` | P2 |

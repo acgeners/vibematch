@@ -13,13 +13,13 @@
 ## 0. Status de implementação (atualizado 2026-06-15)
 
 **✅ Feito nesta sessão:**
-- **Item A — tags declaradas (amo/evito)** — completo. Migration **100** (`user_tag_preferences`, polimórfica tag/subgrupo/grupo) **aplicada**. UI em `/preferencias`: árvore Grupo→Subgrupo→Tag (grupo só navega, não é declarável), 2 colunas, **Salvar batch** (não por-clique), ênfase 2×. Lógica: `mergeDeclaredTagPreferences` (shrinkage `λ=n/(n+k)`, `K_LOVE=5`/`K_AVOID=8`/`BASE=0.5`) em [taste-profile-heuristic.ts](lib/ai-recommendation/taste-profile-heuristic.ts), re-mesclado no recalc ([calculations.ts](server/actions/calculations.ts): features Ridge + `personal_fit` + folds CV, sem leak) → vale após **Recalcular**. Ranking: filtro "evito" **opt-in 3-estados** (`hide_avoided=strong|all`, strong = weight ≥ 2). Página da obra: tags coloridas verde/vermelho por stance + masonry + "expandir todos".
+- **Item A — tags declaradas (amo/evito)** — completo. Migration **100** (`user_tag_preferences`, polimórfica tag/subgrupo/grupo) **aplicada**. UI em `/preferences`: árvore Grupo→Subgrupo→Tag (grupo só navega, não é declarável), 2 colunas, **Salvar batch** (não por-clique), ênfase 2×. Lógica: `mergeDeclaredTagPreferences` (shrinkage `λ=n/(n+k)`, `K_LOVE=5`/`K_AVOID=8`/`BASE=0.5`) em [taste-profile-heuristic.ts](lib/ai-recommendation/taste-profile-heuristic.ts), re-mesclado no recalc ([calculations.ts](server/actions/calculations.ts): features Ridge + `personal_fit` + folds CV, sem leak) → vale após **Recalcular**. Ranking: filtro "evito" **opt-in 3-estados** (`hide_avoided=strong|all`, strong = weight ≥ 2). Página da obra: tags coloridas verde/vermelho por stance + masonry + "expandir todos".
 - **Métrica de ranking (§5) — instrumento ligado.** `prediction_ledger` (migration **101**, **aplicada**) captura a previsão **de-registro** (expected + decision, pré-rótulo) na **primeira nota** de cada obra (hook em `updateWork`/`updateWorkStatus`). Sem backfill → ligado cedo. **Painel da métrica ainda pendente** (esperar acumular notas).
 - **Item B — efeitos cruzados via LLM** — **COMPLETO, migration 102 APLICADA, verificado live.** Campo **"Regras e preferências livres (IA)"** (condicional + geral). Coluna `user_settings.preference_rules jsonb` (query tolerante). Action `savePreferenceRules` (batch, **sem recalc**). Bloco no **profileBlock cacheado** + instruções nos system prompts. Threadado nos **7** call sites (rankFavorites ×6 + runDeepDive). UI **gateada no Pago**. **Verificado:** run `recommendation_rank v3` com `nPreferenceRules=4`; Deep Dive da Aria citou as regras (crueldade/tom) como `tags_cons`. **Endurecido p/ `v4` / `deep-dive-v4`:** (1) **inversão de sentimento** (review que confirma traço evitado conta CONTRA, mesmo se o autor ama); (2) **força por evidência** (regra "evito" confirmada por consenso → Deep Dive capa `read_when` em "guardar" + baixa score; ranking baixa alignment + risks; evidência fraca = só risco). **B6 (chat briefing) NÃO feito** (opcional).
 
 - **Item C — Passe 1 (sinal de reviews ao consultor)** — **FEITO + VERIFICADO LIVE na Aria.** review_summary no tailBlock do ranking + Deep Dive; seleção das cruas por qualidade/diversidade de fonte (não mais por nota); gate de materialidade sem migration (count empacotado no hash). **IA Rk da Aria caiu 91→72 citando o consenso; offline idêntico.** Detalhe em §4. tsc/lint/testes limpos.
 
-- **Item C — Passe 2 (digest estruturado)** — **COMPLETO + VERIFICADO LIVE (migration 103 APLICADA).** `consolidateReviewsDigestDetailed` (Sonnet 4.6, tool `submit_review_digest`, amostragem estratificada por fonte) → `review_digest jsonb` (migration **103 aplicada**; leitura tolerante via `fetchReviewDigestsBatch`). Geração **batch opt-in** (`consolidatePendingReviewDigests` + painel em /settings, ~$0.02–0.04/obra), NÃO automática. Consultor **prefere o digest** sobre o resumo-texto (ranking tailBlock + Deep Dive bundle). Bumps `PROMPT_VERSION v5→v6` + Deep Dive `v5→v6`. **Verificado na Aria:** digest no prompt (não o texto Passe 1); re-rank cita "o consenso… crueldade a uma antagonista criança — evidência convergente e forte"; Deep Dive surfou risco novo (`Suicide/s`) dos content_warnings; offline idêntico (8.53 / 0.558). tsc/lint/117 testes limpos. **→ Item C inteiro CONCLUÍDO.**
+- **Item C — Passe 2 (digest estruturado)** — **COMPLETO + VERIFICADO LIVE (migration 103 APLICADA).** `consolidateReviewsDigestDetailed` (Sonnet 4.6, tool `submit_review_digest`, amostragem estratificada por fonte) → `review_digest jsonb` (migration **103 aplicada**; leitura tolerante via `fetchReviewDigestsBatch`). Geração **batch opt-in** (`consolidatePendingReviewDigests` + painel em /curation/settings, ~$0.02–0.04/obra), NÃO automática. Consultor **prefere o digest** sobre o resumo-texto (ranking tailBlock + Deep Dive bundle). Bumps `PROMPT_VERSION v5→v6` + Deep Dive `v5→v6`. **Verificado na Aria:** digest no prompt (não o texto Passe 1); re-rank cita "o consenso… crueldade a uma antagonista criança — evidência convergente e forte"; Deep Dive surfou risco novo (`Suicide/s`) dos content_warnings; offline idêntico (8.53 / 0.558). tsc/lint/117 testes limpos. **→ Item C inteiro CONCLUÍDO.**
 
 - **Item C — digest no eval-time** — **COMPLETO + VERIFICADO LIVE (2026-06-16).** Decisão custo×latência fechada: **separado / fire-and-forget / gated** (não same-call). `persistReviewDigest` em [persist-reviews.ts](lib/external/persist-reviews.ts) disparado **SEM `await`** no fim de `saveWorkReviews` (logo após o resumo Haiku) — latência **zero** na avaliação. Gate reusa `isMaterialReviewChange` + `review_digest_n`/`_version`: cold gera, version bump regenera, crescimento material renova, senão no-op. Os **3 call sites** (avaliação ai.ts, acquire-reviews, criação works.ts) afunilam em `saveWorkReviews` → eval-time cobre obra nova **e** re-colheita; **batch fica só pro backfill legado** (~493 obras cold hoje). Tolerante à ausência da migration 103 (catch silencioso). **Verificado live** (rota temp): cold→gera (digest rico persistido em background ~depois~ de resposta de ~1,7s, prova do fire-and-forget sobreviver ao request), gate pula em obra já digerida (`digest_at` inalterado, sem Sonnet novo), offline (expected/calc) intacto. tsc/lint/117 testes verdes. Commit `7be13e0`. **→ Item C 100% fechado.**
 
@@ -29,7 +29,7 @@
   usava o mesmo signo do IA pago) → `SlidersHorizontal`; convenção Sparkles=LLM pago / não-Sparkles=grátis.
   Bloco 1 (`75a77c9`): tira as notas decompostas mortas (Perfil/Δ Qualidade) do ranking
   + renomeia "Análise do gosto" → "Re-ranquear favoritos". Bloco 2 (`07a5ac4`): mesma
-  limpeza em /titles + heatmap + re-enquadra o waterfall "Por que esta nota?" (tira o
+  limpeza em /catalog + heatmap + re-enquadra o waterfall "Por que esta nota?" (tira o
   2-stage aposentado). Bloco 3 (`bda7bc4`): `alignment_score` "IA Rk" → **"Veredito IA"**
   em ~23 arquivos (resolve a colisão com "Alinhamento"=personal_fit). **Bloco 4** (`77e4d67`
   +`ea5ceec`): funde as 3 portas (`RunCreatorForm`+`RecommendWithAiButton`×2) num único
@@ -110,7 +110,7 @@ tiers honestos**, diferenciando **dentro do tier** pelo contexto do usuário.
   poucas obras). Diferente do mood-refine, que é **efêmero** e por **atributo (9 critérios)** —
   isto é **persistente** e por **tag/grupo**.
 - **Mudanças:**
-  - **UI:** seção em `/conta/preferencias` — multiselect de grupos/subgrupos de tags com 3 estados
+  - **UI:** seção em `/account/preferencias` — multiselect de grupos/subgrupos de tags com 3 estados
     (amo / neutro / evito). Reusa o catálogo de `tag_group`/subgrupos existente.
   - **DB:** tabela `user_tag_preferences(user_id, tag_or_group_id, stance, weight)` (recomendado
     sobre jsonb — **multi-user está vindo**, auth ainda não ligado). Migration à mão (fluxo padrão:
@@ -134,7 +134,7 @@ tiers honestos**, diferenciando **dentro do tier** pelo contexto do usuário.
   'horny female lead' *exceto* quando comédia é alta") que **nenhum modelo aditivo** (Ridge ou
   mood-refine) consegue.
 - **Mudanças:**
-  - **UI:** campo de **regras condicionais em texto livre** (poucas) em `/conta/preferencias`.
+  - **UI:** campo de **regras condicionais em texto livre** (poucas) em `/account/preferencias`.
   - **Lógica:** injetar as regras + o **perfil completo dos 9 atributos** no prompt do consultor
     ([deep-dive-prompts.ts](lib/ai-recommendation/deep-dive-prompts.ts) / prompt do rerank). O LLM
     raciocina condicionalmente e justifica.
@@ -188,7 +188,7 @@ tiers honestos**, diferenciando **dentro do tier** pelo contexto do usuário.
 
 > **Fechamento:** implementado como **separado / fire-and-forget / gated** (opção recomendada abaixo). `persistReviewDigest` disparado sem `await` no fim de `saveWorkReviews`, gate via `isMaterialReviewChange`+`review_digest_n`/`_version`. Verificado live (cold→gera em background, gate pula em obra digerida, latência/offline intactos). Commit `7be13e0`. Detalhe da decisão preservado abaixo como histórico.
 
-> **Contexto:** Passe 2 entregou o digest, mas a geração é **batch opt-in** (botão em /settings). Obra **nova** NÃO ganha digest na avaliação — só o resumo Haiku do Passe 1 (auto); o consultor cai no fallback até o batch rodar. Discussão (2026-06-16) concluiu que **isso devia ser automático no eval-time**.
+> **Contexto:** Passe 2 entregou o digest, mas a geração é **batch opt-in** (botão em /curation/settings). Obra **nova** NÃO ganha digest na avaliação — só o resumo Haiku do Passe 1 (auto); o consultor cai no fallback até o batch rodar. Discussão (2026-06-16) concluiu que **isso devia ser automático no eval-time**.
 
 - **Dois erros meus já corrigidos na discussão (não repetir):**
   - ❌ "escopar o auto a favoritos/ranking" — obra recém-criada **não é** favorita nem está no ranking; tem que cobrir **toda obra recém-avaliada**.
@@ -264,7 +264,7 @@ ela chama o `rankFavorites`, que é o **re-ranker LLM** (gera `alignment_score`,
 | **MOOD** (efêmero) | Refinar (mood-refine, limitado ao MAE) | Consultor com condicional ad-hoc ("hoje evito X exceto se Y") |
 
 **Regra de diferenciação fixo × mood** (é propriedade do **input**, não engine separada):
-- **FIXO** = persistido no DB (perfil aprendido + declarações de /preferencias) → alimenta o ranking offline **por padrão** + entra como contexto permanente no prompt do consultor. Sobrevive entre sessões.
+- **FIXO** = persistido no DB (perfil aprendido + declarações de /preferences) → alimenta o ranking offline **por padrão** + entra como contexto permanente no prompt do consultor. Sobrevive entre sessões.
 - **MOOD** = efêmero, **transform por cima** do ranking fixo (no Refinar aditivo, ou condicional solto no chat). Reseta a cada sessão.
 
 ### 6.3 — Curadoria: tirar / mudar / implementar
@@ -279,7 +279,7 @@ ela chama o `rankFavorites`, que é o **re-ranker LLM** (gera `alignment_score`,
 **🗑️ TIRAR**
 - ✅ **Bloco 1+2** — Nota **Prevista - Qualidade** (`expected_quality_adj`) e **Prevista
   - Perfil** (`expected_baseline`) **removidas de todas as superfícies** (ranking, tabela
-  de /titles, heatmap, waterfall da obra). Correção factual: Δ Qualidade era **sempre 0
+  de /catalog, heatmap, waterfall da obra). Correção factual: Δ Qualidade era **sempre 0
   pra TODOS** (não só Free) — `L0_QUALITY_ENABLED=false` aposentou o estágio 2; Perfil ≈
   expected menos o nudge de observação. Coeficiente cru do Ridge segue em
   `formula_config.expected_ridge_coefficients` p/ debug real.

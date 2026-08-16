@@ -99,7 +99,7 @@ describe("makeUsdScale", () => {
   })
 
   it("sob veto, o menor da série não vira '$0,00' — isso afirmaria custo zero", () => {
-    // A coluna Custo do /ai-usage: `suggest_groups` custou US$0,0046 e o veto do
+    // A coluna Custo do /curation/ai-usage: `suggest_groups` custou US$0,0046 e o veto do
     // US$25,91 puxa a régua pra dólar. "$0,00" diria que não houve custo.
     const coluna = makeUsdScale(0.0046, 3.28, 25.91)
     expect(coluna.format(0.0046)).toBe("<$0,01")

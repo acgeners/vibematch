@@ -351,7 +351,7 @@ export interface FormulaConfig {
   distance_p95: number | null
   /** Quantas versões pra trás do prompt são aceitas sem marcar como outdated. */
   prompt_version_tolerance: number
-  /** Threshold (0-1) do filtro "Confiança < X%" em /ai-evaluation. */
+  /** Threshold (0-1) do filtro "Confiança < X%" em /curation/works. */
   low_confidence_threshold: number
   pseudo_votes_nota_m: number
   pseudo_votes_blend: number

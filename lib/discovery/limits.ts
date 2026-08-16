@@ -1,5 +1,5 @@
 /**
- * Limites de "Mais como estas" (`/descobrir`).
+ * Limites de "Mais como estas" (`/discover`).
  *
  * 🔴 Mora aqui, e não em `server/queries/seed-discovery.ts`, porque a TELA precisa deles —
  * para saber quando esconder o botão "adicionar" e o que escrever em "3 de 5". Aquele módulo

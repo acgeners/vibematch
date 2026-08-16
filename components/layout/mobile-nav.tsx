@@ -14,16 +14,16 @@ import { useIsSignedIn } from "@/components/layout/admin-context"
  * ao visitante seria prometer o que não se entrega — e a divergência entre as duas
  * barras é do tipo que ninguém nota até alguém reclamar de uma tela vazia.
  *
- * ⚠️ **"Leitura", não "Lendo".** O rótulo curto de `/leitura` precisava de forma
+ * ⚠️ **"Leitura", não "Lendo".** O rótulo curto de `/reading` precisava de forma
  * curta (a bottom-nav tem ~76px por slot, e "Acompanhamento" não cabe), mas "Lendo"
  * é literalmente um `personal_status` do app — o mesmo nome pra um destino e pra um
  * estado de obra. "Leitura" é curto e tem a raiz da rota.
  */
 const MOBILE_NAV = [
   { href: "/", icon: Home, label: "Início" },
-  { href: "/leitura", icon: BookMarked, label: "Leitura", requiresSignedIn: true },
+  { href: "/reading", icon: BookMarked, label: "Leitura", requiresSignedIn: true },
   { href: "/favorites", icon: Heart, label: "Favoritos", requiresSignedIn: true },
-  { href: "/titles", icon: BookOpen, label: "Catálogo" },
+  { href: "/catalog", icon: BookOpen, label: "Catálogo" },
   { href: "/ranking", icon: Trophy, label: "Ranking", requiresSignedIn: true },
   { href: "/recommendations", icon: Wand2, label: "Recom.", requiresSignedIn: true },
 ]

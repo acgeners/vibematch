@@ -74,7 +74,7 @@ export async function saveTagPreferences(items: TagStanceItem[]): Promise<SaveTa
     changed: ["tag_preferences"],
     actorId: userId,
   })
-  revalidatePath("/preferencias")
+  revalidatePath("/preferences")
   revalidatePath("/ranking")
   return { ok: true }
 }

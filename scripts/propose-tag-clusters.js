@@ -3,7 +3,7 @@
 /**
  * Generate AI-proposed semantic tag clusters for a given group and
  * persist them in `tag_cluster_proposal` for human review via
- * `/settings/tag-consolidation`.
+ * `/curation/settings/tag-consolidation`.
  *
  * Usage:
  *   node scripts/propose-tag-clusters.js --group characters [--min-confidence 0.7]

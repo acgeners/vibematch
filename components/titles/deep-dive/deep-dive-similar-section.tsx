@@ -72,7 +72,7 @@ export function DeepDiveSimilarSection({ items }: DeepDiveSimilarSectionProps) {
               <div className="flex items-start justify-between gap-2">
                 {item.title ? (
                   <Link
-                    href={`/titles/${titleToSlug(item.title)}`}
+                    href={`/catalog/${titleToSlug(item.title)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="line-clamp-2 text-sm font-medium leading-tight hover:underline"

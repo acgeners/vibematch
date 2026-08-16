@@ -301,7 +301,7 @@ export function WorkTable({
   namespace = "titles",
   viewNamespace,
   defaultViewMode = "list",
-  basePath = "/titles",
+  basePath = "/catalog",
   enableCompare = true,
   enableHeatmap = true,
   enableSelectAll = false,
@@ -479,7 +479,7 @@ export function WorkTable({
   }, [favoriteSelectedIds, updateCompareIds, refresh])
 
   /** Desfavoritar em LOTE sempre confirma. A versão anterior só perguntava quando alguma
-   *  selecionada estava em pasta — então fora de um grupo (em /titles, /ranking e "Todos os
+   *  selecionada estava em pasta — então fora de um grupo (em /catalog, /ranking e "Todos os
    *  favoritos") 20 favoritas sumiam num clique, sem pergunta. A consulta de pastas continua,
    *  mas agora decide o TEXTO do aviso, não se ele aparece. */
   const handleBatchUnfavorite = useCallback(async () => {
@@ -847,7 +847,7 @@ function EmptyState({ searchQuery }: { searchQuery?: string }) {
       </div>
       {searchedTitle && isAdmin && (
         <Button asChild size="sm">
-          <Link href={`/titles/new?title=${encodeURIComponent(searchedTitle)}`}>
+          <Link href={`/catalog/new?title=${encodeURIComponent(searchedTitle)}`}>
             <Plus className="h-4 w-4" />
             Adicionar &quot;{searchedTitle}&quot;
           </Link>
@@ -925,7 +925,7 @@ function WorkCardsView({
             )}
 
             <Link
-              href={`/titles/${slug}`}
+              href={`/catalog/${slug}`}
               onClick={(e) => {
                 if (!enableCompare || !selectionActive) return
                 // Cmd/Ctrl/Shift+clique continua abrindo a obra (nova aba/janela): no modo
@@ -1025,7 +1025,7 @@ function WorkListView({
   selectedIds,
   onToggleSelect,
   namespace = "titles",
-  basePath = "/titles",
+  basePath = "/catalog",
   enableCompare = true,
   enableSelectAll = false,
   allSelected = false,
@@ -1348,7 +1348,7 @@ function WorkListView({
               <>
             <DropdownMenuItem asChild>
               <Link
-                href={`/titles/${slug}`}
+                href={`/catalog/${slug}`}
                 target="_blank"
                 rel="noreferrer"
                 onClick={(e) => e.stopPropagation()}
@@ -1358,7 +1358,7 @@ function WorkListView({
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href={`/titles/${slug}/edit`} onClick={(e) => e.stopPropagation()}>
+              <Link href={`/catalog/${slug}/edit`} onClick={(e) => e.stopPropagation()}>
                 <Pencil className="h-4 w-4 mr-2" />
                 Editar
               </Link>
@@ -1673,7 +1673,7 @@ function WorkListView({
                     isSelected &&
                       "bg-primary/12 shadow-[inset_3px_0_0_0_var(--color-primary)] hover:bg-primary/12"
                   )}
-                  onClick={() => router.push(`/titles/${titleToSlug(row.original.title)}`)}
+                  onClick={() => router.push(`/catalog/${titleToSlug(row.original.title)}`)}
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell
@@ -1731,7 +1731,7 @@ function WorkListView({
                   ? "border-transparent bg-primary/10 ring-2 ring-primary"
                   : "border-border/70 hover:border-primary/30"
               )}
-              onClick={() => router.push(`/titles/${titleToSlug(work.title)}`)}
+              onClick={() => router.push(`/catalog/${titleToSlug(work.title)}`)}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-start gap-2 min-w-0 flex-1">
@@ -1825,7 +1825,7 @@ function Pagination({
   page,
   totalPages,
   router,
-  basePath = "/titles",
+  basePath = "/catalog",
 }: {
   page: number
   totalPages: number

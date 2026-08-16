@@ -75,7 +75,7 @@ export function QueueSortSelect({
 }
 
 /**
- * Barra de ferramentas + seleção unificada das filas de /ai-evaluation. Uma só
+ * Barra de ferramentas + seleção unificada das filas de /curation/works. Uma só
  * casca pra todas as abas: checkbox "selecionar tudo", ordenação (slot `sort`,
  * visível no estado ocioso), extras da aba (slot `idleExtras`, empurrado à
  * direita) e, quando há ≥1 selecionada, as ações em lote da aba (slot
