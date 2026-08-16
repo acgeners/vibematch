@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { BookOpenText, Gem } from "lucide-react"
 import { Header } from "@/components/layout/header"
 import { canConsumeAi } from "@/server/queries/current-user"
@@ -14,6 +15,8 @@ interface GuideCard {
   where: string
   /** Consome crédito de IA (decisão de 31/07: só INDICA — sem gate novo). */
   aiCredit?: boolean
+  /** Página que aprofunda o conceito, quando existe uma. */
+  more?: { href: string; label: string }
 }
 
 /**
@@ -41,6 +44,7 @@ const CARDS: GuideCard[] = [
     details:
       "MangaUpdates, AniList, MyAnimeList, Kitsu, AnimePlanet, MangaDex, ComicK e Comix. A IA recebe uma amostra equilibrada entre as fontes e responde pelo consenso — nunca por uma review isolada. Cada avaliação fica registrada com data e modelo usado, e você pode discordar: a nota que você corrige vale mais que a dela.",
     where: "página da obra · aba Atributos",
+    more: { href: "/guide/attributes", label: "Ver o que cada nota quer dizer" },
   },
   {
     tier: "seu sinal mais barato",
@@ -126,6 +130,14 @@ export default async function GuiaPage() {
               </summary>
               <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">{c.details}</p>
             </details>
+            {c.more && (
+              <Link
+                href={c.more.href}
+                className="w-fit text-[13px] font-semibold text-primary hover:underline"
+              >
+                {c.more.label} →
+              </Link>
+            )}
             <span className="mt-auto border-t border-dashed border-border pt-2.5 font-mono text-[11px] text-muted-foreground">
               {c.where}
             </span>
