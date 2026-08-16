@@ -128,6 +128,15 @@ export interface CalculatedScore {
    * o personal_fit cru tem teto matemático baixo (~0.55). Migration 071.
    */
   personal_fit_percentile: number | null
+  /**
+   * Posição da estimativa de ARTE no catálogo (0–1). É esta a grandeza que ordena e
+   * filtra — a estimativa em pontos é comprimida a ~0,49× a escala do rótulo, então
+   * um limiar em pontos devolve a fatia errada (ver lib/arte/model.ts).
+   *
+   * NULL = sem estimativa. Terceiro estado, nunca "média": obra sem sinal de arte não
+   * pode afundar num desempate por causa de dado que falta.
+   */
+  art_percentile: number | null
   /** Score 0–100 do LLM re-ranker (Passo 8). Atualizado sob demanda. */
   alignment_score: number | null
   alignment_run_id: string | null

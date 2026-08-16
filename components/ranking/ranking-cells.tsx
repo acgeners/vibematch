@@ -9,6 +9,7 @@ import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { useRerankSingleWork } from "@/components/ranking/use-rerank-single-work"
 import { AlignmentTooltipContent, VerdictTooltipContent } from "@/components/ranking/score-tooltip-content"
 import type { AlignmentPayload } from "@/components/ranking/score-tooltip-content"
+import { ART_BAND_LABELS, artBandFromPercentile } from "@/lib/arte/bands"
 
 /**
  * Botão pequeno que substitui o "—" da `AlignmentScoreCell` quando há um
@@ -289,6 +290,7 @@ export function DecisionCell({
   expected,
   fitPercentile,
   alignment,
+  moodAdjusted = null,
 }: {
   score: number | null
   /**
@@ -299,8 +301,25 @@ export function DecisionCell({
   expected: number | null
   fitPercentile: number | null
   alignment: number | null
+  /**
+   * Prioridade ajustada pelo refino por mood, quando há um ativo na lista.
+   *
+   * 🔴 Quando existe, é ELA que a célula imprime — e não é cosmético: a lista
+   * passa a estar ORDENADA por este número, e exibir a base enquanto se ordena
+   * pelo ajustado é exatamente a invariante "quem ordena tem que ver o mesmo
+   * número da tela" que custou 19.624 pares de empate na Prioridade. O valor
+   * base continua no tooltip, que é onde ele responde "de quanto o refino moveu".
+   */
+  moodAdjusted?: number | null
 }) {
-  if (score == null) {
+  const base = score
+  const refinada = moodAdjusted != null && base != null
+  const shown = refinada ? (moodAdjusted as number) : score
+  // ⚠️ A afinidade (0–100) é derivada da Prioridade BASE lá na tabela. Com refino
+  // ativo ela descreveria outro número que não o da ordenação, então a célula
+  // volta pra escala 0–10 — que é a única em que o ajustado existe.
+  const affinityShown = refinada ? null : affinity
+  if (shown == null) {
     return (
       <TooltipProvider>
         <Tooltip>
@@ -316,14 +335,14 @@ export function DecisionCell({
   }
 
   const colorClass =
-    score >= 8 ? "bg-primary/15 text-primary border-primary/40"
-    : score >= 6 ? "bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300"
-    : score >= 4 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
+    shown >= 8 ? "bg-primary/15 text-primary border-primary/40"
+    : shown >= 6 ? "bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300"
+    : shown >= 4 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
     : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
 
   // Estimativa SECUNDÁRIA (o tier é o sinal primário): prefixo "~" + visual
   // discreto pra não prometer uma ordem fina que o modelo não sustenta.
-  const display = affinity != null ? `~${affinity}` : `~${score.toFixed(1)}`
+  const display = affinityShown != null ? `~${affinityShown}` : `~${shown.toFixed(1)}`
 
   return (
     <TooltipProvider>
@@ -333,6 +352,10 @@ export function DecisionCell({
             className={cn(
               "inline-flex items-center rounded-md border px-1.5 py-0.5 text-xs font-medium cursor-help tabular-nums",
               colorClass,
+              // O refino é reversível e momentâneo: a borda tracejada diz que este
+              // número não é o do banco, sem gastar uma cor de estado (âmbar já é
+              // "desatualizado" e o refino não tem nada de desatualizado).
+              refinada && "border-dashed",
             )}
           >
             {display}
@@ -340,8 +363,21 @@ export function DecisionCell({
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[300px] space-y-1.5">
           <p className="text-xs font-semibold">
-            Prioridade{affinity != null ? `: ${affinity}/100` : `: ${score.toFixed(1)}/10`}
+            Prioridade{affinityShown != null ? `: ${affinityShown}/100` : `: ${shown.toFixed(1)}/10`}
+            {refinada && <span className="font-normal text-muted-foreground"> · refinada</span>}
           </p>
+          {refinada && (
+            <p className="flex items-center justify-between gap-3 text-[11px]">
+              <span className="text-muted-foreground">Sem o refino</span>
+              <span className="font-mono font-semibold">
+                {(base as number).toFixed(1)}
+                <span className="ml-1 text-muted-foreground">
+                  ({shown - (base as number) >= 0 ? "+" : "−"}
+                  {Math.abs(shown - (base as number)).toFixed(2)})
+                </span>
+              </span>
+            </p>
+          )}
           <p className="text-[11px] text-muted-foreground">
             Estimativa de satisfação pra priorizar o que ler primeiro (Prevista ajustada pelo
             Veredito IA, ×10). <span className="font-semibold">Diferenças pequenas entre obras da
@@ -462,3 +498,51 @@ export function AlignmentCell({
   )
 }
 
+
+/**
+ * Cell da ARTE nas listas — o PERCENTIL (0–100), nunca a estimativa em pontos.
+ *
+ * 🔴 A estimativa em pontos é comprimida a ~0,49× a escala do rótulo, então um número
+ * em pontos convida à comparação errada com uma nota de critério; a posição relativa é
+ * a única coisa que significa algo (ver lib/arte/model.ts). Por isso a coluna mostra
+ * percentil e o nome da faixa vive no tooltip.
+ *
+ * ⚠️ Ela existe nas listas desde 2026-08-15 porque é um dos separadores mais fortes
+ * entre obras EMPATADAS: medido, separa 79,8% dos pares dentro dos grupos de mesma
+ * Prioridade exibida (cobertura 97,5%). Vivia só na página da obra — o único lugar onde
+ * ela não ajuda a escolher ENTRE várias.
+ *
+ * ⚠️ Sem estimativa é "—", nunca 0 nem "média": é um terceiro estado. E para quem não é
+ * o dono ela vem NULL de propósito (é treinada nos rótulos DELE — ver PERSONAL_SCORE_FIELDS).
+ */
+export function ArtCell({ percentile }: { percentile: number | null }) {
+  const band = artBandFromPercentile(percentile)
+  if (percentile == null || band == null) {
+    return <span className="font-mono text-sm text-muted-foreground">—</span>
+  }
+  const pct = Math.round(percentile * 100)
+  // Tom só nos EXTREMOS: a faixa do meio é "sem destaque", e pintá-la faria a coluna
+  // inteira colorida — o alarme que sempre toca.
+  const tone =
+    band === "forte"
+      ? "text-emerald-600 dark:text-emerald-400"
+      : band === "fraca"
+        ? "text-rose-600 dark:text-rose-400"
+        : "text-muted-foreground"
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={cn("cursor-help font-mono text-sm tabular-nums", tone)}>{pct}</span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[260px] space-y-1">
+          <p className="text-xs font-semibold">{ART_BAND_LABELS[band]}</p>
+          <p className="text-[11px] text-background/70">
+            Percentil {pct} do catálogo. É estimativa — a escala é comprimida, então serve pra
+            comparar obras entre si, não como nota.
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}

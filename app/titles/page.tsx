@@ -14,6 +14,7 @@ import { WorkTable } from "@/components/titles/work-table"
 import { Button } from "@/components/ui/button"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { parseArtFilter } from "@/lib/arte/url"
+import { getVerdictScale } from "@/server/queries/verdict-scale"
 
 interface TitlesPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -163,6 +164,8 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
   const offset = (page - 1) * pageSize
   const pageIds = entries.slice(offset, offset + pageSize).map((e) => e.workId)
   const works = await getWorksByIds(pageIds)
+  // Régua do Veredito (migration 193) — descreve o catálogo, então vem do servidor.
+  const verdictScale = await getVerdictScale()
 
   return (
     <div className="space-y-4">
@@ -191,6 +194,7 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
       />
 
       <WorkTable
+        verdictScale={verdictScale}
         works={works}
         total={total}
         page={page}

@@ -42,6 +42,7 @@ import {
   type WeightInferenceResult,
 } from "@/lib/ml/weight-inference"
 import { computeCalibration, computeBucketBreakdown } from "@/lib/calculations/calibration"
+import { computeVerdictScale, type VerdictScale } from "@/lib/calculations/decision"
 import type { BucketInput, OofBucketBreakdown } from "@/lib/calculations/calibration"
 import {
   criterionAlignment,
@@ -659,6 +660,15 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
     .upsert(rowsComArte, { onConflict: "work_id" })
   if (upsertErr) throw new Error(upsertErr.message)
 
+  // A régua do Veredito na Prioridade (migration 193). Medida sobre o CATÁLOGO,
+  // porque é isso que a torna a mesma em toda tela — derivar das linhas visíveis
+  // faria a obra ter Prioridades diferentes conforme o filtro.
+  //
+  // ⚠️ O veredito NÃO é reescrito por este recalc (ele é pago e roda à parte), então
+  // vem do banco. É uma coluna, ~1000 linhas: alguns KB contra os 5,3 MB que este
+  // recalc já lê.
+  const verdictScale = await measureVerdictScale(supabase, rows)
+
   // FATIA 2b — os scores DERIVADOS ganham dono. `calculated_scores` não tem `user_id`, então a
   // Nota Prevista que está lá é a do DONO — e hoje ela aparece pra Leitora como se fosse dela
   // ("você vai gostar 8,6 disso" é a previsão do gosto DELE).
@@ -691,6 +701,11 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
       // Centro da amplificação GPT.N (média do GPT cru deste recalc). Reusado
       // como `center` em normalizeGPT nos caminhos single-work.
       gpt_mean: gptMean,
+      // A régua do Veredito. NULL quando não há dispersão pra medir — e aí o
+      // veredito não ajusta nada, que é o lado seguro (ver decision.ts).
+      verdict_mean: verdictScale?.mean ?? null,
+      verdict_std: verdictScale?.sd ?? null,
+      expected_std: verdictScale?.expectedSd ?? null,
       gpt_clamp_hit_rate: gptClampHitRate,
       negative_activation_rate: negativeActivationRate,
       distance_p95: null,
@@ -821,6 +836,53 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
 }
 
 /** FNV-1a 32-bit → string curta. Determinístico, sem deps. */
+/**
+ * Mede a régua do Veredito (média/σ do `alignment_score` no catálogo + σ da Nota
+ * Prevista recém-calculada) para `formula_config`.
+ *
+ * ⚠️ O σ da Prevista sai das linhas que ACABARAM de ser calculadas, e não de uma
+ * segunda leitura: elas são a verdade deste recalc, e reler devolveria o estado
+ * anterior em qualquer corrida concorrente.
+ *
+ * ⚠️ Paginado: `select` corta em 1000 linhas sem avisar, e o catálogo já passa de
+ * 980 — a 1001ª obra sairia da régua em silêncio, deslocando média e σ.
+ *
+ * Falha de leitura devolve `null` (a régua fica nula ⇒ o veredito não ajusta),
+ * nunca uma régua parcial: meia amostra dá um centro errado, e centro errado é
+ * exatamente o defeito que esta régua existe para corrigir.
+ */
+async function measureVerdictScale(
+  supabase: ReturnType<typeof createAdminClient>,
+  rows: Array<{ work_id: string; expected_score: number | null }>,
+): Promise<VerdictScale | null> {
+  const PAGE = 1000
+  const alignmentByWork = new Map<string, number>()
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("calculated_scores")
+      .select("work_id, alignment_score")
+      .not("alignment_score", "is", null)
+      .order("work_id", { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (error) {
+      console.warn("[recalculateAll] régua do veredito não medida:", error.message)
+      return null
+    }
+    if (!data?.length) break
+    for (const r of data as Array<{ work_id: string; alignment_score: number | null }>) {
+      if (r.alignment_score != null) alignmentByWork.set(r.work_id, Number(r.alignment_score))
+    }
+    if (data.length < PAGE) break
+  }
+
+  return computeVerdictScale(
+    rows.map((r) => ({
+      expected: r.expected_score,
+      alignment: alignmentByWork.get(r.work_id) ?? null,
+    })),
+  )
+}
+
 function hashString(s: string): string {
   let h = 0x811c9dc5
   for (let i = 0; i < s.length; i++) {

@@ -119,6 +119,13 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
   // Prioridade — âncora na Prevista (que já embute o Alinhamento calibrado) +
   // Veredito IA quando há. Default visível em /favorites; opcional nos demais namespaces.
   { key: "decision", label: LABELS.decision.short, configLabel: LABELS.decision.short, description: LABELS.decision.tooltip_full, align: "center", group: "notas" },
+  // Arte — PERCENTIL, nunca a estimativa em pontos (comprimida a ~0,49× a escala do
+  // rótulo, então um número em pontos convida à comparação errada com uma nota de
+  // critério). Entrou nas listas em 2026-08-15 porque é um dos separadores mais fortes
+  // entre obras empatadas: medido, separa 79,8% dos pares dentro dos grupos de mesma
+  // Prioridade exibida, com 97,5% de cobertura. Vivia só na página da obra — ou seja,
+  // exatamente onde não ajuda a ESCOLHER entre várias.
+  { key: "art", label: "Arte", configLabel: "Arte (percentil)", description: "Posição da estimativa de arte no catálogo (0–100). É estimativa: a escala é comprimida e a precisão no topo é ~55%, então serve pra comparar obras entre si, não como nota. Vazia quando não há estimativa.", align: "center", group: "notas" },
   // Novo (Fase 1.5): expected_score é o L1 que substitui o trio N.IA/N.Pr/N.Final
   { key: "expected_score", label: LABELS.expected_score.short, configLabel: LABELS.expected_score.full, description: LABELS.expected_score.tooltip_full, align: "center", group: "notas" },
   // Sua nota (user_score), vinda do espelho de QUEM OLHA (`user_work_state`, via

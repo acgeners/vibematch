@@ -10,12 +10,16 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
 import { MoodRefineDialog } from "@/components/ranking/mood-refine-dialog"
+import type { MoodPreviewWork } from "@/components/ranking/mood-preview"
+import { filterMoodWorks } from "@/lib/calculations/mood-refine"
 import { isMoodActive, sortByMoodAdjusted, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
+import { MoodListButton } from "@/components/ranking/mood-list-button"
+import { applyMoodToList, moodDimensionCount } from "@/lib/ranking/mood-list"
 import { buildRankingTiers } from "@/lib/ranking/build-tiers"
 import { whyThisWork, forceMomentsOf } from "@/lib/ranking/why-this-work"
 import type { WorkSeparator } from "@/lib/ranking/why-this-work"
 import { SeparatorCell, SeparatorLegend, separatorValue } from "@/components/ranking/separator-cell"
-import { roundToDisplayScore } from "@/lib/score-rounding"
+import { displayTierKey } from "@/lib/ranking/display-sort"
 import { criterionHighlights } from "@/lib/ranking/criterion-highlights"
 import type { CriterionHighlight, HighlightWeight } from "@/lib/ranking/criterion-highlights"
 import type { CriterionMoments } from "@/lib/ranking/criterion-unit"
@@ -43,7 +47,7 @@ import { PublicationStatusBadge, PersonalStatusBadge, AiStatusBadge } from "@/co
 import { AdultBadge } from "@/components/ui/adult-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
-import { AlignmentCell, AlignmentScoreCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
+import { AlignmentCell, AlignmentScoreCell, ArtCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { BussolaPlane } from "@/components/ranking/bussola-plane"
 import { computeWorkForces } from "@/lib/calculations/forces"
 import { LABELS } from "@/lib/constants/ui-labels"
@@ -462,6 +466,8 @@ function renderCell(
   affinity: number | null = null,
   colorMode: AttrColorMode = "catalog",
   criterionPrefs?: Record<string, CriterionRange>,
+  /** Prioridade ajustada pelo refino de lista; null = sem refino ativo. */
+  moodAdjusted: number | null = null,
 ) {
   if (col.key === "rank") return <span className="font-mono text-sm text-muted-foreground">{entry.rank}</span>
   if (col.key === "percentile") {
@@ -540,8 +546,10 @@ function renderCell(
         expected={entry.expectedScore}
         fitPercentile={entry.personalFitPercentile ?? (entry.personalFit != null ? entry.personalFit * 100 : null)}
         alignment={entry.alignmentScore}
+        moodAdjusted={moodAdjusted}
       />
     )
+  if (col.key === "art") return <ArtCell percentile={entry.artPercentile} />
   if (col.key === "expected_score") {
     const expectedBadge = (
       <ScoreBadge score={entry.expectedScore} size="sm" showStub={entry.expectedIsStub} thresholds={scoreThresholds?.expected} />
@@ -591,6 +599,40 @@ function renderCell(
   return null
 }
 
+/**
+ * `RankingEntry` → o shape que o cálculo do mood consome.
+ *
+ * 🔴 Uma função só, porque são TRÊS consumidores (a lista, a prévia do popup e a
+ * ordem do comparador) e eles têm que enxergar exatamente as mesmas obras. Enquanto
+ * cada um montava o objeto por conta própria, bastava um esquecer o
+ * `predictedSynopsisQuality` pra uma dimensão ficar neutra só em um dos lados — sem
+ * erro, com resultado plausível.
+ */
+function toMoodWork(e: RankingEntry): MoodWork {
+  return {
+    id: e.workId,
+    decisionScore: e.decisionScore,
+    scores: e.scores as Partial<Record<CriterionSlug, number | null>>,
+    totalChapters: e.totalChapters,
+    personalFit: e.personalFit,
+    totalVotes: e.totalVotes,
+    // Interesse EFETIVO: o seu ♥ manda, e a previsão só preenche a ausência —
+    // mesma régua do recalc. Sem isso, a dimensão "sinopse interessante" ficaria
+    // neutra nas ~10% de obras que você ainda não avaliou.
+    synopsisQuality: e.synopsisQuality ?? e.predictedSynopsisQuality,
+    artPercentile: e.artPercentile,
+    publicationStatusId: e.publicationStatusId,
+    platformAvg: e.platformAvg,
+    year: e.year,
+    personalStatusId: e.personalStatusId,
+  }
+}
+
+/** Idem, com o título — o shape que a PRÉVIA do popup desenha. */
+function toMoodPreviewWork(e: RankingEntry): MoodPreviewWork {
+  return { ...toMoodWork(e), title: e.title }
+}
+
 export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true, tierBandWidth = DEFAULT_TIER_BAND_WIDTH, criterionPrefs, criterionMoments, highlightWeights, favoriteGroups }: RankingTableProps) {
   const { widths, setWidth } = useColumnWidths()
   // Colunas do /ranking vêm do vocabulário COMPARTILHADO (work-table-config,
@@ -616,6 +658,14 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   const [moodDialogOpen, setMoodDialogOpen] = useState(false)
   const [moodClusterIds, setMoodClusterIds] = useState<string[]>([])
   const [moodRefine, setMoodRefine] = useState<MoodRefine | null>(null)
+  /**
+   * De onde veio o refino ativo. Não é decoração: o ESCOPO decide sobre qual
+   * conjunto as dimensões foram normalizadas, e `computeMoodFit` tira min/max do
+   * conjunto que recebe. Com `"list"`, o comparador tem que HERDAR os valores já
+   * calculados aqui — recalculá-los sobre as 5 obras selecionadas daria outra
+   * ordem (medido: até 17 de 25 janelas divergem).
+   */
+  const [moodScope, setMoodScope] = useState<"cluster" | "list">("cluster")
   const selectedSet = new Set(selectedIds)
   // 🔴 O teto é o do LOTE (100), não o do Comparar (10). Enquanto a seleção só
   // servia pra comparar os dois eram o mesmo número; desde que ela alimenta
@@ -749,18 +799,63 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
     clearAfterAction()
   }, [favoriteSelectedIds, clearAfterAction])
 
+  /** As obras do cluster para a PRÉVIA do refino — mesmo shape que o cálculo consome. */
+  const moodPreviewWorks = useMemo<MoodPreviewWork[]>(() => {
+    const byId = new Map(entries.map((e) => [e.workId, e]))
+    const out: MoodPreviewWork[] = []
+    for (const id of moodClusterIds) {
+      const e = byId.get(id)
+      if (e) out.push(toMoodPreviewWork(e))
+    }
+    return out
+  }, [entries, moodClusterIds])
+
   // Ação do divisor de tier: abre o popup de refino por mood. Guarda o tier
   // INTEIRO (sem cortar): o mood rankeia todas e o drawer mostra as melhores até
   // o teto (`fetchCompareWorks` corta em MAX_COMPARE_WORKS).
   const compareCluster = (workIds: string[]) => {
+    setMoodScope("cluster")
     setMoodClusterIds(workIds)
     setMoodDialogOpen(true)
+  }
+  /**
+   * Refino sobre a LISTA INTEIRA — o mesmo popup, outro alcance: aqui ele não
+   * antecede uma comparação, ele reordena o que está na tela.
+   *
+   * ⚠️ O cluster passa a ser a lista visível, e é isso que faz a prévia do popup
+   * mostrar a mesma ordem que a tabela vai assumir. Passar um recorte (as 5
+   * primeiras, por exemplo) normalizaria as dimensões num universo menor e a
+   * prévia prometeria uma ordem diferente da entregue.
+   */
+  const openListMood = useCallback(() => {
+    setMoodScope("list")
+    setMoodClusterIds(entries.map((e) => e.workId))
+    setMoodDialogOpen(true)
+  }, [entries])
+  const clearListMood = useCallback(() => {
+    setMoodRefine(null)
+    setMoodClusterIds([])
+  }, [])
+  /**
+   * Aplica o refino à LISTA (não abre comparação). O popup fecha e a tabela
+   * reordena — é o caminho que o botão da barra usa.
+   */
+  const applyListMood = (mood: MoodRefine | null) => {
+    setMoodRefine(mood)
+    setMoodDialogOpen(false)
   }
   // Abre o drawer de comparação com (ou sem) o refino por mood escolhido.
   const openCompareWithMood = (mood: MoodRefine | null) => {
     const scrollY = window.scrollY
     setMoodRefine(mood)
-    setSelectedIds(moodClusterIds)
+    // 🔴 As exclusões ("Não mostrar") tiram a obra da COMPARAÇÃO, não só da prévia.
+    // Sem este filtro, a prévia mostraria 3 obras e o comparador abriria com 5 — a
+    // tela prometendo uma coisa e a seguinte entregando outra, que é o defeito que o
+    // teste de equivalência da prévia existe pra impedir do outro lado.
+    const ids = mood?.exclude?.length
+      ? filterMoodWorks(moodPreviewWorks, mood).map((w) => w.id)
+      : moodClusterIds
+    setSelectedIds(ids)
     setMoodDialogOpen(false)
     setDrawerOpen(true)
     requestAnimationFrame(() => {
@@ -812,20 +907,56 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
         ? computeTiers(
             entries,
             // A banda usa a MESMA chave da ordenação, senão o tier intercala e vira
-            // vários blocos "Tier N" (ver build-tiers). Nota Prevista ordena pela
-            // nota EXIBIDA; Prioridade ordena pelo valor cru.
+            // vários blocos "Tier N" (ver build-tiers). `displayTierKey` é o mesmo
+            // arredondamento que `compareByField` aplica aos campos de
+            // `DISPLAY_ROUNDED_SORT_FIELDS` — os dois lados derivam de um dono só,
+            // em vez de repetir a decisão aqui e lá.
             tierField === "expected_score"
-              ? (e) => (e.expectedScore == null ? null : roundToDisplayScore(e.expectedScore))
-              : (e) => e.decisionScore,
+              ? (e) => displayTierKey(e.expectedScore)
+              : (e) => displayTierKey(e.decisionScore),
             tierBandWidth,
           )
         : null,
     [entries, tierField, tierBandWidth],
   )
 
-  // A ordem exibida É a do servidor — a ordenação escolhida vale inclusive DENTRO
-  // de cada tier (o tier só agrupa). O mood reordena depois, no drawer.
-  const displayEntries = entries
+  /**
+   * A ordem exibida É a do servidor — a ordenação escolhida vale inclusive DENTRO
+   * de cada tier (o tier só agrupa).
+   *
+   * A exceção é o refino de LISTA: quando há um ativo, ele reordena pela
+   * Prioridade ajustada (e as exclusões tiram obras da tela). O refino aberto pelo
+   * divisor de tier NÃO mexe aqui — ele só ordena a comparação, que é o que sempre
+   * fez.
+   */
+  const listMood = moodScope === "list" ? moodRefine : null
+  const moodList = useMemo(
+    () => applyMoodToList(entries.map(toMoodWork), listMood, criterionPrefs),
+    [entries, listMood, criterionPrefs],
+  )
+  const displayEntries = useMemo(() => {
+    if (!moodList.active) return entries
+    const byId = new Map(entries.map((e) => [e.workId, e]))
+    // O `rank` volta a numerar a partir de 1: a coluna "#" descreve a POSIÇÃO na
+    // lista, e manter o rank do servidor faria a primeira linha aparecer como "#7".
+    return moodList.works.flatMap((w, i) => {
+      const e = byId.get(w.id)
+      return e ? [{ ...e, rank: i + 1 }] : []
+    })
+  }, [entries, moodList])
+  const hiddenByMood = moodList.active ? entries.length - moodList.works.length : 0
+  const moodCounts = moodDimensionCount(listMood)
+  const moodToolbar = useMemo(
+    () => ({
+      active: moodList.active,
+      weights: moodCounts.weights,
+      exclusions: moodCounts.exclusions,
+      hiddenCount: hiddenByMood,
+      onOpen: openListMood,
+      onClear: clearListMood,
+    }),
+    [moodList.active, moodCounts.weights, moodCounts.exclusions, hiddenByMood, openListMood, clearListMood],
+  )
 
   /** O que a caixa do cabeçalho governa: as obras NA TELA, não o catálogo. */
   const visibleIds = useMemo(() => displayEntries.map((e) => e.workId), [displayEntries])
@@ -911,23 +1042,20 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   const drawerIds = useMemo(() => {
     const base = sortIdsByVisibleOrder(selectedIds, displayEntries)
     if (!moodRefine || !isMoodActive(moodRefine)) return base
+    // 🔴 Refino de LISTA: a ordem já foi calculada sobre a lista inteira, e
+    // `sortIdsByVisibleOrder` acabou de herdá-la. Reordenar aqui recalcularia o
+    // fit sobre as poucas obras selecionadas — outro universo, outra régua, e as
+    // duas telas discordando sobre a mesma pergunta.
+    if (moodScope === "list") return base
     const byId = new Map(entries.map((e) => [e.workId, e]))
-    const moodWorks: MoodWork[] = []
-    for (const id of base) {
+    const moodWorks = base.flatMap((id) => {
       const e = byId.get(id)
-      if (!e) continue
-      moodWorks.push({
-        id,
-        decisionScore: e.decisionScore,
-        scores: e.scores as Partial<Record<CriterionSlug, number | null>>,
-        totalChapters: e.totalChapters,
-        personalFit: e.personalFit,
-        totalVotes: e.totalVotes,
-        synopsisQuality: e.synopsisQuality,
-      })
-    }
+      return e ? [toMoodWork(e)] : []
+    })
     return sortByMoodAdjusted(moodWorks, moodRefine, criterionPrefs).map((w) => w.id)
-  }, [selectedIds, displayEntries, moodRefine, entries, criterionPrefs])
+  }, [selectedIds, displayEntries, moodRefine, moodScope, entries, criterionPrefs])
+
+
 
   const updateSort = (field: string) => {
     const params = new URLSearchParams(window.location.search)
@@ -966,15 +1094,16 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
     return (
       <div className="space-y-3">
         <ViewModeToolbar
-          count={entries.length}
+          count={displayEntries.length}
           viewMode={viewMode}
           onChange={writeViewMode}
           tiersEnabled={tiersEnabled}
           tiersAvailable={tierSortEligible}
           onTiersChange={writeTiersEnabled}
+          mood={moodToolbar}
         />
         <RankingCardsView
-          entries={entries}
+          entries={displayEntries}
           scoreThresholds={scoreThresholds}
           criterionMoments={criterionMoments}
           highlightWeights={highlightWeights}
@@ -988,14 +1117,15 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
     return (
       <div className="space-y-3">
         <ViewModeToolbar
-          count={entries.length}
+          count={displayEntries.length}
           viewMode={viewMode}
           onChange={writeViewMode}
           tiersEnabled={tiersEnabled}
           tiersAvailable={tierSortEligible}
           onTiersChange={writeTiersEnabled}
+          mood={moodToolbar}
         />
-        <BussolaPlane entries={entries} grouped={tiersEnabled} thresholds={scoreThresholds?.expected} />
+        <BussolaPlane entries={displayEntries} grouped={tiersEnabled} thresholds={scoreThresholds?.expected} />
       </div>
     )
   }
@@ -1003,13 +1133,26 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   return (
     <div className="space-y-3">
       <ViewModeToolbar
-        count={entries.length}
+        count={displayEntries.length}
         viewMode={viewMode}
         onChange={writeViewMode}
         tiersEnabled={tiersEnabled}
         tiersAvailable={tierSortEligible}
         onTiersChange={writeTiersEnabled}
+        mood={moodToolbar}
       />
+
+      {/* ⚠️ Exclusão que zera a lista precisa DIZER isso. Sem esta faixa a tabela
+          fica vazia com a barra de refino ativa em cima, que lê como bug — e o
+          caminho de volta (limpar o refino) some junto com as linhas. */}
+      {moodList.active && displayEntries.length === 0 && (
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-border/70 bg-card/80 py-12 text-center text-sm text-muted-foreground shadow-sm">
+          <span>O refino excluiu todas as {entries.length} obras desta lista.</span>
+          <Button variant="outline" size="sm" onClick={clearListMood}>
+            Limpar refino
+          </Button>
+        </div>
+      )}
 
       {/* Desktop table */}
       <TooltipProvider delayDuration={150}>
@@ -1195,7 +1338,18 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                             value={separatorValue(entry, separatorByIndex.get(index) ?? null)}
                           />
                         ) : (
-                          renderCell(entry, col, scoreThresholds, isPaid, null, attrColorMode, criterionPrefs)
+                          renderCell(
+                            entry,
+                            col,
+                            scoreThresholds,
+                            isPaid,
+                            null,
+                            attrColorMode,
+                            criterionPrefs,
+                            // Com refino ativo a lista está ORDENADA por este valor —
+                            // a célula tem que imprimir o mesmo número.
+                            moodList.adjusted.get(entry.workId) ?? null,
+                          )
                         )}
                       </div>
                     </td>
@@ -1258,7 +1412,11 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
         count={selectedIds.length}
         favoriteCount={favoriteSelectedIds.length}
         onOpen={() => {
-          setMoodRefine(null) // comparação manual: sem refino por mood
+          // ⚠️ Comparação manual limpa o refino do CLUSTER (ele existe só para
+          // aquela comparação), mas NUNCA o da lista: apagar a reordenação da tela
+          // inteira porque alguém clicou em "Comparar" seria um efeito colateral
+          // sem relação com o gesto — e o drawer herda os valores dela.
+          if (moodScope !== "list") setMoodRefine(null)
           setDrawerOpen(true)
         }}
         onClear={clearSelection}
@@ -1302,11 +1460,18 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
       )}
 
       <MoodRefineDialog
+        works={moodPreviewWorks}
+        ranges={criterionPrefs}
         open={moodDialogOpen}
         onOpenChange={setMoodDialogOpen}
         workCount={moodClusterIds.length}
-        onApply={(mood) => openCompareWithMood(mood)}
-        onSkip={() => openCompareWithMood(null)}
+        scope={moodScope}
+        initialMood={listMood}
+        // O mesmo popup responde a duas perguntas: pelo divisor de tier ele
+        // antecede uma COMPARAÇÃO; pelo botão da barra ele reordena a LISTA e
+        // não abre nada.
+        onApply={(mood) => (moodScope === "list" ? applyListMood(mood) : openCompareWithMood(mood))}
+        onSkip={() => (moodScope === "list" ? applyListMood(null) : openCompareWithMood(null))}
         hasRanges={criterionPrefs != null && Object.keys(criterionPrefs).length > 0}
       />
 
@@ -1315,6 +1480,10 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
         onOpenChange={setDrawerOpen}
         ids={drawerIds}
         moodRefine={moodRefine}
+        // 🔴 Refino de lista: os valores JÁ foram calculados sobre a lista inteira.
+        // Sem passá-los, o drawer recalcularia sobre as obras selecionadas — outro
+        // universo de normalização, outra ordem, mesma pergunta.
+        moodAdjustedById={moodScope === "list" ? moodList.adjusted : null}
         onClear={clearSelection}
         onRemoveId={removeSelection}
         scoreThresholds={scoreThresholds}
@@ -1375,6 +1544,7 @@ function ViewModeToolbar({
   tiersEnabled,
   tiersAvailable,
   onTiersChange,
+  mood,
 }: {
   count: number
   viewMode: ViewMode
@@ -1383,6 +1553,15 @@ function ViewModeToolbar({
   /** Falso quando a ordenação atual não forma tiers — o switch fica desabilitado. */
   tiersAvailable: boolean
   onTiersChange: (enabled: boolean) => void
+  /** Ausente na lista vazia: refinar zero obra não é uma ação. */
+  mood?: {
+    active: boolean
+    weights: number
+    exclusions: number
+    hiddenCount: number
+    onOpen: () => void
+    onClear: () => void
+  }
 }) {
   // ⚠️ Só a LISTA agrupa por tier, e só ela depende de a ordenação formar tiers.
   // Cards e Bússola agrupam por ARQUÉTIPO, que sai das forças da obra e independe
@@ -1403,6 +1582,18 @@ function ViewModeToolbar({
         {count} obra{count !== 1 ? "s" : ""} no ranking
       </p>
       <div className="flex items-center gap-2">
+        {/* Vale em TODAS as views: o refino mexe na ORDEM e no conjunto, e os dois
+            valem igual em Lista, Cards e Bússola. */}
+        {mood && (
+          <MoodListButton
+            active={mood.active}
+            weights={mood.weights}
+            exclusions={mood.exclusions}
+            hiddenCount={mood.hiddenCount}
+            onOpen={mood.onOpen}
+            onClear={mood.onClear}
+          />
+        )}
         {/* Fica em TODA view, desabilitado fora da Lista: um controle que some e
             volta obriga a reencontrar a barra a cada troca de view. */}
         <WorkColumnPicker

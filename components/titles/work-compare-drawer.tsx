@@ -54,10 +54,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { DecisionBreakdownPanel } from "@/components/titles/decision-breakdown-panel"
+import { buildDecisionBreakdown } from "@/lib/calculations/decision-breakdown"
+import { moodDimensionLabel } from "@/lib/ui/mood-dimensions"
 import { CRITERIA_INFO, PERSONAL_STATUSES_BY_ID, PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug } from "@/types/domain"
-import { computeMoodAdjusted, isMoodActive, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
+import { computeMoodAdjusted, isMoodActive, type MoodPracticalDimension, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
 import { segmentTags, lowercasedNameSet } from "@/lib/tags/segment"
 import type { TagStance, TagStanceInfo } from "@/lib/tags/segment"
 import { TagStanceMark, tagStanceTitle } from "@/components/ui/tag-stance-mark"
@@ -253,6 +256,18 @@ interface WorkCompareDrawerProps {
   /** Refino por mood (desempate dentro do tier). Quando ativo, mostra a linha
    *  "Prioridade ajustada" + resumo; os `ids` já chegam ordenados pelo mood. */
   moodRefine?: MoodRefine | null
+  /**
+   * Prioridade ajustada JÁ CALCULADA por quem abriu o drawer. Presente quando o
+   * refino veio da LISTA.
+   *
+   * 🔴 Não é otimização — é correção de régua. `computeMoodFit` normaliza cada
+   * dimensão pelo min/max do conjunto que recebe, então recalcular aqui, sobre as
+   * poucas obras selecionadas, produz números e ordem diferentes dos que a lista
+   * mostrou. Medido em 2026-08-16 no clone local: o mesmo mood sobre a lista de 126
+   * favoritas × sobre janelas de 5 obras dá ordem diferente em até 17 de 25 janelas.
+   * Herdar é o que mantém as duas telas contando a mesma história.
+   */
+  moodAdjustedById?: Map<string, number | null> | null
   /** Faixas ideais por critério (perfil). Habilita a cor + melhor/pior "Minha faixa". */
   criterionPrefs?: Record<string, CriterionRange>
 }
@@ -266,6 +281,7 @@ export function WorkCompareDrawer({
   scoreThresholds,
   isPaid = true,
   moodRefine = null,
+  moodAdjustedById = null,
   criterionPrefs,
 }: WorkCompareDrawerProps) {
   const colorMode = useSyncExternalStore(subscribeAttrColorMode, readAttrColorMode, () => "catalog" as const)
@@ -610,6 +626,7 @@ export function WorkCompareDrawer({
               hiddenRows={hiddenRows}
               rowOrder={rowsConfig.order}
               moodRefine={moodRefine}
+              inheritedMoodAdjusted={moodAdjustedById}
               colorMode={colorMode}
               criterionPrefs={criterionPrefs}
             />
@@ -905,6 +922,8 @@ interface CompareGridProps {
   rowOrder: string[]
   /** Refino por mood ativo → mostra a linha "Prioridade ajustada" no topo. */
   moodRefine?: MoodRefine | null
+  /** Valores prontos vindos da lista — ver a prop homônima do drawer. */
+  inheritedMoodAdjusted?: Map<string, number | null> | null
   /** Modo de cor ativo (catálogo vs. faixa ideal). */
   colorMode: AttrColorMode
   /** Faixas ideais por critério (perfil). */
@@ -977,6 +996,7 @@ function CompareGrid({
   hiddenRows,
   rowOrder,
   moodRefine = null,
+  inheritedMoodAdjusted = null,
   colorMode,
   criterionPrefs,
 }: CompareGridProps) {
@@ -984,7 +1004,13 @@ function CompareGrid({
 
   const moodActive = moodRefine != null && isMoodActive(moodRefine)
   // Prioridade ajustada ao mood (0–10) por obra — correção limitada ao MAE.
+  //
+  // ⚠️ Quando o refino veio da LISTA, os valores chegam prontos e são usados como
+  // estão: recalcular aqui mudaria o universo de normalização (ver a prop no
+  // WorkCompareDrawerProps). Só o refino aberto pelo divisor de tier calcula aqui,
+  // e nesse caso o conjunto do drawer É o cluster que ele normalizou.
   const moodAdjustedById = useMemo(() => {
+    if (inheritedMoodAdjusted != null) return inheritedMoodAdjusted
     if (!moodActive || moodRefine == null) return new Map<string, number | null>()
     const moodWorks: MoodWork[] = works.map((w) => ({
       id: w.id,
@@ -995,10 +1021,15 @@ function CompareGrid({
       totalChapters: w.totalChapters,
       personalFit: w.personalFit,
       totalVotes: w.totalVotes,
-      synopsisQuality: w.synopsisQuality,
+      synopsisQuality: w.synopsisQuality ?? w.predictedSynopsisQuality,
+      artPercentile: w.artPercentile,
+      publicationStatusId: w.publicationStatusId,
+      platformAvg: w.platformAvg,
+      year: w.year,
+      personalStatusId: w.personalStatusId,
     }))
     return computeMoodAdjusted(moodWorks, moodRefine, criterionPrefs)
-  }, [works, moodActive, moodRefine, criterionPrefs])
+  }, [works, moodActive, moodRefine, criterionPrefs, inheritedMoodAdjusted])
   const [collapsed, setCollapsed] = useState<Set<SectionKey>>(new Set())
   const [draggedOverIndex, setDraggedOverIndex] = useState<number | null>(null)
   const [sort, setSort] = useState<ColumnSort | null>(null)
@@ -1080,6 +1111,38 @@ function CompareGrid({
       get: (w) => w.decisionScore,
       thresholds: scoreThresholds?.expected ?? null,
       asAttributeBox: true,
+      // "Por que esta obra está na frente daquela?" não tinha resposta em tela
+      // nenhuma — e a ausência produzia a conclusão errada de que a Prioridade
+      // ignora Alinhamento, Interesse, nota externa e votos. Ela consome os quatro
+      // DENTRO da Prevista, com peso aprendido. Ver lib/calculations/decision-breakdown.ts.
+      wrapScore: (node, w) => (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-4">
+              {node}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-xs">
+            <DecisionBreakdownPanel
+              breakdown={buildDecisionBreakdown({
+                expected: w.expectedScore,
+                alignment: w.alignmentScore,
+                alignmentConfidence: w.alignmentConfidence,
+                alignmentStale: w.alignmentStale,
+                verdictScale: w.verdictScale,
+                personalFitPercentile: w.personalFitPercentile,
+                interestManual: w.synopsisQuality,
+                interestPredicted: w.predictedSynopsisQuality,
+                platformAvg: w.platformAvg,
+                totalVotes: w.totalVotes,
+                attributesScored: w.criteria.filter((c) => c.score != null).length,
+                attributesTotal: CRITERION_SLUGS.length,
+                weightsAuto: w.weightsAuto,
+              })}
+            />
+          </TooltipContent>
+        </Tooltip>
+      ),
     },
     {
       key: "score:expectedScore",
@@ -2190,9 +2253,16 @@ function MoodSummaryBanner({ mood }: { mood: MoodRefine }) {
   }
   if (mood.chapters === "curto") prioritize.push("📖 Mais curto")
   if (mood.chapters === "longo") prioritize.push("📖 Mais longo")
-  if (mood.alignment) prioritize.push("❤️ Mais alinhado")
-  if (mood.synopsis) prioritize.push("📜 Sinopse interessante")
-  if (mood.popularity) prioritize.push("📈 Mais popular")
+  // Os rótulos das práticas saem de `moodDimensionLabel`, nunca escritos aqui: o
+  // diálogo e este resumo falam da MESMA escolha, e duas cópias divergiriam no
+  // primeiro ajuste de texto.
+  for (const [key, w] of Object.entries(mood.practical ?? {}) as Array<
+    [MoodPracticalDimension, number]
+  >) {
+    const chip = moodDimensionLabel(key, w)
+    if (w > 0) prioritize.push(chip)
+    else avoid.push(chip)
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-primary/5 px-4 py-2 text-xs">

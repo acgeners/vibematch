@@ -25,9 +25,11 @@ describe("isMoodActive", () => {
     expect(isMoodActive(NONE)).toBe(false)
     expect(isMoodActive({ attributes: { romance: 1 } })).toBe(true)
     expect(isMoodActive({ attributes: {}, chapters: "curto" })).toBe(true)
-    expect(isMoodActive({ attributes: {}, alignment: true })).toBe(true)
-    expect(isMoodActive({ attributes: {}, popularity: true })).toBe(true)
-    expect(isMoodActive({ attributes: {}, synopsis: true })).toBe(true)
+    expect(isMoodActive({ attributes: {}, practical: { alignment: 1 } })).toBe(true)
+    expect(isMoodActive({ attributes: {}, practical: { popularity: -2 } })).toBe(true)
+    expect(isMoodActive({ attributes: {}, practical: { synopsis: 2 } })).toBe(true)
+    // `practical` vazio não é dimensão ativa — senão o botão viraria "Aplicar" sem nada aplicado.
+    expect(isMoodActive({ attributes: {}, practical: {} })).toBe(false)
   })
 })
 
@@ -65,18 +67,18 @@ describe("computeMoodAdjusted", () => {
   })
 
   it("popularidade favorece mais votos", () => {
-    const order = sortByMoodAdjusted(cluster(), { attributes: {}, popularity: true }).map((w) => w.id)
+    const order = sortByMoodAdjusted(cluster(), { attributes: {}, practical: { popularity: 1 } }).map((w) => w.id)
     expect(order[0]).toBe("C") // 9000 votos
   })
 
   it("sinopse favorece maior interesse (mais ♥)", () => {
-    const order = sortByMoodAdjusted(cluster(), { attributes: {}, synopsis: true }).map((w) => w.id)
+    const order = sortByMoodAdjusted(cluster(), { attributes: {}, practical: { synopsis: 1 } }).map((w) => w.id)
     expect(order[0]).toBe("A") // ♥♥♥♥
     expect(order[order.length - 1]).toBe("C") // ♥
   })
 
   it("a correção fica dentro de ±MOOD_SWING da base (limite do MAE)", () => {
-    const mood: MoodRefine = { attributes: { romance: 2, drama: -2 }, chapters: "curto", popularity: true, synopsis: true }
+    const mood: MoodRefine = { attributes: { romance: 2, drama: -2 }, chapters: "curto", practical: { popularity: 1, synopsis: 1 } }
     const works = cluster()
     const adj = computeMoodAdjusted(works, mood)
     for (const w of works) {

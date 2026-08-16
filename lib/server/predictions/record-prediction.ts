@@ -3,6 +3,7 @@ import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getCurrentUserId } from "@/server/queries/current-user"
 import { computeDecisionScore } from "@/lib/calculations/decision"
+import { getVerdictScale } from "@/server/queries/verdict-scale"
 import { buildRankingTiers } from "@/lib/ranking/build-tiers"
 import { getTierBandWidth } from "@/server/queries/tier-band-width"
 import {
@@ -198,6 +199,7 @@ export async function recordRecommendationSnapshots(args: {
     for (const t of tiered) tierByWork.set(t.item.id, t.tier)
 
     const moodKey = args.moodKey?.trim() || null
+    const verdictScale = await getVerdictScale()
     const inputs: PredictionSnapshotInput[] = prospective.map((w) => {
       const cs = w.calculated_scores
       const expected = cs?.expected_score ?? null
@@ -205,6 +207,10 @@ export async function recordRecommendationSnapshots(args: {
         expected,
         alignment: cs?.alignment_score ?? null,
         confidence: cs?.alignment_payload?.confidence ?? null,
+        stale: Boolean((cs as { alignment_stale?: boolean | null } | null)?.alignment_stale),
+        // O snapshot REGISTRA o que a tela mostrou — mesma régua, senão a medição
+        // prospectiva compara a previsão de hoje com uma fórmula que não existiu.
+        verdictScale,
       })
       return {
         workId: w.id,
@@ -361,6 +367,7 @@ export async function recordRankingSnapshots(args: {
     const tierByWork = new Map<string, number>()
     tiered.forEach((t) => tierByWork.set(t.item.id, t.tier))
 
+    const verdictScale = await getVerdictScale()
     const inputs: PredictionSnapshotInput[] = capped.map((id) => {
       const cs = byId.get(id)!.calculated_scores
       const expected = cs?.expected_score ?? null
@@ -368,6 +375,10 @@ export async function recordRankingSnapshots(args: {
         expected,
         alignment: cs?.alignment_score ?? null,
         confidence: cs?.alignment_payload?.confidence ?? null,
+        stale: Boolean((cs as { alignment_stale?: boolean | null } | null)?.alignment_stale),
+        // O snapshot REGISTRA o que a tela mostrou — mesma régua, senão a medição
+        // prospectiva compara a previsão de hoje com uma fórmula que não existiu.
+        verdictScale,
       })
       return {
         workId: id,

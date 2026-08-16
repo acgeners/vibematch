@@ -9,13 +9,14 @@ import {
 import { pickPrimaryCover } from "@/lib/work-derived"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { computeDecisionScore } from "@/lib/calculations/decision"
+import { getVerdictScale } from "@/server/queries/verdict-scale"
 import { getAllActiveSynopsisPredictions } from "@/server/queries/synopsis-quality"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { getHideAdultContent } from "@/server/queries/current-user"
 import { selectByIdsInChunks, fetchAllRows } from "@/lib/supabase/paginate"
 import { titleTokens, workMatchesQuery } from "@/lib/title-match"
-import { roundToDisplayScore } from "@/lib/score-rounding"
+import { displaySortValue } from "@/lib/ranking/display-sort"
 import { compareWithinTierTieBreak } from "@/lib/ranking/build-tiers"
 import { artBandFromPercentile, type ArtBand } from "@/lib/arte/model"
 import { artFilterMatches } from "@/lib/arte/url"
@@ -390,6 +391,9 @@ export async function getRanking(
   // DELES — e, sem modelo, saem NULL: o que sobra é a nota da comunidade, que é um fato.
   // Idem: disparado aqui, aguardado antes do .map() (só usado em overlay/hasModel, pós-query).
   const scoresReaderPromise = getScoresReader()
+  // A régua do Veredito (formula_config). Disparada junto das demais e aguardada
+  // antes do .map(); é `cache()` por requisição, então custa uma leitura só.
+  const verdictScalePromise = getVerdictScale()
 
   // Os filtros pessoais saem de `user_work_state` — pra TODO MUNDO, o dono inclusive. As
   // colunas de `works` não filtram mais nada (Fase D). `null` = o caller não pediu filtro
@@ -663,6 +667,7 @@ export async function getRanking(
   // A partir daqui `personal`/`scoresReader` são consumidos ao montar/filtrar as entries.
   const personal = await personalPromise
   const scoresReader = await scoresReaderPromise
+  const verdictScale = await verdictScalePromise
 
   const personalStatusSymbolsById = new Map(
     personalStatusOptions.map((status) => [status.id, status.symbol])
@@ -711,6 +716,8 @@ export async function getRanking(
         confidence:
           (w.calculated_scores?.alignment_payload as { confidence?: number } | null)?.confidence ??
           null,
+        stale: Boolean(w.calculated_scores?.alignment_stale),
+        verdictScale,
       }),
       chanceScore: w.calculated_scores?.chance_score ?? null,
       platformAvg: w.calculated_scores?.platform_avg ?? null,
@@ -971,22 +978,34 @@ export async function getRanking(
     const m = dir === "asc" ? 1 : -1
     const rawScore = (value: number | null | undefined) =>
       value == null ? -Infinity : value
-    // Nota Prevista ordena pela nota EXIBIDA (1 casa), não pelo valor cru: a lista
+    // Notas 0–10 ordenam pela nota EXIBIDA (1 casa), não pelo valor cru: a lista
     // mostra `expectedScore.toFixed(1)`, então 8,44 e 8,37 aparecem iguais ("8,4").
     // Comparar o cru fazia o 8,44 vir na frente sem empatar — e o critério de
     // desempate seguinte (ex.: Veredito) nunca entrava. Arredondar aqui faz notas
     // que APARECEM iguais empatarem e caírem pro próximo nível de ordenação.
     //
-    // 🔴 O arredondamento vem de `roundToDisplayScore` justamente porque o atalho
-    // (`Math.round(v * 10) / 10`) NÃO bate com o `toFixed(1)` da tela — ver o
-    // porquê e o bug medido em lib/score-rounding.ts.
-    const displayScore = (value: number | null | undefined) =>
-      value == null ? -Infinity : roundToDisplayScore(value)
+    // 🔴 QUAIS campos seguem essa régua é `DISPLAY_ROUNDED_SORT_FIELDS`, e a lista
+    // é dona única de propósito: a chave da banda de tier deriva DELA (ver
+    // `displayTierKey` em ranking-table.tsx). Enquanto cada lado decidia sozinho,
+    // `decision` ficou de fora aqui e ninguém percebeu.
+    const displayScore = displaySortValue
     if (field === "title") return m * a.title.localeCompare(b.title)
     if (field === "expected_score")
       return m * (displayScore(a.expectedScore) - displayScore(b.expectedScore))
+    // Prioridade: MESMA régua da Prevista, e pelo mesmo motivo — a célula imprime
+    // `~${score.toFixed(1)}` (`DecisionCell`), então duas obras que aparecem como
+    // "~8,4" TÊM que empatar aqui. Comparar o cru fazia a ordem depender de um
+    // decimal que ninguém vê, e o efeito era silencioso e caro: medido em
+    // 2026-08-15 no clone local, só **229** pares empatavam pelo cru contra
+    // **19.624** pela nota exibida — ou seja, o nível 2 de ordenação escolhido
+    // pela pessoa (Média externa, Votos, Veredito…) praticamente NUNCA entrava, e
+    // o desempate final por overlap de tags também não. Pior: o tooltip da célula
+    // promete exatamente o contrário — "dentro de cada faixa a ordem usa
+    // compatibilidade e desempates, não o decimal". A tela dizia uma coisa e a
+    // ordenação fazia outra (a família "dois critérios pro mesmo fato", com um dos
+    // lados em PROSA — ver [[gotcha-ui-documentava-formula-morta]]).
     if (field === "decision")
-      return m * (rawScore(a.decisionScore) - rawScore(b.decisionScore))
+      return m * (displayScore(a.decisionScore) - displayScore(b.decisionScore))
     if (field === "recommended")
       // Unificado com expected_score (auditoria 2026-06): o antigo blend
       // `expected × (0.6 + 0.4·personal_fit)` era ruído — pf é ~constante e ordena
