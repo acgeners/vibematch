@@ -3047,6 +3047,110 @@ verdade conferida. Ao anotar pendência aqui, escreva a **data** e a **forma de 
 - ~~`enforceNeutralCoupleDynamicsWhenNoRomance`~~: **removido na v23** (2026-08-09). Forçava `couple_dynamics = 5.0` quando `romance ≤ 3`, partindo de "sem romance, não há dinâmica" — premissa que morreu com a ampliação do critério pra vínculos centrais. Travava **17 das 18** obras sem romance. Quem decide "não aplicável" agora é o prompt, por ausência de VÍNCULO — não de romance. ⚠️ As ~31 justificativas que ele reescreveu seguem no banco (ver `lib/criteria/justification.ts`)
 - `enforceAuditableReviewUsage`: **non-fatal since v20 (2026-06-27)** — generic review citation is accepted ("algumas reviews apontam…"), so it no longer requires/validates specific review IDs (`R1`, `R2`…) nor throws. It only records an informational `reviewAudit` (`required` = "havia reviews no prompt"; `usedReviewIds` = whatever IDs the model happened to cite, often empty with generic citation). `review_usage` is now an OPTIONAL tool/schema field. (Earlier behavior: threw + retried when IDs weren't cited — removed because a citation slip discarded otherwise-valid evals.)
 
+## A auditoria de critérios NÃO escreve mais sozinha
+
+`/curation/settings?g=notas&open=ai-audit`. A IA relê obra a obra e sugere ajustes nos
+atributos; a curadora aceita, edita ou rejeita. Até 2026-08-16 uma parte escrevia direto no
+banco sem passar por ninguém. **Desligado**, e o motivo é medido — dono único da política:
+`lib/ai-calibration/policy.ts`.
+
+🔴 **O gate de auto-aplicação exigia `confidence ≥ 0,8` numa escala que o modelo não
+produz.** Medido nas 765 pendentes: a confiança **satura em 0,85**, a mediana é **0,60** e
+só **6 (0,78%)** alcançam 0,80 — a faixa que o próprio prompt define como certeza forte
+(0,9+) **nunca aparece**. O gate vivia na cauda de uma distribuição que ninguém tinha olhado
+(a régua de "o limiar sai da DISTRIBUIÇÃO, nunca do olho", aplicada a um caminho que GRAVA).
+
+🔴 **E no topo da escala a precisão observada é 0 de 2.** As duas únicas sugestões de 0,85
+foram julgadas erradas pela curadora: uma pôs `fantasy_nobility` em 3,0 numa obra com
+nobreza clara (empatando-a com as que não têm nada — o auditor não vê como o catálogo usa a
+escala), e a outra derrubou `couple_dynamics` para 3,0 lendo `Villain Couple` + tags de
+personagem tóxico como se descrevessem o vínculo ENTRE os protagonistas, **contra o consenso
+das reviews**, que chamava o casal de *"match made in heaven"*.
+
+⚠️ **O auditor é MENOS informado que o avaliador que ele corrige.** O input dele
+(`AUDIT_WORK_SELECT`) tem tags, sinopse, `user_score` e os `post_*` — **zero reviews, zero
+digest** —, enquanto a avaliação original lê até 30 reviews de 8 fontes. Um juiz com menos
+evidência sobrescrevendo um com mais é o desenho, não um acidente.
+
+🔴 **As 3 auto-aplicações do último run mostram os dois vieses de uma vez:** duas subiram
+`adult_content` por tag de circunstância (`Doggy Style` → 9,0 → 10,0) — o mecanismo que a
+**migration 182 rebaixou de propósito** —, e a terceira subiu `protagonist` de 7,0 para 8,5
+justificando com *"user_score altíssimo (9.4)"*, que é a **feature sendo empurrada na direção
+do rótulo**.
+
+**Escopo por critério, também em `policy.ts`.** `AUDITABLE_CRITERIA` é **derivado** de
+`CRITERION_SLUGS` menos `AUDIT_OUT_OF_SCOPE` — critério novo entra como auditável sozinho, e
+tirar um exige escrever o motivo (o texto vai pro prompt, não é comentário). Fora hoje:
+
+| critério | por quê |
+|---|---|
+| `adult_content` | tem piso/teto determinístico por procedência, e **a calibração não chama o clamp** (zero ocorrências em `calibration.ts`) — sugerir ali é uma 2ª régua pro mesmo número |
+| `couple_dynamics` | é o único de VALÊNCIA e a rubrica ampliada (v23) foi **revertida**; a sugestão nasce sobre régua meia-aplicada. Era o 3º maior gerador de fila (88 pendentes) |
+
+⚠️ **São TRÊS camadas, do mesmo desenho de `LOCKED_SOURCES`:** o enum da tool não deixa o
+modelo nomear o critério, o filtro do serviço descarta, e a action não persiste nem como
+pendente. Guardado por `tests/unit/ai-calibration/politica-de-auditoria.test.ts`, que varre a
+grade inteira de (confiança, Δ) em vez de conferir a constante — conferido com sonda: religar
+o auto-apply reprova.
+
+🔴 **`PROMPT_VERSION` foi pra `v2` junto, e isso tem consequência operacional:** a versão
+entra em `calibration_runs.prompt_version` e é o que `loadLastRun` compara pra detectar drift
+⇒ **o primeiro run depois desta mudança é uma varredura COMPLETA**. Não subir faria o rótulo
+do run mentir e o run seguinte rodar incremental sobre régua diferente.
+
+### A nota calibrada agora diz que é calibrada — e a prosa segue o número
+
+🔴 **A nota mora em `category_scores` e a prosa que a explica mora em `ai_evaluation_scores`,
+então mover uma sem a outra faz a página da obra se contradizer.** Medido em 2026-08-16:
+das 37 notas com `source = 'ai_calibrated'`, **27 exibiam justificativa que contradiz a
+própria nota** — a 1,79 ponto de distância em média —, e `ai_calibrated` **não aparecia em
+nenhuma UI** (grep: zero), então o número reescrito seguia creditado ao selo ✨ da avaliação
+que não o produziu.
+
+Hoje o card lê `getCalibrationProvenanceForWork` e, quando a nota é calibrada, imprime a
+justificativa **da sugestão que a moveu** mais a linha `Ajustada pela auditoria · <quando> ·
+antes <nota>`. ⚠️ A prosa é **recuperada por chave natural**, nunca copiada: a linha da
+sugestão continua dona do próprio texto, e não há duas cópias pra divergir.
+
+⚠️ **A linha é procedência, não estado** — sem cor. Âmbar ali significaria "desatualizado"
+(ver `STATUS_TONE`), e sem alfa no texto: a 10,5px o `/80` derruba o contraste abaixo do AA.
+
+**Duas guardas fecharam o resto do loop:**
+
+- 🔴 **Aceitar sugestão confere o VALOR, não só o `source`.** Uma reavaliação reescreve a nota
+  mantendo `ai_accepted`, então checar procedência deixa passar o caso comum: **132 das 583
+  pendentes (23%) tinham baseline morto**. Divergindo, a sugestão vira `superseded` (ela não
+  errou — envelheceu) com a mensagem dizendo de quanto pra quanto a nota andou.
+- 🔴 **Reavaliar apagava calibração em silêncio: 44 casos.** O upsert de `submitAiReview`
+  sobrescrever está CERTO (evidência mais fresca, revisada no formulário); o que não podia era
+  o silêncio. Hoje as sugestões afetadas viram `superseded` e o caso é logado.
+
+### `bandCoherence`: a única checagem de coerência que sobrevive, e os dois falsos positivos dela
+
+Dono: `lib/criteria/justification.ts`. A pergunta é estrutural — *a nota cai na faixa que a
+prosa citou?* —, sem interpretar uma palavra. Ela já existia como regex dentro do
+`coherence-audit.ts` e tinha **dois** furos, os dois produzindo número alto e plausível:
+
+| furo | efeito medido |
+|---|---|
+| **citação composta** (`Faixa 7-8/9`, `Faixa 4-6 a 7-8`, `Faixa 7-8 / limiar 9-10`) | ler só o 1º par e comparar por igualdade de string deu **6 de 6 amostrados falso positivo** |
+| **a fresta do meio ponto** | os bins da rubrica são de inteiros e **não se tocam** — nenhum contém 3,5 · 6,5 · 8,5. Comparar contra `[lo, hi]` cru reprova **226** notas de borda, nenhuma erro de julgamento |
+
+Corrigida, a régua dá **19** no escopo do script (nota ↔ a avaliação que a produziu) e **73**
+no escopo da PÁGINA (nota ↔ prosa que ela exibe: 27 calibradas + 25 `ai_accepted` +
+21 `ai_edited`). Os dois números são legítimos e respondem perguntas diferentes — o 2º é o
+que a pessoa vê. ⚠️ Uma varredura minha em SQL deu **483** antes de amostrar; foi a
+amostragem que derrubou o número, exatamente como o cabeçalho do `coherence-audit.ts` manda.
+
+⚠️ **A fresta do meio ponto JÁ ESTAVA documentada** em `bandBarBounds` desde 2026-07-22
+("132 dos 205 pontos-fora-da-faixa eram só isto") — e eu a redescobri do zero. Antes de
+escrever régua nova sobre faixa, leia aquele bloco.
+
+⚠️ **A auditoria serve à CONSISTÊNCIA dos atributos (filtros e desempate do `/ranking`),
+não à Nota Prevista** — os 9 atributos somam 0,002 de MAE, e isso está fechado
+([[project-atributos-nao-chegam-na-nota-prevista]]). A descrição do card diz isso por
+escrito; prometer previsão ali é prometer o que foi medido e não existe.
+
 ## Duas réguas para as notas de atributo, e o que cada uma consegue ver
 
 Objetivo é **precisão E coerência**, e são medidas diferentes — colapsar as duas em MAE foi
@@ -3661,6 +3765,9 @@ Quatro ocorrências MEDIDAS em 2026-08-13/14, todas com suíte verde:
 | botão de prever Interesse | a obra dizia "Prever de novo" | a fila dizia "Reprever" (e o popup, "Prever") | mesma ação com **três nomes**; e uma instrução na tela (`shadow-compare-panel`) mandava clicar num "Reprever" que já não existiria — ver `lib/ui/interest-predict-label.ts` |
 | card da fila de Interesse | chip "Diverge"/"Bate" (`diverges`) | chip `Δ +1`/`Δ 0` (`delta !== 0`) | o **mesmo predicado**, nas mesmas duas cores, desenhado 2× no mesmo card, com uma 3ª cópia da paleta hand-rollada no `Δ`. Medido: o chip aparecia em 45 de 815 obras (5,5%) e nas 45 o `Δ` já dizia o mesmo — e ele PERDIA a precedência pro "Desatualizado" justo nas 676 stale que tinham o que comparar. Ficou o `Δ` |
 | explicação do Alinhamento | o **texto** do tooltip e o docstring diziam "40% tag + 30% critério + 30% consistência" | o **código** roda `netNameOverlap` (só tags, sem critério) | a fórmula descrita foi APOSENTADA em 27/06 e virou código morto; as duas superfícies seguiram documentando-a por ~2 meses, e quem lesse o arquivo pra entender o número aprenderia a fórmula errada. Aqui o "outro lado" não era um segundo cálculo — era **prosa**, que não tem como divergir barulhentamente |
+| nota calibrada × prosa da avaliação | `category_scores.score`, que a auditoria reescreve | `ai_evaluation_scores.justification`, que ela não toca | **27 das 37** notas calibradas exibiam prosa contradizendo o próprio número (1,79 ponto de distância), sob o selo ✨ de uma avaliação que não as produziu — e `ai_calibrated` não aparecia em UI nenhuma, então nada sinalizava a troca de autor |
+| aceitar sugestão de calibração | a guarda olhava o `source` do score | a nota em si tinha mudado | reavaliação reescreve o valor mantendo `ai_accepted` ⇒ **132 das 583 pendentes (23%)** julgavam um número que já não existia, e aceitar sobrescrevia a reavaliação mais nova sem erro |
+| régua de coerência faixa × nota | um regex por script, com o 1º par de números | `bandForScore`, que usa bin semiaberto | **483 acusações**, das quais 226 eram meio ponto na borda e 6 de 6 amostradas eram citação composta. O real são 71 — e quem derrubou o número foi a AMOSTRAGEM, que o cabeçalho do próprio script já mandava fazer |
 
 🔴 **A régua: quando duas coisas afirmam o mesmo fato, uma tem que ser DERIVADA da outra.**
 É o que já vale para `LOW_BALANCE_USD`, `STRONG_TAG_WEIGHT`, `CRITERIA_SCALE_LEGEND`,
@@ -3754,10 +3861,15 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.088 passando (+24 pulados) em 297 arquivos** (292 passando + 5 pulados);
-medido em 2026-08-16 depois da `/my-list` (1 arquivo novo: `my-list/prateleiras`, 6 casos), com
-`find tests -name '*.test.ts*'` = 297 conferido contra os 297 executados.
-Base: **3.082 em 296** (padronização das rotas pra inglês), antes **3.076 em 295**,
+`npm run test` → **3.119 passando (+24 pulados) em 299 arquivos** (294 passando + 5 pulados);
+medido em 2026-08-16 depois de desligar o auto-apply da auditoria (2 arquivos novos:
+`ai-calibration/politica-de-auditoria` com 9 casos e `criteria/band-coherence` com 22), com
+`find tests -name '*.test.ts*'` = 299 conferido contra os 299 executados.
+⚠️ Esta rodada precisou de `--maxWorkers=4`: com o pool default duas rodadas cheias
+acusaram **1 falha cada, em arquivos DIFERENTES** (`recalibrar-limpa-recalc-pendente` e
+`ranking-status-exclusao`), os dois passando isolados e com a árvore limpa — é a flakiness
+de carga descrita abaixo, e o número só fecha depois de reproduzir verde.
+Base: **3.088 em 297** (`/my-list`), antes **3.082 em 296** (rotas em inglês), **3.076 em 295**,
 **3.053 em 292**, **3.043 em 291** e **3.021 em 290**.
 
 ⚠️ **A renomeação tocou ~40 arquivos de teste e não somou nenhum caso** — os testes de

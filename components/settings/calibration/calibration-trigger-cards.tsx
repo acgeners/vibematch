@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/tooltip"
 import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { runBiasReportAction, runCalibrationAuditAction } from "@/server/actions/calibration"
+import { AUTO_APPLY_ENABLED } from "@/lib/ai-calibration/policy"
 import { runTask } from "@/lib/tasks-store"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import { formatRelativeDateTime } from "@/lib/date-utils"
@@ -30,7 +31,10 @@ function auditSummary(d: {
 }): string {
   if (d.nWorksScanned === 0) return "Nada mudou desde a última auditoria — nenhum run criado."
   const label = d.scope === "full" ? "Varredura completa" : "Incremental"
-  return `${label}: ${d.nWorksScanned} obras · ${d.nAutoApplied} auto-aplicadas · ${d.nSuggestions - d.nAutoApplied} pendentes.`
+  // Com o auto-apply desligado o termo não aparece: "0 auto-aplicadas" anuncia um caminho
+  // que não existe mais e faz procurar defeito onde há política.
+  const aplicadas = AUTO_APPLY_ENABLED ? `${d.nAutoApplied} auto-aplicadas · ` : ""
+  return `${label}: ${d.nWorksScanned} obras · ${aplicadas}${d.nSuggestions - d.nAutoApplied} pendentes pra revisar.`
 }
 
 /**
@@ -275,7 +279,10 @@ export function AuditTriggerZone({
         lastAudit ? (
           <span className="tabular-nums">
             Último run {formatRelativeDateTime(lastAudit.completed_at ?? lastAudit.created_at)} ·{" "}
-            {lastAudit.n_works_scanned} obras · {lastAudit.n_auto_applied} auto-aplicadas ·{" "}
+            {lastAudit.n_works_scanned} obras ·{" "}
+            {/* Run ANTIGO que auto-aplicou segue mostrando o número — é fato daquele run.
+                O que sai é o "0 auto-aplicadas" dos runs de agora. */}
+            {lastAudit.n_auto_applied > 0 ? `${lastAudit.n_auto_applied} auto-aplicadas · ` : ""}
             {lastAudit.n_suggestions - lastAudit.n_auto_applied} pendentes
           </span>
         ) : (

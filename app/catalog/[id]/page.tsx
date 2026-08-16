@@ -8,7 +8,7 @@ import {
 } from "@/components/titles/curation-request-panel"
 import { ApprovalBadge, ApprovalActions } from "@/components/titles/approval-controls"
 import { getMyOpenRequestsForWork } from "@/server/queries/curation-requests"
-import { formatTimeAgo } from "@/lib/date-utils"
+import { formatTimeAgo, formatProvenanceWhen } from "@/lib/date-utils"
 import { AdultGate } from "@/components/titles/adult-gate"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { ComixResolutionWatcher } from "@/components/titles/comix-resolution-watcher"
@@ -52,6 +52,7 @@ import { getOpeningStructure } from "@/server/queries/opening-structure"
 import { OpeningStructureCard } from "@/components/titles/opening-structure-card"
 import { ArtEstimateCard } from "@/components/titles/art-estimate-card"
 import { getArtEvidenceForWork } from "@/server/queries/art-evidence"
+import { getCalibrationProvenanceForWork } from "@/server/queries/calibration"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getGenerationReadinessMany } from "@/server/queries/generation-readiness"
 import { getWorkAiCost, getFromScratchBaselineCost } from "@/server/queries/ai-usage"
@@ -461,9 +462,18 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       : [null, null]
 
   const scoreMap: Record<string, number> = {}
+  /** `source` por critério — já vem no `category_scores(*)`, custo zero. É ele que diz se
+   *  quem escreveu o número foi a avaliação ou a auditoria de calibração. */
+  const scoreSourceMap: Record<string, string> = {}
   for (const cs of work.category_scores ?? []) {
     scoreMap[cs.criterion_slug] = cs.score
+    if (cs.source) scoreSourceMap[cs.criterion_slug] = cs.source
   }
+  // Só busca a procedência da calibração se ALGUMA nota veio dela — na esmagadora maioria
+  // das obras (37 notas em 8.811, medido) isto não chega a virar consulta.
+  const calibrationProvenance = Object.values(scoreSourceMap).includes("ai_calibrated")
+    ? await getCalibrationProvenanceForWork(work.id as string)
+    : null
   // 18+ oficial = works.is_adult (COALESCE(adult_override, adult_auto), migração
   // 161) — alimentado pelas 59 tags curadas do content_indicator + override humano,
   // NÃO pela nota da IA. Fallback pra nota enquanto a coluna não existe (pré-migração).
@@ -1263,7 +1273,14 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               // Legenda (faixa + rótulo) separada da justificativa específica da obra. A faixa é
               // DERIVADA da nota vigente, nunca da prosa da IA — ver `bandForScore` para os três
               // jeitos silenciosos de a faixa citada apodrecer.
-              const parsed = aiScore?.justification ? parseJustification(aiScore.justification) : null
+              // 🔴 A prosa tem que seguir o NÚMERO. Quando a auditoria reescreveu a nota,
+              // a justificativa da avaliação fala de outro valor (medido: 28 das 37 notas
+              // calibradas, a 1,79 ponto de distância) — então quem explica é a sugestão
+              // que de fato moveu o número, e o rótulo diz de onde ela veio.
+              const calibrated = calibrationProvenance?.get(slug) ?? null
+              const isCalibrated = scoreSourceMap[slug] === "ai_calibrated" && !!calibrated
+              const sourceText = isCalibrated ? calibrated.justification : aiScore?.justification
+              const parsed = sourceText ? parseJustification(sourceText) : null
               const band = score != null ? bandForScore(score) : null
               const [bandLo, bandHi] = band ? bandBarBounds(band) : [null, null]
               return (
@@ -1299,6 +1316,18 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       label={rubricTitle(slug, band)}
                       rubric={rubricForBand(slug, band)}
                     />
+                  )}
+                  {isCalibrated && (
+                    /* Procedência, não estado: o selo ✨ do card credita a avaliação, e esta
+                       nota não veio dela. Sem cor de estado — âmbar aqui significaria
+                       "desatualizado", que é outra coisa (ver STATUS_TONE). */
+                    /* Sem alfa no texto: a 10,5px o `/80` derruba o contraste abaixo do AA,
+                       e alfa não se lê na cor computada (ver o ⚠️ do painel da Prioridade). */
+                    <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                      Ajustada pela auditoria
+                      {calibrated.appliedAt ? ` · ${formatProvenanceWhen(calibrated.appliedAt)}` : ""}
+                      {` · antes ${calibrated.previousScore.toFixed(1)}`}
+                    </p>
                   )}
                   {parsed?.detail && (
                     <p className="text-xs leading-relaxed text-muted-foreground">{parsed.detail}</p>

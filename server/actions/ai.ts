@@ -608,6 +608,44 @@ export interface AiReviewSubmission {
   }>
 }
 
+/**
+ * Marca como `superseded` as sugestões de calibração cujas notas uma avaliação nova está
+ * prestes a sobrescrever, e devolve os critérios afetados.
+ *
+ * Não exportada de propósito: em arquivo `"use server"` todo export vira endpoint HTTP, e
+ * isto é detalhe interno de `submitAiReview`.
+ */
+async function markCalibrationOverwritten(workId: string, slugs: string[]): Promise<string[]> {
+  if (slugs.length === 0) return []
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("category_scores")
+    .select("criterion_slug")
+    .eq("work_id", workId)
+    .eq("source", "ai_calibrated")
+    .in("criterion_slug", slugs)
+  if (error) {
+    console.error("[calibration] erro checando notas calibradas antes de sobrescrever:", error.message)
+    return []
+  }
+  const affected = (data ?? []).map((r) => r.criterion_slug as string)
+  if (affected.length === 0) return []
+
+  // `superseded` e não `reverted`: ninguém desfez a decisão da curadora — um julgamento
+  // mais fresco tomou o lugar dela. É o mesmo sentido que o status já tem quando um run
+  // novo substitui a pendente anterior.
+  const { error: updError } = await supabase
+    .from("score_calibration_suggestions")
+    .update({ status: "superseded", reviewed_at: new Date().toISOString() })
+    .eq("work_id", workId)
+    .in("criterion_slug", affected)
+    .in("status", ["auto_applied", "accepted", "edited"])
+  if (updError) {
+    console.error("[calibration] erro marcando sugestão sobrescrita:", updError.message)
+  }
+  return affected
+}
+
 export async function submitAiReview(submission: AiReviewSubmission) {
   const gate = await ensureAdmin()
   if (!gate.ok) return { data: null, error: gate.error }
@@ -639,11 +677,27 @@ export async function submitAiReview(submission: AiReviewSubmission) {
     ai_evaluation_id: submission.evaluationId,
   }))
 
+  // 🔴 Este upsert APAGA calibração, e por muito tempo apagou calado: medido em 2026-08-16,
+  // 44 notas que a auditoria tinha aplicado já haviam voltado a `ai_accepted` por uma
+  // reavaliação posterior — a curadoria some e a linha de histórico segue dizendo
+  // "aplicada". Sobrescrever está CERTO (a avaliação nova é evidência mais fresca, e ela
+  // acabou de passar pelo formulário de revisão); o que não pode é o silêncio.
+  const overwrittenSlugs = await markCalibrationOverwritten(
+    submission.workId,
+    submission.scores.map((s) => s.criterionSlug),
+  )
+
   const { error: upsertError } = await supabase
     .from("category_scores")
     .upsert(categoryScores, { onConflict: "work_id,criterion_slug" })
 
   if (upsertError) return { data: null, error: upsertError.message }
+  if (overwrittenSlugs.length > 0) {
+    console.log(
+      `[calibration] avaliação nova sobrescreveu ${overwrittenSlugs.length} nota(s) calibrada(s) ` +
+        `na obra ${submission.workId}: ${overwrittenSlugs.join(", ")}`,
+    )
+  }
 
   const { error: workError } = await supabase
     .from("works")

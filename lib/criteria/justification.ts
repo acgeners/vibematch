@@ -15,7 +15,19 @@ export interface ParsedJustification {
 }
 
 // "Faixa 7-8 (Core Romance): texto" · "Faixa 7-8/9-10 (Forte): …" · "Faixa 4-6: …" (rótulo opcional)
-const BAND_RE = /^\s*Faixa\s+(\d+(?:-\d+)?(?:\/\d+-\d+)?)\s*(?:\(([^)]*)\))?\s*:\s*([\s\S]*)$/i
+//
+// ⚠️ A citação composta tem MAIS formas do que "7-8/9-10": o modelo escreve "Faixa 7-8/9",
+// "Faixa 4-6 a 7-8" e "Faixa 7-8, tendendo ao limite superior". Capturar só o primeiro par
+// faz qualquer régua de coerência acusar contradição onde a prosa cobre a nota — foi assim
+// que uma varredura minha deu 483 incoerências das quais 6 de 6 amostradas eram falso
+// positivo (2026-08-16). O grupo abaixo consome a citação INTEIRA; `bandBounds` já reduz a
+// qualquer forma dessas ao par mín–máx.
+// A palavra que liga as duas citações varia ("a", "e", "até", "limiar", "tendendo"), então
+// ela é aceita genericamente — mas SÓ quando vem seguida de mais números, senão o grupo
+// engoliria o começo do argumento. Sem casar, o resultado é "sem-faixa": nenhuma afirmação,
+// que é o lado seguro.
+const BAND_RE =
+  /^\s*Faixa\s+(\d+(?:\s*[-–/]\s*\d+)*(?:\s*[/,]?\s*[a-zà-ú]{1,10}\s*\d+(?:\s*[-–/]\s*\d+)*)?)\s*(?:\(([^)]*)\))?\s*[:,]\s*([\s\S]*)$/i
 
 export function parseJustification(text: string): ParsedJustification {
   const m = text.match(BAND_RE)
@@ -23,9 +35,9 @@ export function parseJustification(text: string): ParsedJustification {
   return { band: m[1], label: m[2]?.trim() || null, detail: m[3].trim() }
 }
 
-/** Menor e maior número de uma faixa: "7-8/9-10" → [7,10] · "4-6" → [4,6]. */
+/** Menor e maior número de uma faixa: "7-8/9-10" → [7,10] · "4-6" → [4,6] · "4-6 a 7-8" → [4,8]. */
 export function bandBounds(band: string): [number, number] {
-  const nums = band.split(/[-/]/).map(Number).filter((n) => Number.isFinite(n))
+  const nums = (band.match(/\d+/g) ?? []).map(Number).filter((n) => Number.isFinite(n))
   if (nums.length === 0) return [0, 10]
   return [Math.min(...nums), Math.max(...nums)]
 }
@@ -120,4 +132,38 @@ export function rubricSummary(slug: string, band: string): string | null {
   const detail = afterBand.slice(colon + 1).trim()
   const first = detail.split(/(?<=\.)\s+/)[0]?.trim()
   return first || null
+}
+
+/** Estado da relação entre a NOTA e a faixa que a prosa cita. */
+export type BandCoherence = "sem-faixa" | "coerente" | "divergente"
+
+/**
+ * A prosa contradiz o número? — a única checagem de coerência deste projeto que sobrevive
+ * à validação manual, porque é ESTRUTURAL: compara o rótulo citado com a faixa da nota, sem
+ * interpretar uma palavra do texto.
+ *
+ * 🔴 Duas armadilhas, as duas medidas em 2026-08-16, e as duas produzem número plausível:
+ *
+ *  1. **Citação composta.** "Faixa 7-8/9" e "Faixa 4-6 a 7-8" cobrem mais de uma faixa. Ler
+ *     só o primeiro par e comparar por igualdade de string dá 6 falsos positivos em 6
+ *     amostrados. Aqui a citação vira um INTERVALO e a pergunta é se a nota cai dentro dele.
+ *
+ *  2. **A fresta do meio ponto.** Os bins da rubrica são de inteiros e não se tocam: nenhum
+ *     contém 3,5 · 6,5 · 8,5. Comparar contra `[lo, hi]` cru reprova toda nota de meio ponto
+ *     na borda — 226 casos no catálogo, nenhum deles erro de julgamento. Por isso o teto usa
+ *     a mesma lógica semiaberta de `bandBarBounds`, que é como a faixa é DESENHADA na tela.
+ *
+ * Sobra o que importa: 71 divergências reais em 8.766 atributos (0,8%), das quais 5 de 5
+ * amostradas eram legítimas — prosa dizendo "Faixa 0-3 (Ausente)" sobre uma nota 4,0.
+ */
+export function bandCoherence(score: number, justification: string | null | undefined): BandCoherence {
+  if (!justification) return "sem-faixa"
+  const { band } = parseJustification(justification)
+  if (!band) return "sem-faixa"
+  const [lo, hi] = bandBounds(band)
+  const teto = Math.min(hi + 1, 10)
+  const s = Math.round(score * 10) / 10
+  // Semiaberto no topo, EXCETO no fim da régua: 10,0 tem que caber em "9-10".
+  const dentro = s >= lo && (s < teto || (teto === 10 && s === 10))
+  return dentro ? "coerente" : "divergente"
 }

@@ -93,8 +93,8 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         title: "Auditoria de critérios IA",
         panelTitle: "Auditoria de critérios IA",
         description:
-          "A IA revê cada obra com nota pessoal e sugere ajustes nos 9 critérios; sugestões fortes (conf ≥ 0.8, |Δ| ≤ 1.5) são auto-aplicadas.",
-        help: "Percorre obra a obra os 9 atributos que a IA atribuiu (category_scores), confronta com as reviews e o contexto externo e sugere correções, que podem ser aplicadas automaticamente. As sugestões que não passam do corte ficam pendentes pra você aceitar, editar ou rejeitar. É o caminho que escreve notas — scores com source “manual” ou “ai_edited” não são tocados.",
+          "A IA revê cada obra com nota pessoal e sugere ajustes nos atributos. Toda sugestão espera sua decisão — nada é aplicado sozinho.",
+        help: "Percorre obra a obra os atributos que a IA atribuiu (category_scores), confronta com tags, sinopse e seus critérios pós-leitura, e propõe correções que ficam pendentes pra você aceitar, editar ou rejeitar. É o caminho que escreve notas — scores “manual” e “ai_edited” não são tocados, e “adult_content” e “couple_dynamics” estão fora do escopo por terem régua própria. Serve à CONSISTÊNCIA dos atributos (filtros e desempate do ranking); não melhora a Nota Prevista, que é medida e não depende deles.",
         icon: ScanSearch,
         chips: [{ kind: "cadence", label: "Frequente" }],
         collapsible: true,
