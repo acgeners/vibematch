@@ -230,6 +230,58 @@ describe("scripts de análise apontam para o banco local", () => {
     }
   })
 
+  /**
+   * 🔴 A TABELA DO CLAUDE.md É DERIVADA DAQUI — senão ela envelhece, e envelheceu DUAS vezes.
+   *
+   * Ela dizia "29 / 29" sobre 58 arquivos por semanas. Foi remedida para "44 / 39 sobre 89"
+   * em 2026-08-15 e **quebrou no mesmo dia**: o PR seguinte ampliou o escopo da varredura
+   * (`.js` entrou, 7 scripts de tag viraram `ALVO: NUVEM`) e não voltou na seção. Nada
+   * acusou — número em prosa não sabe que está defasado.
+   *
+   * É a família "dois critérios pro mesmo fato" com um dos lados em MARKDOWN: o código conta
+   * de um jeito, a doc afirma outro, e quem lê a doc para decidir onde mexer aprende o errado.
+   * A saída é a de sempre: um lado deriva do outro. Aqui a doc é conferida contra o código.
+   *
+   * ⚠️ O teste casa a LINHA da tabela pelo rótulo, não pela posição — reordenar a tabela ou
+   * reescrever o texto ao redor não pode reprovar. O que reprova é o NÚMERO divergir.
+   */
+  it("os números da tabela do CLAUDE.md batem com a varredura", () => {
+    const doc = fs.readFileSync(path.join(process.cwd(), "CLAUDE.md"), "utf8")
+
+    const declaram = invocadosAMao.filter(({ src }) => /--env-file=\.env\.analysis/.test(src) && !src.includes("ALVO: NUVEM"))
+    const gravam = invocadosAMao.filter(({ src }) => src.includes("ALVO: NUVEM"))
+    const universo = [...rastreados]
+      .filter((n) => n.endsWith(".ts") || n.endsWith(".mjs") || n.endsWith(".js"))
+      .filter((n) => !noPackageJson(n))
+
+    /**
+     * ⚠️ Ancora no COMEÇO da linha (`| <rótulo> |`), não em "contém". A 1ª versão usava
+     * `includes` e casou a linha de OUTRA tabela do arquivo, que cita o mesmo rótulo dentro
+     * de uma célula — o teste reprovava com `expected null`, apontando para o lugar errado.
+     */
+    const numeroDaLinha = (rotulo: string): number | null => {
+      const linha = doc.split("\n").find((l) => l.startsWith(`| ${rotulo} |`))
+      const m = linha?.match(/\|\s*\*{0,2}(\d+)\*{0,2}\s*\|/)
+      return m ? Number(m[1]) : null
+    }
+
+    expect(
+      numeroDaLinha("`--env-file=.env.analysis` na linha de uso"),
+      `a tabela do CLAUDE.md diz outro número de scripts que só LEEM; a varredura conta ${declaram.length}`,
+    ).toBe(declaram.length)
+
+    expect(
+      numeroDaLinha("`ALVO: NUVEM` no cabeçalho"),
+      `a tabela do CLAUDE.md diz outro número de scripts que GRAVAM; a varredura conta ${gravam.length}`,
+    ).toBe(gravam.length)
+
+    expect(
+      doc,
+      `o total mudou: são ${universo.length} arquivos rastreados fora do package.json. ` +
+        `Atualize o "(**N arquivos, remedidos em …**)" da seção de alvo dos scripts.`,
+    ).toContain(`${universo.length} arquivos, remedidos`)
+  })
+
   it("o gerador do .env.analysis existe e se recusa a apontar para fora do local", () => {
     // Sem essa trava, um `supabase status` devolvendo alvo remoto faria TODOS os scripts
     // migrarem para a nuvem de uma vez — o oposto exato do que este arquivo protege.
