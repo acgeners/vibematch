@@ -186,9 +186,14 @@ estaria errado, não acertar os dois.
 | quem | arquivo | alvo |
 |---|---|---|
 | app (`npm run dev`) | `.env.local` | **NUVEM** |
-| os 23 scripts do `package.json` que só leem | `--env-file=.env.local --env-file=.env.analysis` | **LOCAL** |
-| os 29 de `scripts/` que só LEEM | idem, declarado no cabeçalho do arquivo | **LOCAL** |
-| os 29 de `scripts/` que GRAVAM (2 deles no `package.json`) | `--env-file=.env.local` + `ALVO: NUVEM` no cabeçalho | **NUVEM** |
+| scripts do `package.json` que só leem | `--env-file=.env.local --env-file=.env.analysis` | **LOCAL** |
+| scripts de `scripts/` que só LEEM | idem, declarado no cabeçalho do arquivo | **LOCAL** |
+| scripts que GRAVAM (dos dois lados) | `--env-file=.env.local` + `ALVO: NUVEM` no cabeçalho | **NUVEM** |
+
+⚠️ **Esta tabela é de PAPÉIS, não de contagem** — os números vivem numa tabela só, mais
+abaixo ("A exigência é DECLARAR o alvo"), que a suíte confere. Aqui eles já disseram
+"23 / 29 / 29" enquanto a outra dizia outra coisa: duas contagens do mesmo fato no mesmo
+arquivo, divergindo em silêncio.
 
 ⚠️ **São 83 entradas, não 25** — a conta de "25 scripts" só enxergava o `package.json`. Ver o
 🔴 sobre os 58 arquivos logo abaixo: metade deles grava, e para essa metade o local é o alvo
@@ -229,16 +234,23 @@ código que muda, é o que ele quer dizer.
 🔴 **A exigência é DECLARAR o alvo, não "usar o local"** — e a razão é medida: quase metade
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
-cada arquivo `.ts`/`.mjs` fora do `package.json` que toca o banco declara um dos dois
-(**89 arquivos, remedidos em 2026-08-15**):
+cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
+banco declara um dos dois (**96 arquivos, remedidos em 2026-08-15**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **44** | só LÊ ⇒ vai pro local, de graça |
-| `ALVO: NUVEM` no cabeçalho | **39** | GRAVA ⇒ tem que ir pra nuvem |
+| `ALVO: NUVEM` no cabeçalho | **46** | GRAVA ⇒ tem que ir pra nuvem |
 | (não tocam o banco) | 6 | fora da régua |
 
-⚠️ **Esta tabela dizia "29 / 29" e envelheceu sem nada acusar** — o universo tinha crescido
+🔴 **ESTES TRÊS NÚMEROS SÃO CONFERIDOS PELA SUÍTE**, e não por quem editar esta seção —
+`scripts-apontam-pro-local.test.ts` lê a tabela daqui e a compara com a varredura real. É a
+única defesa que funcionou: a tabela dizia "29 / 29" sobre 58 arquivos, foi remedida para
+"44 / 39 sobre 89" em 2026-08-15, e **envelheceu de novo no mesmo dia**, porque o PR seguinte
+ampliou o escopo da varredura (`.js` entrou, os 7 scripts de tag viraram `ALVO: NUVEM`) e não
+voltou aqui. Número em prosa não tem como acusar a própria defasagem — quem acusa é o teste.
+
+⚠️ **A tabela dizia "29 / 29" e envelheceu sem nada acusar** — o universo tinha crescido
 de 58 para 89. Pior: **16 desses arquivos não declaravam alvo nenhum**, e o teste não os
 via porque filtrava por quem **menciona** `--env-file=.env.local`, o que é uma allowlist
 disfarçada. Escapar da varredura não é ser inofensivo: 4 deles traziam
@@ -3288,10 +3300,16 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.976 passando (+24 pulados) em 286 arquivos** (281 passando + 5 pulados);
-medido em 2026-08-15 depois de a varredura de alvo dos scripts ganhar 3 casos (nenhum arquivo
-novo — os 3 entraram num teste que já existia), em árvore limpa e sem carga.
-Base: **2.973 em 286**, do merge do PR #426.
+`npm run test` → **2.977 passando (+24 pulados) em 286 arquivos** (281 passando + 5 pulados);
+medido em 2026-08-15 depois de a varredura de alvo dos scripts virar 4 casos novos (nenhum
+arquivo novo — todos entraram num teste que já existia), em árvore limpa.
+Base: **2.976 em 286**, e antes dela **2.973**, do merge do PR #426.
+
+⚠️ **Duas rodadas desta medição acusaram "1 failed" e quatro seguintes passaram limpas**, com
+o total idêntico nas seis (2.976 + 1 = 2.977), ou seja **sem truncamento de arquivo**. Não
+consegui capturar QUAL teste — as rodadas seguintes passaram antes de eu prender o nome. É
+consistente com a flakiness de carga descrita abaixo, mas fica registrado como não
+identificado, e não como "era a máquina".
 
 ✅ **Este número foi RE-MEDIDO, não incrementado.** A linha anterior avisava que o arquivo
 `tests/unit/ui/pendencias-ia-abrem-em-aba-nova.test.tsx` estava fora da conta por não estar
@@ -3338,7 +3356,7 @@ teste. A linha já disse "~1.780 em
 "2.440 em 229", "2.717 em 255", "2.727 em 255", "2.753 em 258", "2.776 em 261", "2.784 em 263",
 "2.788 em 264", "2.807 em 266", "2.813 em 267", "2.828 em 270", "2.833 em 271", "2.872 em 274"
 , "2.883 em 274", "2.891 em 275", "2.896 em 276", "2.913 em 277", "2.935 em 280", "2.945 em 281"
-, "2.971 em 285" e "2.973 em 286", todas
+, "2.971 em 285", "2.973 em 286" e "2.976 em 286", todas
 envelhecendo sem nada acusar — **re-meça antes de editar este número**,
 não incremente de cabeça. ⚠️ O "2.717" durou menos de um dia: dois PRs do mesmo dia somaram 10
 testes e nenhum dos dois tocou nesta linha. Envelhecer aqui é o normal, não a exceção. Vitest, jsdom, alias `@` → raiz. A
