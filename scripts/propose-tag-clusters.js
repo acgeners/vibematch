@@ -16,6 +16,11 @@
  * Idempotency: deletes prior `pending` proposals for the group
  * before inserting new ones. `approved` and `applied` proposals
  * are kept untouched (still consume their member tag ids).
+ *
+ * 🔴 ALVO: NUVEM — grava no CATÁLOGO (tags e propostas), que é compartilhado. Rodá-lo
+ * contra o clone local perde o trabalho no próximo `db:pull`.
+ *   node --env-file=.env.local scripts/propose-tag-clusters.js
+ * ⚠️ Chama a Anthropic — o alvo não muda o custo; quem limita o dano é o escopo do lote.
  */
 
 const path = require("path")

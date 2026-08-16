@@ -19,6 +19,11 @@
  *
  * Idempotency: deletes prior `pending`/`rejected` assignments for the group;
  * tags already `approved`/`applied` are left untouched (human decisions kept).
+ *
+ * 🔴 ALVO: NUVEM — grava no CATÁLOGO (tags e propostas), que é compartilhado. Rodá-lo
+ * contra o clone local perde o trabalho no próximo `db:pull`.
+ *   node --env-file=.env.local scripts/assign-tags-to-subgroups.js
+ * ⚠️ Chama a Anthropic — o alvo não muda o custo; quem limita o dano é o escopo do lote.
  */
 
 const path = require("path")

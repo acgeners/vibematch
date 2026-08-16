@@ -14,6 +14,10 @@
  * Prerequisites: migration 040_tag_alias.sql applied.
  *
  * Idempotent: safe to re-run. On second run, no clusters will need merging.
+ *
+ * 🔴 ALVO: NUVEM — grava no CATÁLOGO (tags e propostas), que é compartilhado. Rodá-lo
+ * contra o clone local perde o trabalho no próximo `db:pull`.
+ *   node --env-file=.env.local scripts/consolidate-tags.js
  */
 
 const { createClient } = require("@supabase/supabase-js")

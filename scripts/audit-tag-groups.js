@@ -12,6 +12,11 @@
  * Prerequisites: migration 043 applied.
  *
  * Idempotent: deletes existing `pending` proposals before inserting new ones.
+ *
+ * 🔴 ALVO: NUVEM — grava no CATÁLOGO (tags e propostas), que é compartilhado. Rodá-lo
+ * contra o clone local perde o trabalho no próximo `db:pull`.
+ *   node --env-file=.env.local scripts/audit-tag-groups.js
+ * ⚠️ Chama a Anthropic — o alvo não muda o custo; quem limita o dano é o escopo do lote.
  */
 
 const { createClient } = require("@supabase/supabase-js")

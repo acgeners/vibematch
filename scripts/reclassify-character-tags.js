@@ -12,6 +12,11 @@
  * Usage:
  *   ANTHROPIC_API_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
  *     node scripts/reclassify-character-tags.js [--dry-run]
+ *
+ * 🔴 ALVO: NUVEM — grava no CATÁLOGO (tags e propostas), que é compartilhado. Rodá-lo
+ * contra o clone local perde o trabalho no próximo `db:pull`.
+ *   node --env-file=.env.local scripts/reclassify-character-tags.js
+ * ⚠️ Chama a Anthropic — o alvo não muda o custo; quem limita o dano é o escopo do lote.
  */
 
 const { createClient } = require("@supabase/supabase-js")

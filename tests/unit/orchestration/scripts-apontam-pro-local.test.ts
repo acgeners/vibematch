@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
@@ -161,9 +162,35 @@ describe("scripts de análise apontam para o banco local", () => {
   const noPackageJson = (nome: string) =>
     Object.values(PKG.scripts).some((cmd) => cmd.includes(`scripts/${nome}`))
 
-  const invocadosAMao = fs
-    .readdirSync(SCRIPTS_DIR)
-    .filter((n) => n.endsWith(".ts") || n.endsWith(".mjs"))
+  /**
+   * ⚠️ `.js` entrou em 2026-08-15, e a extensão era o último recorte da varredura. Ficavam de
+   * fora **7 scripts do pipeline de consolidação de tags** — todos gravando no catálogo, todos
+   * de julho, e cinco deles chamando a Anthropic. Não eram lixo, como pareciam pela idade: os
+   * comentários de `server/actions/tag-consolidation.ts`, `lib/tag-consolidation/merge.ts` e
+   * `lib/ai-evaluation/tag-clustering.ts` os citam como a metade OFFLINE de uma feature que
+   * tem aba viva em `/settings/tag-consolidation`.
+   *
+   * 🔴 A régua: o que define o escopo é **tocar o banco**, nunca a extensão do arquivo. Cada
+   * recorte que sobra ("só .ts", "só quem menciona env-file") é uma allowlist esperando para
+   * esconder o próximo.
+   */
+  /**
+   * 🔴 A varredura pergunta ao GIT, não ao disco — e a diferença apareceu na primeira execução
+   * com `.js` ligado: `seed-from-xlsx 4.js` reprovou o teste sendo **gitignored**, ou seja,
+   * lixo local que não está no repositório e não existe em nenhum outro clone. Medir o disco
+   * torna o resultado dependente da máquina; medir o índice do git é o que o repositório de
+   * fato contém.
+   */
+  const rastreados = new Set(
+    execSync("git ls-files scripts", { cwd: process.cwd(), encoding: "utf8" })
+      .split("\n")
+      .filter(Boolean)
+      .map((p) => p.replace(/^scripts\//, ""))
+      .filter((p) => !p.includes("/")), // subpastas (scripts/lib) têm régua própria
+  )
+
+  const invocadosAMao = [...rastreados]
+    .filter((n) => n.endsWith(".ts") || n.endsWith(".mjs") || n.endsWith(".js"))
     .filter((n) => !noPackageJson(n))
     .map((n) => ({ nome: n, src: fs.readFileSync(path.join(SCRIPTS_DIR, n), "utf8") }))
     .filter(({ src }) => TOCA_BANCO.test(src))
