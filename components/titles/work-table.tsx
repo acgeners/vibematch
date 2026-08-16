@@ -82,12 +82,17 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { addWorksToList, countSelectedWorksInFolders, removeWorksFromList } from "@/server/actions/lists"
 import type { ListPickerOption, WorkGroupRef } from "@/server/queries/lists"
 import { GroupCountCell } from "@/components/titles/group-count-cell"
-import { AlignmentCell, AlignmentScoreCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
+import { AlignmentCell, AlignmentScoreCell, ArtCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { computeDecisionScore } from "@/lib/calculations/decision"
+import type { VerdictScale } from "@/lib/calculations/decision"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
 import { MoodRefineDialog } from "@/components/ranking/mood-refine-dialog"
+import type { MoodPreviewWork } from "@/components/ranking/mood-preview"
+import { filterMoodWorks } from "@/lib/calculations/mood-refine"
 import { sortByMoodAdjusted, isMoodActive } from "@/lib/calculations/mood-refine"
 import type { MoodRefine, MoodWork } from "@/lib/calculations/mood-refine"
+import { MoodListButton } from "@/components/ranking/mood-list-button"
+import { applyMoodToList, moodDimensionCount } from "@/lib/ranking/mood-list"
 import { WorkHeatmapView } from "@/components/titles/work-heatmap-view"
 import { WorkColumnPicker } from "@/components/titles/work-column-picker"
 import { ResponsiveHeaderLabel, headerFormsFor } from "@/components/titles/responsive-header-label"
@@ -171,9 +176,52 @@ interface WorkTableProps {
    *  Habilita "Remover do grupo" (lote + menu da linha). Ausente em /favorites/all e
    *  /favorites/ungrouped, que não são grupos: não há de onde remover. */
   currentGroup?: { id: string; name: string }
+  /**
+   * Régua do Veredito (`formula_config`, migration 193) — vem do servidor porque
+   * descreve o CATÁLOGO. Ausente ⇒ o veredito não ajusta e a Prioridade é a Nota
+   * Prevista, que é o lado seguro.
+   */
+  verdictScale?: VerdictScale | null
   /** work_id → grupos de favoritos a que a obra pertence, para a coluna "Grupos".
    *  Só /favorites passa; nas demais telas a coluna nasce oculta e a célula fica em "—". */
   groupsByWorkId?: Record<string, WorkGroupRef[]>
+}
+
+/**
+ * `WorkWithRelations` → o shape que o cálculo do mood consome.
+ *
+ * 🔴 Dono único porque são TRÊS consumidores (lista, prévia do popup, ordem do
+ * comparador). Enquanto cada um montava o objeto, bastava um esquecer o
+ * `predicted_synopsis_quality` pra uma dimensão ficar neutra num lado só — sem
+ * erro, com resultado plausível.
+ */
+function workToMoodWork(w: WorkWithRelations, verdictScale: VerdictScale | null): MoodWork {
+  const cs = w.calculated_scores
+  return {
+    id: w.id,
+    decisionScore: computeDecisionScore({
+      expected: cs?.expected_score ?? null,
+      alignment: cs?.alignment_score ?? null,
+      confidence: (cs?.alignment_payload as { confidence?: number } | null)?.confidence ?? null,
+      stale: Boolean((cs as { alignment_stale?: boolean | null } | null)?.alignment_stale),
+      verdictScale,
+    }),
+    scores: Object.fromEntries(
+      CRITERION_SLUGS.map((slug) => [slug, scoreFor(w, slug)]),
+    ) as Partial<Record<CriterionSlug, number | null>>,
+    totalChapters: w.total_chapters ?? null,
+    personalFit: cs?.personal_fit ?? null,
+    totalVotes: cs?.total_votes ?? 0,
+    synopsisQuality:
+      (w as { synopsis_quality?: string | null }).synopsis_quality ??
+      (w as { predicted_synopsis_quality?: string | null }).predicted_synopsis_quality ??
+      null,
+    artPercentile: cs?.art_percentile ?? null,
+    publicationStatusId: w.publication_status_id ?? null,
+    platformAvg: cs?.platform_avg ?? null,
+    year: (w as { year?: number | null }).year ?? null,
+    personalStatusId: w.personal_status_id ?? null,
+  }
 }
 
 function scoreFor(work: WorkWithRelations, slug: string): number | null {
@@ -262,6 +310,7 @@ export function WorkTable({
   groups,
   currentGroup,
   groupsByWorkId,
+  verdictScale = null,
 }: WorkTableProps) {
   const router = useRouter()
   const refresh = useRefresh()
@@ -287,7 +336,50 @@ export function WorkTable({
   // Refino por mood: "Comparar" abre primeiro o popup; a escolha (ou pular)
   // define o moodRefine passado ao drawer. Mesmo fluxo do /ranking.
   const [moodDialogOpen, setMoodDialogOpen] = useState(false)
+  /**
+   * De onde veio o refino ativo — ver o comentário homônimo no /ranking. O escopo
+   * decide sobre QUAL conjunto as dimensões foram normalizadas, e é isso que
+   * define se o comparador herda os valores ou recalcula.
+   */
+  const [moodScope, setMoodScope] = useState<"cluster" | "list">("cluster")
+  /** Obras selecionadas, no shape do cálculo — alimentam a PRÉVIA do refino. */
+  const moodPreviewWorks = useMemo<MoodPreviewWork[]>(() => {
+    const byId = new Map(works.map((w) => [w.id, w]))
+    const ids = moodScope === "list" ? works.map((w) => w.id) : compareIds
+    return ids.flatMap((id) => {
+      const w = byId.get(id)
+      return w ? [{ ...workToMoodWork(w, verdictScale), title: w.title }] : []
+    })
+  }, [works, compareIds, moodScope, verdictScale])
   const [moodRefine, setMoodRefine] = useState<MoodRefine | null>(null)
+  /**
+   * A lista com o refino aplicado: exclusões tiram obras, o resto reordena pela
+   * Prioridade ajustada. Sem refino de lista, é a ordem do servidor intacta.
+   *
+   * ⚠️ Só o refino de escopo LISTA mexe aqui. O aberto pelo "Comparar" continua
+   * ordenando apenas a comparação — mudar isso faria a tabela se reorganizar
+   * embaixo de quem só queria comparar cinco obras.
+   */
+  const listMood = moodScope === "list" ? moodRefine : null
+  const moodList = useMemo(
+    () => applyMoodToList(works.map((w) => workToMoodWork(w, verdictScale)), listMood, criterionPrefs),
+    [works, listMood, criterionPrefs, verdictScale],
+  )
+  const displayWorks = useMemo(() => {
+    if (!moodList.active) return works
+    const byId = new Map(works.map((w) => [w.id, w]))
+    return moodList.works.flatMap((m) => {
+      const w = byId.get(m.id)
+      return w ? [w] : []
+    })
+  }, [works, moodList])
+  const hiddenByMood = moodList.active ? works.length - displayWorks.length : 0
+  const moodCounts = moodDimensionCount(listMood)
+  const openListMood = useCallback(() => {
+    setMoodScope("list")
+    setMoodDialogOpen(true)
+  }, [])
+  const clearListMood = useCallback(() => setMoodRefine(null), [])
   const [addGroupOpen, setAddGroupOpen] = useState(false)
   // Desfavoritar em lote passou a esvaziar as pastas (e refavoritar não desfaz), então quando
   // há obra em pasta a ação vira um "confirme": guarda quantas, pra dizer o que se perde.
@@ -329,45 +421,36 @@ export function WorkTable({
     preserveScroll(rootRef.current, () => {
       updateCompareIds([])
       setDrawerOpen(false)
-      setMoodRefine(null)
+      // ⚠️ Limpa o refino do CLUSTER (existe só para aquela comparação) e nunca o
+      // da LISTA: desfazer a seleção não pode desfazer a reordenação da tela.
+      // (Ler o escopo aqui, e não dentro de um updater de estado: efeito colateral
+      // dentro do updater roda duas vezes no StrictMode.)
+      if (moodScope !== "list") setMoodRefine(null)
     })
-  }, [updateCompareIds])
+  }, [updateCompareIds, moodScope])
 
   // IDs na ordem do drawer: ordem visível da tabela por padrão. Com mood ativo,
   // reordena pela Prioridade ajustada (limitada ao MAE) — o mood define a ordem
   // INICIAL; o drag do usuário dentro do drawer sobrepõe depois.
   const drawerIds = useMemo(() => {
-    const indexById = new Map(works.map((w, i) => [w.id, i]))
+    const indexById = new Map(displayWorks.map((w, i) => [w.id, i]))
     const base = [...compareIds].sort(
       (a, b) =>
         (indexById.get(a) ?? Number.MAX_SAFE_INTEGER) -
         (indexById.get(b) ?? Number.MAX_SAFE_INTEGER)
     )
     if (!moodRefine || !isMoodActive(moodRefine)) return base
+    // 🔴 Refino de LISTA: `displayWorks` já está na ordem ajustada, calculada sobre
+    // a lista inteira — e a ordenação acima acabou de herdá-la. Recalcular aqui,
+    // sobre as poucas selecionadas, normalizaria noutro universo e daria outra ordem.
+    if (moodScope === "list") return base
     const byId = new Map(works.map((w) => [w.id, w]))
-    const moodWorks: MoodWork[] = []
-    for (const id of base) {
+    const moodWorks: MoodWork[] = base.flatMap((id) => {
       const w = byId.get(id)
-      if (!w) continue
-      const cs = w.calculated_scores
-      moodWorks.push({
-        id,
-        decisionScore: computeDecisionScore({
-          expected: cs?.expected_score ?? null,
-          alignment: cs?.alignment_score ?? null,
-          confidence: (cs?.alignment_payload as { confidence?: number } | null)?.confidence ?? null,
-        }),
-        scores: Object.fromEntries(
-          CRITERION_SLUGS.map((slug) => [slug, scoreFor(w, slug)])
-        ) as Partial<Record<CriterionSlug, number | null>>,
-        totalChapters: w.total_chapters ?? null,
-        personalFit: cs?.personal_fit ?? null,
-        totalVotes: cs?.total_votes ?? 0,
-        synopsisQuality: (w as { synopsis_quality?: string | null }).synopsis_quality ?? null,
-      })
-    }
+      return w ? [workToMoodWork(w, verdictScale)] : []
+    })
     return sortByMoodAdjusted(moodWorks, moodRefine, criterionPrefs).map((w) => w.id)
-  }, [compareIds, works, moodRefine, criterionPrefs])
+  }, [compareIds, works, displayWorks, moodRefine, moodScope, criterionPrefs, verdictScale])
 
   const allVisibleIds = useMemo(() => works.map((w) => w.id), [works])
   const allSelected =
@@ -493,6 +576,16 @@ export function WorkTable({
               {allSelected ? "Limpar seleção" : "Selecionar todos"}
             </button>
           )}
+          <MoodListButton
+            active={moodList.active}
+            weights={moodCounts.weights}
+            exclusions={moodCounts.exclusions}
+            hiddenCount={hiddenByMood}
+            onOpen={openListMood}
+            onClear={clearListMood}
+            disabled={works.length === 0}
+            disabledTitle="Nada para refinar nesta lista."
+          />
           {(viewMode === "list" || viewMode === "heatmap") && hasCriterionPrefs && (
             <AttrColorModeToggle />
           )}
@@ -507,7 +600,7 @@ export function WorkTable({
         <EmptyState searchQuery={searchQuery} />
       ) : viewMode === "cards" ? (
         <WorkCardsView
-          works={works}
+          works={displayWorks}
           scoreThresholds={scoreThresholds}
           selectedIds={selectedSet}
           onToggleSelect={toggleCompare}
@@ -515,7 +608,7 @@ export function WorkTable({
         />
       ) : viewMode === "heatmap" ? (
         <WorkHeatmapView
-          works={works}
+          works={displayWorks}
           selectedIds={selectedSet}
           onToggleSelect={toggleCompare}
           namespace={namespace}
@@ -533,7 +626,9 @@ export function WorkTable({
         />
       ) : (
         <WorkListView
-          works={works}
+          works={displayWorks}
+          moodAdjustedById={moodList.active ? moodList.adjusted : null}
+          verdictScale={verdictScale}
           searchParams={searchParams}
           router={router}
           scoreThresholds={scoreThresholds}
@@ -562,7 +657,20 @@ export function WorkTable({
           <CompareSelectionBar
             count={compareIds.length}
             favoriteCount={favoriteSelectedIds.length}
-            onOpen={() => setMoodDialogOpen(true)}
+            onOpen={() => {
+              // 🔴 Com um refino de LISTA já aplicado, "Comparar" abre a comparação
+              // DIRETO. Perguntar de novo seria pedir a mesma resposta duas vezes: a
+              // pessoa acabou de dizer o que quer priorizar, a lista inteira já está
+              // ordenada por isso, e o drawer herda essa ordem e esses valores
+              // (`moodAdjustedById`). O popup segue existindo para quem NÃO refinou —
+              // aí ele ainda é a única chance de desempatar antes de comparar.
+              if (moodList.active) {
+                setDrawerOpen(true)
+                return
+              }
+              setMoodScope("cluster")
+              setMoodDialogOpen(true)
+            }}
             onClear={clearCompare}
             onUnfavorite={handleBatchUnfavorite}
             onAddToGroup={groups ? () => setAddGroupOpen(true) : undefined}
@@ -598,28 +706,15 @@ export function WorkTable({
             />
           )}
 
-          <MoodRefineDialog
-            open={moodDialogOpen}
-            onOpenChange={setMoodDialogOpen}
-            workCount={compareIds.length}
-            onApply={(mood) => {
-              setMoodRefine(mood)
-              setMoodDialogOpen(false)
-              setDrawerOpen(true)
-            }}
-            onSkip={() => {
-              setMoodRefine(null)
-              setMoodDialogOpen(false)
-              setDrawerOpen(true)
-            }}
-            hasRanges={hasCriterionPrefs}
-          />
-
           <WorkCompareDrawer
             open={drawerOpen}
             onOpenChange={setDrawerOpen}
             ids={drawerIds}
             moodRefine={moodRefine}
+            // 🔴 Refino de lista: valores já calculados sobre a lista inteira. Sem
+            // isto o drawer recalcularia sobre as selecionadas — outro universo de
+            // normalização, outra ordem, mesma pergunta.
+            moodAdjustedById={moodScope === "list" ? moodList.adjusted : null}
             onClear={clearCompare}
             onRemoveId={(id) =>
               updateCompareIds(compareIds.filter((x) => x !== id))
@@ -628,8 +723,39 @@ export function WorkTable({
             criterionPrefs={criterionPrefs}
             isPaid={isPaid}
           />
+
         </>
       )}
+
+      {/* ⚠️ FORA do `enableCompare`: refinar a lista é uma ação de LEITURA e não
+          depende de a comparação estar habilitada nesta tela. O mesmo popup
+          responde às duas perguntas — o `scope` só troca os textos. */}
+      <MoodRefineDialog
+        works={moodPreviewWorks}
+        ranges={criterionPrefs}
+        open={moodDialogOpen}
+        onOpenChange={setMoodDialogOpen}
+        workCount={moodScope === "list" ? works.length : compareIds.length}
+        scope={moodScope}
+        initialMood={listMood}
+        onApply={(mood) => {
+          setMoodRefine(mood)
+          setMoodDialogOpen(false)
+          if (moodScope === "list") return
+          // As exclusões tiram a obra da comparação, não só da prévia — senão a
+          // prévia promete 3 obras e o drawer abre com 5.
+          if (mood.exclude?.length) {
+            updateCompareIds(filterMoodWorks(moodPreviewWorks, mood).map((w) => w.id))
+          }
+          setDrawerOpen(true)
+        }}
+        onSkip={() => {
+          setMoodRefine(null)
+          setMoodDialogOpen(false)
+          if (moodScope !== "list") setDrawerOpen(true)
+        }}
+        hasRanges={hasCriterionPrefs}
+      />
     </div>
   )
 }
@@ -891,6 +1017,8 @@ function WorkCardsView({
 
 function WorkListView({
   works,
+  moodAdjustedById = null,
+  verdictScale = null,
   searchParams,
   router,
   scoreThresholds,
@@ -909,6 +1037,14 @@ function WorkListView({
   groupsByWorkId,
 }: {
   works: WorkWithRelations[]
+  /**
+   * Prioridade ajustada pelo refino de lista. Quando presente, é ela que a coluna
+   * imprime — a lista está ORDENADA por este número, e mostrar a base enquanto se
+   * ordena pelo ajustado é a invariante "quem ordena vê o mesmo número da tela".
+   */
+  moodAdjustedById?: Map<string, number | null> | null
+  /** Régua do Veredito — a MESMA do servidor, senão a célula mostra outra conta. */
+  verdictScale?: VerdictScale | null
   searchParams: ReturnType<typeof useSearchParams>
   router: ReturnType<typeof useRouter>
   scoreThresholds: ColumnThresholds | null
@@ -1093,6 +1229,8 @@ function WorkListView({
         expected: cs?.expected_score ?? null,
         alignment: cs?.alignment_score ?? null,
         confidence: (cs?.alignment_payload as { confidence?: number } | null)?.confidence ?? null,
+        stale: Boolean((cs as { alignment_stale?: boolean | null } | null)?.alignment_stale),
+        verdictScale,
       })
       return (
         <DecisionCell
@@ -1103,9 +1241,11 @@ function WorkListView({
             cs?.personal_fit_percentile ?? (cs?.personal_fit != null ? cs.personal_fit * 100 : null)
           }
           alignment={cs?.alignment_score ?? null}
+          moodAdjusted={moodAdjustedById?.get(work.id) ?? null}
         />
       )
     },
+    art: (work) => <ArtCell percentile={work.calculated_scores?.art_percentile ?? null} />,
     expected_score: (work) => (
       <ScoreBadge
         score={work.calculated_scores?.expected_score ?? null}

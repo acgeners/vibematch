@@ -1218,7 +1218,302 @@ tier tudo empata" (banda 0,5 cobre 8,5 → 8,0). Ele descartava o 2º nível de 
 FINAL do `getRanking` (depois de todos os níveis, antes do título), então decide só o que
 ninguém mais decidiu e vale igual em Lista, Cards, Faixas e Bússola.
 
-Guardadas por `tests/unit/ranking/score-rounding.test.ts` e `build-tiers.test.ts`.
+🔴 **4. A PRIORIDADE estava fora das três, e ninguém tinha percebido** (corrigido em
+2026-08-15). `DecisionCell` imprime `~${score.toFixed(1)}`, mas `compareByField` comparava
+`decisionScore` CRU — as invariantes 1 e 2 valiam para `expected_score`, `recommended` e
+`user_score`, e a Prioridade ficou de fora **porque a régua estava escrita duas vezes** (aqui e
+na chave da banda, cada lado decidindo sozinho). Medido no clone local, 975 obras ativas:
+
+| ordenando por Prioridade | pares empatados |
+|---|---|
+| pelo decimal cru (como era) | **229** |
+| pela nota exibida (`~8,4`) | **19.624** |
+
+⚠️ **O efeito não é cosmético: o 2º nível de ordenação era DECORATIVO.** Como a cadeia é
+`níveis escolhidos → overlap de tags → título`, quase nada chegava depois do nível 1 — escolher
+"Prioridade, depois Média externa" ordenava só por Prioridade. Caso real: cinco obras exibindo
+**"~7,2"** separadas por 0,004 no cru (num grupo de **72** com a mesma nota exibida).
+
+🔴 **E o tooltip da própria célula PROMETIA o contrário** — *"dentro de cada faixa a ordem usa
+compatibilidade e desempates, não o decimal"*. Prosa e código afirmando o mesmo fato por
+critérios diferentes, com o lado que a pessoa lê sendo o errado
+([[gotcha-ui-documentava-formula-morta]]). Hoje o dono único é
+**`lib/ranking/display-sort.ts`** (`DISPLAY_ROUNDED_SORT_FIELDS` + `displaySortValue` +
+`displayTierKey`), e a chave da banda DERIVA dele em vez de repetir a decisão.
+
+⚠️ **Desempate por média externa/votos na cadeia final seria CÓDIGO MORTO:** `tag_overlap_net`
+está preenchido em 975/975 e resolve **100%** dos 19.624 pares. Os externos entram por ESCOLHA
+(nível 2), que é o que voltou a funcionar.
+
+Guardadas por `tests/unit/ranking/score-rounding.test.ts`, `build-tiers.test.ts` e
+`prioridade-ordena-pelo-numero-da-tela.test.ts` — o último com a contraprova do comportamento
+antigo, conferida com sonda.
+
+## Desempatar o que está EMPATADO: o refino por mood, com peso
+
+O caso real: a lista mostra seis obras com a mesma nota e cada uma tem um "porém"
+diferente — duas em hiato, uma com arte fraca, uma antiga, uma com pouco conteúdo adulto.
+A pessoa abre três abas e não decide. Medido em 2026-08-15: **32 grupos com 5+ obras na
+mesma Prioridade exibida**, o maior com 20.
+
+🔴 **A pergunta aqui NÃO é "qual nota prevê melhor o gosto?" — é "o que separa estas
+seis?".** Medir um desempatador contra `user_score` responde a primeira e reprova o que
+serve para a segunda. Dentro dos grupos empatados, a fração dos pares que cada sinal
+separa de forma material:
+
+| sinal | separa | cobertura |
+|---|---|---|
+| conteúdo adulto · humor · tragédia | 84% · 81% · 80% | 100% |
+| **arte (percentil)** | **79,8%** | **97,5%** |
+| votos · alinhamento · ação | 74% · 73% · 72% | 100% |
+| interesse ♥ | 55,0% | 100% |
+| **publicação (dá pra começar agora?)** | **53,9%** | 100% |
+| Veredito IA | 46,9% | **49%** |
+| média externa · ano | 37,9% · 35,5% | 100% · 84% |
+| tipo de hiato | 19,7% | 10% |
+
+⚠️ **O desempate PAGO é o pior candidato a desempatador padrão** — o Veredito IA separa
+menos que qualquer sinal grátis e só existe em metade dos pares.
+
+🔴 **As dimensões práticas do `mood-refine` viraram PESO −2..+2**, a mesma escala dos
+atributos. Eram booleanas (`alignment`/`popularity`/`synopsis`), o que dava duas convenções
+no mesmo diálogo e escondia o lado útil do negativo: hoje dá pra pedir **"mais de nicho"**
+(`popularity: -2`), **"ainda em andamento"** (`publication: -1`) e **"mais antiga"**
+(`recency: -2`). Entraram junto **arte**, **publicação**, **média externa** e **recência**.
+
+⚠️ **Nem toda dimensão é BIPOLAR, e forçar simetria mentiria.** "Mais popular" tem oposto
+útil; "sinopse menos interessante" não tem. Quem declara `down: null` em
+`MOOD_DIMENSION_INFO` desenha só 3 níveis (neutro→priorizar) em vez de 5.
+
+⚠️ **`chapters` fica fora do equalizer de propósito:** curta e longa são dois ALVOS, não
+menos e mais da mesma coisa boa.
+
+⚠️ **A régua de "dá pra começar agora?" (`startabilityOf`) é ESCOLHA, não medição** —
+concluída 1,0 · em andamento 0,6 · hiato 0,25 · cancelada 0. O par tem dois botões, mas a
+régua tem QUATRO níveis: pedir concluída empurra hiato e cancelada pra baixo, e pedir em
+andamento sobe Ongoing acima de Hiatus. Os ids vêm por SLUG (`isHiatusPublicationStatus` e
+vizinhas), nunca comparando nome à mão: a migration 155 documenta o que renomear "Completed"
+quebrou.
+
+🔴 **`Unknown` caía no mesmo `return 0` de `Cancelled`** — "não sabemos se acabou" era tratado
+como o PIOR caso —, e este arquivo afirmava o contrário ("cai no meio, não em zero"): a prosa
+certa e o código errado, a classe de erro de sempre. Hoje devolve `null`, que o cálculo trata
+como sem dado (contribuição neutra). São 3 obras, mas o que importa é o modo de falha: status
+NOVO no Supabase entraria calado como pior caso.
+
+🔴 **"Leitura" (continuar × começar) entrou em 2026-08-16, e o TERMINAL fica de fora dos dois
+lados.** `readingProgressOf`: em curso 1 · não-começada 0 · **terminada/largada `null`**. Em 0,
+"quero começar algo novo" promoveria o que você JÁ LEU junto com o que nunca abriu; em 1,
+"quero continuar" ofereceria o que não tem como continuar. ⚠️ Separa **37,9%** dos pares
+empatados — o teto vem da distribuição: 690 das 978 obras estão em `Untracked`. ⚠️ `Untracked` É
+escolha explícita e conta como não-começada; ausência de linha no espelho é desconhecimento e
+vira neutro.
+
+⚠️ **A correção segue limitada ao MAE (`MOOD_SWING = 0,9`)** — o mood reordena dentro da
+incerteza que já existe, sem inventar distância entre obras.
+
+🔴 **O diálogo MOSTRA o resultado antes de você confirmar** (`components/ranking/mood-preview.tsx`).
+Ele prometia "a comparação abre reordenada por isso" e não mostrava nada do efeito: a pessoa
+configurava às cegas, clicava, e só então descobria se tinha servido — numa feature cujo
+propósito é ajudar a DECIDIR. Hoje as obras do cluster aparecem no rodapé, na ordem que a
+comparação vai abrir, com quanto cada uma andou (`↑4`).
+
+🔴 **A prévia NÃO calcula: ela chama `sortByMoodAdjusted`**, a mesma função que o comparador usa
+pra abrir. Uma cópia da fórmula aqui seria "dois critérios pro mesmo fato" no pior formato — a
+prévia promete uma ordem e a tela seguinte entrega outra, e quem confia na promessa é justamente
+quem está tentando decidir. Guardado por `tests/unit/ranking/previa-usa-o-mesmo-calculo.test.tsx`,
+que compara a ordem RENDERIZADA com a do dono em **10 moods diferentes** — com um só, duas
+fórmulas coincidem por acaso (5 obras têm poucas ordens possíveis), e o teste ainda exige que os
+casos gerem ≥5 ordens distintas, senão ele não separaria nada. Conferido com sonda.
+
+⚠️ **A prévia fica FORA da área que rola** — resultado que sai da tela quando se rola pra mexer
+num controle não fecha o loop.
+
+⚠️ **`sm:max-w-3xl`, nunca `max-w-3xl`:** o `DialogContent` traz `sm:max-w-lg`, e a variante
+responsiva vence a classe base acima de 640px. Com `max-w-3xl` o diálogo ficava em 512px e as
+duas colunas do topo espremiam — medido, não suposto.
+
+🔴 **PESO e EXCLUSÃO convivem — são perguntas diferentes.** O par diz "prefiro concluída"
+(empurra pro topo, ninguém some); o bloco **"Não mostrar"** diz "não me mostre hiato" (a obra
+sai da comparação). Colapsar as duas num controle só obrigaria a escolher entre "prefiro" e
+"não quero". O bloco nasce COLAPSADO (escolha da Ana) porque excluir é o caso raro — sete
+linhas de chip permanentes devolveriam a parede que este redesenho desmontou —, e o contador
+fica no gatilho (`2 categorias · 3 de 5 obras`) pra exclusão ativa nunca ficar escondida.
+
+⚠️ **A exclusão tira da COMPARAÇÃO, não só da prévia.** `filterMoodWorks` é o dono e os dois
+lados o chamam; sem isso a prévia mostraria 3 obras e o drawer abriria com 5 — o mesmo defeito
+que o teste de equivalência da prévia existe pra impedir do outro lado.
+
+🔴 **Os baldes saem de FLAGS, e a tentação errada era `hideFromInterest`.** Ela parecia agrupar
+as "descartadas", mas também é true em `Stalled`, `Read Again` e `Finished` — varreria leitura
+em curso pro balde de descarte. "Descartada" = `isTerminal` sem `isFullyRead` (Dropped) +
+`isDismissedPersonalStatus` (Not Now / Not Interested).
+
+⚠️ **"Not Now" e "Not Interested" não têm flag NENHUMA true** — reconhecê-las por ausência de
+sinal quebraria no primeiro status novo com as flags em branco. Por isso `isDismissedPersonalStatus`
+as nomeia por SLUG e ESTOURA num rename, mesmo padrão de "Read Again" na prateleira "Pra você hoje".
+
+🔴 **E a mesma medição corrigiu `readingProgressOf`:** ele usava `isUnread`, que é true SÓ em
+Untracked e Want to Read — "Not Now" e "Not Interested" caíam no lado "já comecei", afirmando
+que a pessoa abriu obras que ela adiou ou recusou. Hoje a régua é `tracksProgress`.
+
+⚠️ **Obra sem status sobrevive a qualquer exclusão** — "não sei" não é "não serve", e sumir em
+silêncio é o pior desfecho de um filtro.
+
+🔴 **O refino ganhou um BOTÃO na lista em 2026-08-16, e isso não contradiz a decisão de
+não pôr uma barra permanente** — "além de poluir a tela, não é sempre que vai ser usado" era
+sobre os CONTROLES ficarem à mostra. O gatilho é um botão ("Refinar") na barra de
+`/ranking` e `/favorites`; o popup é o mesmo, com `scope="list"` trocando só os textos.
+Duas fórmulas conforme a porta de entrada fariam a mesma escolha produzir ordens diferentes
+em duas telas. E sem presets fixos: quem monta a combinação é quem está escolhendo.
+
+⚠️ **O estado é EFÊMERO e fora da URL, de propósito.** Mood é "o que eu quero agora", não
+configuração de lista — e há um motivo mecânico junto: `RankingFilters` reescreve a query
+string inteira no "Aplicar filtros", então um parâmetro que entrasse por fora do rascunho
+seria apagado em silêncio (ver "O painel de filtros é RASCUNHO"). O preço aceito é o refino
+se desfazer ao navegar; por isso o estado ativo é visível no chip (`3 ajustes · 12 obras
+fora`) e desfazível num clique.
+
+🔴 **A normalização é por CONJUNTO, e é isso que obriga o comparador a HERDAR.**
+`computeMoodFit` tira o min/max de cada dimensão das obras que recebe: medido em 2026-08-16
+sobre as 126 favoritas, o mesmo mood aplicado à lista inteira × a janelas de 5 obras dá ordem
+DIFERENTE em **até 17 de 25 janelas**. Por isso `applyMoodToList` (`lib/ranking/mood-list.ts`)
+é dono único, devolve o mapa de valores junto da ordem, e o `WorkCompareDrawer` recebe
+`moodAdjustedById` quando o refino veio da lista — em vez de recalcular sobre a seleção. É a
+família "mesma função, CONJUNTOS diferentes" do `/descobrir`.
+
+⚠️ **Excluir vem ANTES de normalizar** — obra fora da lista não pode esticar a régua de quem
+ficou. E a **célula imprime o número ajustado** (borda tracejada), nunca a base: a lista está
+ordenada por ele, e mostrar outro é a invariante que custou 19.624 pares de empate.
+
+⚠️ **A prévia do popup desenha 6 obras no modo lista, mas CALCULA sobre todas** — cortar antes
+de ordenar reintroduziria o bug do conjunto, com a prévia prometendo uma ordem de um universo
+que não é o da lista.
+
+⚠️ **O diálogo passou de 3 toggles para 7 linhas de equalizer (835px) e estourava a
+janela**: medido, a 800px de altura o topo ia a −17px e a 700px o botão de confirmar saía
+da tela, sem scroll pra alcançá-lo. Hoje a lista rola e o rodapé não (`max-h-[90vh]` +
+`overflow-y-auto` só na lista).
+
+🔴 **A ARTE saiu da página da obra e entrou nas listas** (`ArtCell`) — era o único dos
+separadores fortes visível só onde não ajuda a escolher ENTRE várias. Mostra o
+**percentil**, nunca a estimativa em pontos: a escala é comprimida a ~0,49× a do rótulo, e
+um número em pontos convida à comparação errada com uma nota de critério. Sem estimativa é
+"—", nunca 0 nem "média". ⚠️ Ela é PESSOAL (treinada nos rótulos do dono) e passa pelo
+overlay de `PERSONAL_SCORE_FIELDS` — para quem não é o dono vem NULL, de propósito.
+
+## O Veredito na Prioridade era um IMPOSTO, não um ajuste
+
+🔴 **Até 2026-08-16 a Prioridade fazia `expected×(1−w) + (alignment/10)×w`, e isso converte
+UNIDADE sem converter ESCALA.** Medido no clone local (981 obras com Prevista, 695 com
+veredito): o Veredito IA tem média **54,2** na escala 0–100 e a Nota Prevista vale **76,9** na
+mesma escala. O termo entrava 2,27 pontos abaixo da âncora, então o "ajuste" era um
+deslocamento para baixo — **625 das 695 obras desciam**, média −0,49.
+
+🔴 **E como 29% do catálogo não tem veredito, isso virava ORDENAÇÃO:** 37.230 pares invertiam
+em favor de quem simplesmente não passou pelo re-rank, contra dezenas no sentido oposto. A
+maior alavanca da Prioridade não era o gosto de ninguém — era **ter sido processada**.
+
+Hoje o veredito entra como **desvio padronizado**: quantos σ ele destoa da própria
+distribuição, convertidos para a escala da Prevista.
+
+```
+z     = (alignment − verdict_mean) / verdict_std
+score = expected + peso × expected_std × z          peso = 0,35 × confiança (× 0,5 se stale)
+```
+
+| variante | shift médio | sobem/descem | inversões pró-sem-veredito | rho c/ `user_score` |
+|---|---|---|---|---|
+| Prevista pura | 0 | — | — | **0,6456** |
+| `alignment/10` (antiga) | −0,485 | 70/625 | 37.148 | 0,5828 |
+| centrada na mediana | −0,014 | 336/328 | 14.564 | 0,6226 |
+| **z-pareado (hoje)** | **+0,001** | **367/328** | **2.460** | **0,6433** |
+
+⚠️ O rho é **in-sample** (o Ridge da Prevista treinou nessas 210 rotuladas), então ele compara
+as VARIANTES DO AJUSTE entre si — todas sobre a mesma base enviesada —, e não mede acurácia
+absoluta. O que ele sustenta: corrigir a escala recupera quase todo o dano.
+
+🔴 **A régua vive em `formula_config` (migration 193: `verdict_mean`, `verdict_std`,
+`expected_std`), medida no recalc sobre o CATÁLOGO.** Derivá-la das linhas visíveis faria a
+mesma obra ter Prioridades diferentes conforme o filtro — é o mesmo motivo pelo qual `gpt_mean`
+mora lá. Quem lê é `getVerdictScale()` (`server/queries/verdict-scale.ts`), com `select("*")`
+para tolerar a coluna não migrada.
+
+⚠️ **Sem régua, o veredito NÃO ajusta e a Prioridade é a Nota Prevista.** É degradação para o
+lado seguro e medido (Prevista pura tem o melhor rho da tabela) — a alternativa seria voltar ao
+imposto. Consequência operacional: **entre aplicar a migration e rodar o primeiro recalc, a
+Prioridade fica igual à Prevista.**
+
+⚠️ **`alignment_stale` passou a valer meio peso** (`STALE_CONFIDENCE_FACTOR = 0.5`). Antes o
+veredito desatualizado pesava igual ao fresco — `computeDecisionScore` nem recebia o campo. São
+15 obras hoje, mas o modo de falha é o que importa: um veredito de antes afirmando tanto quanto
+um de agora.
+
+⚠️ **A régua é do catálogo do DONO**, porque `formula_config` tem uma linha só. Para outra
+pessoa, o veredito dela é padronizado pela dispersão dele — desloca levemente a calibração, não
+vaza nada (são dois escalares agregados) e continua muito melhor que o `alignment/10` que valia
+para todo mundo. Quando `user_calculated_scores` tiver régua própria, `getVerdictScale` passa a
+receber o `userId`.
+
+Guardado por `tests/unit/calculations/prioridade-veredito-z-pareado.test.ts`, que inclui a
+contraprova do defeito: um veredito **62** — acima da média do catálogo — DERRUBAVA uma obra de
+8,0 na fórmula antiga e hoje a sobe.
+
+## A Prioridade agora EXPLICA de onde vem (e por que não soma mais coisa)
+
+O comparador tem um painel no hover da linha "Prioridade"
+(`components/titles/decision-breakdown-panel.tsx` + `lib/calculations/decision-breakdown.ts`):
+âncora (Nota Prevista), ajuste do Veredito **com o peso efetivo**, e os quatro sinais que já
+entram na Prevista com os valores da obra — Alinhamento, Interesse (seu ⊕ previsto), Média
+externa, Votos.
+
+🔴 **Ele nasceu de uma pergunta que a ausência dele respondia errado:** "a Prioridade ignora o
+Alinhamento, o Interesse e a nota externa?". Não ignora — consome os quatro **dentro da Nota
+Prevista**, com peso APRENDIDO (`BASELINE_NUMERIC_FEATURES`). O que a `decision.ts` evita é
+RE-aplicá-los por cima.
+
+⚠️ **E somá-los de novo foi MEDIDO, não suposto** (2026-08-15, 210 rotuladas, ridge 5-fold
+out-of-fold contra o `user_score` do dono): **Prevista sozinha rho 0,643 · os 7 sinais juntos
+0,626**. Os externos são os mais fracos contra o gosto (média 0,271, votos 0,225).
+
+🔴 **O que os dados sustentam é "NÃO MELHORA", e não "piora" — os dois ICs cruzam zero:** os 7
+juntos dão Δrho −0,017 [−0,050, +0,015], P(melhor) = 16,3%; a melhor variante (Prevista +
+Alinhamento) dá +0,007 [−0,010, +0,023]. Esta seção nasceu dizendo "derruba a ordenação" e a
+frase chegou até a **tela** do painel — inferência além da medição, na superfície onde ela é
+mais cara. O argumento que decide não é a diferença de rho: é que **nem com os pesos ÓTIMOS há
+ganho**, e peso escrito à mão só pode ser pior que o ótimo. Replica o gate Fit×Mérito de
+07/2026.
+
+⚠️ **O peso do Veredito sai de `decisionAlignWeight`, nunca reescrito no componente** — e é
+ZERO quando não há veredito (28,9% das obras), senão o painel afirmaria um ajuste que não houve.
+
+🔴 **A ênfase dos 9 atributos entrou no painel porque a OMISSÃO gerou a pergunta certa** — *"e a
+seleção de atributos pra colocar ênfase, vocês consideram?"*. Consideram: as 9 notas são as
+features nº 1 do Ridge e viram `IA(n)` (a Nota.IA) ponderadas por `score_weights`. **Mas o peso
+que vale pode não ser o seu.** Medido em 2026-08-15: `formula_config.score_weights_auto = true`,
+então o sistema usa os pesos INFERIDOS do histórico e os declarados em `/preferencias` viram
+fallback (treino < 20). Os dois divergem em **7 dos 9**, e três com o SINAL INVERTIDO:
+
+| critério | declarado | inferido (em vigor) |
+|---|---|---|
+| `tragedy` | **−15** | **+11,4** |
+| `drama` | −5 | +7,0 |
+| `adult_content` | +6 | −15,1 |
+| `fantasy_nobility` | 56,8 | 38,0 |
+| `protagonist` | 31,6 | 46,2 |
+
+⚠️ **E o inferido acerta MAIS o gosto do dono:** ordenando as 210 rotuladas pela Nota.IA, rho
+**0,584 com o peso inferido × 0,499 com o declarado**. Ou seja, o automático está certo em estar
+ligado — o problema era só a tela não dizer qual dos dois está valendo. Hoje o painel imprime
+`ênfase automática` ou `ênfase sua`.
+
+⚠️ **A ordenação da Nota.IA muda pouco entre os dois** (Spearman 0,857, |Δ| mediano 0,27 ponto),
+e ela chega à Prevista diluída — `IA(n)` é uma feature entre 20, e a Nota.Calc pesa ~0,05 no
+blend. Não espere que trocar o toggle reordene o catálogo.
+
+⚠️ **Alfa de texto não se lê na cor computada:** `text-background/50` dava **3,87:1** (abaixo do
+AA de 4,5:1 em 12px) e medir sem compor o canal alfa sobre o fundo dava "18:1". Hoje `/65`
+(6,6:1) e `/60` (5,5:1), medidos no browser.
 
 ## Na Bússola, EMPATE é regra — e ponto empilhado imita o estado aceso
 
@@ -3300,10 +3595,19 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **2.977 passando (+24 pulados) em 286 arquivos** (281 passando + 5 pulados);
-medido em 2026-08-15 depois de a varredura de alvo dos scripts virar 4 casos novos (nenhum
-arquivo novo — todos entraram num teste que já existia), em árvore limpa.
-Base: **2.976 em 286**, e antes dela **2.973**, do merge do PR #426.
+`npm run test` → **3.076 passando (+24 pulados) em 295 arquivos** (290 passando + 5 pulados);
+medido em 2026-08-16 depois do refino na lista e do z-pareado do Veredito (3 arquivos novos:
+`ranking/mood-na-lista`, `ui/refino-na-lista-render`, `calculations/prioridade-veredito-z-pareado`),
+com `find tests -name '*.test.ts*'` = 295 conferido contra os 295 executados.
+Base: **3.053 em 292**, antes **3.043 em 291** e **3.021 em 290**.
+
+⚠️ **Quatro arquivos foram REESCRITOS junto, não só somados** — `decision.test.ts`,
+`decision-breakdown.test.ts`, `prioridade-decomposicao-render.test.tsx` e
+`previa-usa-o-mesmo-calculo.test.tsx` fixavam a fórmula antiga do Veredito. O último falhou por
+um motivo diferente e instrutivo: ele varre o SOURCE do `MoodPreview` procurando
+`computeMoodFit`, e passou a reprovar o **comentário** que explica por que não se pode cortar
+antes de ordenar. Hoje ele varre o código sem comentários — a mesma correção que
+`abas-da-obra.test.ts` já tinha precisado fazer.
 
 ⚠️ **Duas rodadas desta medição acusaram "1 failed" e quatro seguintes passaram limpas**, com
 o total idêntico nas seis (2.976 + 1 = 2.977), ou seja **sem truncamento de arquivo**. Não

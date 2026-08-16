@@ -32,6 +32,7 @@ import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import { readStatusFilter } from "@/lib/status-filter-toggle"
 import { parseArtFilter } from "@/lib/arte/url"
 import { getScoresReader } from "@/server/queries/user-scores"
+import { getVerdictScale } from "@/server/queries/verdict-scale"
 
 interface FavoritesListPageProps {
   params: Promise<{ listId: string }>
@@ -171,6 +172,8 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
   // não pode aparecer: "Forte" devolveria vazio, indistinguível de "não há obra com arte
   // forte". `cache()` no reader ⇒ sem round-trip extra.
   const artScoresReader = await getScoresReader()
+  // Régua do Veredito (migration 193) — descreve o catálogo, então vem do servidor.
+  const verdictScale = await getVerdictScale()
 
   // Recorrência: um mapa só alimenta a ORDENAÇÃO (via getRanking) e a CÉLULA (via
   // WorkTable). Duas contagens independentes é como a coluna passaria a mostrar um número
@@ -397,6 +400,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
       />
 
       <WorkTable
+        verdictScale={verdictScale}
         works={worksWithPred}
         total={worksWithPred.length}
         page={1}

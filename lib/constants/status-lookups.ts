@@ -80,9 +80,36 @@ const STILL_PUBLISHING_IDS = publicationIdsBySlugOrThrow(["ongoing", "hiatus"])
 /** A história chegou ao fim previsto pelo autor. `cancelled` fica de fora: acabou, mas incompleta. */
 const CONCLUDED_IDS = publicationIdsBySlugOrThrow(["completed"])
 
+/** Parada sem data pra voltar — o pior caso pra quem quer COMEÇAR agora. */
+const HIATUS_IDS = publicationIdsBySlugOrThrow(["hiatus"])
+
+/** Acabou INCOMPLETA — nunca vai terminar. */
+const CANCELLED_IDS = publicationIdsBySlugOrThrow(["cancelled"])
+
 /** A obra ainda está saindo (Ongoing/Hiatus) — logo, ninguém leu "a obra inteira". */
 export function isStillPublishingStatus(id: number | null | undefined): boolean {
   return id != null && STILL_PUBLISHING_IDS.has(id)
+}
+
+/**
+ * A obra foi CANCELADA — acabou sem terminar a história.
+ *
+ * ⚠️ Existe para separar "cancelada" de "não sei o status": as duas caíam no mesmo
+ * ramo final de `startabilityOf`, e `Unknown` era tratado como o pior caso.
+ */
+export function isCancelledPublicationStatus(id: number | null | undefined): boolean {
+  return id != null && CANCELLED_IDS.has(id)
+}
+
+/**
+ * A obra está PARADA (hiato) — subconjunto de "ainda saindo".
+ *
+ * Existe porque "dá pra começar agora?" não é a mesma pergunta que "acabou?": entre
+ * as duas que ainda saem, a em andamento entrega capítulo e a em hiato não entrega
+ * nada e não tem data. Ver `startabilityOf` em lib/calculations/mood-refine.ts.
+ */
+export function isHiatusPublicationStatus(id: number | null | undefined): boolean {
+  return id != null && HIATUS_IDS.has(id)
 }
 
 /** A obra terminou de sair (Completed) — ler o último capítulo é ter lido tudo. */
@@ -181,6 +208,39 @@ const PERSONAL_BY_SLUG = new Map<string, PersonalStatusInfo>(
  * uma falha ALTA. Com `=== "Reading"` escrito à mão, renomear o status faz a seção simplesmente
  * vir vazia — sem erro, sem log, e ninguém percebe. Com isto, o build/render quebra na cara.
  */
+/**
+ * A pessoa DESCARTOU esta obra — decidiu não ler (agora ou de vez).
+ *
+ * 🔴 Nomeado por SLUG porque NÃO existe flag que descreva esta união. Medido nas
+ * colunas de `personal_status`: "Not Now" e "Not Interested" têm **todas** as flags
+ * `false` — logo, a única forma de reconhecê-las seria por AUSÊNCIA de sinal, que é
+ * a régua mais frágil possível (qualquer status novo com as flags em branco entraria
+ * junto). É a mesma situação de "Read Again" na prateleira "Pra você hoje": sem
+ * coluna que descreva o conceito, o slug é o acoplamento honesto — e este estoura
+ * num rename, em vez de parar de casar em silêncio.
+ *
+ * ⚠️ `Dropped` NÃO está aqui: ele é `isTerminal` e já tem régua própria. Somá-lo
+ * criaria dois caminhos para o mesmo fato.
+ */
+const DISMISSED_IDS = new Set<number>(
+  ["not_now", "not_interested"].map((slug) => {
+    const info = PERSONAL_BY_SLUG.get(slug)
+    if (!info) {
+      throw new Error(
+        `personal_status: não existe status com slug "${slug}". ` +
+          `Slugs válidos: ${[...PERSONAL_BY_SLUG.keys()].join(", ")}. ` +
+          `Se o slug mudou no Supabase, rode sync-constants e ajuste o chamador.`,
+      )
+    }
+    return info.id
+  }),
+)
+
+/** Decidiu não ler — "Not Now" ou "Not Interested". Ver DISMISSED_IDS. */
+export function isDismissedPersonalStatus(status: number | null | undefined): boolean {
+  return status != null && DISMISSED_IDS.has(status)
+}
+
 export function personalStatusNameBySlugOrThrow(slug: string): string {
   const info = PERSONAL_BY_SLUG.get(slug)
   if (!info) {

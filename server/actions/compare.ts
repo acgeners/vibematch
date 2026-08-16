@@ -4,6 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { getWorksByIds } from "@/server/queries/works"
 import type { HiatusFields } from "@/lib/works/hiatus-display"
 import { computeDecisionScore } from "@/lib/calculations/decision"
+import { getVerdictScale } from "@/server/queries/verdict-scale"
+import type { VerdictScale } from "@/lib/calculations/decision"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug, WorkWithRelations } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
@@ -11,6 +13,7 @@ import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/consta
 import { getAllTags } from "@/server/queries/tags"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { getGroupMembership, type WorkGroupRef } from "@/server/queries/lists"
+import { getSynopsisPredictionsByWorkIds } from "@/server/queries/synopsis-quality"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { buildTagStanceLookup, resolveTagStance } from "@/lib/tags/segment"
 import type { TagStanceInfo, TagStanceLookup } from "@/lib/tags/segment"
@@ -50,9 +53,30 @@ export interface CompareWork extends HiatusFields {
   totalVotes: number
   /** Chance de gostar (0–100) — Força 1 da Bússola (chance_score calibrado). NULL quando stub/arquivada. */
   chanceScore: number | null
+  /** Percentil da estimativa de arte (0–1). NULL = sem estimativa — nunca "média". */
+  artPercentile: number | null
   alignmentScore: number | null
   alignmentJustification: string | null
   alignmentAt: string | null
+  /** Confiança 0–1 do veredito — é ela que pondera o peso dele na Prioridade. */
+  alignmentConfidence: number | null
+  /** `alignment_stale` — o veredito existe mas descreve inputs antigos ⇒ meio peso. */
+  alignmentStale: boolean
+  /**
+   * A régua do Veredito no catálogo, repetida por obra pelo mesmo motivo de
+   * `weightsAuto`: o consumidor é o painel que EXPLICA a Prioridade, e ele precisa
+   * recalcular exatamente o que o servidor calculou. Passar por fora obrigaria
+   * cada tela a buscá-la — e uma delas esqueceria.
+   */
+  verdictScale: VerdictScale | null
+  /** Interesse PREVISTO pela IA (♥..♥♥♥♥). Só preenche a ausência do manual. */
+  predictedSynopsisQuality: string | null
+  /**
+   * `formula_config.score_weights_auto` — se a ênfase dos 9 atributos em vigor é a
+   * INFERIDA do histórico (true) ou a declarada em `/preferencias` (false). Igual pra
+   * todas as obras da comparação; vive aqui porque quem consome é a linha da obra.
+   */
+  weightsAuto: boolean
   genres: string[]
   /** Grupos de favoritos de QUEM COMPARA a que a obra pertence — a recorrência, que aqui é
    *  LINHA e não cabeçalho: ela compara as obras entre si (ver a régua do comparador). */
@@ -77,7 +101,8 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
   if (unique.length === 0) return []
 
   const supabase = createAdminClient()
-  const [works, aiJustifications, tagCatalog, declaredPrefs, profileRow, membership] = await Promise.all([
+  const verdictScale = await getVerdictScale()
+  const [works, aiJustifications, tagCatalog, declaredPrefs, profileRow, membership, predictions, weightsConfig] = await Promise.all([
     getWorksByIds(unique),
     supabase
       .from("ai_evaluations")
@@ -95,7 +120,18 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
     // contagem própria daqui. Sem sessão volta vazio, e a linha simplesmente não tem o que
     // mostrar.
     getGroupMembership(),
+    // Interesse PREVISTO, pro painel que explica a Prioridade. Escopado por ids
+    // (≤ MAX_COMPARE_WORKS obras) — `getAllActiveSynopsisPredictions` puxaria a
+    // tabela inteira contra a NUVEM, que é onde o app aponta.
+    getSynopsisPredictionsByWorkIds(unique),
+    // Qual ênfase dos 9 atributos está EM VIGOR: a inferida do histórico ou a que a
+    // pessoa declarou em `/preferencias`. Uma coluna de uma linha — e sem ela o painel
+    // deixaria implícito um fato que a pessoa acredita conhecer (ver o breakdown).
+    supabase.from("formula_config").select("score_weights_auto").limit(1).maybeSingle(),
   ])
+  const weightsAuto = Boolean(
+    (weightsConfig.data as { score_weights_auto?: boolean } | null)?.score_weights_auto,
+  )
   const subGroupBySlug = new Map<string, string>()
   for (const t of tagCatalog) {
     if (t.subGroupName) subGroupBySlug.set(t.slug, t.subGroupName)
@@ -128,6 +164,9 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
       subGroupBySlug,
       stanceLookup,
       membership.byWork[work.id] ?? [],
+      predictions.get(work.id)?.predictedQuality ?? null,
+      weightsAuto,
+      verdictScale,
     ),
   )
 }
@@ -138,6 +177,10 @@ function mapWorkToCompare(
   subGroupBySlug: Map<string, string>,
   stanceLookup: TagStanceLookup,
   groups: WorkGroupRef[],
+  predictedSynopsisQuality: string | null,
+  weightsAuto: boolean,
+  /** Régua do Veredito (formula_config) — a MESMA que o /ranking usa. */
+  verdictScale: VerdictScale | null,
 ): CompareWork {
   const scoreByCrit: Record<string, number> = {}
   for (const cs of work.category_scores ?? []) {
@@ -195,6 +238,8 @@ function mapWorkToCompare(
       confidence:
         (work.calculated_scores?.alignment_payload as { confidence?: number } | null)?.confidence ??
         null,
+      stale: Boolean(work.calculated_scores?.alignment_stale),
+      verdictScale,
     }),
     personalFit: work.calculated_scores?.personal_fit ?? null,
     personalFitPercentile: work.calculated_scores?.personal_fit_percentile ?? null,
@@ -203,9 +248,17 @@ function mapWorkToCompare(
     platformAvg: work.calculated_scores?.platform_avg ?? null,
     totalVotes: work.calculated_scores?.total_votes ?? 0,
     chanceScore: work.calculated_scores?.chance_score ?? null,
+    artPercentile: work.calculated_scores?.art_percentile ?? null,
     alignmentScore: work.calculated_scores?.alignment_score ?? null,
     alignmentJustification: work.calculated_scores?.alignment_justification ?? null,
     alignmentAt: work.calculated_scores?.alignment_at ?? null,
+    alignmentStale: Boolean(work.calculated_scores?.alignment_stale),
+    verdictScale,
+    alignmentConfidence:
+      (work.calculated_scores?.alignment_payload as { confidence?: number } | null)?.confidence ??
+      null,
+    predictedSynopsisQuality,
+    weightsAuto,
     genres: work.genres ?? [],
     groups,
     tags,

@@ -5,6 +5,7 @@ import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
 import { Header } from "@/components/layout/header"
 import { WorkTable } from "@/components/titles/work-table"
 import { Button } from "@/components/ui/button"
+import { getVerdictScale } from "@/server/queries/verdict-scale"
 
 interface BatchReviewPageProps {
   searchParams: Promise<{ ids?: string }>
@@ -34,6 +35,7 @@ export default async function BatchReviewPage({ searchParams }: BatchReviewPageP
     )
   }
 
+  const verdictScale = await getVerdictScale()
   const [works, scoreThresholds, criterionPrefs] = await Promise.all([
     getWorksByIds(ids),
     getScoreColorThresholds(),
@@ -72,6 +74,7 @@ export default async function BatchReviewPage({ searchParams }: BatchReviewPageP
       />
 
       <WorkTable
+        verdictScale={verdictScale}
         works={worksForReview}
         total={worksForReview.length}
         page={1}

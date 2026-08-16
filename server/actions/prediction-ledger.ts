@@ -12,6 +12,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { createUserClient } from "@/lib/supabase/user"
 import { ensureSignedIn } from "@/server/queries/current-user"
 import { computeDecisionScore } from "@/lib/calculations/decision"
+import { getVerdictScale } from "@/server/queries/verdict-scale"
 
 /**
  * Captura a previsão DE-REGISTRO de uma obra no instante em que ela ganha a
@@ -57,6 +58,7 @@ export async function capturePredictionForFirstRating(
       expected_is_stub: boolean | null
       alignment_score: number | null
       alignment_payload: { confidence?: number } | null
+      alignment_stale: boolean | null
     } | null
 
     const expected = cs?.expected_score ?? null
@@ -64,6 +66,10 @@ export async function capturePredictionForFirstRating(
       expected,
       alignment: cs?.alignment_score ?? null,
       confidence: cs?.alignment_payload?.confidence ?? null,
+      stale: Boolean(cs?.alignment_stale),
+      // O ledger REGISTRA a Prioridade que a tela mostrou — tem que usar a mesma
+      // régua, senão o histórico compara previsões que nunca existiram.
+      verdictScale: await getVerdictScale(),
     })
 
     // O ledger é SEU (as leituras acima são de catálogo e seguem na service role).
