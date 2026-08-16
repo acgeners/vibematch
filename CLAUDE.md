@@ -3385,6 +3385,31 @@ mas significa que **se as artes originais de 1254² se perderem, o que resta sã
 no servidor do Fly, e estas artes são imutáveis: pagar CPU por elas a cada request seria trocar
 400 KB de disco por latência permanente. Por isso `<img>` cru, não `next/image`.
 
+🔴 **ABERTO, medido e ADIADO em 2026-08-16 (decisão da Ana): no celular o índice come a
+primeira tela.** Ele não gruda abaixo de 660px (isso está certo), mas vira **5 linhas de 2
+colunas, 561px**:
+
+| aparelho | índice | % da tela |
+|---|---|---|
+| iPhone SE (375×667) | 561px | **84%** |
+| iPhone 14 (390×844) | 561px | 66% |
+| Pixel (412×915) | 561px | 61% |
+| tablet (768×1024) | 308px | 30% |
+
+Nada está quebrado — **zero overflow horizontal** nas quatro larguras, a tabela rola sozinha,
+a arte do verbete fica em 200px. O que se perde é a função: quem abre o dicionário no celular
+vê uma parede de ícones e rola quase duas telas até "Como ler a escala". A saída desenhada é
+uma **tira horizontal rolável** (uma linha, artes ~56px, ~110px de altura) só abaixo de 660px,
+sem tocar no desktop. ⚠️ Isso é uma media query, não um redesenho — se alguém for mexer aqui,
+o custo é esse e o número a bater é 561px.
+
+⚠️ **Também aberto: a página tem UMA porta de entrada só** (o card do `/guide` + a busca ⌘K).
+O lugar que falta é o cabeçalho do bloco "Notas por critério" da aba Análise da IA — quem está
+olhando as 9 notas de uma obra é exatamente quem quer saber o que elas significam. **Não** ponha
+no chip de faixa (são 9 por obra, e o chip já mostra a rubrica daquela faixa no tooltip) nem
+DENTRO de um tooltip: o do Radix fecha quando o mouse sai do gatilho, e o link fica
+inalcançável.
+
 Guardado por `tests/unit/guide/dicionario-de-atributos.test.ts`, que **deriva de
 `CRITERION_SLUGS`** (critério novo no Supabase entra na página sozinho, ou reprova) e foi
 conferido com **5 sondas**. Uma delas pegou um caso fraco: a versão inicial checava só que a
