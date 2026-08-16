@@ -59,18 +59,45 @@ describe("dicionário dos atributos", () => {
     }
   })
 
-  it("a cobertura impressa bate com o bin que a nota de fato cai em", () => {
-    // O rótulo "7-8" não cobre 8,5, mas o BIN cobre — é o erro que a página existe para
-    // não repetir. Cada faixa é conferida contra `bandForScore`, o dono da regra.
+  it("a cobertura impressa é a do BIN, e vai até onde o bin vai", () => {
+    // O rótulo "7-8" não cobre 8,5, mas o BIN cobre — é o erro que a página existe para não
+    // repetir. Conferir só que o texto CAI na faixa não basta: "0,0–3" também cai, e esconde
+    // exatamente o meio ponto que motivou a página (conferido com sonda — a versão anterior
+    // deste caso passava verde com a cobertura escrita pelo rótulo cru). Por isso o limite
+    // superior é testado pelos DOIS lados.
     for (const entry of entries) {
-      for (const band of entry.bands) {
+      for (const [i, band] of entry.bands.entries()) {
         const [inicio, fim] = band.covers.split("–").map((n) => Number(n.replace(",", ".")))
+        const ultima = i === entry.bands.length - 1
+
         expect(bandForScore(inicio), `${entry.slug}: ${inicio} deveria cair em ${band.band}`).toBe(band.band)
         expect(bandForScore(fim), `${entry.slug}: ${fim} deveria cair em ${band.band}`).toBe(band.band)
-        // meio ponto logo abaixo do fim declarado — o caso que o rótulo esconde
+
+        // o meio ponto que o rótulo esconde tem que estar DENTRO do que a página promete
         const meio = fim - 0.5
         if (meio > inicio) {
           expect(bandForScore(meio), `${entry.slug}: ${meio} deveria cair em ${band.band}`).toBe(band.band)
+        }
+
+        // e logo acima do fim declarado a faixa TEM que acabar — senão a cobertura está
+        // curta e a página volta a mentir sobre o meio ponto.
+        if (!ultima) {
+          const acima = Number((fim + 0.1).toFixed(1))
+          expect(
+            bandForScore(acima),
+            `${entry.slug}: a cobertura "${band.covers}" para antes do fim do bin — ${acima} ainda é ${band.band}`
+          ).not.toBe(band.band)
+        } else {
+          expect(fim, `${entry.slug}: a última faixa tem que ir até 10`).toBe(10)
+        }
+
+        // e logo abaixo do início ela não pode ter começado
+        if (i > 0) {
+          const abaixo = Number((inicio - 0.1).toFixed(1))
+          expect(
+            bandForScore(abaixo),
+            `${entry.slug}: a cobertura "${band.covers}" começa cedo demais`
+          ).not.toBe(band.band)
         }
       }
     }

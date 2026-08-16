@@ -94,6 +94,69 @@ export default function DicionarioDeAtributosPage() {
         </div>
       </section>
 
+      <section className="space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold tracking-tight">Os nove lado a lado</h2>
+          <p className="text-sm text-muted-foreground">
+            Só os rótulos das faixas — clique numa linha para abrir o verbete completo.
+          </p>
+        </div>
+
+        {/* A tabela é larga e rola SOZINHA: sem este contêiner, quem sai de lado é a página
+            inteira, e aí o índice grudado sai junto do lugar. */}
+        <div className="overflow-x-auto rounded-xl border border-border bg-card">
+          <table className="w-full min-w-[720px] border-collapse">
+            <thead>
+              <tr>
+                <th className="border-b border-border px-4 py-3 text-left font-mono text-[10.5px] uppercase tracking-[0.1em] font-semibold text-muted-foreground">
+                  Atributo
+                </th>
+                {faixas.map((faixa) => (
+                  <th
+                    key={faixa.band}
+                    className="whitespace-nowrap border-b border-border px-4 py-3 text-left font-mono text-[10.5px] uppercase tracking-[0.1em] font-semibold text-muted-foreground"
+                  >
+                    {faixa.band.replace("-", "–")}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((entry) => (
+                <tr key={entry.slug} className="border-b border-border/60 last:border-b-0 hover:bg-muted/40">
+                  <td className="px-4 py-2.5">
+                    <Link href={`#${entry.slug}`} className="flex items-center gap-2.5 whitespace-nowrap font-semibold">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={attributeArtSrc(entry.slug, 64)}
+                        alt=""
+                        width={26}
+                        height={26}
+                        className="size-[26px] shrink-0"
+                      />
+                      {entry.name}
+                    </Link>
+                  </td>
+                  {entry.bands.map((faixa, j) => (
+                    <td key={faixa.band} className="px-4 py-2.5">
+                      <span
+                        className={`inline-block whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                          j === entry.bands.length - 1
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-primary/15 text-primary"
+                        }`}
+                      >
+                        {faixa.label}
+                      </span>
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section className="space-y-1">
         <h2 className="text-xl font-semibold tracking-tight">Os nove verbetes</h2>
         <p className="text-sm text-muted-foreground">
