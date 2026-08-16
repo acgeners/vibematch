@@ -43,7 +43,7 @@ const CONSOLE_PREFIXES = ["/curation"]
  * devolveriam vazio, deixando um slider cuja metade não faz nada e uma lista que ignora
  * o que já foi lido. Gatear é mais honesto do que renderizar meia página.
  */
-const SIGNED_IN_PREFIXES = ["/account", "/dashboard", "/discover"]
+const SIGNED_IN_PREFIXES = ["/account", "/dashboard", "/discover", "/my-list"]
 
 function matchesPrefix(pathname: string, prefixes: string[]): boolean {
   return prefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`))

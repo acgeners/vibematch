@@ -61,6 +61,7 @@ const PAGES: Array<Omit<SearchEntry, "kind" | "crumb">> = [
   { id: "page-sobre", title: "Sobre a SatorIA", description: "a marca, o método e os 4 passos", href: "/about", minRole: "leitor", requiresSession: false, iconName: "Info" },
   { id: "page-guia", title: "Guia do app", description: "como usar, do zero", href: "/guide", minRole: "leitor", requiresSession: false, iconName: "BookOpenText" },
 
+  { id: "page-my-list", title: "Minha lista", description: "tudo em que você se pronunciou, por status de leitura", href: "/my-list", minRole: "leitor", requiresSession: true, iconName: "Library" },
   { id: "page-leitura", title: "Acompanhamento", description: "o que você está lendo e o ritmo de cada obra", href: "/reading", minRole: "leitor", requiresSession: true, iconName: "BookMarked" },
   { id: "page-favorites", title: "Favoritos", description: "suas listas e grupos", href: "/favorites", minRole: "leitor", requiresSession: true, iconName: "Heart" },
   { id: "page-fila", title: "Suas notas de IA", description: "Veredito IA e previsão de Interesse, por obra", href: "/my-ai-scores", minRole: "leitor", requiresSession: true, iconName: "Clock" },

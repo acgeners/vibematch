@@ -34,7 +34,7 @@ interface NavLink {
  *
  * | Zona | Pergunta | O que entra |
  * |---|---|---|
- * | Esquerda | "pra onde eu vou?" | destinos, máx. 5, **todos planos** |
+ * | Esquerda | "pra onde eu vou?" | destinos, hoje 6, **todos planos** |
  * | Centro | "onde está aquilo?" | a busca (⌘K), elástica |
  * | Direita | "o que está acontecendo?" | só o que tem **número ou estado** |
  * | Avatar | "coisas minhas" | conta, preferências, importar, painel, pendências |
@@ -65,8 +65,23 @@ interface NavLink {
  * pior que qualquer alternativa, e ícone sem número é enfeite. Por isso a nav é
  * `shrink-0` e quem encolhe é a busca — na primeira versão era o contrário, e o texto
  * transbordava por cima dos vizinhos sem que nada acusasse.
+ *
+ * ## O 6º destino ("Minha lista", 2026-08-16) e o que ele custou
+ *
+ * O teto de 5 caiu porque foi MEDIDO, não estimado. Playwright, curador logado, fonte real,
+ * 20 combinações de largura × papel: o nav vai de **531 → 629px (+98)**.
+ *
+ * 🔴 E a medição achou um defeito que já existia: "quem encolhe é a busca" só vale até o
+ * `min-w-[190px]` dela. Abaixo disso ela **transborda pra esquerda por cima do nav**, e como
+ * o contêiner é `min-w-0`, `scrollWidth − clientWidth` fica **0** nas 20 combinações — invade
+ * sem corte, sem rolagem, sem erro. Com 5 destinos isso já acontecia a 980px (16px).
+ *
+ * Por isso o degrau do ícone da busca subiu de `md:` (768px) para `xl:` — a "ordem do
+ * sacrifício" acima sempre prometeu esse degrau, mas ele estava 500px abaixo de onde a barra
+ * aperta. Ver o 🔴 em `components/search/global-search.tsx`.
  */
 const NAV: NavLink[] = [
+  { href: "/my-list", label: "Minha lista", requiresSignedIn: true },
   { href: "/reading", label: "Acompanhamento", requiresSignedIn: true },
   { href: "/favorites", label: "Favoritos", requiresSignedIn: true },
   { href: "/catalog", label: "Catálogo" },
