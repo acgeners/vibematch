@@ -1728,15 +1728,31 @@ tela — **fator 0,49**, e *toda* coluna sai pela metade: Ano recebe 34px e vira
 de maior conteúdo, mas **o problema nunca foi dela**.
 
 Desde 17/08/2026, com tiers na tela a Lista usa **`TIER_MODE_COLUMN_KEYS`**
-(`work-table-config.ts`) no lugar da config do seletor: `fav · título · Prioridade · O que a
-separa · N. Prevista · Média externa · Votos` (+ as duas estruturais). Soma **1.122px** ⇒
-**fator 1,34** a 1.500px, e o separador recebe ~400px, que é onde ele mostra a leitura inteira.
+(`work-table-config.ts`) no lugar da config do seletor: `♥ · título · Status · Caps. · Ano ·
+Arte · Prioridade · O que a separa · N. Prevista · Interesse · Int. Previsto · Veredito · Média
+externa · Votos` (+ as duas estruturais). Soma **1.772px** ⇒ **fator 0,85** a 1.500px, e o
+separador recebe **296px** — acima dos 292 de que a leitura inteira precisa.
+
+🔴 **O piso é a LARGURA DO SEPARADOR, não o fator.** É por isso que `separator` vale **350** e
+não 300: a largura aqui é uma **share**, então o conjunto crescer encolhe a coluna sem ninguém
+tocar nela. Coluna nova no modo derruba esse piso, e é isso que
+`tests/unit/ranking/modo-agrupar-colunas.test.ts` reprova — não o tamanho da lista.
 
 🔴 **A régua de quem entra: responde "destas empatadas, qual eu escolho?"** — ligar o Agrupar
-troca a PERGUNTA da tela. Entram o eixo da decisão (`decision`), o separador e as forças que
-ele compara (`why-this-work.ts`: avaliação = `platform_avg`, alcance = `total_votes`).
+troca a PERGUNTA da tela. Entram o eixo da decisão (`decision`), o separador, o estado da obra e
+o seu, as notas que sustentam a escolha, e as forças que o separador compara
+(`why-this-work.ts`: avaliação = `platform_avg`, alcance = `total_votes`).
 ⚠️ **Não existe coluna para a força "chance"** (ela só vive na Bússola), então o conjunto tem 2
 das 3 — inventar uma coluna aqui seria criar dado novo dentro de uma decisão de largura.
+
+🔴 **`decision` e `expected_score` NÃO são redundantes, e a intuição erra o lado.** Dentro de um
+tier o campo ORDENADO é o constante — os tiers são construídos por `displayTierKey` sobre ele —,
+e o outro é justamente o que varia. Ordenando por Prioridade, ela sai "~8,5 ~8,5 ~8,5" (o rótulo
+do divisor já diz isso) e quem separa as linhas é a Nota Prevista; por Prevista, é o contrário.
+
+⚠️ **Duas larguras foram remedidas junto:** `art` ganhou 70px em vez de herdar o fallback de 100,
+e `total_votes` foi de 70 para 80 — com fator 0,85 ele virava "33,…", e é uma das duas forças
+que o separador compara.
 
 ⚠️ **A config do usuário NÃO é apagada** — o modo a ignora enquanto vale, e desligar o Agrupar
 devolve as colunas dele intactas. Por isso o seletor fica **desabilitado com a explicação**, em
@@ -1750,8 +1766,8 @@ mas custa o cabeçalho fixo (com um contêiner de rolagem no meio, o `sticky` gr
 página) — fica como PR próprio, de tabela.
 
 Guardado por `tests/unit/ranking/modo-agrupar-colunas.test.ts`, que testa a **conta**, não a
-lista: soma das larguras ⇒ fator ≥ 1,2, e o separador ≥ 292px. Coluna nova no modo sem olhar a
-largura reprova (conferido com sonda).
+lista: o separador ≥ 292px e o título ≥ 260px, ambos sobre a soma real do conjunto. Coluna nova
+no modo sem olhar a largura reprova (conferido com sonda).
 
 ## Coluna sem largura declarada cai em 100px — e o conteúdo dela some sem nada acusar
 
