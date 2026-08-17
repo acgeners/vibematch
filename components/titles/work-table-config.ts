@@ -361,11 +361,10 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   // conteúdo da coluna, tinha −44px para caber e nunca era desenhada. O título também
   // truncava ("O QU…", precisa de 127px). Medido no browser em 17/08/2026: célula típica
   // 292px, pior caso 335px.
-  // ⚠️ São 355 e não 300 porque a largura aqui é uma SHARE, não um tamanho: com as 14 colunas
-  // do modo Agrupar (soma 1.797px), 300 daria 250px reais e a frase sumiria. 355 ⇒ 296px.
-  // ⚠️ Foi de 350 para 355 quando `personal_status` (110) deu lugar a `publication_status`
-  // (130): os 20px de share extra derrubavam o separador para 293px, a 1px do piso de 292.
-  // A coluna só existe no modo Agrupar, então subir esta linha não mexe em nenhuma outra tela.
+  // ⚠️ **Esta entrada não está em vigor em lugar nenhum, e é de propósito que ela fique.** A
+  // coluna só é renderizada no modo Agrupar, e lá quem manda é `TIER_MODE_COLUMN_WIDTHS` (294,
+  // medido). O valor aqui é a rede para o dia em que ela for usada fora do modo — sem a linha,
+  // ela cairia no `?? 100` invisível que é o assunto do `coluna-declara-largura.test.ts`.
   separator: 355,
   ai_status: 80,
   updated_at: 110,
@@ -397,9 +396,9 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
  * em Untracked + Want to Read (`BASELINE_PERSONAL_STATUSES`), então a coluna gastava uma share
  * do orçamento para repetir "—" linha após linha.
  *
- * ⚠️ E ele custa **20px a mais** de largura natural (130 × 110), que saem da share de todo
- * mundo — daí `separator` ter subido junto, de 350 para 355. Sem isso o separador caía para
- * 293px, a 1px do piso de 292: passaria no teste e não sobreviveria ao próximo ajuste.
+ * ⚠️ Ele custa **20px a mais** de largura natural que o `personal_status`, e essa conta hoje é
+ * feita em `TIER_MODE_COLUMN_WIDTHS`, onde a coluna vale os **92px** que a pílula "⏸️ HIA »"
+ * de fato pede — medidos, não herdados do mapa global.
  *
  * ⚠️ **Não existe coluna para a força "chance"** — ela só aparece na Bússola. Por isso o
  * conjunto tem 2 das 3 forças, e não 3: inventar uma coluna aqui seria criar dado novo dentro
@@ -412,12 +411,11 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
  * Prevista, é o contrário. Tirar qualquer um dos dois apaga informação em metade das
  * ordenações.
  *
- * 🔴 **O ORÇAMENTO é a restrição, e ele fecha na largura do separador.** A soma é **1.797px**;
- * a 1.500px de tela o fator é 0,83 e o separador recebe **296px** — acima dos 292 de que a
- * leitura inteira precisa, e é por isso que `separator` vale 355 e não 300: a share dele tinha
- * que aguentar o conjunto crescer. Coluna nova aqui **empurra o separador para baixo desse
- * piso**, e é isso que `tests/unit/ranking/modo-agrupar-colunas.test.ts` reprova — não o
- * tamanho da lista.
+ * 🔴 **O ORÇAMENTO é a restrição, e quem o declara é `TIER_MODE_COLUMN_WIDTHS`** (logo abaixo),
+ * cuja soma é exatamente a largura medida da tabela: cada coluna recebe na tela o número
+ * escrito lá. O conjunto fecha com **11px de folga** sobre o que as células pedem, e é isso que
+ * `tests/unit/ranking/modo-agrupar-colunas.test.ts` guarda — coluna nova aqui obriga a tirar
+ * px de alguém, e o teste diz de quem sobrou.
  *
  * ⚠️ **A escolha do usuário não é apagada.** O modo IGNORA a config enquanto está ligado;
  * desligar o Agrupar devolve as colunas dele intactas (nada é gravado). Por isso o seletor
@@ -445,6 +443,90 @@ export const TIER_MODE_COLUMN_KEYS = [
   "platform_avg",
   "total_votes",
 ] as const
+
+/**
+ * A largura que a TABELA de fato recebe, medida no browser — e a régua deste modo.
+ *
+ * 🔴 **Toda largura daqui já foi calibrada contra "1.500px de container", e a tabela nunca
+ * recebe isso.** Medido em 17/08/2026 com o app rodando: a **1500px de viewport a tabela mede
+ * 1.442px** (o resto é o padding da página), e ela tem um **TETO de 1.502px** — a partir de
+ * ~1.760px de janela o container para de crescer, então monitor maior não compra coluna. O
+ * fator real a 1500 é **0,80**, não os 0,83 que a conta antiga usava.
+ *
+ * 🔴 **Os 24px de `px-3` do `<td>` também ficavam de fora da conta.** Somados, os dois erros
+ * escondiam QUATRO truncamentos silenciosos na tela de 1500px — Ano em "20…", Votos em "33,…",
+ * a pílula do Veredito cortada ao meio e a frase do separador nunca desenhada —, e o teste
+ * aprovava todos, porque media contra um container que a página não tem.
+ */
+export const TIER_MODE_TABLE_WIDTH = 1442
+
+/**
+ * As larguras do MODO AGRUPAR, em px na largura de referência acima.
+ *
+ * 🔴 **A soma é exatamente `TIER_MODE_TABLE_WIDTH`, e isso é o que dá sentido aos números.**
+ * A largura vira share (`natural ÷ soma × container`), então com a soma igual à tabela cada
+ * coluna recebe na tela **exatamente** o número escrito aqui. Deixa de ser "um peso" e passa a
+ * ser o pedido medido daquela célula.
+ *
+ * 🔴 **O mapa é PRÓPRIO porque o `DEFAULT_COLUMN_WIDTHS` é global.** Para dar ao separador os
+ * 294px de que ele precisa era necessário tirar do `title`, que é o mesmo 360 do `/catalog` —
+ * o modo estaria pagando a conta dele com a largura de outra tela. Aqui ele paga com a própria.
+ *
+ * **Como cada número foi obtido** (medido no browser, 40 linhas, filtro de publicação aberto):
+ * clonando cada `<td>` num contêiner `width: max-content`. Medir no lugar não serve — a tabela
+ * é `table-layout: fixed` com `overflow:hidden`, então o que se lê ali é a largura CONCEDIDA,
+ * nunca a PEDIDA. Todo valor já inclui os 24px de padding do `td`.
+ *
+ * 🔴 **Todo valor é o teto ARREDONDADO PRA CIMA, e o sub-pixel não é preciosismo.** A 1ª
+ * rodada usou o medido arredondado ao inteiro mais próximo, e `Caps.` pedia **49,2px** com
+ * 49,0 concedidos: o `text-overflow` do navegador dispara em QUALQUER estouro, então 0,2px
+ * viraram "2…" numa coluna de três dígitos. O mesmo em Arte e Média externa. Ao mexer aqui,
+ * arredonde para cima e confira na tela — a diferença entre caber e truncar é décimo de pixel.
+ *
+ * Três não saem de `max-content`, e cada um tem motivo:
+ * - `separator` = **294** — o degrau do container query da célula (270px de conteúdo) + 24. Um
+ *   clone mede 24px ali, porque a barra é `absolute` e o `@container` não resolve fora da
+ *   árvore; medir o pedido dela pelo clone daria "cabe em qualquer lugar".
+ * - `title` = a SOBRA (**255**). Ele é o único que degrada bem — reticências num nome são
+ *   esperadas —, então é ele que absorve o que resta depois de todo o resto receber o pedido.
+ * - `total_votes` = **75** e não os 66 medidos: o pior caso da TELA era "16,2K", e o do
+ *   CATÁLOGO é 193.712 votos ⇒ "193,7K". Coluna de número dimensionada pela amostra visível
+ *   trunca no dia em que a obra popular aparece.
+ *
+ * ⚠️ **O orçamento fecha, mas sem folga: o título ficou em 255px e a mediana dele pede 275.**
+ * Ou seja, mais da metade dos nomes trunca — o modo é ~20px curto para caber tudo com o
+ * título inteiro. Os dois candidatos a ceder, se um dia isso incomodar, estão MEDIDOS: o
+ * botão "Rankear" (−14px, virando ícone) e a frase do separador (−24px, voltando ao degrau
+ * de 270). Nenhum dos dois foi feito porque os dois trocam um defeito visível por outro.
+ *
+ * ⚠️ **`alignment_score` = 100 é o botão "Rankear"**, não a pílula (que pede 83). Ele aparece
+ * nas obras sem Veredito, que são a maioria desta lista, e botão cortado lê como quebrado. É a
+ * maior peça isolada do orçamento depois do separador: virá-lo em ícone devolveria ~17px ao
+ * título — decisão de UI, não de largura, e por isso não foi feita aqui.
+ *
+ * ⚠️ Abaixo de ~1.442px de tabela tudo encolhe junto e as células voltam a truncar. Isso é
+ * degradação escolhida, não conserto pela metade: quem cede primeiro é a escada de degraus que
+ * `SeparatorCell` já tem (sai a frase, depois o σ). O que este mapa garante é que **na largura
+ * de referência nada é cortado**.
+ */
+export const TIER_MODE_COLUMN_WIDTHS: Record<string, number> = {
+  select: 41,
+  rank: 41,
+  fav: 53,
+  title: 255,
+  publication_status: 92,
+  chapters_total: 50,
+  year: 58,
+  art: 50,
+  decision: 62,
+  separator: 294,
+  expected_score: 58,
+  synopsis_q: 73,
+  synopsis_pred: 90,
+  alignment_score: 100,
+  platform_avg: 50,
+  total_votes: 75,
+}
 
 /**
  * As defs do modo Agrupar, na ordem declarada. Derivado de `WORK_TABLE_COLUMNS`, nunca uma 2ª

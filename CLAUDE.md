@@ -1730,13 +1730,43 @@ de maior conteúdo, mas **o problema nunca foi dela**.
 Desde 17/08/2026, com tiers na tela a Lista usa **`TIER_MODE_COLUMN_KEYS`**
 (`work-table-config.ts`) no lugar da config do seletor: `♥ · título · Pub. · Caps. · Ano ·
 Arte · Prioridade · O que a separa · N. Prevista · Interesse · Int. Previsto · Veredito · Média
-externa · Votos` (+ as duas estruturais). Soma **1.797px** ⇒ **fator 0,83** a 1.500px, e o
-separador recebe **296px** — acima dos 292 de que a leitura inteira precisa.
+externa · Votos` (+ as duas estruturais).
 
-🔴 **O piso é a LARGURA DO SEPARADOR, não o fator.** É por isso que `separator` vale **355** e
-não 300: a largura aqui é uma **share**, então o conjunto crescer encolhe a coluna sem ninguém
-tocar nela. Coluna nova no modo derruba esse piso, e é isso que
-`tests/unit/ranking/modo-agrupar-colunas.test.ts` reprova — não o tamanho da lista.
+🔴 **As larguras do modo são PRÓPRIAS (`TIER_MODE_COLUMN_WIDTHS`), e a soma é a largura MEDIDA
+da tabela — 1.442px.** Com a soma igual à tabela, `natural ÷ soma × container` devolve o
+próprio número escrito no mapa: cada entrada deixa de ser "um peso" e passa a ser **o pedido
+medido daquela célula, em px**. O mapa é separado porque o `DEFAULT_COLUMN_WIDTHS` é global —
+dar 294px ao separador exigia tirar do `title`, que é o mesmo 360 do `/catalog`, ou seja o modo
+pagaria a conta dele com a largura de outra tela.
+
+🔴 **A referência estava errada, e por isso o teste aprovava quatro truncamentos.** Medido no
+browser em 17/08/2026: a **1500px de viewport a tabela mede 1.442px** (o resto é padding da
+página) e ela tem **teto de 1.502px** — monitor maior não compra coluna. O fator real é
+**0,80**, não 0,83. Somado aos **24px de `px-3` do `<td>`**, que a conta também ignorava, a
+tela de 1500px vinha com Ano em "20…", Votos em "33,…", a pílula do Veredito cortada ao meio e
+a frase do separador nunca desenhada — tudo com a suíte verde.
+
+⚠️ **Arredonde PRA CIMA: 0,2px viram reticências.** A 1ª rodada do rateio usou o medido
+arredondado ao inteiro mais próximo e `Caps.` pedia **49,2px** com 49,0 concedidos — o
+`text-overflow` dispara em qualquer estouro, e a coluna de 3 dígitos virou "2…". Idem Arte e
+Média externa.
+
+| | |
+|---|---|
+| como cada pedido foi medido | clonando cada `<td>` num contêiner `width: max-content` (40 linhas). Medir no lugar dá a largura CONCEDIDA, nunca a pedida: a tabela é `fixed` e o `td` é `overflow:hidden` |
+| `separator` = **294** | é o degrau do container query (270 de conteúdo) + 24. O clone mede 24px ali — a barra é `absolute` e o `@container` não resolve fora da árvore |
+| `total_votes` = **75** | o pior caso da TELA era "16,2K"; o do CATÁLOGO é 193.712 votos ⇒ "193,7K" |
+| `alignment_score` = **100** | é o botão **"Rankear"** (a pílula pede 83), que aparece nas obras sem Veredito — a maioria desta lista |
+| `title` = **255** | a SOBRA: ele é o único que degrada bem, então absorve o que resta |
+
+⚠️ **O orçamento fecha, mas sem folga — e a mediana do título pede 275px.** Mais da metade dos
+nomes trunca de qualquer jeito. Os dois candidatos a ceder estão medidos: o botão "Rankear"
+(−14px, virando ícone) e a frase do separador (−24px, voltando ao degrau de 270). Nenhum dos
+dois foi feito porque os dois trocam um defeito visível por outro.
+
+⚠️ Abaixo de ~1.442px de tabela tudo encolhe junto e as células voltam a truncar. É degradação
+escolhida: quem cede primeiro é a escada de degraus que `SeparatorCell` já tem (sai a frase,
+depois o σ). O que o mapa garante é que **na largura de referência nada é cortado**.
 
 🔴 **A régua de quem entra: responde "destas empatadas, qual eu escolho?"** — ligar o Agrupar
 troca a PERGUNTA da tela. Entram o eixo da decisão (`decision`), o separador, o estado da obra,
@@ -1748,9 +1778,8 @@ responde *"dá pra começar agora?"* — o mesmo eixo que `startabilityOf` pontu
 mood —, que é decisão dentro do tier. O `personal_status` que estava ali entrava `iconOnly` e
 era quase-constante **por construção**: o filtro padrão do `/ranking` já recorta a lista em
 Untracked + Want to Read (`BASELINE_PERSONAL_STATUSES`), então a coluna gastava share do
-orçamento para repetir "—". ⚠️ O preço são **20px** de largura natural (130 × 110), e por isso
-`separator` subiu de 350 para 355 na mesma leva: sem compensar, ele caía para **293px**, a 1px
-do piso. ⚠️ E o padrão de publicação é `Completed` só, então quem não abrir esse filtro vê
+orçamento para repetir "—". ⚠️ Ela vale **92px** no mapa do modo — o que a pílula "⏸️ HIA »"
+pede, medido. ⚠️ E o padrão de publicação é `Completed` só, então quem não abrir esse filtro vê
 "✅ CMP" em toda linha — a coluna paga a share quando a pessoa amplia o filtro.
 ⚠️ **Não existe coluna para a força "chance"** (ela só vive na Bússola), então o conjunto tem 2
 das 3 — inventar uma coluna aqui seria criar dado novo dentro de uma decisão de largura.
@@ -1760,13 +1789,15 @@ tier o campo ORDENADO é o constante — os tiers são construídos por `display
 e o outro é justamente o que varia. Ordenando por Prioridade, ela sai "~8,5 ~8,5 ~8,5" (o rótulo
 do divisor já diz isso) e quem separa as linhas é a Nota Prevista; por Prevista, é o contrário.
 
-⚠️ **Duas larguras foram remedidas junto:** `art` ganhou 70px em vez de herdar o fallback de 100,
-e `total_votes` foi de 70 para 80 — com fator 0,85 ele virava "33,…", e é uma das duas forças
-que o separador compara.
-
 ⚠️ **A config do usuário NÃO é apagada** — o modo a ignora enquanto vale, e desligar o Agrupar
 devolve as colunas dele intactas. Por isso o seletor fica **desabilitado com a explicação**, em
 vez de sumir: controle que some obriga a pessoa a reencontrá-lo.
+
+🔴 **E a LARGURA arrastada também é ignorada, pelo mesmo motivo.** `naturalWidthOf` consulta o
+mapa do modo antes do `widths[key]` salvo: o orçamento só significa alguma coisa porque a soma
+é a largura da tabela, e um resize antigo de `title` o desmontaria em silêncio — a primeira
+coisa a sumir seria a frase do separador. Nada é gravado, então desligar o Agrupar devolve as
+duas escolhas (quais colunas **e** quão largas) intactas.
 
 ⚠️ **As alternativas foram pesadas e recusadas, com motivo:** fixar a Lista inteira (como o
 Heatmap) tira uma escolha que o curador usa de propósito, e o aperto só existe neste modo; uma
@@ -1821,13 +1852,15 @@ Foi assim com **"O que a separa"** (achado em 17/08/2026): a coluna com MAIS con
 tabela — trilha de 92px + ícone + valor + frase + σ — era a única sem entrada em
 `DEFAULT_COLUMN_WIDTHS`. Medido no browser: trilha + ícone pedem **144px**, então em 100px
 sobravam **−44px** para a frase, que é o conteúdo da coluna e **nunca chegou a ser desenhada**;
-o título truncava em "O QU…". Hoje: **`separator: 355`** — e são 355 e não 300 porque a largura
-aqui é uma **share**: com as 14 colunas do modo Agrupar (soma 1.797px), 300 daria 250px reais e
-a frase sumiria de novo. Guardado por `tests/unit/ui/coluna-declara-largura.test.ts`, que
+o título truncava em "O QU…". Hoje ela vale **294px**, e quem os declara é
+`TIER_MODE_COLUMN_WIDTHS` — a entrada `separator: 355` do mapa global **não está em vigor em
+lugar nenhum** e fica só como rede para o dia em que a coluna for usada fora do modo, porque
+sem ela a coluna cairia no `?? 100` invisível que é o assunto desta seção. Guardado por
+`tests/unit/ui/coluna-declara-largura.test.ts`, que
 **deriva o universo de `WORK_TABLE_COLUMNS`** e exige que toda exceção esteja declarada com
 motivo (conferido com sonda). ⚠️ Na mesma varredura, `art` deixou o fallback e ganhou **70px** (é
 um percentil de 2 dígitos, a largura das outras colunas numéricas) e `total_votes` foi de 70
-para **80** — com fator 0,85 ele virava "33,…".
+para **80** — números do mapa GLOBAL, que segue valendo em `/catalog` e fora do modo Agrupar.
 
 🔴 **Legenda não cabe em cabeçalho de tabela.** Os 3 ícones de força moravam dentro do `<th>`,
 embaixo do nome: pedem **260px** numa linha (a 8,5px; **271px a 9px**), então com a coluna em
@@ -4200,12 +4233,13 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.165 passando (+24 pulados) em 303 arquivos** (298 passando + 5 pulados);
-remedido em 2026-08-17 na troca da coluna de status do modo Agrupar — que **não somou teste
-nenhum**: os +7 casos e o +1 arquivo são `covers/sondar-capa-tri-estado` (commit `69ee961`,
-conferido rodando o arquivo sozinho), e a linha nasceu velha por ter sido escrita antes dele.
-Com `find tests -name '*.test.ts*'` =
-303 conferido contra os 303 executados. Antes: **3.158 em 302** (tom do segmentado de filtro,
+`npm run test` → **3.167 passando (+24 pulados) em 303 arquivos** (298 passando + 5 pulados);
+medido em 2026-08-17 com o rateio de largura do modo Agrupar, que **não somou arquivo** — os
++2 casos são o teste do modo trocando um piso inventado por dois: "a soma é a largura da
+tabela" e "nenhuma coluna recebe menos do que pede". Com `find tests -name '*.test.ts*'` =
+303 conferido contra os 303 executados. Antes: **3.165 em 303** (troca da coluna de status —
+os +7 casos e o +1 arquivo dali eram `covers/sondar-capa-tri-estado`, commit `69ee961`, e a
+linha tinha nascido velha), **3.158 em 302** (tom do segmentado de filtro,
 largura declarada por coluna, colunas do modo Agrupar), **3.134 em 299** (aposentadoria da auditoria de
 critérios — o número CAIU ali, e era o esperado: saiu `ai-calibration/politica-de-auditoria`,
 20 casos, junto com o código que ele guardava) e **3.148 em 300** (dicionário dos atributos).
