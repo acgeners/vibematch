@@ -37,6 +37,7 @@ export function TierDividerRow({
   focusedArchetype,
   onFocusArchetype,
   selectSlot,
+  legendSlot,
 }: {
   tierNumber: number
   workIds: string[]
@@ -64,23 +65,56 @@ export function TierDividerRow({
    * coisa) ou página que não tem seleção.
    */
   selectSlot?: ReactNode
+  /**
+   * A legenda da coluna "O que a separa" — os 3 ícones de força e o que a régua mede.
+   *
+   * 🔴 **Ela morava no `<th>` da coluna e veio pra cá (escolha da Ana, 17/08/2026), trocando de
+   * lugar com os chips de composição.** No cabeçalho ela custava altura da linha inteira e
+   * disputava a largura de UMA coluna; aqui a linha é `colSpan` cheio e sobra espaço. Os chips
+   * subiram para junto do rótulo do tier — que é sobre o que eles falam ("6 obras de prioridade
+   * equivalente" e DE QUE tipo elas são), então ficaram mais perto do que descrevem do que
+   * estavam.
+   *
+   * ⚠️ Aparece em TODO divisor, não só no primeiro. O `<thead>` é sticky e a legenda no
+   * cabeçalho acompanhava a rolagem; aqui ela não acompanha, então repetir por tier é o que
+   * mantém a explicação ao alcance de quem está lendo o tier 4.
+   */
+  legendSlot?: ReactNode
 }) {
   return (
     <tr className="bg-gradient-to-r from-primary/10 via-muted/40 to-transparent">
       <td colSpan={colSpan} className="border-y border-primary/25 px-3 py-1.5">
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
           {selectSlot && <span className="flex shrink-0 items-center">{selectSlot}</span>}
-          <span className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-primary">
-              <span className="font-mono">≈</span>
-              Tier {tierNumber}
+          {/*
+            🔴 **A contagem mora DENTRO do badge** (escolha da Ana, 17/08/2026). Solta, ela era
+            texto nu entre um badge e três pílulas — não era objeto como os vizinhos e não
+            pertencia a nenhum dos dois lados. Junta, o badge responde duas coisas de uma vez
+            (QUAL tier · de QUE TAMANHO) e os chips ao lado passam a ser só a composição: um
+            objeto que identifica o grupo, seguido dos objetos que o decompõem.
+
+            ⚠️ "de prioridade equivalente" saiu da tela e virou `title`. O "≈" já diz o essencial,
+            e a frase completa continua alcançável porque é ela que registra que "equivalente"
+            vale só no EIXO DA ORDENAÇÃO — dentro do mesmo tier convivem apostas seguras,
+            arriscadas e de nicho, que é justamente o que os chips mostram.
+          */}
+          <span
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary"
+            title={`${count} ${count === 1 ? "obra" : "obras"} de prioridade equivalente`}
+          >
+            <span className="font-mono">≈</span>
+            Tier {tierNumber}
+            <span aria-hidden className="text-primary/40">
+              ·
             </span>
-            <span className="font-normal normal-case tracking-normal">
-              {count} {count === 1 ? "obra" : "obras"} de prioridade equivalente
+            <span className="font-normal normal-case tracking-normal text-primary/80">
+              {count} {count === 1 ? "obra" : "obras"}
             </span>
           </span>
 
-          <span className="ml-auto flex items-center gap-1.5">
+          {/* Os chips dizem DE QUE o tier é feito — pertencem ao lado do rótulo que diz de
+              quantas obras ele é feito, não ao canto oposto da linha. */}
+          <span className="flex items-center gap-1.5">
             {composition?.map(({ archetype, count: n }) => {
               const on = focusedArchetype === archetype
               return (
@@ -102,6 +136,8 @@ export function TierDividerRow({
               )
             })}
           </span>
+
+          {legendSlot && <span className="ml-auto flex items-center">{legendSlot}</span>}
 
           {onCompare && (
             <button

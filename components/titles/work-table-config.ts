@@ -346,13 +346,99 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   predicted_score: 80,
   final_score: 90,
   platform_avg: 80,
-  total_votes: 70,
+  // 80 e não 70: o conteúdo é "33,4K" (5 glifos, ~40px) e 70 só serve com a tabela em fator
+  // ~1. Em qualquer tabela densa — inclusive no modo Agrupar, fator 0,85 — ele virava "33,…",
+  // e esta é uma das duas forças que o separador compara.
+  total_votes: 80,
   alignment_score: 70,
   synopsis_pred: 110,
+  // Arte é um percentil de 2 dígitos: 70 é a largura das outras colunas numéricas. Estava sem
+  // entrada e herdava o fallback de 100 — 30px a mais que nunca foram escolhidos, e que no
+  // modo Agrupar saem da conta do separador.
+  art: 70,
+  // 🔴 Esta linha FALTAVA, e a coluna caía no fallback `?? 100` — largura menor que a trilha
+  // + o ícone (144px medidos), então a FRASE ("8,8 a mais alta do grupo +1,2σ"), que é o
+  // conteúdo da coluna, tinha −44px para caber e nunca era desenhada. O título também
+  // truncava ("O QU…", precisa de 127px). Medido no browser em 17/08/2026: célula típica
+  // 292px, pior caso 335px.
+  // ⚠️ São 350 e não 300 porque a largura aqui é uma SHARE, não um tamanho: com as 14 colunas
+  // do modo Agrupar (soma 1.762px), 300 daria 255px reais e a frase sumiria. 350 ⇒ 298px.
+  separator: 350,
   ai_status: 80,
   updated_at: 110,
   last_read_at: 110,
   actions: 60,
+}
+
+/**
+ * As colunas do MODO AGRUPAR da Lista (`/ranking` com tiers na tela).
+ *
+ * 🔴 **É uma trava de ORÇAMENTO, e o número é medido.** A tabela é `table-layout: fixed`,
+ * proporcional e sem rolagem horizontal: cada coluna recebe `natural ÷ soma × largura`. Com as
+ * 26 colunas que o seletor permite ligar, a soma é **3.066px** para ~1.500px de tela — **fator
+ * 0,49**, ou seja *toda* coluna sai pela metade (Ano recebe 34px e vira "2…", Publicação 64px e
+ * vira "✅ Cl"). Não é a coluna "O que a separa" que não cabe; é que **nenhuma cabe**, e ela só
+ * torna o sintoma visível por ser a de maior conteúdo.
+ *
+ * 🔴 **A régua de quem entra: responde "destas empatadas, qual eu escolho?".** Ligar o Agrupar
+ * troca a PERGUNTA da tela — de "meu catálogo em N colunas" para a escolha dentro de um tier.
+ * Entram o eixo do tier (`decision`), o separador, o estado da obra e o seu (status, capítulos,
+ * ano, arte), as notas que sustentam a escolha, e as **forças** que o separador compara
+ * (`why-this-work.ts`: avaliação = `platform_avg` · alcance = `total_votes`).
+ *
+ * ⚠️ **Não existe coluna para a força "chance"** — ela só aparece na Bússola. Por isso o
+ * conjunto tem 2 das 3 forças, e não 3: inventar uma coluna aqui seria criar dado novo dentro
+ * de uma decisão de largura.
+ *
+ * 🔴 **`decision` e `expected_score` NÃO são redundantes, e a intuição erra o lado.** Dentro de
+ * um tier o campo ORDENADO é o constante — os tiers são construídos por `displayTierKey` sobre
+ * ele —, e o outro é justamente o que varia. Ordenando por Prioridade, ela sai "~8,5 ~8,5 ~8,5"
+ * (o rótulo do divisor já diz isso) e quem separa as linhas é a Nota Prevista; ordenando por
+ * Prevista, é o contrário. Tirar qualquer um dos dois apaga informação em metade das
+ * ordenações.
+ *
+ * 🔴 **O ORÇAMENTO é a restrição, e ele fecha na largura do separador.** A soma é **1.762px**;
+ * a 1.500px de tela o fator é 0,85 e o separador recebe **298px** — acima dos 292 de que a
+ * leitura inteira precisa, e é por isso que `separator` vale 350 e não 300: a share dele tinha
+ * que aguentar o conjunto crescer. Coluna nova aqui **empurra o separador para baixo desse
+ * piso**, e é isso que `tests/unit/ranking/modo-agrupar-colunas.test.ts` reprova — não o
+ * tamanho da lista.
+ *
+ * ⚠️ **A escolha do usuário não é apagada.** O modo IGNORA a config enquanto está ligado;
+ * desligar o Agrupar devolve as colunas dele intactas (nada é gravado). Por isso o seletor
+ * aparece DESABILITADO com a explicação, em vez de sumir — sumir faria a pessoa procurar um
+ * controle que existe.
+ */
+export const TIER_MODE_COLUMN_KEYS = [
+  // identidade
+  "fav",
+  "title",
+  // o que é seu, e o que a obra é
+  "personal_status",
+  "chapters_total",
+  "year",
+  "art",
+  // a decisão: o eixo do tier, e o que separa quem empatou nele
+  "decision",
+  "separator",
+  // as notas que sustentam a escolha
+  "expected_score",
+  "synopsis_q",
+  "synopsis_pred",
+  "alignment_score",
+  // as duas forças que o separador compara (a terceira, chance, não tem coluna)
+  "platform_avg",
+  "total_votes",
+] as const
+
+/**
+ * As defs do modo Agrupar, na ordem declarada. Derivado de `WORK_TABLE_COLUMNS`, nunca uma 2ª
+ * definição das colunas — chave que não existir some daqui em silêncio, e é isso que o teste
+ * `tests/unit/ranking/modo-agrupar-colunas.test.ts` reprova.
+ */
+export function getTierModeColumns(): WorkColumnDef[] {
+  const byKey = new Map(WORK_TABLE_COLUMNS.map((c) => [c.key, c]))
+  return TIER_MODE_COLUMN_KEYS.map((k) => byKey.get(k)).filter((c): c is WorkColumnDef => Boolean(c))
 }
 
 export function getDefaultWorkColumnConfig(

@@ -1194,6 +1194,12 @@ meio da rampa. O que a régua proíbe é **chip de palavra** em âmbar que não 
 
 ⚠️ **Violeta fica FORA da régua**: `✨` é procedência ("quem escreveu isto"), não estado.
 
+⚠️ **Segmentado de FILTRO também fica fora — ele tem régua própria e dono próprio**
+(`lib/ui/filter-segment-tone.ts`): ali a cor não descreve estado do sistema, e sim se aquela
+opção **corta obras da lista**. Isso importa aqui porque o rosa dele já significou apenas
+"selecionado", que era um terceiro sentido para a cor do `failed` — ver o bloco do painel de
+filtros mais abaixo.
+
 🔴 **Estado fica junto da SAÍDA dele — não no rodapé** (2026-08-15, card do Interesse). O
 "Previsão desatualizada" era a última linha do bloco, **depois** da justificativa: ~230px
 abaixo do único botão que o desfaz e, pior, **depois da seta de aplicar** — ou seja, era lido
@@ -1711,6 +1717,84 @@ TODAS as linhas do título (46 caracteres viravam 4 linhas num card de 268px; ho
 Guardado por `tests/unit/ranking/bussola-empilhamento.test.tsx` e `bussola-legenda-lista.test.tsx`
 — inclusive um teste que falha se a prop de faixas for ignorada, que era o jeito silencioso de a
 cor da nota regredir pro fallback.
+
+## "Agrupar" na Lista é um MODO, e ele traz as colunas dele
+
+🔴 **A tabela do `/ranking` não tem orçamento para o seletor de colunas cheio.** Ela é
+`table-layout: fixed`, proporcional e **sem rolagem horizontal**, então cada coluna recebe
+`natural ÷ soma × largura`. Com **26 colunas ligadas** a soma é **3.066px** para ~1.500px de
+tela — **fator 0,49**, e *toda* coluna sai pela metade: Ano recebe 34px e vira "2…", Publicação
+64px e vira "✅ Cl", Título 176px. O sintoma aparecia na coluna "O que a separa" por ela ser a
+de maior conteúdo, mas **o problema nunca foi dela**.
+
+Desde 17/08/2026, com tiers na tela a Lista usa **`TIER_MODE_COLUMN_KEYS`**
+(`work-table-config.ts`) no lugar da config do seletor: `fav · título · Prioridade · O que a
+separa · N. Prevista · Média externa · Votos` (+ as duas estruturais). Soma **1.122px** ⇒
+**fator 1,34** a 1.500px, e o separador recebe ~400px, que é onde ele mostra a leitura inteira.
+
+🔴 **A régua de quem entra: responde "destas empatadas, qual eu escolho?"** — ligar o Agrupar
+troca a PERGUNTA da tela. Entram o eixo da decisão (`decision`), o separador e as forças que
+ele compara (`why-this-work.ts`: avaliação = `platform_avg`, alcance = `total_votes`).
+⚠️ **Não existe coluna para a força "chance"** (ela só vive na Bússola), então o conjunto tem 2
+das 3 — inventar uma coluna aqui seria criar dado novo dentro de uma decisão de largura.
+
+⚠️ **A config do usuário NÃO é apagada** — o modo a ignora enquanto vale, e desligar o Agrupar
+devolve as colunas dele intactas. Por isso o seletor fica **desabilitado com a explicação**, em
+vez de sumir: controle que some obriga a pessoa a reencontrá-lo.
+
+⚠️ **As alternativas foram pesadas e recusadas, com motivo:** fixar a Lista inteira (como o
+Heatmap) tira uma escolha que o curador usa de propósito, e o aperto só existe neste modo; uma
+4ª view "Faixas" já existiu, foi absorvida pela Lista, e voltar divide a mesma pergunta em duas
+telas; **rolagem horizontal com largura mínima é a única saída que conserta as 26 de uma vez**,
+mas custa o cabeçalho fixo (com um contêiner de rolagem no meio, o `sticky` gruda nele e não na
+página) — fica como PR próprio, de tabela.
+
+Guardado por `tests/unit/ranking/modo-agrupar-colunas.test.ts`, que testa a **conta**, não a
+lista: soma das larguras ⇒ fator ≥ 1,2, e o separador ≥ 292px. Coluna nova no modo sem olhar a
+largura reprova (conferido com sonda).
+
+## Coluna sem largura declarada cai em 100px — e o conteúdo dela some sem nada acusar
+
+🔴 **`naturalWidthOf` termina em `?? 100`, e esse 100 é invisível.** A tabela é
+`table-layout: fixed` com larguras PROPORCIONAIS e **sem scroll horizontal** (é o que mantém o
+sticky header funcionando), então a coluna esquecida não estoura nada: ela nasce estreita, o
+conteúdo é cortado pelo `overflow` do `td` e a tela fica plausível.
+
+Foi assim com **"O que a separa"** (achado em 17/08/2026): a coluna com MAIS conteúdo da
+tabela — trilha de 92px + ícone + valor + frase + σ — era a única sem entrada em
+`DEFAULT_COLUMN_WIDTHS`. Medido no browser: trilha + ícone pedem **144px**, então em 100px
+sobravam **−44px** para a frase, que é o conteúdo da coluna e **nunca chegou a ser desenhada**;
+o título truncava em "O QU…". Hoje: `separator: 300`, guardado por
+`tests/unit/ui/coluna-declara-largura.test.ts`, que **deriva o universo de
+`WORK_TABLE_COLUMNS`** e exige que toda exceção esteja declarada com motivo (conferido com
+sonda).
+
+🔴 **Legenda não cabe em cabeçalho de tabela.** Os 3 ícones de força moravam dentro do `<th>`,
+embaixo do nome: pedem **260px** numa linha (a 8,5px; **271px a 9px**), então com a coluna em
+100px quebravam em quatro e esticavam o cabeçalho INTEIRO por causa de uma coluna. Mesmo com a
+coluna em 296px ela cabia por 14px de folga — no cabeçalho ela disputa a largura de UMA coluna e
+cobra altura da linha INTEIRA. Hoje mora na **linha do divisor de tier** (escolha da Ana), que é
+`colSpan` cheio: a restrição some e ela volta a 10px. ⚠️ Ela **trocou de lugar com os chips de
+composição**, que subiram para junto do rótulo do tier — eles dizem *de que* o tier é feito e o
+rótulo diz *de quantas obras*. ⚠️ Aparece em TODO divisor: o `<thead>` é sticky e acompanhava a
+rolagem, a linha do divisor não.
+
+🔴 **Com largura proporcional, "cabe" é sempre relativo — então a célula cede por PARTES.**
+Declarar 300 não garante 300 na tela: a coluna recebe `300 / soma_das_naturais` do container, e
+com 20+ colunas isso vira ~200px. Truncar não bastava (abaixo de ~230px o corte cai no meio de
+um número), e a ordem do sacrifício estava invertida — sumia o σ e depois o próprio VALOR.
+`SeparatorCell` é `@container` e desce em degraus medidos:
+
+| conteúdo disponível | mostra |
+|---|---|
+| ≥ 270px | barra 92px · ícone · valor · frase · σ |
+| ≥ 200px | a FRASE sai — a barra já diz o que ela diz (lado = direção, divisões = 1σ) |
+| < 200px | o σ sai e a barra encolhe pra 64px, para o VALOR caber inteiro |
+
+⚠️ O `title` da trilha carrega a frase completa em qualquer largura — nada do que sai fica
+inalcançável. ⚠️ **Isto não é testável no vitest** (jsdom não tem layout, e casar a string
+`@[270px]` protegeria a grafia): a verificação é no browser, replicando a coluna sobre uma
+página pública com o CSS real.
 
 ## A página da obra tem SEIS abas, e a régua delas é a PERGUNTA — não a procedência
 
@@ -2313,17 +2397,79 @@ não reconhece como padrão, e o "Todos" reacenderia no render seguinte.
 
 🔴 **O filtro de arte tinha o mais restritivo no MEIO**: `Tudo · Forte · Sem fraca`, sendo que
 "Forte" é o topo 20% e "Sem fraca" corta só o fundo 20%. Segmentado é lido como escala. Hoje é
-`Tudo · Sem os 20% piores · Top 20%`, com ordem em `ART_FILTER_ORDER` e o "20%" **derivado de
+`Tudo · Sem fracas · Top 20%`, com ordem em `ART_FILTER_ORDER` e o "20%" **derivado de
 `ART_BAND_CUTOFFS`** — o número no botão e o que corta a faixa são o mesmo fato.
 
 ⚠️ Havia uma 2ª cópia dos rótulos (`ART_FILTER_LABELS`) que **ninguém lia**: repetia palavra por
 palavra o texto de `ART_BAND_LABELS` (o do card da obra) e só era exercitada por um teste que
 lia o objeto, não a tela. Foi apagada; o tooltip do controle deriva de `ART_BAND_LABELS`.
 
-⚠️ **Custo medido dos rótulos novos:** o segmentado vai de 180 para **249px** e a linha passa a
-quebrar em duas de 1440 a 1920px (o vizinho "Esconder tags evitadas" não quebra). Não estoura o
-card, e **o painel não cresce**: "Conteúdo exibido" tem **53px de folga vertical** contra os
-~36px que a quebra consome. Encurtar para caber exigiria algo como "Sem 20%", que não diz de quê.
+🔴 **A COR do botão ativo era herdada, não escolhida — corrigido em 17/08/2026.** Com NENHUM
+filtro ligado, o card acendia **três pílulas**: "Não" (não esconde nada) e "Tudo" (não filtra
+arte) em ROSA, e o "Tudo" do 18+ em `primary`. Eram dois componentes com duas convenções — o
+`HideAvoidedSegment` pintava de rosa **qualquer** opção ativa, o `AdultContentSegment` tinha um
+flag `danger`. E o rosa nasceu (`f3df744`, 03/07) junto de "Esconder tags evitadas", onde ele
+era a stance de **tag evitada**; o filtro de arte reusou o componente em 14/08 e herdou uma cor
+que fala de tags. **O nome do componente virou a cor dele.**
+
+Hoje o dono é **`lib/ui/filter-segment-tone.ts`**, e o papel **deriva do valor que o botão grava
+na URL** — `null` limpa o parâmetro ⇒ `selected`; qualquer outro ⇒ `cutting`:
+
+| papel | quando | cor |
+|---|---|---|
+| `selected` | é a posição atual e **não tira nada** ("Não", "Tudo") | `primary` |
+| `cutting` | esta opção **remove obras** ("Fortes", "Top 20%"…) | rosa |
+| `adult` | 18+ — fato sobre a **OBRA**, não sobre o filtro | vermelho |
+
+⚠️ **A régua não é "azul = escolhido": é COR = está cortando.** Foi o que decidiu entre as duas
+saídas — com "ativo = primary sempre", a pílula fica igual ligada e desligada e o card deixa de
+dizer se está filtrando. ⚠️ `cutting` e `adult` são cores parecidas de propósito (as duas
+cortam); o que separa é `adult` seguir o vermelho de CONTEÚDO do `status-tone.ts`.
+⚠️ **Nenhum `cuts` booleano por call site** — flag digitado é como o "Não" volta a acender
+vermelho no próximo botão que alguém adicionar. Por isso `FilterSegment` (era
+`HideAvoidedSegment`) recebe `value` e o devolve no `onSelect`: cor e efeito saem do mesmo lugar.
+⚠️ A 3ª cópia das classes vivia no `AdultContentSegment` do **`/catalog`**
+(`components/titles/title-filters.tsx`) e passou a derivar do mesmo dono. Guardado por
+`tests/unit/ui/tom-do-segmentado-de-filtro.test.ts`, que **recorta a fonte de cada segmentado**
+e reprova classe de fundo escrita lá dentro (conferido com duas sondas).
+
+🔴 **O rótulo do meio era "Sem os 20% piores" e QUEBRAVA a linha — trocado por "Sem fracas" em
+17/08/2026 (escolha da Ana).** O custo estava medido desde o dia em que ele entrou e foi
+aceito como "não estoura o card": o segmentado ia de 180 para **249px** e a linha quebrava em
+duas. **"Não estoura" não é o mesmo que "cabe"** — a quebra caía justo na largura de uso, com o
+segmentado desalinhado dos dois vizinhos, e sobreviveu três dias a uma medição correta.
+
+Remedido no browser com o CSS e a fonte reais, replicando o grid da linha 2 (`showTierBand`
+ligado ⇒ ramo não-`roomy`). **O orçamento é 218px** (o que cabe no card de 366px do print) e o
+**teto útil é 208px** — a linha "Conteúdo 18+", que acima disso deixa de ser a mais larga:
+
+| rótulo | segmentado | a linha da arte cabe a partir de |
+|---|---|---|
+| `Sem os 20% piores` | 249px ❌ | card **399px** (grid ~1540) |
+| **`Sem fracas`** | **205px** ✅ | card **353px** (grid ~1376) |
+| ~~`Top 80%`~~ | 190px | card 340px |
+
+Com o card em 366px o antigo quebrava e o novo não; a altura cai de 255 para 219px e as três
+trilhas voltam a alinhar. ⚠️ Abaixo de ~350px de card a arte volta a quebrar, **junto com
+"Conteúdo 18+"** — degradação de tela estreita que já existia, não regressão desta troca.
+
+🔴 **A FORMA dos dois botões é diferente de propósito, e a primeira tentativa errou nisso.**
+`Top 80% · Top 20%` era simétrico, 190px e mais curto — e a simetria mentia: fazia o filtro de
+baixo parecer seleção positiva, quando ele é NEGATIVO e deixa passar obra **sem** estimativa
+(`artFilterMatches`). "Sem …" remove uma faixa; "Top …" seleciona um topo.
+
+⚠️ **Todo rótulo negativo COM o número estoura** — medido: `Sem o fundo 20%` 241px,
+`Sem 20% pior` 220px, `Sem o pior 20%` 230px; e os curtos que cabem sem dizer a ponta
+(`Corta 20%` 201px, `Fora 20%` 195px) trocam um erro por outro. Por isso o número **saiu** deste
+botão em vez de a frase encurtar: ele vive no tooltip, e botão sem número não mente sobre corte.
+⚠️ Em compensação a palavra "fraca" foi pro botão sem o "provavelmente" que `ART_BAND_LABELS`
+carrega — quem segura essa leitura é o rótulo **"Arte (estimada)"** ao lado. Se ele sair, o
+botão passa a prometer um julgamento da arte que o dado não paga (Chobits: 38 elogios, zero
+críticas, percentil 5).
+⚠️ **A ↓/↑ foi considerada e recusada** (`Sem ↓20% · Só ↑20%`, 207px): no MESMO painel a ↓ dos
+chips de Ordenação já quer dizer "decrescente".
+⚠️ O **chip de filtro ativo mudou junto** ("Sem a arte fraca (est.)"): chip com um nome ao lado
+de um botão com outro é dois nomes pro mesmo fato a dois centímetros um do outro.
 ⚠️ O controle é gateado por dono, então **não dá para vê-lo sem sessão** — as larguras acima
 foram medidas clonando a linha vizinha no browser, com a fonte real, e a árvore desenhada é
 guardada por `tests/unit/ranking/filtro-de-arte-render.test.tsx` (que monta o segmentado pelo
@@ -3982,11 +4128,12 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.134 passando (+24 pulados) em 299 arquivos** (294 passando + 5 pulados);
-medido em 2026-08-16 depois de APOSENTAR a auditoria de critérios — o número CAIU, e é o caso
-em que isso é o esperado: saiu `ai-calibration/politica-de-auditoria` (20 casos) junto com o
-código que ele guardava. Com `find tests -name '*.test.ts*'` = 299 conferido contra os 299
-executados. Antes: **3.148 em 300** (dicionário dos atributos).
+`npm run test` → **3.158 passando (+24 pulados) em 302 arquivos** (297 passando + 5 pulados);
+medido em 2026-08-17 com os três testes novos desta leva (tom do segmentado de filtro, largura
+declarada por coluna, colunas do modo Agrupar). Com `find tests -name '*.test.ts*'` = 302
+conferido contra os 302 executados. Antes: **3.134 em 299** (aposentadoria da auditoria de
+critérios — o número CAIU ali, e era o esperado: saiu `ai-calibration/politica-de-auditoria`,
+20 casos, junto com o código que ele guardava) e **3.148 em 300** (dicionário dos atributos).
 ⚠️ Esta rodada precisou de `--maxWorkers=4`: com o pool default duas rodadas cheias
 acusaram **1 falha cada, em arquivos DIFERENTES** (`recalibrar-limpa-recalc-pendente` e
 `ranking-status-exclusao`), os dois passando isolados e com a árvore limpa — é a flakiness
