@@ -1188,9 +1188,61 @@ pede ação), então o nível virou **forma**: três pontos, N acesos, com cor s
 desatualizada" no card do Interesse — eram os dois âmbares.
 
 ⚠️ **Escala de VALOR não é estado.** Nota, similaridade, alinhamento e Veredito são rampas
-contínuas e vêm sempre com o número ao lado (`8,4`, `72%`); elas seguem usando amarelo no
-meio da rampa. O que a régua proíbe é **chip de palavra** em âmbar que não seja
-"desatualizado".
+contínuas e vêm sempre com o número ao lado (`8,4`, `72%`), e por isso ficam fora da tabela
+acima. O que a régua proíbe é **chip de palavra** em âmbar que não seja "desatualizado".
+
+🔴 **Esta linha dizia "elas seguem usando amarelo no MEIO da rampa", e isso deixou de valer
+no Veredito em 17/08/2026** — ver o bloco logo abaixo. Prosa que descreve uma régua trocada é
+a família "dois critérios pro mesmo fato" no formato mais caro: quem lê aqui aprende o
+arranjo antigo e vai "consertar" o código.
+
+### A rampa do Veredito é SEMÁFORO, e tem dono: `lib/ui/verdict-band.ts`
+
+Todo número 0–100 do consultor IA — a coluna "Ver." do `/ranking`, o card do Veredito na
+página da obra e o `match_score` do Deep Dive — pinta por `verdictBandClass`:
+
+| faixa | corte | cor | o que diz |
+|---|---|---|---|
+| `forte` | ≥ 80 | violeta | combina muito |
+| `bom` | ≥ 60 | azul | combina |
+| `morno` | ≥ 40 | **cinza** | neutro |
+| `fraco` | < 40 | **âmbar** | a IA acha que NÃO é pra você |
+
+🔴 **O âmbar no FUNDO contraria a colorimetria de propósito** (escolha da Ana): amarelo já
+significa "pior que o neutro" em sinalização, então quem descreve o morno é o cinza. Até
+17/08 era o inverso (`≥40` âmbar, `<40` cinza).
+
+⚠️ **O preço, aceito:** âmbar é a cor do "desatualizado", e o ⟳ âmbar do re-rank stale fica a
+4px da pílula, na mesma célula. Veredito baixo + stale = dois âmbares vizinhos falando de
+coisas diferentes; quem separa é a forma e o esmaecimento da pílula.
+
+🔴 **Eram TRÊS cópias da rampa, e duas descreviam o mesmo número** (a coluna e o card da obra)
+— trocar uma cor fazia o mesmo 55 sair cinza na lista e âmbar na obra. O **traço de confiança**
+sob o número (era uma bolinha de 6px) é a 5ª cópia dos cortes `0,75/0,5` fechada: hoje sai de
+`confidenceMarkClass`, e confiança baixa é **rose** como nas outras quatro telas, não o slate
+que só esta usava.
+
+⚠️ **`border-<cor>` nunca pintou nessas pílulas, e as classes saíram.** Conferido no CSS
+servido em 17/08: `.border-violet-500\/40` é gerada dentro de `@layer utilities` (linha 5331)
+e o `* { border-color }` do `globals.css` está **fora de layer** (linha 18979) — sem layer
+vence layered. A borda sempre foi o neutro do tema. Devolver a cor a ela é `ring-1
+ring-<cor>-500/40`, e é decisão de aparência em aberto.
+
+⚠️ **A pílula tem 29px de altura** (era 22) e a linha não muda — medido no app em 17/08:
+pílula **29×29**, linha de dados **80–81px**, coluna 100px, `overflowX` 0. ⚠️ A conta que eu
+tinha feito antes de olhar (`td` é `h-14 py-3` ⇒ caixa de 32px) dava a resposta certa pelo
+motivo errado: quem define a altura da linha é a célula do título, não o `h-14`.
+
+🔴 **O slot do traço leva uma TRILHA neutra (`bg-foreground/10`) quando não há confiança, e
+isso só apareceu na tela real:** medido, **297 das 695 obras com Veredito (43%) não têm
+confiança registrada** — no `/ranking` foram 14 das 40 linhas visíveis. Com o slot vazio, o
+número fica alto dentro da pílula e lê como desalinhamento; o mockup não pegou isso porque
+tinha confiança em TODAS as linhas inventadas. A trilha a 10% fica muito abaixo das três
+cores saturadas, então diz "sem registro" e não "confiança baixa" (que é rose).
+
+Guardado por `tests/unit/ui/faixa-do-veredito.test.tsx`, que inclui a contraprova do arranjo
+antigo, reprova quem remontar a rampa a partir do corte 80 e exige que a trilha vazia não
+seja nenhuma das três cores (as três sondas conferidas).
 
 ⚠️ **Violeta fica FORA da régua**: `✨` é procedência ("quem escreveu isto"), não estado.
 
@@ -4233,11 +4285,13 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.167 passando (+24 pulados) em 303 arquivos** (298 passando + 5 pulados);
-medido em 2026-08-17 com o rateio de largura do modo Agrupar, que **não somou arquivo** — os
-+2 casos são o teste do modo trocando um piso inventado por dois: "a soma é a largura da
-tabela" e "nenhuma coluna recebe menos do que pede". Com `find tests -name '*.test.ts*'` =
-303 conferido contra os 303 executados. Antes: **3.165 em 303** (troca da coluna de status —
+`npm run test` → **3.178 passando (+24 pulados) em 304 arquivos** (299 passando + 5 pulados);
+medido em 2026-08-17 com a rampa do Veredito ganhando dono: **+11 casos e +1 arquivo**
+(`ui/faixa-do-veredito`), o teste novo inteiro. Com `find tests -name '*.test.ts*'` = **304**
+conferido contra os 304 executados. Antes: **3.167 em 303** (rateio de largura do modo
+Agrupar, que **não somou arquivo** — os +2 casos eram o teste do modo trocando um piso
+inventado por dois: "a soma é a largura da tabela" e "nenhuma coluna recebe menos do que
+pede"), **3.165 em 303** (troca da coluna de status —
 os +7 casos e o +1 arquivo dali eram `covers/sondar-capa-tri-estado`, commit `69ee961`, e a
 linha tinha nascido velha), **3.158 em 302** (tom do segmentado de filtro,
 largura declarada por coluna, colunas do modo Agrupar), **3.134 em 299** (aposentadoria da auditoria de
