@@ -361,9 +361,12 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   // conteúdo da coluna, tinha −44px para caber e nunca era desenhada. O título também
   // truncava ("O QU…", precisa de 127px). Medido no browser em 17/08/2026: célula típica
   // 292px, pior caso 335px.
-  // ⚠️ São 350 e não 300 porque a largura aqui é uma SHARE, não um tamanho: com as 14 colunas
-  // do modo Agrupar (soma 1.762px), 300 daria 255px reais e a frase sumiria. 350 ⇒ 298px.
-  separator: 350,
+  // ⚠️ São 355 e não 300 porque a largura aqui é uma SHARE, não um tamanho: com as 14 colunas
+  // do modo Agrupar (soma 1.797px), 300 daria 250px reais e a frase sumiria. 355 ⇒ 296px.
+  // ⚠️ Foi de 350 para 355 quando `personal_status` (110) deu lugar a `publication_status`
+  // (130): os 20px de share extra derrubavam o separador para 293px, a 1px do piso de 292.
+  // A coluna só existe no modo Agrupar, então subir esta linha não mexe em nenhuma outra tela.
+  separator: 355,
   ai_status: 80,
   updated_at: 110,
   last_read_at: 110,
@@ -382,9 +385,21 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
  *
  * 🔴 **A régua de quem entra: responde "destas empatadas, qual eu escolho?".** Ligar o Agrupar
  * troca a PERGUNTA da tela — de "meu catálogo em N colunas" para a escolha dentro de um tier.
- * Entram o eixo do tier (`decision`), o separador, o estado da obra e o seu (status, capítulos,
- * ano, arte), as notas que sustentam a escolha, e as **forças** que o separador compara
+ * Entram o eixo do tier (`decision`), o separador, o estado da obra (publicação, capítulos, ano,
+ * arte), as notas que sustentam a escolha, e as **forças** que o separador compara
  * (`why-this-work.ts`: avaliação = `platform_avg` · alcance = `total_votes`).
+ *
+ * 🔴 **O status é o de PUBLICAÇÃO, não o seu** (escolha da Ana, 17/08/2026). Aqui a coluna
+ * responde "dá pra começar agora?" — concluída · em andamento · hiato · cancelada —, que é o
+ * mesmo eixo que o refino por mood pontua em `startabilityOf` e que a rodada de escolha dentro
+ * do tier de fato usa. O `personal_status` que estava no lugar entrava `iconOnly` e é
+ * quase-constante por CONSTRUÇÃO neste modo: o filtro padrão do `/ranking` já recorta a lista
+ * em Untracked + Want to Read (`BASELINE_PERSONAL_STATUSES`), então a coluna gastava uma share
+ * do orçamento para repetir "—" linha após linha.
+ *
+ * ⚠️ E ele custa **20px a mais** de largura natural (130 × 110), que saem da share de todo
+ * mundo — daí `separator` ter subido junto, de 350 para 355. Sem isso o separador caía para
+ * 293px, a 1px do piso de 292: passaria no teste e não sobreviveria ao próximo ajuste.
  *
  * ⚠️ **Não existe coluna para a força "chance"** — ela só aparece na Bússola. Por isso o
  * conjunto tem 2 das 3 forças, e não 3: inventar uma coluna aqui seria criar dado novo dentro
@@ -397,9 +412,9 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
  * Prevista, é o contrário. Tirar qualquer um dos dois apaga informação em metade das
  * ordenações.
  *
- * 🔴 **O ORÇAMENTO é a restrição, e ele fecha na largura do separador.** A soma é **1.762px**;
- * a 1.500px de tela o fator é 0,85 e o separador recebe **298px** — acima dos 292 de que a
- * leitura inteira precisa, e é por isso que `separator` vale 350 e não 300: a share dele tinha
+ * 🔴 **O ORÇAMENTO é a restrição, e ele fecha na largura do separador.** A soma é **1.797px**;
+ * a 1.500px de tela o fator é 0,83 e o separador recebe **296px** — acima dos 292 de que a
+ * leitura inteira precisa, e é por isso que `separator` vale 355 e não 300: a share dele tinha
  * que aguentar o conjunto crescer. Coluna nova aqui **empurra o separador para baixo desse
  * piso**, e é isso que `tests/unit/ranking/modo-agrupar-colunas.test.ts` reprova — não o
  * tamanho da lista.
@@ -413,8 +428,8 @@ export const TIER_MODE_COLUMN_KEYS = [
   // identidade
   "fav",
   "title",
-  // o que é seu, e o que a obra é
-  "personal_status",
+  // o que a obra é — inclusive se dá para começá-la agora
+  "publication_status",
   "chapters_total",
   "year",
   "art",
