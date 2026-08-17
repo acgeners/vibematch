@@ -58,17 +58,22 @@ describe("o segmentado de arte na árvore desenhada", () => {
     ])
   })
 
-  it("o texto visível traz o número, e ele é o corte de faixa", () => {
+  it("o botão de cima traz o corte de faixa; o do meio nomeia a FAIXA, sem número", () => {
     render(<Segmento artMode="off" />)
-    const pctBaixo = Math.round(ART_BAND_CUTOFFS.fraca * 100)
     const pctAlto = Math.round((1 - ART_BAND_CUTOFFS.forte) * 100)
-    expect(screen.getByText(`Sem os ${pctBaixo}% piores`)).toBeTruthy()
     expect(screen.getByText(`Top ${pctAlto}%`)).toBeTruthy()
+    // "Sem os 20% piores" saiu em 17/08/2026 porque quebrava a linha do card (249px contra
+    // 218px de orçamento) — e toda variante negativa COM número também estoura. O número desse
+    // lado ficou no tooltip; o botão passou a chamar a faixa pelo nome do card da obra.
+    const meio = screen.getAllByRole("button")[1]
+    expect(meio.textContent).toMatch(/frac/i)
+    expect(meio.textContent).not.toMatch(/\d/)
   })
 
   it("cada botão carrega o tooltip do seu lado da assimetria", () => {
     // A frase do "sem estimativa" é a única coisa que a pessoa não deduz da tela, e os dois
-    // lados são opostos: "Top 20%" exclui quem não tem estimativa, "Sem os 20% piores" mantém.
+    // lados são opostos: "Top 20%" exclui quem não tem estimativa, "Sem fracas" mantém. A
+    // FORMA dos rótulos já separa remover de selecionar; o resto é o tooltip.
     render(<Segmento artMode="off" />)
     expect(
       screen.getByText(ART_FILTER_SEGMENT_LABELS.forte).getAttribute("title")

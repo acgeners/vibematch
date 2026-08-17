@@ -61,7 +61,23 @@ export function ForceIcon({ force, className }: { force: ForceKey; className?: s
 
 const FORCE_NAME: Record<ForceKey, string> = { chance: "chance", avaliacao: "crítica", alcance: "alcance" }
 
-/** Legenda da coluna: ensina os 3 ícones e o que a régua mede. Uma vez, no header. */
+/**
+ * Legenda da coluna: os 3 ícones de força e o que a régua mede.
+ *
+ * 🔴 **Ela mora na LINHA DO DIVISOR de tier, não no cabeçalho da coluna** (escolha da Ana,
+ * 17/08/2026 — trocou de lugar com os chips de composição, que subiram para junto do rótulo do
+ * tier). O cabeçalho foi onde ela nasceu e é o pior lugar possível: ali ela disputa a largura
+ * de UMA coluna e cobra altura da linha INTEIRA. Medido no browser: 260px a 8,5px, contra 274
+ * de conteúdo disponível — cabia por 14px, e só depois que a coluna passou de 100 para 296.
+ * Na linha do divisor o `colSpan` é cheio e a restrição some.
+ *
+ * ⚠️ **O tamanho default (8,5px) é herança daquele aperto** — quem a desenha no divisor sobe
+ * para 10px pelo `className`. Se ela um dia voltar para um espaço estreito, 9px já quebra a
+ * linha (medido: 271px).
+ *
+ * ⚠️ Uma cópia só, num lugar só. Ela já esteve simultaneamente no tooltip do cabeçalho e no
+ * `<th>`; duas cópias do mesmo texto divergem na primeira edição.
+ */
 export function SeparatorLegend({ className }: { className?: string }) {
   return (
     <span className={cn("mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[8.5px] font-semibold normal-case tracking-normal", className)}>
@@ -76,12 +92,18 @@ export function SeparatorLegend({ className }: { className?: string }) {
   )
 }
 
-/** A trilha com a régua de 1σ e a baseline central. Compartilhada pelos dois estados. */
+/**
+ * A trilha com a régua de 1σ e a baseline central. Compartilhada pelos dois estados.
+ *
+ * ⚠️ Ela ENCOLHE no degrau mais estreito (92 → 64px). A barra é proporcional e os ticks
+ * acompanham, então continua correta — e é o que dá espaço pro VALOR caber em vez de ser
+ * cortado ao meio: a 160px de coluna, 92px de trilha deixavam 16px pra "28,4K".
+ */
 function Track({ children, title }: { children?: React.ReactNode; title: string }) {
   return (
     <span
       title={title}
-      className="relative block h-3.5 w-[92px] shrink-0 overflow-hidden rounded-[3px] bg-foreground/[0.07]"
+      className="relative block h-3.5 w-16 shrink-0 overflow-hidden rounded-[3px] bg-foreground/[0.07] @[200px]:w-[92px]"
     >
       {TICKS_SIGMA.map((k) => (
         <span
@@ -99,12 +121,17 @@ function Track({ children, title }: { children?: React.ReactNode; title: string 
 
 /**
  * Frase do separador. O `rank` vem da função pura e é o que impede o texto de
- * afirmar mais do que o dado sustenta: "a mais alta do grupo" só quando é o
- * máximo ÚNICO — com duas obras empatadas no topo, seria falso nas duas.
+ * afirmar mais do que o dado sustenta: "a mais alta" só quando é o máximo ÚNICO
+ * — com duas obras empatadas no topo, seria falso nas duas.
+ *
+ * ⚠️ Dizia "a mais alta DO GRUPO", e o "do grupo" saiu por largura medida (−50px numa coluna
+ * que raramente passa de 260): a linha divisória logo acima já nomeia o grupo ("3 obras de
+ * prioridade equivalente") e o `title` da trilha continua dizendo "da média do grupo" por
+ * extenso. Repetir o enquadramento em toda linha custava justamente o espaço do σ.
  */
 function tail(rank: WorkSeparator["rank"]): string {
-  if (rank === "max") return "a mais alta do grupo"
-  if (rank === "min") return "a mais baixa do grupo"
+  if (rank === "max") return "a mais alta"
+  if (rank === "min") return "a mais baixa"
   return rank === "above" ? "acima da média" : "abaixo da média"
 }
 
@@ -149,14 +176,19 @@ export function SeparatorCell({
   // obra está, na média do grupo. Dizer isso por extenso em toda linha (era
   // "— nada a separa daqui") repetia um texto longo dezenas de vezes.
   if (!separator || value == null) {
+    // O `@container` também aqui: sem ele o `@[200px]:w-[92px]` da trilha não resolve e a
+    // linha vazia fica com a barra estreita ao lado das cheias, que é largura demais pra
+    // diferença NENHUMA — as duas têm que medir o mesmo.
     return (
-      <Track title="Na média do grupo — nenhuma força destoa 1σ das empatadas">
-        <span
-          aria-hidden
-          className="absolute left-1/2 top-1/2 size-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted-foreground/75"
-        />
-        <span className="sr-only">Na média do grupo</span>
-      </Track>
+      <span className="@container flex min-w-0 items-center">
+        <Track title="Na média do grupo — nenhuma força destoa 1σ das empatadas">
+          <span
+            aria-hidden
+            className="absolute left-1/2 top-1/2 size-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted-foreground/75"
+          />
+          <span className="sr-only">Na média do grupo</span>
+        </Track>
+      </span>
     )
   }
 
@@ -166,8 +198,8 @@ export function SeparatorCell({
   const cls = FORCE_CLASS[force]
 
   return (
-    <span className="flex min-w-0 items-center gap-2">
-      <Track title={`${FORCE_NAME[force]}: ${value} — desvio da média do grupo, cada divisão vale 1σ`}>
+    <span className="@container flex min-w-0 items-center gap-2">
+      <Track title={`${FORCE_NAME[force]}: ${value} ${tail(rank)} — desvio da média do grupo, cada divisão vale 1σ`}>
         <span
           aria-hidden
           className={cn("absolute inset-y-[3px] min-w-[2px] rounded-[2px]", cls.fill)}
@@ -175,9 +207,23 @@ export function SeparatorCell({
         />
       </Track>
       <ForceIcon force={force} className={cls.text} />
-      <span className="min-w-0 truncate text-[11.5px] leading-tight">
-        <b className={cn("font-semibold", cls.text)}>{value}</b> {tail(rank)}{" "}
-        <span className="font-mono tabular-nums text-muted-foreground/70">
+      {/* 🔴 **A célula cede por PARTES, e a ordem do sacrifício é medida.** As larguras da
+          tabela são proporcionais e não há scroll horizontal, então esta coluna vive apertada:
+          com os três pedaços num span só, o `overflow` do `td` cortava do fim para o começo —
+          sumia o σ e, a 200px, o próprio VALOR ("8… +1,2σ"), que é o conteúdo da célula.
+          Truncar também não bastava: abaixo de ~230px não sobra o que truncar e o corte cai no
+          meio de um número.
+
+          Hoje quem manda é o container query da própria célula:
+            ≥ 270px  barra · ícone · valor · frase · σ
+            ≥ 200px  a FRASE sai — a barra já diz o que ela diz (lado = direção, divisões = 1σ)
+            abaixo   sai o σ — a barra continua mostrando a grandeza, com os ticks de 1σ
+          O `title` da barra carrega a frase inteira em qualquer largura, então nada do que sai
+          fica inalcançável. */}
+      <span className="flex min-w-0 items-baseline gap-1 text-[11.5px] leading-tight">
+        <b className={cn("shrink-0 font-semibold", cls.text)}>{value}</b>
+        <span className="hidden min-w-0 truncate @[270px]:inline">{tail(rank)}</span>
+        <span className="hidden shrink-0 font-mono tabular-nums text-muted-foreground/70 @[200px]:inline">
           {up ? "+" : "−"}
           {Math.abs(z).toFixed(1).replace(".", ",")}σ
         </span>

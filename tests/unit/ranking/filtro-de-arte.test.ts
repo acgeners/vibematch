@@ -111,8 +111,37 @@ describe("os rótulos do controle DERIVAM dos cortes de faixa", () => {
     // lugares, mudar o corte deixa o botão mentindo — sem erro e sem log.
     expect(ART_FILTER_PERCENTS.fraca).toBe(Math.round(ART_BAND_CUTOFFS.fraca * 100))
     expect(ART_FILTER_PERCENTS.forte).toBe(Math.round((1 - ART_BAND_CUTOFFS.forte) * 100))
-    expect(ART_FILTER_SEGMENT_LABELS.sem_fraca).toContain(String(ART_FILTER_PERCENTS.fraca))
     expect(ART_FILTER_SEGMENT_LABELS.forte).toContain(String(ART_FILTER_PERCENTS.forte))
+    // 🔴 O botão do "sem_fraca" NÃO imprime número, e isso é medido: com ele o segmentado vai
+    // a 241px contra 218px de orçamento e a linha do card quebra. Quem carrega o corte de
+    // baixo é o TOOLTIP — botão sem número não tem como mentir sobre o corte.
+    expect(ART_FILTER_SEGMENT_LABELS.sem_fraca).not.toMatch(/\d/)
+    expect(ART_FILTER_TOOLTIPS.sem_fraca).toContain(String(ART_FILTER_PERCENTS.fraca))
+  })
+
+  it("os dois botões não podem cair no MESMO texto", () => {
+    // Dois filtros OPOSTOS com o mesmo nome não quebram nada visível: o segmentado continua com
+    // três botões e a URL segue certa. Só a pessoa é que não consegue escolher.
+    expect(ART_FILTER_SEGMENT_LABELS.sem_fraca).not.toBe(ART_FILTER_SEGMENT_LABELS.forte)
+    expect(ART_FILTER_CHIP_LABELS.sem_fraca).not.toBe(ART_FILTER_CHIP_LABELS.forte)
+  })
+
+  it("sem número, o botão chama a FAIXA pelo nome que o card da obra usa", () => {
+    // Sem número, a única forma de este botão mentir é a faixa ser renomeada e ele ficar pra
+    // trás — "Sem fracas" sobre uma faixa que o resto do app passou a chamar de outra coisa.
+    // `ART_BAND_LABELS` é o dono do nome; as três superfícies têm que segui-lo.
+    const nucleo = "frac"
+    expect(ART_BAND_LABELS.fraca.toLowerCase()).toContain(nucleo)
+    expect(ART_FILTER_SEGMENT_LABELS.sem_fraca.toLowerCase()).toContain(nucleo)
+    expect(ART_FILTER_CHIP_LABELS.sem_fraca.toLowerCase()).toContain(nucleo)
+  })
+
+  it("o chip do filtro ativo repete o que o BOTÃO diz", () => {
+    // Chip com um nome e botão com outro, a dois centímetros um do outro, é a família que já
+    // deu três nomes à previsão de Interesse. Cada lado repete o seu identificador: o número,
+    // no que tem número; a faixa, no que não tem.
+    expect(ART_FILTER_CHIP_LABELS.forte).toContain(String(ART_FILTER_PERCENTS.forte))
+    expect(ART_FILTER_CHIP_LABELS.sem_fraca).not.toMatch(/\d/)
   })
 
   it("o painel monta os botões a partir da ORDEM, sem enumerar os três à mão", () => {

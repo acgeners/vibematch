@@ -27,6 +27,7 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { filterSegmentClass } from "@/lib/ui/filter-segment-tone"
 import { TagFilter } from "@/components/titles/tag-filter"
 import type { TagOption } from "@/server/queries/tags"
 import { searchWorkSuggestions } from "@/server/actions/work-search"
@@ -234,15 +235,10 @@ function AdultContentSegment({
   value: "all" | "hide" | "only"
   onChange: (v: "all" | "hide" | "only") => void
 }) {
+  // Mesmo tom do segmentado do /ranking, do mesmo dono — este arquivo tinha uma cópia literal
+  // das classes, e cópia é como as duas telas passam a discordar sobre o mesmo controle.
   const seg = (active: boolean, danger: boolean) =>
-    cn(
-      "inline-flex h-7 items-center gap-1 rounded px-2.5 text-xs font-medium transition-colors",
-      active
-        ? danger
-          ? "bg-red-500/15 text-red-600 dark:text-red-300"
-          : "bg-primary/15 text-primary"
-        : "text-muted-foreground hover:text-foreground",
-    )
+    filterSegmentClass(active, danger ? "adult" : "selected")
   return (
     <div className="inline-flex rounded-md border border-border/70 bg-background/60 p-0.5">
       <button

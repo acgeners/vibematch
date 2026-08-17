@@ -53,6 +53,7 @@ import {
   ART_FILTER_TOOLTIPS,
   parseArtFilter,
 } from "@/lib/art/url"
+import { filterSegmentClass, filterSegmentRole } from "@/lib/ui/filter-segment-tone"
 
 interface SavedFilterPreset {
   id: string
@@ -1771,14 +1772,31 @@ interface GenreRuleGridProps {
   showLegend?: boolean
 }
 
-/** Um segmento do controle "Esconder evitadas" (rascunho; estado ativo em rosa). */
-function HideAvoidedSegment({
+/**
+ * Um botão de segmentado de FILTRO do rascunho — usado por "Esconder tags evitadas" e por
+ * "Arte (estimada)".
+ *
+ * 🔴 Chamava-se `HideAvoidedSegment` e acendia o ativo SEMPRE em rosa. O nome era o problema:
+ * o rosa veio da stance de "tag evitada", e quando o filtro de arte reusou o componente ele
+ * herdou uma cor que fala de tags — inclusive no "Tudo", que não filtra nada. Quem decide o
+ * tom agora é `lib/ui/filter-segment-tone.ts`, a partir do VALOR que o botão grava na URL:
+ * `null` limpa o parâmetro ⇒ `selected`; qualquer outro corta obras ⇒ `cutting`.
+ *
+ * ⚠️ É por isso que o botão recebe `value` e devolve ele no `onSelect`, em vez de um
+ * `onSelect: () => void` fechado sobre o valor: com o valor de fora, cor e efeito saem do
+ * mesmo lugar. Um `cuts` booleano por call site é como o "Não" voltaria a acender vermelho no
+ * próximo botão que alguém adicionar.
+ */
+function FilterSegment({
+  value,
   onSelect,
   active,
   label,
   tooltip,
 }: {
-  onSelect: () => void
+  /** o que este botão grava no parâmetro — `null` é o "não filtra" */
+  value: string | null
+  onSelect: (value: string | null) => void
   active: boolean
   label: string
   tooltip: string
@@ -1788,13 +1806,9 @@ function HideAvoidedSegment({
       <TooltipTrigger asChild>
         <button
           type="button"
-          onClick={onSelect}
+          onClick={() => onSelect(value)}
           aria-pressed={active}
-          className={`inline-flex h-7 items-center whitespace-nowrap rounded px-2.5 text-xs font-medium transition-colors ${
-            active
-              ? "bg-rose-500/15 text-rose-600 dark:text-rose-300"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
+          className={filterSegmentClass(active, filterSegmentRole(value))}
         >
           {label}
         </button>
@@ -1817,14 +1831,10 @@ function AdultContentSegment({
   value: "all" | "hide" | "only"
   onChange: (v: "all" | "hide" | "only") => void
 }) {
+  // O vermelho aqui NÃO é o rosa do "está cortando": é o vermelho de CONTEÚDO (o mesmo do 🔞),
+  // fato sobre a obra e não sobre o filtro. Ver `lib/ui/filter-segment-tone.ts`.
   const seg = (active: boolean, danger: boolean) =>
-    `inline-flex h-7 items-center gap-1 whitespace-nowrap rounded px-2.5 text-xs font-medium transition-colors ${
-      active
-        ? danger
-          ? "bg-red-500/15 text-red-600 dark:text-red-300"
-          : "bg-primary/15 text-primary"
-        : "text-muted-foreground hover:text-foreground"
-    }`
+    filterSegmentClass(active, danger ? "adult" : "selected")
   return (
     <div className="inline-flex rounded-md border border-border/70 bg-background/60 p-0.5">
       <button
@@ -3805,20 +3815,25 @@ export function RankingFilters({
                         </Label>
                         <TooltipProvider delayDuration={150} disableHoverableContent>
                           <div className="inline-flex rounded-md border border-border/70 bg-background/60 p-0.5">
-                            <HideAvoidedSegment
-                              onSelect={() => updateParams({ hide_avoided: null })}
+                            {/* O `value` é a única fonte: ele grava o parâmetro E decide o tom
+                                (`null` ⇒ não corta nada ⇒ azul). */}
+                            <FilterSegment
+                              value={null}
+                              onSelect={(v) => updateParams({ hide_avoided: v })}
                               active={hideAvoidedMode === "off"}
                               label="Não"
                               tooltip="Não esconde nada; mostra todas as obras."
                             />
-                            <HideAvoidedSegment
-                              onSelect={() => updateParams({ hide_avoided: "strong" })}
+                            <FilterSegment
+                              value="strong"
+                              onSelect={(v) => updateParams({ hide_avoided: v })}
                               active={hideAvoidedMode === "strong"}
                               label="Fortes"
                               tooltip="Esconde obras com tags evitadas marcadas como fortes (2×)."
                             />
-                            <HideAvoidedSegment
-                              onSelect={() => updateParams({ hide_avoided: "all" })}
+                            <FilterSegment
+                              value="all"
+                              onSelect={(v) => updateParams({ hide_avoided: v })}
                               active={hideAvoidedMode === "all"}
                               label="Todas"
                               tooltip="Esconde obras com qualquer tag evitada."
@@ -3852,9 +3867,10 @@ export function RankingFilters({
                       <TooltipProvider delayDuration={150} disableHoverableContent>
                         <div className="inline-flex rounded-md border border-border/70 bg-background/60 p-0.5">
                           {ART_FILTER_ORDER.map((value) => (
-                            <HideAvoidedSegment
+                            <FilterSegment
                               key={value ?? "off"}
-                              onSelect={() => updateParams({ [ART_FILTER_PARAM]: value ?? null })}
+                              value={value ?? null}
+                              onSelect={(v) => updateParams({ [ART_FILTER_PARAM]: v })}
                               active={artMode === (value ?? "off")}
                               label={value ? ART_FILTER_SEGMENT_LABELS[value] : "Tudo"}
                               tooltip={

@@ -67,6 +67,7 @@ import type { WorkPreview } from "@/server/actions/works"
 import {
   DEFAULT_COLUMN_WIDTHS,
   getConfiguredWorkColumns,
+  getTierModeColumns,
   getDefaultWorkColumnConfig,
   readWorkColumnConfig,
   subscribeWorkColumnConfig,
@@ -961,19 +962,33 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   /** O que a caixa do cabeçalho governa: as obras NA TELA, não o catálogo. */
   const visibleIds = useMemo(() => displayEntries.map((e) => e.workId), [displayEntries])
 
-  // "O que a separa" mede o desvio contra as empatadas DO TIER: sem tiers na tela
-  // ela não tem grupo a que se referir, e sairia medindo contra um conjunto que
-  // não está sendo exibido. Some da tabela — a escolha no seletor continua valendo
-  // (ela é a outra metade da conjunção), só não tem efeito com o Agrupar desligado.
+  /**
+   * 🔴 **Com tiers na tela, quem manda nas colunas é o MODO, não o seletor.**
+   * Ligar o Agrupar troca a pergunta da tela — de "meu catálogo em N colunas"
+   * para "destas empatadas, qual eu escolho?" —, e a tabela é proporcional e sem
+   * rolagem horizontal: com as 26 colunas que o seletor permite, a soma das
+   * larguras naturais é 3.066px para ~1.500px de tela ⇒ **fator 0,49**, e TODA
+   * coluna sai pela metade (Ano em 34px, Publicação em 64px). O conjunto do modo
+   * soma 1.122px ⇒ fator 1,34: sobra largura em vez de faltar.
+   *
+   * ⚠️ A config do usuário não é tocada — desligar o Agrupar devolve as colunas
+   * dele intactas. Ver `TIER_MODE_COLUMN_KEYS` para a régua de quem entra.
+   *
+   * Sem tiers, "O que a separa" sai da tabela: ela mede o desvio contra as
+   * empatadas DO TIER e, sem grupo, mediria contra um conjunto que não está na
+   * tela. A escolha no seletor continua valendo, só não tem efeito.
+   */
   const columns = useMemo(
     () =>
-      [
-        SELECT_COL,
-        RANK_COL,
-        // O "select" da config sai da lista: ele já entra prependido acima, e sem
-        // o filtro apareceria DUAS vezes (com o mesmo `key`, que o React reclama).
-        ...getConfiguredWorkColumns(config).filter((c) => c.key !== "select" && c.key !== "actions"),
-      ].filter((c) => c.key !== "separator" || tiers != null),
+      tiers != null
+        ? [SELECT_COL, RANK_COL, ...getTierModeColumns()]
+        : [
+            SELECT_COL,
+            RANK_COL,
+            // O "select" da config sai da lista: ele já entra prependido acima, e sem
+            // o filtro apareceria DUAS vezes (com o mesmo `key`, que o React reclama).
+            ...getConfiguredWorkColumns(config).filter((c) => c.key !== "select" && c.key !== "actions"),
+          ].filter((c) => c.key !== "separator"),
     [config, tiers],
   )
 
@@ -1263,9 +1278,6 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                   style={{ textAlign: align }}
                 >
                   {cellContent}
-                  {/* Os 3 ícones de força só fazem sentido ao lado da coluna que
-                      os usa — ensinar uma vez, no cabeçalho, como na antiga Faixas. */}
-                  {col.key === "separator" && <SeparatorLegend />}
                   <ResizeHandle
                     columnKey={col.key}
                     onResize={setWidth}
@@ -1291,6 +1303,10 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                     composition={compositionByStart.get(index)}
                     focusedArchetype={focusedArchetype}
                     onFocusArchetype={toggleArchetype}
+                    // A linha do divisor é `colSpan` cheio: aqui a legenda não disputa a
+                    // largura de uma coluna nem custa altura do cabeçalho, então volta ao
+                    // tamanho legível (8,5px era o que cabia no `<th>`, não o que se lê bem).
+                    legendSlot={<SeparatorLegend className="mt-0 text-[10px]" />}
                     selectSlot={
                       tierDivider.count >= 2 ? (
                         <BulkSelectCheckbox
@@ -1569,10 +1585,14 @@ function ViewModeToolbar({
   // proibir um agrupamento que funciona perfeitamente.
   const groupAvailable = viewMode === "list" ? tiersAvailable : true
   const tiersActive = tiersEnabled && groupAvailable
+  // Na Lista, o Agrupar não é só um agrupamento: é um MODO com colunas próprias
+  // (ver `TIER_MODE_COLUMN_KEYS`). O seletor fica desabilitado enquanto ele vale —
+  // desabilitado e não ausente, porque controle que some obriga a reencontrá-lo.
+  const tierModeOnList = viewMode === "list" && tiersEnabled && groupAvailable
   const groupTitle = !groupAvailable
     ? "Agrupar em tiers só se aplica ao ordenar por Prioridade ou Nota Prevista (decrescente)."
     : viewMode === "list"
-      ? "Agrupar em tiers de prioridade equivalente. Traz junto a coluna “O que a separa”."
+      ? "Agrupar em tiers de prioridade equivalente. Traz as colunas da escolha dentro do tier — inclusive “O que a separa” — no lugar das suas; desligar devolve as suas."
       : viewMode === "cards"
         ? "Agrupar os cards em prateleiras por tipo de aposta."
         : "Agrupar a lista ao lado do mapa em prateleiras por tipo de aposta."
@@ -1598,8 +1618,12 @@ function ViewModeToolbar({
             volta obriga a reencontrar a barra a cada troca de view. */}
         <WorkColumnPicker
           namespace="ranking"
-          disabled={viewMode !== "list"}
-          disabledTitle="As colunas valem na view Lista."
+          disabled={viewMode !== "list" || tierModeOnList}
+          disabledTitle={
+            tierModeOnList
+              ? "Com o Agrupar ligado, a Lista usa as colunas da escolha dentro do tier. Desligue o Agrupar para voltar às suas."
+              : "As colunas valem na view Lista."
+          }
         />
         <button
               type="button"

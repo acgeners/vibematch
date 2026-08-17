@@ -71,7 +71,10 @@ export const ART_FILTER_ORDER = [undefined, "sem_fraca", "forte"] as const
  * 🔴 O número no botão e o número que corta a faixa são o MESMO fato. Escritos em dois
  * lugares, mudar o corte deixa o rótulo mentindo em silêncio — a família de erro que este
  * projeto já pagou no `LOW_BALANCE_USD` e na banda dos tiers. `ART_BAND_CUTOFFS.fraca = 0.2`
- * ⇒ "os 20% piores"; `forte = 0.8` ⇒ o que sobra acima ⇒ "top 20%".
+ * ⇒ "o fundo 20%" (o que o tooltip diz que sai); `forte = 0.8` ⇒ o que sobra acima ⇒ "top 20%".
+ *
+ * ⚠️ O lado `fraca` só aparece no TOOLTIP — o botão dele nomeia a FAIXA, não a posição (ver
+ * `ART_FILTER_SEGMENT_LABELS`). Botão sem número não tem como mentir sobre o corte.
  */
 export const ART_FILTER_PERCENTS = {
   fraca: Math.round(ART_BAND_CUTOFFS.fraca * 100),
@@ -79,24 +82,56 @@ export const ART_FILTER_PERCENTS = {
 } as const
 
 /**
- * Rótulos do CONTROLE. Curtos porque o segmentado divide ~200px com um rótulo de 96px — o
+ * Rótulos do CONTROLE. Curtos porque o segmentado divide ~218px com um rótulo de 96px — o
  * nome longo mora no tooltip, e ele vem de `ART_BAND_LABELS` (o dono desses nomes, usado
  * pelo card da obra), nunca de uma 2ª cópia aqui.
  *
- * ⚠️ "piores" descreve a POSIÇÃO na estimativa, não a arte: medido, Chobits tem 38 palavras
- * de elogio, zero de crítica, e cai no percentil 5. Quem segura essa leitura é o rótulo
- * "Arte (estimada)" ao lado do controle — se ele sair, estes nomes passam a prometer o que
- * o dado não paga.
+ * 🔴 **"Sem os 20% piores" virou "Sem fracas" (escolha da Ana, 17/08/2026) porque o rótulo
+ * longo QUEBRAVA a linha.** O custo estava medido desde o dia em que ele entrou — o segmentado
+ * ia de 180 → 249px e a linha quebrava em duas —, e foi aceito como "não estoura o card". Não
+ * bastava: a quebra caía na largura de uso. Remedido no browser com a fonte real, o orçamento
+ * é **218px** (o que cabe no card de 366px), e o teto útil é **208px**, que é a linha
+ * "Conteúdo 18+" — acima disso a arte vira a primeira a quebrar. `Sem fracas · Top 20%` = 205px.
+ *
+ * 🔴 **A forma dos dois botões é DIFERENTE de propósito, porque os dois filtros são
+ * diferentes.** "Sem …" remove uma faixa; "Top …" seleciona um topo. Uma primeira versão usou
+ * `Top 80% · Top 20%` — simétrico, 190px e mais curto —, e a simetria mentia: fazia o filtro
+ * de baixo parecer SELEÇÃO POSITIVA, quando ele é negativo e deixa passar obra SEM estimativa
+ * (ver `artFilterMatches`).
+ *
+ * ⚠️ **Todo rótulo negativo COM o número estoura** — medido: `Sem o fundo 20%` 241px,
+ * `Sem 20% pior` 220px, `Sem o pior 20%` 230px. E os curtos que cabem sem dizer a ponta
+ * (`Corta 20%` 201px, `Fora 20%` 195px) trocam um erro por outro. Por isso o número saiu deste
+ * botão em vez de a frase encurtar.
+ *
+ * ⚠️ **"fraca" fala da POSIÇÃO na estimativa, não da arte** — medido, Chobits tem 38 palavras
+ * de elogio, zero de crítica, e cai no percentil 5. O card da obra diz "Arte provavelmente
+ * fraca", e o botão não tem largura para o "provavelmente": quem segura essa leitura é o
+ * rótulo **"Arte (estimada)"** ao lado do controle. Se ele sair, este botão passa a prometer
+ * um julgamento da arte que o dado não paga.
+ *
+ * ⚠️ E a assimetria do "sem estimativa" continua sendo coisa do TOOLTIP — nenhum rótulo de
+ * ~110px a expressa. É a frase que nunca se corta para encurtar.
  */
 export const ART_FILTER_SEGMENT_LABELS: Record<ArtFilter, string> = {
-  sem_fraca: `Sem os ${ART_FILTER_PERCENTS.fraca}% piores`,
+  // "fracas" é o nome da FAIXA — o mesmo que `ART_BAND_LABELS.fraca` imprime no card da obra.
+  // Guardado por teste: renomear a faixa sem trazer o botão junto reprova.
+  sem_fraca: "Sem fracas",
   forte: `Top ${ART_FILTER_PERCENTS.forte}%`,
 }
 
-/** Versão curta, para o chip de filtro ativo. */
+/**
+ * Versão curta, para o chip de filtro ativo.
+ *
+ * ⚠️ Acompanha o BOTÃO, não o mecanismo: o chip nomeia o filtro que a pessoa acabou de ligar, e
+ * chamá-lo de "Sem os 20% piores" a dois centímetros de um botão escrito "Sem fracas" é dar
+ * dois nomes ao mesmo fato — a família de erro que já produziu três nomes para a previsão de
+ * Interesse (`lib/ui/interest-predict-label.ts`). Aqui o chip tem largura para o "(est.)" que
+ * não cabe no botão.
+ */
 export const ART_FILTER_CHIP_LABELS: Record<ArtFilter, string> = {
   forte: `Arte no top ${ART_FILTER_PERCENTS.forte}% (est.)`,
-  sem_fraca: `Sem os ${ART_FILTER_PERCENTS.fraca}% piores de arte (est.)`,
+  sem_fraca: "Sem a arte fraca (est.)",
 }
 
 /**
