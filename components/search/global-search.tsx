@@ -36,6 +36,7 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { useIsSignedIn, useRole } from "@/components/layout/admin-context"
+import { CoverImage } from "@/components/ui/cover-image"
 import { searchWorkSuggestions } from "@/server/actions/work-search"
 import type { WorkSuggestion } from "@/server/queries/work-suggestions"
 import type { SearchEntry, SearchKind } from "@/server/queries/search-index"
@@ -390,9 +391,15 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
                       vira no-op sem erro. Com <a>, ainda ganhamos ctrl+clique e URL no hover. */}
                   <a href={`/catalog/${w.slug}`} onClick={close}>
                     <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded bg-muted text-[9px] text-muted-foreground">
+                      {/* `CoverImage` e não `<img>` cru: 201 das 980 obras que a busca alcança
+                          (não arquivadas, com capa — 20,5%, medido em 17/08/2026) têm a capa
+                          primária em `cdn.anime-planet.com`, que RECUSA o hotlink: 403 ao
+                          browser e 200 ao servidor. Quem sabe disso é `getCoverImageSrc`, que
+                          o CoverImage já aplica; montando a tag aqui, a busca era a única
+                          superfície servindo a URL crua, e o resultado era o ícone de imagem
+                          quebrada do browser em 1 de cada 5 resultados. */}
                       {w.coverUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element -- capa externa, sem images config
-                        <img src={w.coverUrl} alt="" className="size-full object-cover" />
+                        <CoverImage url={w.coverUrl} className="size-full object-cover" />
                       ) : (
                         "—"
                       )}
