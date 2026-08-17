@@ -1769,6 +1769,37 @@ Guardado por `tests/unit/ranking/modo-agrupar-colunas.test.ts`, que testa a **co
 lista: o separador ≥ 292px e o título ≥ 260px, ambos sobre a soma real do conjunto. Coluna nova
 no modo sem olhar a largura reprova (conferido com sonda).
 
+### 🔴 ABERTO: com o Agrupar DESLIGADO, as 26 colunas continuam espremidas
+
+**O modo Agrupar conserta o caso dele, e só ele.** Fora do modo o fator segue **0,49** e a tela
+é a do print de 17/08: Ano em "2…", Publicação em "✅ Cl", Título cortado no meio do nome. Não é
+esquecimento — é que consertar isso é mexer na TABELA, não numa coluna, e por isso ficou de
+fora. Registrado em 17/08/2026 a pedido da Ana ("deixa registrado só"), sem prazo.
+
+O mecanismo, para não ser re-derivado: a tabela é `table-layout: fixed` num contêiner
+`width: 100%` **sem `overflow-x`**, então ela sempre cabe na tela e cada coluna recebe
+`natural ÷ soma × largura`. **Não existe piso** — ligar uma coluna encolhe todas as outras, e
+quando a fatia fica menor que o conteúdo o `overflow` do `td` corta, sem barra de rolagem e sem
+erro.
+
+🔴 **A saída óbvia (largura MÍNIMA por coluna + rolagem horizontal) custa o cabeçalho fixo, e
+não dá para escapar.** Hoje o `<thead>` é `sticky -top-5` e gruda na PÁGINA, o que só funciona
+porque não há contêiner de rolagem no meio. Com `overflow-x: auto` no wrapper, ele vira o
+contexto de rolagem e o `sticky` passa a grudar NELE — como quem rola na vertical continua
+sendo a página, o cabeçalho sai de cena junto com as linhas. E pedir "só na horizontal" não
+existe em CSS: `overflow-x: auto` com `overflow-y: visible` é promovido a `auto` nos dois eixos
+pela própria spec.
+
+As três saídas, nenhuma medida ainda:
+
+| | o que é | o que custa |
+|---|---|---|
+| **a** | data grid de verdade: a área da tabela vira o scroller dos DOIS eixos (altura fixa) | muda como a página inteira rola |
+| **b** | rolagem lateral simples | perde o cabeçalho fixo |
+| **c** | teto de colunas no seletor | avisa em vez de espremer calado, mas não devolve as colunas |
+
+⚠️ **Antes de escolher, meça** — nenhum número acima é sobre as opções, só sobre o problema.
+
 ## Coluna sem largura declarada cai em 100px — e o conteúdo dela some sem nada acusar
 
 🔴 **`naturalWidthOf` termina em `?? 100`, e esse 100 é invisível.** A tabela é
