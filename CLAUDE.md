@@ -1764,10 +1764,13 @@ Foi assim com **"O que a separa"** (achado em 17/08/2026): a coluna com MAIS con
 tabela — trilha de 92px + ícone + valor + frase + σ — era a única sem entrada em
 `DEFAULT_COLUMN_WIDTHS`. Medido no browser: trilha + ícone pedem **144px**, então em 100px
 sobravam **−44px** para a frase, que é o conteúdo da coluna e **nunca chegou a ser desenhada**;
-o título truncava em "O QU…". Hoje: `separator: 300`, guardado por
-`tests/unit/ui/coluna-declara-largura.test.ts`, que **deriva o universo de
-`WORK_TABLE_COLUMNS`** e exige que toda exceção esteja declarada com motivo (conferido com
-sonda).
+o título truncava em "O QU…". Hoje: **`separator: 350`** — e são 350 e não 300 porque a largura
+aqui é uma **share**: com as 14 colunas do modo Agrupar (soma 1.772px), 300 daria 255px reais e
+a frase sumiria de novo. Guardado por `tests/unit/ui/coluna-declara-largura.test.ts`, que
+**deriva o universo de `WORK_TABLE_COLUMNS`** e exige que toda exceção esteja declarada com
+motivo (conferido com sonda). ⚠️ Na mesma varredura, `art` deixou o fallback e ganhou **70px** (é
+um percentil de 2 dígitos, a largura das outras colunas numéricas) e `total_votes` foi de 70
+para **80** — com fator 0,85 ele virava "33,…".
 
 🔴 **Legenda não cabe em cabeçalho de tabela.** Os 3 ícones de força moravam dentro do `<th>`,
 embaixo do nome: pedem **260px** numa linha (a 8,5px; **271px a 9px**), então com a coluna em
@@ -1780,7 +1783,7 @@ rótulo diz *de quantas obras*. ⚠️ Aparece em TODO divisor: o `<thead>` é s
 rolagem, a linha do divisor não.
 
 🔴 **Com largura proporcional, "cabe" é sempre relativo — então a célula cede por PARTES.**
-Declarar 300 não garante 300 na tela: a coluna recebe `300 / soma_das_naturais` do container, e
+Declarar 350 não garante 350 na tela: a coluna recebe `350 / soma_das_naturais` do container, e
 com 20+ colunas isso vira ~200px. Truncar não bastava (abaixo de ~230px o corte cai no meio de
 um número), e a ordem do sacrifício estava invertida — sumia o σ e depois o próprio VALOR.
 `SeparatorCell` é `@container` e desce em degraus medidos:
