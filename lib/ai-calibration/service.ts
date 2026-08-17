@@ -24,6 +24,15 @@ import { SONNET_MODEL } from "@/lib/ai/models"
 
 export const MODEL = SONNET_MODEL
 /**
+ * v5 (2026-08-16): `user_score` deixa de ser âncora e vira contexto proibido de justificar
+ * sozinho; a pós-leitura (`post_*`) é promovida à evidência principal. O motivo é medido —
+ * a auto-aplicação que subiu `protagonist` 7,0 → 8,5 se justificava com "user_score
+ * altíssimo (9.4)", que é gosto entrando num atributo de catálogo COMPARTILHADO. A pool
+ * passa a exigir pós-leitura: sem ela o auditor relê a mesma evidência da avaliação.
+ *
+ * ⚠️ Pula a v4 de propósito: ela existiu num piloto e está gravada em `ai_api_calls`
+ * (3 chamadas). Reusar o rótulo faria duas réguas diferentes dividirem o mesmo nome no log.
+ *
  * v3 (2026-08-16): o auditor passou a receber o DIGEST das reviews e as ÂNCORAS de
  * distribuição do catálogo — as duas causas dos erros de 85% (juiz sem evidência e juiz sem
  * escala). Obra sem digest sai do run.
@@ -36,7 +45,7 @@ export const MODEL = SONNET_MODEL
  *
  * ⚠️ Consequência esperada: o primeiro run depois desta mudança é uma varredura COMPLETA.
  */
-export const PROMPT_VERSION = "v3"
+export const PROMPT_VERSION = "v5"
 
 /** Universo do relatório de VIÉS — diagnóstico cobre os 9, inclusive os fora da auditoria. */
 const CRITERION_SLUG_ENUM = [...CRITERION_SLUGS]

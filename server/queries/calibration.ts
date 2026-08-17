@@ -4,7 +4,7 @@ import { getOwnerUserId } from "@/server/queries/current-user"
 import { MODEL, PROMPT_VERSION } from "@/lib/ai-calibration/service"
 import { pickPrimarySynopsis } from "@/lib/work-derived"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
-import { temEvidenciaParaAuditar } from "@/lib/ai-calibration/policy"
+import { POST_READING_FIELDS, temEvidenciaParaAuditar, temLeituraDoUsuario } from "@/lib/ai-calibration/policy"
 import { CRITERION_SLUGS, type CriterionSlug, type ScoreSource } from "@/types/domain"
 import type {
   AuditStaleness,
@@ -51,6 +51,22 @@ const AUDIT_WORK_SELECT = `
   category_scores(criterion_slug, score, source),
   work_tags(tag_id, tags(name, tag_group_id)),
   work_synopses(text, is_primary, position)
+`
+
+/** Colunas mínimas pra decidir se a obra entra na pool — literal porque o cliente tipado do
+ *  Supabase não analisa template string. As de pós-leitura são `POST_READING_FIELDS`, e o
+ *  teste `pool-da-auditoria` confere que as duas listas não divergiram. */
+const AUDIT_POOL_SELECT = `
+  id,
+  review_digest,
+  post_story_score,
+  post_fl_score,
+  post_ml_score,
+  post_character_development_score,
+  post_pacing_score,
+  post_art_visual_score,
+  post_impact_immersion_score,
+  post_originality_score
 `
 
 const BIAS_WORK_SELECT = `
@@ -170,6 +186,8 @@ export interface AuditPool {
   works: AuditWorkInput[]
   /** Obras que entrariam no escopo mas não têm digest — ficam de fora, e a UI diz quantas. */
   semDigest: number
+  /** Obras com digest mas sem pós-leitura do usuário — o auditor não teria vantagem nelas. */
+  semLeitura: number
 }
 
 /**
@@ -184,9 +202,18 @@ export interface AuditPool {
  * um defeito da auditoria — é o piso de 4 reviews úteis do `digest-gate` fazendo o trabalho
  * dele numa obra com pouca evidência.
  */
-function comDigest(works: AuditWorkInput[]): AuditPool {
-  const out = works.filter((w) => temEvidenciaParaAuditar(w.digest))
-  return { works: out, semDigest: works.length - out.length }
+function comEvidencia(works: AuditWorkInput[]): AuditPool {
+  // Duas exigências, e as duas são de EVIDÊNCIA: o consenso das reviews (o que os leitores
+  // observaram) e a pós-leitura do usuário (o que quem leu observou, dimensão a dimensão).
+  // Sem a segunda o auditor relê a mesma evidência da avaliação; sem a primeira ele julga
+  // no escuro. Ver `temLeituraDoUsuario` e `temEvidenciaParaAuditar` em policy.ts.
+  const comDigest = works.filter((w) => temEvidenciaParaAuditar(w.digest))
+  const out = comDigest.filter((w) => temLeituraDoUsuario(w.postScores))
+  return {
+    works: out,
+    semDigest: works.length - comDigest.length,
+    semLeitura: comDigest.length - out.length,
+  }
 }
 
 export async function loadWorksForAudit(
@@ -195,7 +222,7 @@ export async function loadWorksForAudit(
   const supabase = createAdminClient()
 
   if (opts.onlyIds) {
-    if (opts.onlyIds.length === 0) return { works: [], semDigest: 0 }
+    if (opts.onlyIds.length === 0) return { works: [], semDigest: 0, semLeitura: 0 }
     const out: AuditWorkInput[] = []
     for (let i = 0; i < opts.onlyIds.length; i += 150) {
       const idChunk = opts.onlyIds.slice(i, i + 150)
@@ -208,7 +235,7 @@ export async function loadWorksForAudit(
       if (error) throw new Error(`Falha lendo obras pra audit (incremental): ${error.message}`)
       for (const row of data ?? []) out.push(mapAuditRow(row))
     }
-    return comDigest(out)
+    return comEvidencia(out)
   }
 
   const { data, error } = await supabase
@@ -220,7 +247,7 @@ export async function loadWorksForAudit(
     .limit(opts.limit ?? 1000)
 
   if (error) throw new Error(`Falha lendo obras pra audit: ${error.message}`)
-  return comDigest((data ?? []).map(mapAuditRow))
+  return comEvidencia((data ?? []).map(mapAuditRow))
 }
 
 function quantile(sorted: number[], q: number): number {
@@ -567,18 +594,30 @@ type Admin = ReturnType<typeof createAdminClient>
 
 /** Ids da pool que a auditoria varre: obras do dono, avaliadas e não arquivadas. */
 async function auditPoolIds(supabase: Admin): Promise<Set<string>> {
-  const rows = await fetchAllRows<{ id: string }>(
+  type PoolRow = { id: string; review_digest: unknown } & Partial<Record<string, number | null>>
+  const rows = await fetchAllRows<PoolRow>(
     (from, to) =>
+      // ⚠️ A MESMA régua do run: só obra que o auditor de fato audita. Contar aqui o que o
+      // run descarta faria a barra de defasagem prometer trabalho que não existe — dois
+      // critérios pro mesmo fato, com o lado visível sendo o errado.
       supabase
         .from("works_owner")
-        .select("id")
+        .select(AUDIT_POOL_SELECT)
         .not("user_score", "is", null)
         .eq("is_archived", false)
         .order("id", { ascending: true })
         .range(from, to),
     "audit/pool",
   )
-  return new Set(rows.map((r) => r.id))
+  return new Set(
+    rows
+      .filter((r) => {
+        const digest = mapDigest(r.review_digest)
+        if (!digest || !temEvidenciaParaAuditar(digest)) return false
+        return temLeituraDoUsuario(r)
+      })
+      .map((r) => r.id),
+  )
 }
 
 /**

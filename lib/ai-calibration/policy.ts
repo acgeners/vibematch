@@ -74,6 +74,39 @@ export function shouldAutoApply(confidence: number, delta: number): boolean {
 }
 
 /**
+ * As colunas de pós-leitura que provam que a pessoa LEU a obra e a avaliou dimensão a
+ * dimensão. É a única evidência que o auditor tem e o avaliador não tinha.
+ *
+ * 🔴 A distinção que sustenta a pool inteira: `user_score` é **gosto** (a média dos 7 eixos
+ * de taste desde 16/07/2026) — ele diz "gostei muito", não "o romance é intenso". Estas
+ * colunas são **observação por dimensão**. Sem elas o auditor vira a mesma ferramenta que
+ * produziu a nota, relendo a mesma evidência: o digest sobrepõe 78,9% da amostra de reviews
+ * que a avaliação já tinha lido, então sobraria só a tabela de distribuição como novidade.
+ */
+export const POST_READING_FIELDS = [
+  "post_story_score",
+  "post_fl_score",
+  "post_ml_score",
+  "post_character_development_score",
+  "post_pacing_score",
+  "post_art_visual_score",
+  "post_impact_immersion_score",
+  "post_originality_score",
+] as const
+
+/**
+ * A obra tem observação de quem leu? — o critério de entrada na pool desde 2026-08-16.
+ *
+ * ⚠️ Medido: 190 das 212 obras avaliadas têm pós-leitura; o catálogo tem 851 com digest.
+ * Auditar as 851 pareceria cobertura 4× maior e seria a IA se re-julgando em 661 delas.
+ * A cobertura certa cresce por LEITURA — cada leitor que preenche o pós-leitura amplia a
+ * pool sozinho —, não por afrouxar a exigência.
+ */
+export function temLeituraDoUsuario(post: Partial<Record<string, number | null>>): boolean {
+  return POST_READING_FIELDS.some((f) => post[f] != null)
+}
+
+/**
  * Obra sem consenso de reviews destilado fica FORA do run (2026-08-16).
  *
  * 🔴 Sem digest o auditor volta a ser o juiz cego que produziu os dois erros de 85%: ele

@@ -143,10 +143,12 @@ export async function getPendingSuggestionIds(): Promise<string[]> {
  */
 export const getSettingsItemUnread = cache(
   async (): Promise<Record<string, number>> => {
-    const [pending, batchAcks, unreadSuggestions] = await Promise.all([
+    // A contagem de sugestões não lidas saiu daqui junto com o badge do `ai-audit` —
+    // era uma consulta paga em toda navegação pra alimentar um número que não é mais
+    // exibido. `countUnreadPendingSuggestions` segue existindo pro card, se ele quiser.
+    const [pending, batchAcks] = await Promise.all([
       getSettingsItemPending(),
       getSettingsReadAcks(),
-      countUnreadPendingSuggestions(),
     ])
     const unread: Record<string, number> = {}
     // Seções cujo piso ficou ACIMA da pendência atual (pendências resolvidas):
@@ -158,7 +160,10 @@ export const getSettingsItemUnread = cache(
       if (acked !== undefined && p < acked) decayed.push({ section, count: p })
       unread[section] = Math.max(0, p - (acked ?? 0))
     }
-    unread["ai-audit"] = unreadSuggestions
+    // 🔴 `ai-audit` deixou de ter badge em 2026-08-16 — ver `getSettingsItemPending`. A fila
+    // produz ~250 por execução e consome ~20/mês; um contador ali nunca zera. O marcador
+    // "lida" por sugestão CONTINUA existindo, mas como anotação sua, não como silenciador
+    // de alarme: sem alarme, não há o que silenciar.
     if (decayed.length > 0) {
       // Persistência em segundo plano (não bloqueia o render). Fora de um escopo
       // de request `after()` lança — aí só pulamos: o unread desta leitura já

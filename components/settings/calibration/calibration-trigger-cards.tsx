@@ -28,11 +28,15 @@ function auditSummary(d: {
   nAutoApplied: number
   nSuggestions: number
   nSkippedNoDigest: number
+  nSkippedNoReading: number
   scope: string
 }): string {
   // "Nada a auditar" precisa dizer POR QUÊ quando o motivo é ausência de evidência — senão
   // parece que a fila esvaziou, e o que houve foi obra ficando de fora.
-  const foraPorDigest = d.nSkippedNoDigest > 0 ? ` ${d.nSkippedNoDigest} fora (sem síntese de reviews).` : ""
+  const fora: string[] = []
+  if (d.nSkippedNoDigest > 0) fora.push(`${d.nSkippedNoDigest} sem síntese de reviews`)
+  if (d.nSkippedNoReading > 0) fora.push(`${d.nSkippedNoReading} sem sua pós-leitura`)
+  const foraPorDigest = fora.length ? ` Fora: ${fora.join(" · ")}.` : ""
   if (d.nWorksScanned === 0) {
     return `Nada mudou desde a última auditoria — nenhum run criado.${foraPorDigest}`
   }
