@@ -3361,13 +3361,31 @@ pode custar uma reavaliação do catálogo. O teste reprova nota cujo slug não 
 "7-8" não cobre 8,5 e o BIN cobre; imprimir o rótulo cru faria a página contradizer a nota que a
 obra exibe — que é justamente o mal-entendido que ela existe para desfazer.
 
-🔴 **Três defeitos que só apareceram no APP, e que um mockup não tem como reproduzir:**
+🔴 **O índice NÃO gruda, e isso foi decidido EM USO** (2026-08-16). Ele nasceu `sticky` e as
+medições diziam que cabia — **288px, 29% de uma tela de 1000px**. Cabia e mesmo assim estava
+errado: em movimento a barra permanente espreme o verbete contra a borda de baixo e a página
+vira índice com um pouco de conteúdo. **Porcentagem de tela não captura isso; só usar captura.**
+
+O que substituiu são duas peças mais baratas, e juntas elas fazem o mesmo trabalho:
+
+| peça | custo | o que responde |
+|---|---|---|
+| **o título do verbete gruda** (`sticky top-[57px]` no cabeçalho de cada `<article>`) | ~44px | "que atributo eu estou lendo?" |
+| **botão "Ver os atributos"** (`components/guide/back-to-top.tsx`) | 42px, e só depois de uma tela rolada | "como volto para escolher outro?" |
+
+⚠️ O sticky do título para sozinho no fim do próprio verbete, porque é preso ao pai — não
+precisa de JS. E com o índice estático o **scroll-spy saiu junto**: destacar o item ativo só
+serve enquanto o índice está na tela, e quando ele está na tela você está no topo, onde nenhum
+verbete está sendo lido. Isso devolveu o `AttributeIndex` ao servidor, sem `"use client"`.
+
+🔴 **Quatro defeitos que só apareceram no APP, e que um mockup não tem como reproduzir:**
 
 | o que | por quê |
 |---|---|
-| o índice marcava o ÚLTIMO verbete em qualquer posição | o `AppShell` põe `overflow: hidden` no body e quem rola é um **div interno** — `window.scrollY` fica preso em 0 e a condição de fim-de-página é sempre verdadeira |
-| o índice nascia **cortado pela metade** | o `<header>` gruda em `top: 0` com `z-40`; o índice em `top-0` fica embaixo dele. Hoje `top-[57px]` = `h-14` + 1px de borda |
-| o índice marcava o verbete ANTERIOR ao clicado | a linha de leitura do spy era 30% da janela (300px) e a barra mede 288px: o alvo parava a 304px e ainda não tinha cruzado. Ela sai da BORDA da barra |
+| o índice marcava o ÚLTIMO verbete em qualquer posição | o `AppShell` põe `overflow: hidden` no body e quem rola é um **div interno** — `window.scrollY` fica preso em 0 e a condição de fim-de-página é sempre verdadeira. **Vale para qualquer scroll novo neste app**: o `BackToTop` precisa da mesma descoberta de scroller |
+| o índice nascia **cortado pela metade** | o `<header>` gruda em `top: 0` com `z-40`; quem grudar em `top-0` fica embaixo dele. O valor é `top-[57px]` = `h-14` + 1px de borda — é ele que o título do verbete usa hoje |
+| o índice marcava o verbete ANTERIOR ao clicado | a linha de leitura do spy era 30% da janela (300px) e a barra media 288px: o alvo parava a 304px e ainda não tinha cruzado |
+| o "voltar ao topo" **parava no meio do caminho** | esconder o elemento FOCADO durante rolagem suave devolve o foco ao body e o navegador **CANCELA a animação**. Medido: parava em 869px de 3.000, com o botão já sumido. `blur()` antes do `scrollTo` resolve |
 
 ⚠️ **As artes vêm de `Imagens/Atributos/Fundo Branco` e essa pasta MENTE no nome:** as nove
 trazem o xadrez de transparência **rasterizado** (dois cinzas neutros, rgb 253 e 246 — 2,7% de
@@ -3385,9 +3403,8 @@ mas significa que **se as artes originais de 1254² se perderem, o que resta sã
 no servidor do Fly, e estas artes são imutáveis: pagar CPU por elas a cada request seria trocar
 400 KB de disco por latência permanente. Por isso `<img>` cru, não `next/image`.
 
-🔴 **ABERTO, medido e ADIADO em 2026-08-16 (decisão da Ana): no celular o índice come a
-primeira tela.** Ele não gruda abaixo de 660px (isso está certo), mas vira **5 linhas de 2
-colunas, 561px**:
+⚠️ **ABERTO, medido e adiado (2026-08-16): no celular o índice ainda come a primeira tela.**
+Abaixo de 660px ele vira 5 linhas de 2 colunas:
 
 | aparelho | índice | % da tela |
 |---|---|---|
@@ -3396,12 +3413,12 @@ colunas, 561px**:
 | Pixel (412×915) | 561px | 61% |
 | tablet (768×1024) | 308px | 30% |
 
-Nada está quebrado — **zero overflow horizontal** nas quatro larguras, a tabela rola sozinha,
-a arte do verbete fica em 200px. O que se perde é a função: quem abre o dicionário no celular
-vê uma parede de ícones e rola quase duas telas até "Como ler a escala". A saída desenhada é
-uma **tira horizontal rolável** (uma linha, artes ~56px, ~110px de altura) só abaixo de 660px,
-sem tocar no desktop. ⚠️ Isso é uma media query, não um redesenho — se alguém for mexer aqui,
-o custo é esse e o número a bater é 561px.
+Nada está quebrado — **zero overflow horizontal** nas quatro larguras, a tabela rola sozinha, a
+arte do verbete fica em 200px —, e o custo CAIU quando o índice deixou de grudar: hoje se passa
+por ele uma vez, em vez de conviver. O que sobra é a primeira impressão: quem abre o dicionário
+no celular vê uma parede de ícones antes de "Como ler a escala". A saída desenhada é uma **tira
+horizontal rolável** (uma linha, artes ~56px, ~110px de altura) só abaixo de 660px, sem tocar no
+desktop. ⚠️ É uma media query, não um redesenho — o número a bater é 561px.
 
 ⚠️ **Também aberto: a página tem UMA porta de entrada só** (o card do `/guide` + a busca ⌘K).
 O lugar que falta é o cabeçalho do bloco "Notas por critério" da aba Análise da IA — quem está
