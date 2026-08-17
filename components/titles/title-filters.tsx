@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, Filter, RotateCcw, Search, Trash2, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { CoverImage } from "@/components/ui/cover-image"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -719,13 +720,16 @@ function SearchInputWithHistory({
                       rel="noopener noreferrer"
                       onClick={() => setOpen(false)}
                     >
+                      {/* `CoverImage` e não `<img>` cru — mesmo dado (`WorkSuggestion.coverUrl`)
+                          e mesmo defeito do ⌘K: 201 das 980 obras que a busca alcança têm a
+                          primária em `cdn.anime-planet.com`, que responde 403 ao browser e 200
+                          ao servidor. Quem sabe disso é `getCoverImageSrc`, dentro do
+                          CoverImage; montando a tag aqui, 1 em cada 5 sugestões desenhava o
+                          ícone de imagem quebrada. */}
                       {s.coverUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={s.coverUrl}
-                          alt=""
+                        <CoverImage
+                          url={s.coverUrl}
                           className="h-11 w-8 shrink-0 rounded-sm object-cover"
-                          loading="lazy"
                         />
                       ) : (
                         <span className="h-11 w-8 shrink-0 rounded-sm bg-muted" />

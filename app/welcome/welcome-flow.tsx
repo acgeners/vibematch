@@ -11,6 +11,7 @@ import {
 } from "@/server/actions/onboarding"
 import { saveQuickScore } from "@/server/actions/quick-score"
 import { ExternalListImport } from "@/components/import/external-list-import"
+import { CoverImage } from "@/components/ui/cover-image"
 import { LOVED_CHIPS, VETO_CHIPS, MIN_LOVED } from "@/lib/onboarding/chips"
 import type { OnboardingDeckWork } from "@/server/queries/onboarding-deck"
 import styles from "./welcome.module.css"
@@ -487,9 +488,12 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
               <>
                 <div className={`${styles.deck} ${outClass}`}>
                   <div className={styles.deckArt}>
-                    {current.coverUrls[0] && (
-                      // eslint-disable-next-line @next/next/no-img-element -- capa externa, sem images config
-                      <img src={current.coverUrls[0]} alt="" />
+                    {/* `urls` (a lista) e não `coverUrls[0]`: o CoverImage roteia pelo
+                        /api/image-proxy os hosts que recusam hotlink (anime-planet devolve 403
+                        ao browser) e cai na próxima candidata quando uma morre. O `<img>` cru
+                        daqui mostrava o ícone de imagem quebrada nos dois casos. */}
+                    {current.coverUrls.length > 0 && (
+                      <CoverImage urls={current.coverUrls} className="size-full" />
                     )}
                     {current.totalChapters != null && (
                       <span className={styles.deckBadge}>{current.totalChapters} caps</span>
@@ -612,9 +616,8 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
                   return (
                     <div key={w.id} className={styles.rateRow}>
                       <span className={styles.rateThumb}>
-                        {w.coverUrls[0] && (
-                          // eslint-disable-next-line @next/next/no-img-element -- capa externa
-                          <img src={w.coverUrls[0]} alt="" />
+                        {w.coverUrls.length > 0 && (
+                          <CoverImage urls={w.coverUrls} className="size-full" />
                         )}
                       </span>
                       <span className={styles.rateName}>

@@ -23,7 +23,9 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { AdultBadge } from "@/components/ui/adult-badge"
+import { CoverImage } from "@/components/ui/cover-image"
 import { ExplainPanel } from "@/components/discovery/explain-panel"
+import { getCoverImageSrc } from "@/lib/image-proxy"
 import { titleToSlug } from "@/lib/utils"
 import { searchWorkSuggestions } from "@/server/actions/work-search"
 import {
@@ -1202,7 +1204,15 @@ function Cover({ work, className }: { work: DiscoveryWork; className: string }) 
   }
   return (
     <Image
-      src={work.coverUrl}
+      // ⚠️ `getCoverImageSrc` e não a URL crua: 201 das 980 obras têm a primária em
+      // `cdn.anime-planet.com`, que recusa hotlink (403 ao browser, 200 ao servidor).
+      // Sem isso, 1 em cada 5 linhas caía no placeholder abaixo tendo capa perfeitamente
+      // viva — e como o placeholder é neutro, nada denunciava.
+      //
+      // Aqui é `getCoverImageSrc` avulso, e não o `<CoverImage>`: o placeholder desta lista
+      // é escolha registrada (quadrado neutro, sem o traço "—"), e o CoverImage traria o
+      // dele junto. O que faltava era o proxy, não o tratamento de erro.
+      src={getCoverImageSrc(work.coverUrl)}
       alt=""
       width={44}
       height={62}
@@ -1310,13 +1320,13 @@ function SeedChip({
       } ${isPrimary ? "ring-2 ring-foreground/45" : ""}`}
     >
       {seed.coverUrl ? (
-        <Image
-          src={seed.coverUrl}
-          alt=""
-          width={30}
-          height={42}
+        // `CoverImage` aqui, e não `getCoverImageSrc` avulso como no `Cover` acima: este
+        // chip não tratava erro NENHUM, então a capa que não carregasse desenhava o ícone
+        // de imagem partida do browser. Não há placeholder próprio a preservar — o dono já
+        // traz proxy e queda para o traço.
+        <CoverImage
+          url={seed.coverUrl}
           className="h-10 w-7 shrink-0 rounded object-cover"
-          unoptimized
         />
       ) : (
         <div className="h-10 w-7 shrink-0 rounded bg-muted" />
