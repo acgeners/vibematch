@@ -6,6 +6,7 @@ import { VERDICT_BAND_CUTOFFS, verdictBand, verdictBandClass } from "@/lib/ui/ve
 import { confidenceMarkClass } from "@/lib/ai-evaluation/confidence-tone"
 import { CONFIDENCE_CUTOFFS } from "@/lib/ai-evaluation/confidence-ruler"
 import { AlignmentScoreCell } from "@/components/ranking/ranking-cells"
+import { VerdictTooltipContent } from "@/components/ranking/score-tooltip-content"
 
 const raiz = process.cwd()
 /** Sem comentários: eles CITAM o arranjo antigo ("`≥40` âmbar e `<40` cinza"), e a 1ª versão
@@ -97,9 +98,11 @@ describe("o traço de confiança sai do dono dos cortes", () => {
     expect(confidenceMarkClass(0.3)).not.toMatch(/slate/)
   })
 
-  it("a célula não reescreve os cortes", () => {
+  it("a célula delega o traço e não reescreve os cortes", () => {
+    // Ela não desenha o traço nem escolhe a cor: quem faz as duas coisas é o `ConfidenceMark`,
+    // porque o tooltip precisa renderizar exatamente o mesmo desenho pra servir de legenda.
     const src = lerSemComentarios("components/ranking/ranking-cells.tsx")
-    expect(src).toMatch(/confidenceMarkClass/)
+    expect(src).toMatch(/<ConfidenceMark/)
     expect(src).not.toMatch(/confidence\s*>=\s*0?\.\d/)
   })
 })
@@ -127,6 +130,48 @@ describe("o marcador é um traço, e o slot dele é sempre reservado", () => {
     expect(alta).toBeTruthy()
     expect(media).toBeTruthy()
     expect(alta!.className).not.toBe(media!.className)
+  })
+
+  it("o tooltip desenha O MESMO traço da pílula, que é o que o explica", () => {
+    // Um traço de 2px é mudo: quem varre a coluna vê barrinhas e não sabe do que falam. Quem
+    // responde é o tooltip, desenhando o mesmo traço encostado em "Confiança: 62%" — e isso só
+    // ensina a ler certo enquanto os dois forem idênticos. Um retângulo "parecido" no tooltip
+    // seria pior que legenda nenhuma.
+    const naCelula = marcaDe(0.62)[0]!.className
+    cleanup()
+    const { container } = render(
+      <VerdictTooltipContent score={66} justification={null} payload={{ confidence: 0.62 }} />,
+    )
+    const noTooltip = [...container.querySelectorAll("span")].find((el) => /\bw-\[15px\]/.test(el.className))
+    expect(noTooltip, "o tooltip precisa desenhar o traço").toBeTruthy()
+    expect(noTooltip!.className).toBe(naCelula)
+    expect(container.textContent).toMatch(/Confiança/)
+  })
+
+  it("no tooltip o traço fica sobre fundo ESCURO, não sobre o fundo invertido", () => {
+    // O `TooltipContent` é `bg-foreground` — quase branco no dark. Calculado: direto ali o
+    // traço dá 1,84:1 (âmbar) e 2,18:1 (esmeralda), abaixo do mínimo de 3:1 pra elemento
+    // gráfico, e o âmbar é o caso comum. Sobre `bg-background` ele volta aos 7,4–8,8:1 que
+    // tem na pílula. jsdom não calcula contraste, então o que dá pra travar é o CHÃO.
+    const { container } = render(
+      <VerdictTooltipContent score={66} justification={null} payload={{ confidence: 0.62 }} />,
+    )
+    const mark = [...container.querySelectorAll("span")].find((el) => /\bw-\[15px\]/.test(el.className))
+    expect(mark!.parentElement!.className).toMatch(/\bbg-background\b/)
+  })
+
+  it("o tooltip não usa token de página no tom secundário", () => {
+    // O `TooltipContent` é invertido (`bg-foreground` + `text-background`): `text-muted-foreground`
+    // ali dentro passa no escuro e desaba pra ~3:1 no claro. A função irmã deste arquivo já
+    // documentava a régua enquanto esta a violava.
+    const { container } = render(
+      <VerdictTooltipContent
+        score={66}
+        justification={null}
+        payload={{ confidence: 0.62, mood_fit: 0.8, review_quotes: ["boa"] }}
+      />,
+    )
+    expect(container.innerHTML).not.toMatch(/text-muted-foreground/)
   })
 
   it("sem confiança sobra uma trilha neutra, que não é nenhuma das três cores", () => {

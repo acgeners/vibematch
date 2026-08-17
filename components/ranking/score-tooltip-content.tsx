@@ -17,6 +17,7 @@
  */
 
 import { LABELS } from "@/lib/constants/ui-labels"
+import { ConfidenceMark } from "@/components/ui/confidence-mark"
 
 /** Payload enriquecido do consultor (sub-fase 2.3.A — Smart Shortlist v2+). */
 export interface AlignmentPayload {
@@ -182,13 +183,32 @@ export function VerdictTooltipContent({
       <div className="flex items-center justify-between gap-3">
         <p className="font-semibold text-xs">{LABELS.alignment_score.full}: {Math.round(score)}/100</p>
         {payload?.confidence != null && (
-          <span className="text-[11px] text-muted-foreground">
+          // 🔴 O TRAÇO vem antes do número de propósito: ele é a legenda da barrinha que a
+          // pílula desenha sob o score, e essa barrinha é muda sozinha. Pôr o mesmo desenho
+          // encostado na palavra "Confiança" explica sem gastar uma linha de prosa — por isso
+          // é o `ConfidenceMark`, o mesmo componente da célula, e não um retângulo parecido.
+          //
+          // ⚠️ Tom secundário aqui é `text-background/<alfa>`, NUNCA `text-muted-foreground`:
+          // o `TooltipContent` é invertido (`bg-foreground` + `text-background`), e o token de
+          // página passa no escuro e desaba pra ~3:1 no claro. A função irmã logo acima já
+          // documentava isso; esta estava com o token errado.
+          <span className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-background/70">
+            {/* 🔴 O traço vai sobre um recorte de `bg-background`, NUNCA direto no fundo do
+                tooltip. Calculado em 17/08/2026: o `TooltipContent` é `bg-foreground`, que no
+                dark é quase branco (hsl 39 30% 93%), e ali o traço cai pra **1,84:1 (âmbar)** e
+                2,18:1 (esmeralda) — abaixo do mínimo de 3:1 pra elemento gráfico. E o âmbar é o
+                caso comum (306 das 398 obras com confiança). Sobre o fundo escuro ele tem
+                7,4–8,8:1, que é o que ele tem na pílula. O recorte não é enfeite: ele devolve
+                ao traço o chão em que a pessoa acabou de vê-lo. */}
+            <span className="inline-flex items-center rounded-[3px] bg-background px-1 py-[3px]">
+              <ConfidenceMark confidence={payload.confidence} />
+            </span>
             Confiança: <span className="font-semibold">{(payload.confidence * 100).toFixed(0)}%</span>
           </span>
         )}
       </div>
       {payload?.mood_fit != null && (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-[11px] text-background/70">
           Fit com mood: <span className="font-mono font-semibold">{(payload.mood_fit * 100).toFixed(0)}%</span>
         </p>
       )}
@@ -207,7 +227,7 @@ export function VerdictTooltipContent({
           )}
           {payload?.review_quotes && payload.review_quotes.length > 0 && (
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Reviews citadas</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-background/70">Reviews citadas</p>
               <ul className="mt-0.5 text-xs italic space-y-0.5">
                 {payload.review_quotes.map((q, i) => (
                   <li key={i} className="leading-snug">&ldquo;{q}&rdquo;</li>
