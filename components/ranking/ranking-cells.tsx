@@ -11,7 +11,7 @@ import { AlignmentTooltipContent, VerdictTooltipContent } from "@/components/ran
 import type { AlignmentPayload } from "@/components/ranking/score-tooltip-content"
 import { ART_BAND_LABELS, artBandFromPercentile } from "@/lib/art/bands"
 import { verdictBandClass } from "@/lib/ui/verdict-band"
-import { confidenceMarkClass } from "@/lib/ai-evaluation/confidence-tone"
+import { ConfidenceMark } from "@/components/ui/confidence-mark"
 
 /**
  * Botão pequeno que substitui o "—" da `AlignmentScoreCell` quando há um
@@ -149,16 +149,6 @@ export function AlignmentScoreCell({
   // 55 poder sair de uma cor na lista e de outra na obra.
   const colorClass = verdictBandClass(score)
 
-  // O TRAÇO de confiança (era uma bolinha de 6px até 17/08/2026): 15px × 2px centrados sob o
-  // número, dentro do preenchimento. Largura CONSTANTE de propósito — no sublinhado do número
-  // ela seguiria a quantidade de dígitos, e "100" marcaria mais que "35" sem significar nada.
-  // Com largura e x fixos, a coluna vira uma tira que dá pra varrer na vertical.
-  //
-  // ⚠️ Ele NÃO encosta na borda: friso colado na base funde com a borda da pílula quando as
-  // duas cores coincidem (âmbar/âmbar, cinza/cinza) e lê como "a borda engrossou". A cor sai
-  // de `confidenceMarkClass`, nunca dos cortes reescritos aqui.
-  const confidenceMark = payload?.confidence != null ? confidenceMarkClass(payload.confidence) : null
-
   // Quando desatualizado e o re-rank é possível (Pago + workId), o ⟳ vira um
   // botão clicável ao lado do badge. Senão, fica como indicador estático dentro
   // do badge (Free ou sem workId).
@@ -178,16 +168,11 @@ export function AlignmentScoreCell({
           >
             <span>{Math.round(score)}</span>
             {/* Slot SEMPRE reservado — mesmo motivo do slot do ⟳ logo abaixo: sem ele o número
-                muda de altura de uma linha pra outra. E ele leva uma TRILHA neutra quando não há
-                confiança, em vez de ficar vazio: medido no app em 17/08/2026, **297 das 695
-                obras com Veredito (43%) não têm confiança registrada**, então o vão vazio é o
-                caso comum e lê como número desalinhado dentro da pílula. A trilha a 10% fica
-                muito abaixo das três cores saturadas — diz "sem registro", não "confiança
-                baixa", que é rose. */}
-            <span
-              className={cn("h-0.5 w-[15px] rounded-full", confidenceMark ?? "bg-foreground/10")}
-              aria-hidden="true"
-            />
+                muda de altura de uma linha pra outra. O desenho é do `ConfidenceMark`, que o
+                TOOLTIP desta mesma pílula também renderiza ao lado de "Confiança: 62%" — é
+                assim que um traço de 2px deixa de ser mudo, e só funciona enquanto os dois
+                forem o mesmo componente. */}
+            <ConfidenceMark confidence={payload?.confidence ?? null} />
           </span>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[400px] space-y-1.5">

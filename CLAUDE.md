@@ -1240,9 +1240,32 @@ número fica alto dentro da pílula e lê como desalinhamento; o mockup não peg
 tinha confiança em TODAS as linhas inventadas. A trilha a 10% fica muito abaixo das três
 cores saturadas, então diz "sem registro" e não "confiança baixa" (que é rose).
 
+🔴 **Quem explica o traço é o TOOLTIP da própria pílula, desenhando o MESMO traço ao lado de
+"Confiança: 62%"** — e por isso os dois são um componente só (`components/ui/confidence-mark.tsx`).
+Um traço de 2px é mudo: quem varre a coluna vê barrinhas e não sabe do que falam. Um retângulo
+"parecido" no tooltip seria pior que legenda nenhuma, porque ensinaria a ler errado.
+
+⚠️ **A legenda NÃO foi pra `ui_labels`, e a tabela é que decidiu.** A migration 126 fixa o
+contrato: `tooltip_full` "explica o CONCEITO do campo" e `tooltip_short` é o resumo dele. O
+traço não é o conceito de `alignment_score` — é como UMA célula desenha outro dado. Pior, os
+campos têm consumidores que não são a coluna: `tooltip_full` alimenta o seletor de colunas, o
+heatmap e um painel de filtros; `tooltip_short` é só o `title=` do cabeçalho no `/ranking`. Pôr
+a frase no `short` o deixaria maior que o `full`, invertendo os dois. Detalhe de renderização
+mora no componente, não em label compartilhada — e assim não custa escrita na nuvem.
+
+🔴 **Marca colorida dentro de tooltip precisa de CHÃO próprio.** O `TooltipContent` é
+`bg-foreground`, que no dark é quase branco: calculado em 17/08, o traço direto ali dá
+**1,84:1 (âmbar) e 2,18:1 (esmeralda)** — abaixo do mínimo de 3:1 pra elemento gráfico —, e o
+âmbar é o caso comum (306 das 398 obras com confiança). Sobre `bg-background` ele volta aos
+**7,4–8,8:1** que tem na pílula. Por isso o traço vai num recorte escuro lá dentro. ⚠️ Mesma
+armadilha do tom secundário (`text-background/<alfa>`, nunca `text-muted-foreground`) — e
+`VerdictTooltipContent` estava com o token errado em três linhas enquanto a função IRMÃ do
+mesmo arquivo documentava a régua.
+
 Guardado por `tests/unit/ui/faixa-do-veredito.test.tsx`, que inclui a contraprova do arranjo
-antigo, reprova quem remontar a rampa a partir do corte 80 e exige que a trilha vazia não
-seja nenhuma das três cores (as três sondas conferidas).
+antigo, reprova quem remontar a rampa a partir do corte 80, exige que a trilha vazia não seja
+nenhuma das três cores, que o traço do tooltip seja idêntico ao da célula e que ele não fique
+direto sobre o fundo invertido (as seis sondas conferidas).
 
 ⚠️ **Violeta fica FORA da régua**: `✨` é procedência ("quem escreveu isto"), não estado.
 
@@ -4285,10 +4308,12 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.178 passando (+24 pulados) em 304 arquivos** (299 passando + 5 pulados);
-medido em 2026-08-17 com a rampa do Veredito ganhando dono: **+11 casos e +1 arquivo**
-(`ui/faixa-do-veredito`), o teste novo inteiro. Com `find tests -name '*.test.ts*'` = **304**
-conferido contra os 304 executados. Antes: **3.167 em 303** (rateio de largura do modo
+`npm run test` → **3.181 passando (+24 pulados) em 304 arquivos** (299 passando + 5 pulados);
+medido em 2026-08-17 com o traço virando a legenda de si mesmo no tooltip: **+3 casos, sem
+arquivo novo** (o traço idêntico ao da célula, o token de página fora e o chão escuro do
+recorte). Com `find tests -name '*.test.ts*'` = **304** conferido contra os 304 executados.
+Antes: **3.178 em 304** (a rampa do Veredito ganhando dono, +11 casos e +1 arquivo,
+`ui/faixa-do-veredito`), **3.167 em 303** (rateio de largura do modo
 Agrupar, que **não somou arquivo** — os +2 casos eram o teste do modo trocando um piso
 inventado por dois: "a soma é a largura da tabela" e "nenhuma coluna recebe menos do que
 pede"), **3.165 em 303** (troca da coluna de status —
