@@ -4,7 +4,6 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { getSettingsItemPending } from "@/server/queries/settings-pending"
 import {
   BATCH_READ_SECTIONS,
-  getPendingSuggestionIds,
   type BatchReadSection,
 } from "@/server/queries/settings-read"
 
@@ -81,17 +80,17 @@ export async function unmarkSuggestionRead(suggestionId: string): Promise<{ ok: 
 }
 
 /**
- * Marca TUDO como lido (ação global): snapshot de todas as seções batch +
- * ack de todas as sugestões pendentes da auditoria. Idempotente.
+ * Marca TUDO como lido (ação global): snapshot de todas as seções batch. Idempotente.
+ *
+ * O 2º modelo de ack — 1 linha por sugestão da auditoria — saiu em 2026-08-16 com a
+ * aposentadoria dela. A tabela `settings_suggestion_read_acks` fica no banco com as 583
+ * linhas de histórico; nada mais escreve nela.
  */
 export async function markAllSettingsRead(): Promise<{ ok: boolean; marked: number }> {
-  const [pending, suggestionIds] = await Promise.all([
-    getSettingsItemPending(),
-    getPendingSuggestionIds(),
-  ])
+  const pending = await getSettingsItemPending()
   const supabase = createAdminClient()
 
-  // (A) Snapshots das seções batch.
+  // Snapshots das seções batch.
   const batchRows = BATCH_READ_SECTIONS.map((section) => ({
     section,
     acked_count: pending[section] ?? 0,
@@ -101,27 +100,17 @@ export async function markAllSettingsRead(): Promise<{ ok: boolean; marked: numb
     .upsert(batchRows, { onConflict: "section" })
   if (batchErr) throw new Error(`Falha marcando seções como lidas: ${batchErr.message}`)
 
-  // (B) Acks das sugestões pendentes, em chunks de 500 (limite de payload).
-  for (let i = 0; i < suggestionIds.length; i += 500) {
-    const chunk = suggestionIds.slice(i, i + 500).map((id) => ({ suggestion_id: id }))
-    const { error } = await supabase
-      .from("settings_suggestion_read_acks")
-      .upsert(chunk, { onConflict: "suggestion_id", ignoreDuplicates: true })
-    if (error) throw new Error(`Falha marcando sugestões como lidas: ${error.message}`)
-  }
 
-  return { ok: true, marked: batchRows.length + suggestionIds.length }
+  return { ok: true, marked: batchRows.length }
 }
 
 /** Desmarca TUDO (limpa os dois modelos de ack). Volta a contar todas as pendências. */
 export async function unmarkAllSettingsRead(): Promise<{ ok: boolean }> {
   const supabase = createAdminClient()
   // DELETE sem WHERE não é aceito pelo PostgREST; filtro sempre-verdadeiro.
-  const [batch, suggestions] = await Promise.all([
+  const [batch] = await Promise.all([
     supabase.from("settings_read_acks").delete().not("section", "is", null),
-    supabase.from("settings_suggestion_read_acks").delete().not("suggestion_id", "is", null),
   ])
   if (batch.error) throw new Error(`Falha desmarcando seções: ${batch.error.message}`)
-  if (suggestions.error) throw new Error(`Falha desmarcando sugestões: ${suggestions.error.message}`)
   return { ok: true }
 }

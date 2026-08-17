@@ -1,7 +1,6 @@
 import { cache } from "react"
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { fetchAllRows } from "@/lib/supabase/paginate"
 import { getSettingsItemPending } from "@/server/queries/settings-pending"
 
 /**
@@ -82,23 +81,6 @@ export async function lowerSettingsReadAcks(
 
 
 
-/**
- * IDs de todas as sugestões PENDENTES da auditoria (sem filtro). Usado por
- * "marcar tudo como lido" pra ackar a fila inteira. Bounded pelo nº de pendentes.
- */
-export async function getPendingSuggestionIds(): Promise<string[]> {
-  const supabase = createAdminClient()
-  const rows = await fetchAllRows<{ id: string }>(
-    (from, to) =>
-      supabase
-        .from("score_calibration_suggestions")
-        .select("id")
-        .eq("status", "pending")
-        .range(from, to),
-    "getPendingSuggestionIds",
-  )
-  return rows.map((r) => r.id)
-}
 
 /**
  * NÃO-LIDO por item (`Record<sectionId, count>`), com os MESMOS sectionIds que

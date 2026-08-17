@@ -3052,7 +3052,17 @@ verdade conferida. Ao anotar pendência aqui, escreva a **data** e a **forma de 
 Ela existia em `/curation/settings?g=notas`: um LLM relia as obras e sugeria ajustes nos
 `category_scores`, com uma faixa auto-aplicando sozinha. Saiu inteira — card, action, prompt,
 fila. **As 1.100+ linhas de `score_calibration_suggestions` e `calibration_runs` ficam no
-banco**, sem migration; o card de **Viés & atributos** continua, porque é diagnóstico.
+banco**, sem migration.
+
+⚠️ **O "Relatório de viés" foi junto, em 17/08** — ele era a outra metade paga da mesma
+console: mandava estatísticas agregadas pro Sonnet e gravava a prosa em
+`calibration_runs.bias_report`, que **nenhum prompt, limiar ou pipeline lia**. Com ele foi
+`lib/ai-calibration/` inteiro (service, prompts, schema, types) — o diretório ficou órfão —, e
+`server/queries/calibration.ts` encolheu para uma função: a procedência das notas calibradas.
+
+O card **Viés & atributos** continua e ficou melhor: sem as abas (sobrou um painel só), com o
+offset por atributo — que muda TODA nota de origem IA — na frente em vez de atrás do
+relatório inerte.
 
 🔴 **O argumento que decidiu é de ARQUITETURA, e ele estava escrito no próprio código.** Os
 9 atributos são read-only no formulário da obra já avaliada, com o motivo em comentário:
