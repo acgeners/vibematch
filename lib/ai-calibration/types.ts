@@ -1,7 +1,9 @@
-import type { CriterionSlug, ScoreSource } from "@/types/domain"
+import type { CriterionSlug } from "@/types/domain"
 
 export type CalibrationMode = "audit" | "bias"
 
+/** Só `getCalibrationProvenanceForWork` ainda lê isto — as 37 notas `ai_calibrated` que a
+ *  auditoria aposentada deixou no banco precisam continuar mostrando de onde vieram. */
 export type SuggestionStatus =
   | "pending"
   | "auto_applied"
@@ -79,60 +81,5 @@ export interface CalibrationRunRow {
   completed_at: string | null
 }
 
-export type AuditStalenessLevel = "never" | "fresh" | "review" | "stale"
 
-/** Estimativa de defasagem da auditoria — o quanto do dado que ela varre mudou desde o run. */
-export interface AuditStaleness {
-  /** Já houve pelo menos um run de auditoria concluído? */
-  hasRun: boolean
-  /** `completed_at ?? created_at` do último run (referência do "mudou desde"). */
-  lastRunAt: string | null
-  /** Universo que a auditoria varre: obras do dono avaliadas e não arquivadas. */
-  ratedWorks: number
-  /** Obras distintas cujo INPUT da auditoria mudou desde o run (união de score+critério). */
-  changedWorks: number
-  /** Dessas, quantas mudaram a nota pessoal (`user_work_state.updated_at`). */
-  changedByScore: number
-  /** Dessas, quantas tiveram `category_scores` alterado por fonte que a auditoria pode reescrever. */
-  changedByCriteria: number
-  /** `changedWorks / ratedWorks`. */
-  staleFraction: number
-  /** Modelo/prompt mudou desde o run → sugestões antigas calibradas com outra régua. */
-  modelDrift: boolean
-  /** Rótulo curto do que mudou na régua (ex.: "modelo sonnet-4-6 → sonnet-5"), ou null. */
-  driftDetail: string | null
-  level: AuditStalenessLevel
-}
 
-export interface SuggestionRow {
-  id: string
-  run_id: string
-  work_id: string
-  criterion_slug: CriterionSlug
-  previous_score: number
-  previous_source: ScoreSource
-  suggested_score: number
-  delta: number
-  confidence: number
-  justification: string | null
-  status: SuggestionStatus
-  applied_score: number | null
-  applied_at: string | null
-  reviewed_at: string | null
-  created_at: string
-}
-
-export interface SuggestionWithWork extends SuggestionRow {
-  work_title: string
-  /**
-   * Metadados leves da obra pra tooltip no hover do título — join escalar em
-   * `loadSuggestions` (sem blobs de sinopse/scores, pra não inflar o payload).
-   */
-  /** URL da capa primária (colapsada no server a partir de `work_covers` — 1 string por linha, não o array). */
-  work_cover_url?: string | null
-  work_user_score?: number | null
-  work_is_favorite?: boolean
-  work_year?: number | null
-  work_total_chapters?: number | null
-  work_publication_status_id?: number | null
-}
