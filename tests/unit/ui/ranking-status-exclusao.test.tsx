@@ -230,12 +230,53 @@ describe("o estado excluído aparece na tela — e não como cor", () => {
     expect(plain.className).not.toContain("line-through")
   })
 
-  it("excluindo, nenhum pill fica marcado como selecionado", () => {
+  /**
+   * 🔴 A regressão que este bloco tranca: excluir UM status apagava a cor dos outros
+   * quatro. `selected*` é esvaziado no modo negativo (a barra de "Filtros ativos" não
+   * pode listar uma inclusão ao lado do chip "exceto") e os pills liam esse mesmo
+   * conjunto — a tela dizia "perdi minha seleção" no clique em que o filtro passou a
+   * incluir MAIS obras. Marcado = está no resultado, então "todos menos os riscados".
+   */
+  it("excluindo, os outros pills continuam marcados — só o excluído não", () => {
     renderFilters("pub_status_exclude=Cancelled")
     for (const { status } of PUBLICATION) {
       const label = within(statusChip(status)).getByText(status)
-      expect(label.closest("button")?.getAttribute("aria-pressed")).toBe("false")
+      expect(label.closest("button")?.getAttribute("aria-pressed")).toBe(
+        status === "Cancelled" ? "false" : "true"
+      )
     }
+  })
+
+  /**
+   * 🔴 O gesto tem que acompanhar a marca. Com o pill marcado, `"include"` (o clique de
+   * antes, quando nenhum ficava marcado) faz `setStatusRule` sair da exclusão com a
+   * lista positiva VAZIA — que é a forma canônica do `"all"`. Ou seja: clicar em
+   * "Ongoing" para TIRÁ-LO acenderia os cinco.
+   */
+  it("clicar no nome de um pill marcado o exclui, em vez de acender todos", () => {
+    renderFilters("pub_status_exclude=Cancelled")
+    fireEvent.click(within(statusChip("Ongoing")).getByText("Ongoing"))
+    const q = applyAndRead()
+    expect(q.get("pub_status_exclude")).toBe("Cancelled,Ongoing")
+    expect(q.get("pub_status")).toBeNull()
+  })
+
+  it("clicar no nome do pill riscado desfaz a exclusão dele", () => {
+    renderFilters("pub_status_exclude=Cancelled,Hiatus")
+    fireEvent.click(within(statusChip("Hiatus")).getByText("Hiatus"))
+    expect(applyAndRead().get("pub_status_exclude")).toBe("Cancelled")
+  })
+
+  /**
+   * Sem exclusão nenhuma o card volta a ser positivo: o clique no nome SELECIONA (e
+   * some com os defaults da página), que é o uso comum e não pode ter mudado.
+   */
+  it("sem exclusão, o clique no nome continua selecionando", () => {
+    renderFilters("pub_status=Completed")
+    fireEvent.click(within(statusChip("Ongoing")).getByText("Ongoing"))
+    const q = applyAndRead()
+    expect(q.get("pub_status")).toBe("Completed,Ongoing")
+    expect(q.get("pub_status_exclude")).toBeNull()
   })
 
   /**
