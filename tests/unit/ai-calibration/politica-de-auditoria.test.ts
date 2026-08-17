@@ -9,6 +9,8 @@ import {
   isAuditableCriterion,
   shouldAutoApply,
   temEvidenciaParaAuditar,
+  temLeituraDoUsuario,
+  POST_READING_FIELDS,
 } from "@/lib/ai-calibration/policy"
 import { AUDIT_SYSTEM_PROMPT, buildAuditUserPrompt } from "@/lib/ai-calibration/prompts"
 import { CRITERION_SLUGS } from "@/types/domain"
@@ -158,5 +160,45 @@ describe("o prompt carrega a evidência e a escala", () => {
     expect(AUDIT_SYSTEM_PROMPT).toContain("precedência sobre inferência a partir de tag")
     expect(AUDIT_SYSTEM_PROMPT).toContain("não atribui SUJEITO nem VALÊNCIA")
     expect(AUDIT_SYSTEM_PROMPT).toContain("ÂNCORAS DO CATÁLOGO")
+  })
+})
+
+describe("a pool exige a leitura de quem avaliou", () => {
+  it("nota geral não basta — sem pós-leitura a obra fica fora", () => {
+    // `user_score` é GOSTO (média dos eixos de taste). Sozinho, ele não prova que alguém
+    // observou o atributo — e foi ele que produziu a auto-aplicação defeituosa de 16/08.
+    expect(temLeituraDoUsuario({})).toBe(false)
+    expect(temLeituraDoUsuario({ user_score: 9.4 })).toBe(false)
+  })
+
+  it("qualquer dimensão de pós-leitura basta", () => {
+    for (const campo of POST_READING_FIELDS) {
+      expect(temLeituraDoUsuario({ [campo]: 8 }), `${campo} deveria bastar`).toBe(true)
+    }
+  })
+
+  it("o SELECT da pool e a lista de campos não podem divergir", () => {
+    // Duas listas dos mesmos campos: uma no literal que o PostgREST entende, outra na
+    // política. Divergindo, a query traz menos colunas do que o filtro consulta e a obra
+    // cai fora por dado ausente — silenciosamente.
+    const src = readFileSync(join(raiz, "server/queries/calibration.ts"), "utf8")
+    const bloco = src.slice(src.indexOf("const AUDIT_POOL_SELECT"), src.indexOf("const BIAS_WORK_SELECT"))
+    for (const campo of POST_READING_FIELDS) {
+      expect(bloco, `AUDIT_POOL_SELECT não traz ${campo}`).toContain(campo)
+    }
+  })
+})
+
+describe("o gosto saiu de âncora", () => {
+  it("o prompt proíbe justificar por user_score e promove a pós-leitura", () => {
+    expect(AUDIT_SYSTEM_PROMPT).toContain("nunca justificativa")
+    expect(AUDIT_SYSTEM_PROMPT).toContain("não sustenta subir critério nenhum")
+    expect(AUDIT_SYSTEM_PROMPT).toContain("são a avaliação de quem LEU a obra")
+  })
+
+  it("a versão pula a v4 — ela já existe no log com outra régua", () => {
+    const src = readFileSync(join(raiz, "lib/ai-calibration/service.ts"), "utf8")
+    const versao = src.match(/export const PROMPT_VERSION = "(v\d+)"/)?.[1]
+    expect(["v1", "v2", "v3", "v4"]).not.toContain(versao)
   })
 })

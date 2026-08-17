@@ -110,6 +110,8 @@ export interface RunAuditResult {
   nAutoApplied: number
   /** Obras que entrariam no escopo mas ficaram de fora por não terem digest de reviews. */
   nSkippedNoDigest: number
+  /** Obras com digest mas sem pós-leitura — o auditor não teria vantagem sobre a avaliação. */
+  nSkippedNoReading: number
   usage: RunUsageAccumulator
 }
 
@@ -155,7 +157,7 @@ export async function runCalibrationAuditAction(
     if (changedIds.length === 0) {
       // Nada mudou desde o último run — não cria run vazio.
       return {
-        data: { runId: null, scope, nWorksScanned: 0, nSuggestions: 0, nAutoApplied: 0, nSkippedNoDigest: 0, usage: EMPTY_USAGE },
+        data: { runId: null, scope, nWorksScanned: 0, nSuggestions: 0, nAutoApplied: 0, nSkippedNoDigest: 0, nSkippedNoReading: 0, usage: EMPTY_USAGE },
       }
     }
     pool = await loadWorksForAudit({ onlyIds: changedIds })
@@ -168,7 +170,7 @@ export async function runCalibrationAuditAction(
     return {
       data: {
         runId: null, scope, nWorksScanned: 0, nSuggestions: 0, nAutoApplied: 0,
-        nSkippedNoDigest: pool.semDigest, usage: EMPTY_USAGE,
+        nSkippedNoDigest: pool.semDigest, nSkippedNoReading: pool.semLeitura, usage: EMPTY_USAGE,
       },
     }
   }
@@ -326,6 +328,7 @@ export async function runCalibrationAuditAction(
         nSuggestions: nInserted,
         nAutoApplied: nAutoApplied,
         nSkippedNoDigest: pool.semDigest,
+        nSkippedNoReading: pool.semLeitura,
         usage,
       },
     }

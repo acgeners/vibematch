@@ -3101,6 +3101,56 @@ entra em `calibration_runs.prompt_version` e é o que `loadLastRun` compara pra 
 ⇒ **o primeiro run depois desta mudança é uma varredura COMPLETA**. Não subir faria o rótulo
 do run mentir e o run seguinte rodar incremental sobre régua diferente.
 
+### v5: a auditoria é uma PONTE, não uma fila — e a régua é a leitura de quem avaliou
+
+Decidido em 2026-08-16, depois de a conta de vazão ficar clara. **O número que decide não é
+precisão, é throughput:** 58 decisões humanas em **84 dias** (~0,7/dia) contra **~250
+sugestões por execução**. Esvaziar a fila levaria mais de dois anos, e cada run recoloca um
+ano de trabalho. Isso não é qualidade de prompt — é descasamento de uma ordem de grandeza, e
+**mais leitores pioram**: escrever em `category_scores` é ação de curador, então usuário novo
+adiciona demanda, não oferta.
+
+🔴 **A fila deixou de ser PENDÊNCIA** — saiu de `getSettingsItemPending` e o badge do card
+morreu. Ela continua consultável dentro do card; o que acabou foi ela se apresentar como
+trabalho esperando por você. Os **583 acks** de "marcar lida" de antes são a medição de que,
+como alarme, ela era silenciada em bloco e não trabalhada. O marcador por sugestão ficou,
+mas o texto dele mudou: prometia "silencia no badge", e não há mais badge.
+
+🔴 **A pool passou a exigir PÓS-LEITURA, e é aqui que mora a régua conceitual.** O banco já
+separa duas coisas que é fácil confundir:
+
+| | o que é | vale como evidência de atributo? |
+|---|---|---|
+| `user_score` | **gosto** — média dos 7 eixos de taste desde 16/07 | **não.** Diz "gostei muito", não "o romance é intenso" |
+| `post_*` · `user_attribute_assessment` | **observação por dimensão**, feita depois de ler | **sim** — é o que o avaliador nunca viu |
+
+O defeito medido veio do primeiro: a auto-aplicação que subiu `protagonist` 7,0 → 8,5
+justificando com *"user_score altíssimo (9.4)"* — gosto de uma pessoa entrando num atributo
+de catálogo **compartilhado**, que em multi-user vira vazamento entre usuários.
+
+⚠️ **E sem a pós-leitura o auditor é a MESMA ferramenta relendo a MESMA evidência.** O que
+ele tem de novo sobre a avaliação são três coisas, e só duas são reais: `post_*` (novo),
+âncoras de distribuição (novo) e o digest — que sobrepõe **78,9%** da amostra de reviews que
+a avaliação já lia. Tirada a pós-leitura, sobraria uma tabela de distribuição.
+
+**Pool hoje: 174 obras.** Fora: 16 sem digest, 22 sem pós-leitura. ⚠️ **Não ampliar
+afrouxando a exigência** — 851 obras têm digest, e auditar as 851 pareceria cobertura 4×
+maior sendo a IA se re-julgando em 677 delas. A cobertura cresce por LEITURA: cada leitor
+que preenche o pós-leitura amplia a pool sozinho.
+
+🔴 **O caminho durável não é este card.** `attribute_bias` já faz a versão estatística de "a
+IA errou o atributo": IA × você por dimensão, com encolhimento bayesiano, aplicado como
+`valor_calibrado = valor_IA − aplicado` — **1.404 respostas em 156 obras, 9 atributos com
+offset**. Com N leitores na mesma obra, a média cancela o viés individual e isso vira
+consenso humano. **A auditoria por LLM é a ponte para o período em que há uma leitora só.**
+
+⚠️ **A versão pula a v4 de propósito:** ela existiu num piloto e está gravada em
+`ai_api_calls` (3 chamadas). Reusar o rótulo faria duas réguas dividirem o mesmo nome no log.
+
+⚠️ **Sete tentativas de prompt falharam nesta base** — cinco no gold, a v27, e a v4
+(proeminência × intensidade: defeito 16% → 18%, dentro do ruído). A oitava não se justifica;
+o que sobrou de acionável é estrutural, não textual.
+
 ### v3: o auditor ganhou evidência e escala — e a confiança CAIU
 
 Piloto de 16/08/2026 (`scripts/pilot-audit.ts`, 30 obras, **US$0,1778 medidos em

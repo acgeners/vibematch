@@ -206,7 +206,7 @@ export function SuggestionRow({
               title={
                 isRead
                   ? "Lida — clique para desmarcar (volta a contar no badge)"
-                  : "Marcar como lida — silencia no badge sem aceitar/rejeitar"
+                  : "Marcar como já vista — anotação sua, sem aceitar nem rejeitar"
               }
               className={cn(
                 isRead && "text-emerald-700 hover:text-emerald-700 dark:text-emerald-300",

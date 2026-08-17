@@ -61,7 +61,9 @@ async function main() {
   const pool = await loadWorksForAudit()
   console.log(`alvo: ${url}`)
   console.log(`prompt: ${PROMPT_VERSION} · modelo: ${MODEL}`)
-  console.log(`pool: ${pool.works.length} obras com digest · ${pool.semDigest} fora (sem digest)`)
+  console.log(
+    `pool: ${pool.works.length} obras · fora: ${pool.semDigest} sem digest, ${pool.semLeitura} sem pós-leitura`,
+  )
   console.log(`fora do escopo: ${Object.keys(AUDIT_OUT_OF_SCOPE).join(", ")}\n`)
 
   const amostra = embaralhaDeterminístico(pool.works, 20260816).slice(0, N)

@@ -1,7 +1,6 @@
 import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { countStaleEmbeddings } from "@/server/embeddings/refresh"
-import { countPendingSuggestions } from "@/server/queries/calibration"
 import { getWorksMissingComixHid } from "@/server/queries/comix-coverage"
 import { hasConsolidatableBlocks } from "@/lib/ai-recommendation/synopsis-consolidator"
 import { splitSynopsesFromText } from "@/lib/work-derived"
@@ -136,9 +135,8 @@ export async function getSettingsBadgePendingTotal(): Promise<number> {
  */
 export const getSettingsItemPending = cache(
   async (): Promise<Record<string, number>> => {
-    const [suggestions, embeddings, canonicalSynopsis, reviewSummary, comixMissing] =
+    const [embeddings, canonicalSynopsis, reviewSummary, comixMissing] =
       await Promise.all([
-        countPendingSuggestions().catch(() => 0),
         countMissingEmbeddings().catch(() => 0),
         countPendingCanonicalSynopses().catch(() => 0),
         countPendingReviewSummaries().catch(() => 0),
@@ -147,7 +145,17 @@ export const getSettingsItemPending = cache(
           .catch(() => 0),
       ])
     return {
-      "ai-audit": suggestions,
+      // 🔴 `ai-audit` NÃO entra, e a ausência é a decisão (2026-08-16).
+      //
+      // A fila de calibração produz ~250 sugestões por execução e consome ~20 por mês —
+      // medido: 58 decisões humanas em 84 dias. Um contador sobre isso nunca zera, e alarme
+      // que sempre toca não é lido: as 583 pendentes de então foram silenciadas em bloco
+      // pelo "marcar lida", não revisadas. É a mesma régua do `db:health` e do painel
+      // "Estado da obra" — o que é maioria vira número na tela, só o raro vira alarme.
+      //
+      // A fila continua existindo e consultável dentro do card; ela só deixou de se
+      // apresentar como pendência acionável. O que ficou como fila permanente é a guarda
+      // determinística (contradição prosa × nota), que é limitada e objetiva.
       embeddings,
       "synopsis-canonical": canonicalSynopsis,
       "review-synthesis": reviewSummary,
