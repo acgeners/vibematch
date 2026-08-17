@@ -4308,11 +4308,13 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.181 passando (+24 pulados) em 304 arquivos** (299 passando + 5 pulados);
-medido em 2026-08-17 com o traço virando a legenda de si mesmo no tooltip: **+3 casos, sem
-arquivo novo** (o traço idêntico ao da célula, o token de página fora e o chão escuro do
-recorte). Com `find tests -name '*.test.ts*'` = **304** conferido contra os 304 executados.
-Antes: **3.178 em 304** (a rampa do Veredito ganhando dono, +11 casos e +1 arquivo,
+`npm run test` → **3.184 passando (+24 pulados) em 304 arquivos** (299 passando + 5 pulados);
+medido em 2026-08-17 com a exclusão de status parando de apagar os outros pills: **+3 casos,
+sem arquivo novo** (um teste virou quatro em `ui/ranking-status-exclusao` — os outros pills
+seguem marcados, e os dois sentidos do clique no nome). Com
+`find tests -name '*.test.ts*'` = **304** conferido contra os 304 executados.
+Antes: **3.181 em 304** (o traço virando a legenda de si mesmo no tooltip, +3 casos sem
+arquivo novo), **3.178 em 304** (a rampa do Veredito ganhando dono, +11 casos e +1 arquivo,
 `ui/faixa-do-veredito`), **3.167 em 303** (rateio de largura do modo
 Agrupar, que **não somou arquivo** — os +2 casos eram o teste do modo trocando um piso
 inventado por dois: "a soma é a largura da tabela" e "nenhuma coluna recebe menos do que

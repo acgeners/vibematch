@@ -1543,6 +1543,47 @@ function encodeCsvSet(set: Set<string>): string | null {
 const UNINFORMATIVE_SYMBOLS = new Set(["?", "？", "-", "–", "—", "―", "−", "⎯"])
 
 /**
+ * O pill fica MARCADO quando o status está no resultado — e com exclusão de pé isso é
+ * "todos menos os riscados", não "nenhum".
+ *
+ * 🔴 Até 17/08/2026 excluir UM status apagava a cor dos outros quatro. O motivo era
+ * mecânico: `selected*` é esvaziado no modo negativo porque ele alimenta a barra de
+ * "Filtros ativos", onde uma lista positiva não pode aparecer ao lado do chip
+ * "exceto" — e os pills liam esse MESMO conjunto. A tela dizia "perdi minha seleção"
+ * no exato clique em que o filtro passou a incluir MAIS obras.
+ *
+ * ⚠️ O efeito colateral é honesto e não é bug: um status que estava fora da lista
+ * positiva (ex.: `Unknown`) ACENDE ao excluir outro. Ele entrou no resultado de
+ * verdade — `setStatusRule` limpa o positivo ao excluir, então a dimensão vira
+ * "todos exceto", e desenhá-lo apagado é que mentiria.
+ */
+function statusChipOn(
+  excluded: Set<string>,
+  isAll: boolean,
+  selected: Set<string>,
+  status: string
+): boolean {
+  if (excluded.size > 0) return !excluded.has(status)
+  return isAll || selected.has(status)
+}
+
+/**
+ * O que o clique no NOME do pill faz. Com exclusão de pé o card inteiro é negativo e o
+ * pill marcado quer dizer "está no resultado" — então clicá-lo o TIRA de lá, igual à
+ * zona `−`.
+ *
+ * 🔴 Mandar `"include"` aqui (o gesto de antes, quando nenhum pill ficava marcado)
+ * passou a produzir o oposto do gesto: `setStatusRule` sai da exclusão com a lista
+ * positiva VAZIA, e vazio é a forma canônica do `"all"` — clicar em "Ongoing" para
+ * tirá-lo acenderia todos os cinco. Para voltar à seleção positiva existe o
+ * interruptor "Excluir" do cabeçalho, que já limpa as exclusões.
+ */
+function statusChipRule(hasExclusion: boolean, on: boolean, off: boolean): StatusRule {
+  if (hasExclusion) return off ? null : "exclude"
+  return on ? null : "include"
+}
+
+/**
  * Chip de status com TRÊS estados: neutro · incluído · excluído.
  *
  * A anatomia é a mesma das abas Gêneros e Tags (`[−] rótulo`) de propósito — o gesto de
@@ -1587,12 +1628,19 @@ function StatusButton({
     </>
   )
 
+  // ⚠️ Status SEM cor própria (`Unknown`, vindo do banco com `color` nulo) precisa do
+  // preenchimento do tema, senão marcado e desmarcado ficam idênticos nesta variante —
+  // o `<Badge variant="default">` do outro ramo já veste esse mesmo par. Ficou visível
+  // quando a exclusão passou a marcar os demais pills: era o único que não acendia.
+  const activeWithoutColor = active && !option.color
+
   const chip = onExclude ? (
     <div
       className={cn(
         "inline-flex h-8 shrink-0 items-stretch overflow-hidden rounded-full border transition-transform hover:-translate-y-px",
         excluded ? "border-dashed opacity-60" : "",
         active ? "" : "bg-transparent",
+        activeWithoutColor ? "border-transparent bg-primary text-primary-foreground" : "",
       )}
       style={
         option.color
@@ -1612,6 +1660,9 @@ function StatusButton({
           // largura em `--l1cols2xl`.
           "flex items-center border-r px-1.5 text-sm font-bold leading-none transition-colors",
           active ? "border-white/35 text-white" : "border-border/60 text-muted-foreground",
+          // O branco sai por cima do `--primary`, que no tema escuro é claro (72% de
+          // luminosidade): sem isto o `−` some no único pill sem cor própria.
+          activeWithoutColor ? "border-primary-foreground/35 text-primary-foreground" : "",
           "hover:bg-foreground/10 hover:text-foreground",
         )}
       >
@@ -1622,7 +1673,15 @@ function StatusButton({
         onClick={onClick}
         aria-pressed={active}
         className="flex cursor-pointer items-center gap-1 whitespace-nowrap px-2 text-[13px] font-medium"
-        style={active ? { color: "#fff" } : option.color ? { color: option.color } : undefined}
+        style={
+          activeWithoutColor
+            ? undefined
+            : active
+              ? { color: "#fff" }
+              : option.color
+                ? { color: option.color }
+                : undefined
+        }
       >
         {label}
       </button>
@@ -2957,9 +3016,11 @@ export function RankingFilters({
   // tem filtro padrão) — só o primeiro deve virar chip em "Filtros ativos": o segundo
   // não é uma escolha de ninguém, é só o estado inicial, e mostrar um chip "Todos"
   // removível pra ele contradiz "sem filtro nenhum aplicado por padrão".
-  // ⚠️ Excluindo, NENHUM chip fica marcado: a dimensão está no modo negativo, e um
-  // "todos marcados menos os riscados" diria que os outros foram escolhidos a dedo —
-  // que é justamente a leitura que a exclusão veio desfazer.
+  // ⚠️ `selected*` fica VAZIO no modo negativo, e isso é sobre a barra de "Filtros
+  // ativos": lá a lista positiva não pode aparecer ao lado do chip "exceto" (seriam
+  // dois filtros na tela para uma dimensão que só aplica um). Quem desenha os PILLS é
+  // `statusChipOn`, que trata o modo negativo como "todos menos os riscados" — ver o
+  // doc dela para por que os dois não podem ler o mesmo conjunto.
   const pubStatusExplicitAll = pubStatusParam === "all"
   const isAllPublication =
     !pubExcluded.size && (pubStatusExplicitAll || (pubStatusParam == null && pubStatusDefaultsAll))
@@ -3482,15 +3543,22 @@ export function RankingFilters({
               {/* gap-1.5: cada 2px entre pills vale ~14px de linha nos 10 status pessoais. */}
               <div className="flex flex-wrap gap-1.5">
                 {visiblePublicationStatuses.map((s) => {
-                  const on = isAllPublication || selectedPublicationStatuses.has(s.status)
                   const off = pubExcluded.has(s.status)
+                  const on = statusChipOn(
+                    pubExcluded,
+                    isAllPublication,
+                    selectedPublicationStatuses,
+                    s.status
+                  )
                   return (
                     <StatusButton
                       key={`publication-${s.status}`}
                       option={s}
                       active={on}
                       excluded={off}
-                      onClick={() => setPublicationRule(s.status, on ? null : "include")}
+                      onClick={() =>
+                        setPublicationRule(s.status, statusChipRule(pubExcluded.size > 0, on, off))
+                      }
                       onExclude={
                         pubExcludeOn
                           ? () => setPublicationRule(s.status, off ? null : "exclude")
@@ -3549,8 +3617,8 @@ export function RankingFilters({
             >
               <div className="flex flex-wrap gap-1.5">
                 {visiblePersonalStatuses.map((s) => {
-                  const on = isAllPersonal || selectedPerStatuses.has(s.status)
                   const off = perExcluded.has(s.status)
+                  const on = statusChipOn(perExcluded, isAllPersonal, selectedPerStatuses, s.status)
                   return (
                     <StatusButton
                       key={`personal-${s.status}`}
@@ -3558,7 +3626,9 @@ export function RankingFilters({
                       active={on}
                       excluded={off}
                       tooltip={getPersonalStatusDescription(s.status, s.comment)}
-                      onClick={() => setPersonalRule(s.status, on ? null : "include")}
+                      onClick={() =>
+                        setPersonalRule(s.status, statusChipRule(perExcluded.size > 0, on, off))
+                      }
                       onExclude={
                         perExcludeOn
                           ? () => setPersonalRule(s.status, off ? null : "exclude")
