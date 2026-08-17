@@ -1279,6 +1279,18 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               // que de fato moveu o número, e o rótulo diz de onde ela veio.
               const calibrated = calibrationProvenance?.get(slug) ?? null
               const isCalibrated = scoreSourceMap[slug] === "ai_calibrated" && !!calibrated
+              // 🔴 Nota que VOCÊ editou também precisa dizer isso. A prosa abaixo é sempre da
+              // IA, e quando a nota foi trocada ela passa a argumentar por outro número —
+              // medido em 2026-08-17: das 20 justificativas que contradizem a nota exibida,
+              // **19 são exatamente isto** e só 1 é o modelo se contradizendo. Não é erro, é
+              // troca de autor sem crédito. Rótulo em vez de reescrever o texto: reescrever
+              // faria o registro da IA dizer o que ela não disse.
+              const iaSuggested = aiScore?.suggested_score ?? null
+              const isUserEdited =
+                scoreSourceMap[slug] === "ai_edited" &&
+                score != null &&
+                iaSuggested != null &&
+                Math.abs(iaSuggested - score) >= 0.05
               const sourceText = isCalibrated ? calibrated.justification : aiScore?.justification
               const parsed = sourceText ? parseJustification(sourceText) : null
               const band = score != null ? bandForScore(score) : null
@@ -1316,6 +1328,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       label={rubricTitle(slug, band)}
                       rubric={rubricForBand(slug, band)}
                     />
+                  )}
+                  {isUserEdited && (
+                    <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                      Ajustada por você · a IA sugeria {iaSuggested!.toFixed(1)}
+                    </p>
                   )}
                   {isCalibrated && (
                     /* Procedência, não estado: o selo ✨ do card credita a avaliação, e esta

@@ -235,12 +235,12 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**97 arquivos, remedidos em 2026-08-16**):
+banco declara um dos dois (**98 arquivos, remedidos em 2026-08-17**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **44** | só LÊ ⇒ vai pro local, de graça |
-| `ALVO: NUVEM` no cabeçalho | **46** | GRAVA ⇒ tem que ir pra nuvem |
+| `ALVO: NUVEM` no cabeçalho | **47** | GRAVA ⇒ tem que ir pra nuvem |
 | (não tocam o banco) | 7 | fora da régua |
 
 🔴 **ESTES TRÊS NÚMEROS SÃO CONFERIDOS PELA SUÍTE**, e não por quem editar esta seção —
@@ -3111,6 +3111,47 @@ leia [[project-prompt-v27-veredito-do-piloto]] antes.
 ⚠️ **A procedência das notas calibradas FICA na página da obra.** As 37 notas com
 `source = 'ai_calibrated'` continuam no banco, e sem o chip "Ajustada pela auditoria" elas
 voltariam a exibir a justificativa da avaliação — que fala de outro número em 27 delas.
+
+### Nota trocada diz QUEM trocou — senão a prosa da IA vira contradição
+
+A justificativa impressa ao lado de cada critério é **sempre da avaliação**. Quando a nota é
+substituída depois, ela passa a argumentar por outro número — e sem crédito isso parece o
+modelo se contradizendo. Medido em 2026-08-17 sobre as 20 justificativas que contradizem a
+nota exibida:
+
+| origem | n | é erro? |
+|---|---|---|
+| `ai_edited` — a curadora trocou a nota | **19** | **não.** É decisão dela, sem crédito na tela |
+| `ai_accepted` — o modelo se contradisse | **1** | sim, e vale 3,84¢ de reavaliação ou nada |
+
+🔴 **Reavaliar as 19 seria destruir curadoria pra perguntar de novo ao modelo que ela já
+corrigiu.** O conserto é atribuir, não reavaliar: o card imprime `Ajustada por você · a IA
+sugeria 6,0`, irmão do `Ajustada pela auditoria · antes 7,0` das calibradas. `suggested_score`
+já vinha no payload — custo zero.
+
+⚠️ **Não usar `realinharFaixaCitada` aqui.** Ele reescreve o rótulo da faixa dentro do texto,
+e existe para o caso do CLAMP — uma regra moveu o número sem análise. Numa edição humana,
+reescrever faria o registro da IA dizer o que ela não disse.
+
+### As auto-aplicações da auditoria foram revertidas — as decisões humanas não
+
+Das 40 notas `ai_calibrated` que a auditoria aposentada deixou: **21 auto-aplicadas** (ninguém
+olhou, |Δ| médio 1,55) e **19 aceitas ou editadas** pela curadora (|Δ| 2,00 / 0,50).
+
+**As 19 ficam** — desfazê-las seria apagar curadoria. Das 21, foram revertidas em 17/08 as
+**3 de 16/08**, as únicas com defeito nomeado individualmente: duas subiram `adult_content`
+por tag de circunstância (o mecanismo que a **migration 182 rebaixou de propósito**) e uma
+subiu `protagonist` alegando *"user_score altíssimo (9.4)"*. As 18 de junho seguem no ar —
+sobreviveram dois meses de uso sem incomodar, e reverter no escuro descartaria acertos.
+
+Ferramenta: `scripts/reverter-calibracao-auto-aplicada.ts` (ALVO: NUVEM, US$0, ensaio por
+padrão, `--desde=` para recortar).
+
+🔴 **Ela olha a ÚLTIMA aplicação do par, de qualquer status — não só as automáticas.** Um par
+pode ter sido auto-aplicado em junho e ACEITO depois: filtrar só por `auto_applied` acha a
+antiga e reverter para o `previous_score` dela apagaria a decisão posterior. Medido: **24
+pares com auto-aplicação no histórico, 21 em que ela é a última palavra.** Foi a divergência
+entre 24 e 21 que denunciou o bug — dois números para o mesmo fato.
 
 ### `bandCoherence`: a régua que sobreviveu, e os dois falsos positivos dela
 
