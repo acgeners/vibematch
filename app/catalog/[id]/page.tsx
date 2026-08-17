@@ -122,6 +122,7 @@ import {
 } from "@/lib/constants/post-reading-criteria"
 import { cn, titleToSlug } from "@/lib/utils"
 import { STATUS_CHIP_BASE, STATUS_TONE } from "@/lib/ui/status-tone"
+import { verdictBandClass } from "@/lib/ui/verdict-band"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { unstable_cache } from "next/cache"
 
@@ -1568,11 +1569,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 const alignConfidence =
                   (work.calculated_scores.alignment_payload as { confidence?: number } | null)
                     ?.confidence ?? null
-                const cls =
-                  rk >= 80 ? "bg-violet-500/15 text-violet-700 border-violet-500/40 dark:text-violet-300"
-                  : rk >= 60 ? "bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300"
-                  : rk >= 40 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
-                  : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
+                // Mesmo número da coluna "Ver." do /ranking ⇒ MESMA rampa, vinda do dono.
+                const cls = verdictBandClass(rk)
                 return (
                   <div className={cn(
                     // flex-col: a linha de cima é sempre [rótulo+selo | nota] e as ações do
@@ -1681,11 +1679,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   </div>
                   {(() => {
                     const ms = lastDeepDive!.match_score as number
-                    const cls =
-                      ms >= 80 ? "bg-violet-500/15 text-violet-700 border-violet-500/40 dark:text-violet-300"
-                      : ms >= 60 ? "bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300"
-                      : ms >= 40 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
-                      : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
+                    // Outro NÚMERO (match_score do Deep Dive), mesma escala 0–100 do consultor
+                    // e mesma linguagem visual — então a rampa é a mesma, e vem do dono.
+                    const cls = verdictBandClass(ms)
                     const oneLiner = lastDeepDive!.one_liner?.trim() || null
                     const badge = (
                       <span className={cn("flex h-10 w-14 items-center justify-center rounded-md border font-mono text-lg font-bold shrink-0", cls, oneLiner && "cursor-help")}>

@@ -35,6 +35,23 @@ export function confidenceTextClass(confidence: number): string {
   return "text-rose-600 dark:text-rose-400"
 }
 
+/**
+ * Só o PREENCHIMENTO de um marcador sem texto — o traço de confiança da pílula do Veredito
+ * (`AlignmentScoreCell`), que até 17/08/2026 era uma bolinha de 6px com os cortes `0,75/0,5`
+ * escritos à mão ali dentro: a **quinta** cópia, e a única em que a faixa baixa era `slate`
+ * em vez do rose que as outras quatro telas usam. Mesma avaliação, duas cores.
+ *
+ * ⚠️ Confiança baixa em rose incomoda (rose é `failed` na régua de estado, e confiança baixa
+ * não é falha) — mas o dono já paga esse preço em três telas, e o mesmo número pintado de
+ * duas cores conforme a tela é pior que uma escolha de cor discutível.
+ */
+export function confidenceMarkClass(confidence: number): string {
+  const band = confidenceBand(confidence)
+  if (band === "alta") return "bg-emerald-500"
+  if (band === "media") return "bg-amber-500"
+  return "bg-rose-500"
+}
+
 /** Pílula completa: anel + fundo + texto. Combine com `rounded-full ring-1 px-2 py-0.5`. */
 export function confidenceBadgeClass(confidence: number | null): string {
   if (confidence == null) return "ring-border bg-muted text-muted-foreground"

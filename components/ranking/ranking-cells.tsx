@@ -10,6 +10,8 @@ import { useRerankSingleWork } from "@/components/ranking/use-rerank-single-work
 import { AlignmentTooltipContent, VerdictTooltipContent } from "@/components/ranking/score-tooltip-content"
 import type { AlignmentPayload } from "@/components/ranking/score-tooltip-content"
 import { ART_BAND_LABELS, artBandFromPercentile } from "@/lib/art/bands"
+import { verdictBandClass } from "@/lib/ui/verdict-band"
+import { confidenceMarkClass } from "@/lib/ai-evaluation/confidence-tone"
 
 /**
  * Botão pequeno que substitui o "—" da `AlignmentScoreCell` quando há um
@@ -142,19 +144,20 @@ export function AlignmentScoreCell({
     )
   }
 
-  const colorClass =
-    score >= 80 ? "bg-violet-500/15 text-violet-700 border-violet-500/40 dark:text-violet-300"
-    : score >= 60 ? "bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300"
-    : score >= 40 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
-    : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
+  // 🔴 A rampa das faixas tem DONO (`lib/ui/verdict-band.ts`) — ela também desenha o card do
+  // Veredito e o do Deep Dive na página da obra, e montá-la aqui de novo é o que fazia o mesmo
+  // 55 poder sair de uma cor na lista e de outra na obra.
+  const colorClass = verdictBandClass(score)
 
-  // Confidence dot: indicador visual sutil ao lado do score. Verde = ≥0.75 (alta),
-  // âmbar = 0.5-0.75 (média), cinza = <0.5 (baixa). Omitido quando ausente.
-  const confidenceDot = payload?.confidence != null
-    ? payload.confidence >= 0.75 ? "bg-emerald-500"
-    : payload.confidence >= 0.5 ? "bg-amber-500"
-    : "bg-slate-400"
-    : null
+  // O TRAÇO de confiança (era uma bolinha de 6px até 17/08/2026): 15px × 2px centrados sob o
+  // número, dentro do preenchimento. Largura CONSTANTE de propósito — no sublinhado do número
+  // ela seguiria a quantidade de dígitos, e "100" marcaria mais que "35" sem significar nada.
+  // Com largura e x fixos, a coluna vira uma tira que dá pra varrer na vertical.
+  //
+  // ⚠️ Ele NÃO encosta na borda: friso colado na base funde com a borda da pílula quando as
+  // duas cores coincidem (âmbar/âmbar, cinza/cinza) e lê como "a borda engrossou". A cor sai
+  // de `confidenceMarkClass`, nunca dos cortes reescritos aqui.
+  const confidenceMark = payload?.confidence != null ? confidenceMarkClass(payload.confidence) : null
 
   // Quando desatualizado e o re-rank é possível (Pago + workId), o ⟳ vira um
   // botão clicável ao lado do badge. Senão, fica como indicador estático dentro
@@ -168,18 +171,23 @@ export function AlignmentScoreCell({
         <TooltipTrigger asChild>
           <span
             className={cn(
-              "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs font-medium cursor-help tabular-nums",
+              "inline-flex flex-col items-center gap-0.5 rounded-md border px-1.5 pt-[3px] pb-1 text-xs font-medium leading-4 cursor-help tabular-nums",
               colorClass,
               stale && "opacity-60",
             )}
           >
-            {confidenceDot && (
-              <span
-                className={cn("h-1.5 w-1.5 rounded-full", confidenceDot)}
-                title={`Confiança: ${(payload!.confidence! * 100).toFixed(0)}%`}
-              />
-            )}
-            {Math.round(score)}
+            <span>{Math.round(score)}</span>
+            {/* Slot SEMPRE reservado — mesmo motivo do slot do ⟳ logo abaixo: sem ele o número
+                muda de altura de uma linha pra outra. E ele leva uma TRILHA neutra quando não há
+                confiança, em vez de ficar vazio: medido no app em 17/08/2026, **297 das 695
+                obras com Veredito (43%) não têm confiança registrada**, então o vão vazio é o
+                caso comum e lê como número desalinhado dentro da pílula. A trilha a 10% fica
+                muito abaixo das três cores saturadas — diz "sem registro", não "confiança
+                baixa", que é rose. */}
+            <span
+              className={cn("h-0.5 w-[15px] rounded-full", confidenceMark ?? "bg-foreground/10")}
+              aria-hidden="true"
+            />
           </span>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[400px] space-y-1.5">
