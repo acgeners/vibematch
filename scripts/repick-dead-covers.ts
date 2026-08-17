@@ -1,5 +1,10 @@
 /**
- * Repesca a capa principal das obras cuja capa EXIBIDA está morta (link 403/404/DNS).
+ * Repesca a capa principal das obras cuja capa EXIBIDA está morta — isto é, cujo host
+ * RESPONDEU dizendo que ela não serve (403/404, ou corpo que não é imagem).
+ *
+ * 🔴 Falha de rede (DNS, timeout, conexão recusada) NÃO conta como morta: essa linha já
+ * disse "403/404/DNS" e o script agia assim, o que quase custou 98 capas boas. Ver o
+ * `EstadoDaCapa`.
  *
  * 🔴 ALVO: NUVEM — este script GRAVA no catálogo (`work_covers.is_primary`). Rodá-lo contra o
  * local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
@@ -27,6 +32,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { createClient } from "@supabase/supabase-js"
+import { sondarCapa } from "@/lib/server/covers/cover-liveness"
 import { measureCover, scoreCover } from "@/lib/server/covers/measure-cover"
 import { pickCoverUrls } from "@/lib/work-derived"
 // O dono da retenção de `.backups` é ÚNICO — ver scripts/lib/backups-retencao.mjs.
@@ -69,58 +75,6 @@ async function lerTodasAsCapas(): Promise<CoverRow[]> {
   return out
 }
 
-const cache = new Map<string, Promise<boolean>>()
-
-/**
- * A capa carrega?
- *
- * 🔴 Decide pela ASSINATURA do arquivo, nunca pelo `content-type`: a Tappytoon devolve
- * `image` (sem a barra) num JPEG perfeitamente válido, e um `startsWith("image/")` reprovou
- * 2 capas boas na primeira medição. O header é o que o servidor ALEGA; os bytes são o fato.
- * Do outro lado, o Cloudflare devolve **200 em alguns casos e 403 com `text/html`** — daí não
- * bastar o status.
- */
-function carrega(url: string): Promise<boolean> {
-  const emCache = cache.get(url)
-  if (emCache) return emCache
-  const p = (async () => {
-    for (let tentativa = 0; tentativa < 2; tentativa++) {
-      try {
-        const ac = new AbortController()
-        const t = setTimeout(() => ac.abort(), 15000)
-        // GET e não HEAD: vários CDNs de capa devolvem 403/405 a HEAD mesmo servindo a imagem.
-        const r = await fetch(url, {
-          signal: ac.signal,
-          headers: { "user-agent": "Mozilla/5.0", accept: "image/*,*/*" },
-        })
-        clearTimeout(t)
-        if (!r.ok || !r.body) {
-          await r.body?.cancel().catch(() => {})
-          return false
-        }
-        const leitor = r.body.getReader()
-        const { value } = await leitor.read()
-        await leitor.cancel().catch(() => {})
-        const h = [...(value ?? new Uint8Array()).slice(0, 12)]
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("")
-        return (
-          h.startsWith("ffd8ff") || // JPEG
-          h.startsWith("89504e47") || // PNG
-          h.startsWith("474946") || // GIF
-          (h.startsWith("52494646") && h.slice(16, 24) === "57454250") || // RIFF…WEBP
-          h.slice(8, 16) === "66747970" // ftyp (AVIF/HEIC)
-        )
-      } catch {
-        if (tentativa === 1) return false
-      }
-    }
-    return false
-  })()
-  cache.set(url, p)
-  return p
-}
-
 async function emLotes<T, R>(itens: T[], n: number, fn: (t: T) => Promise<R>): Promise<R[]> {
   const out: R[] = []
   for (let i = 0; i < itens.length; i += n) {
@@ -159,17 +113,35 @@ async function main() {
     descartadas: (number | null)[]
   }[] = []
   const semSaida: { workId: string; titulo: string; capas: number }[] = []
+  /** Obras que a rede não deixou avaliar. Nunca viram plano — ver o 🔴 do `EstadoDaCapa`. */
+  const indeterminadas: { workId: string; url: string }[] = []
 
   const trabalho = [...porObra.entries()]
   await emLotes(trabalho, CONCORRENCIA, async ([workId, linhas]) => {
     const urls = pickCoverUrls(linhas)
     if (urls.length === 0) return
-    if (await carrega(urls[0])) return // a capa exibida está viva: nada a fazer
+    const exibida = await sondarCapa(urls[0])
+    if (exibida === "viva") return // a capa exibida está viva: nada a fazer
+    if (exibida === "indeterminada") {
+      // Não sabemos se está morta ⇒ não tocamos. Trocar aqui é o caminho pelo qual 98
+      // capas boas quase foram sobrescritas por causa de um DNS local fora do ar.
+      indeterminadas.push({ workId, url: urls[0] })
+      return
+    }
 
     const vivas: string[] = []
-    for (const u of urls.slice(1)) if (await carrega(u)) vivas.push(u)
+    let alternativaIncerta = false
+    for (const u of urls.slice(1)) {
+      const e = await sondarCapa(u)
+      if (e === "viva") vivas.push(u)
+      else if (e === "indeterminada") alternativaIncerta = true
+    }
     if (vivas.length === 0) {
-      semSaida.push({ workId, titulo: workId, capas: urls.length })
+      // ⚠️ "morta e sem alternativa VIVA" só é "sem saída" quando todas as outras
+      // responderam. Se alguma ficou indeterminada, pode haver saída que a rede escondeu —
+      // e anunciá-la como "precisa de capa nova" mandaria alguém caçar capa à toa.
+      if (alternativaIncerta) indeterminadas.push({ workId, url: urls[0] })
+      else semSaida.push({ workId, titulo: workId, capas: urls.length })
       return
     }
 
@@ -237,6 +209,33 @@ async function main() {
     console.log(`\n${semSaida.length} obra(s) SEM nenhuma capa viva — precisam de capa nova:`)
     for (const s of semSaida.sort((a, b) => a.titulo.localeCompare(b.titulo))) {
       console.log(`  ${s.titulo}  (${s.capas} capa(s), todas mortas)`)
+    }
+  }
+
+  // 🔴 Agrupado por HOST, e não listado obra a obra, porque é o host que denuncia a causa:
+  // capa morre uma a uma e espalhada pelas fontes; rede cai em BLOCO num host só. Foi essa
+  // concentração (98 de 98 em `uploads.mangadex.org`) que revelou o falso positivo de
+  // 17/08/2026 — obra a obra, a mesma lista parecia um relatório legítimo.
+  if (indeterminadas.length) {
+    const porHost = new Map<string, number>()
+    for (const i of indeterminadas) {
+      let h = "?"
+      try {
+        h = new URL(i.url).hostname
+      } catch {}
+      porHost.set(h, (porHost.get(h) ?? 0) + 1)
+    }
+    const ranking = [...porHost].sort((a, b) => b[1] - a[1])
+    console.log(
+      `\n⚠️  ${indeterminadas.length} obra(s) NÃO avaliadas: a rede não respondeu sobre a capa.`,
+    )
+    console.log("   Não entram no plano — indeterminado não é morto.")
+    for (const [h, n] of ranking) console.log(`   ${String(n).padStart(4)}  ${h}`)
+    if (ranking[0] && ranking[0][1] >= 10) {
+      console.log(
+        `\n   🔴 ${ranking[0][1]} concentradas em ${ranking[0][0]}: isso é a SUA rede ou aquele host,`,
+      )
+      console.log("      não o catálogo. Cheque o DNS e rode de novo antes de concluir.")
     }
   }
 
