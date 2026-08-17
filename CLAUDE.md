@@ -1728,20 +1728,30 @@ tela — **fator 0,49**, e *toda* coluna sai pela metade: Ano recebe 34px e vira
 de maior conteúdo, mas **o problema nunca foi dela**.
 
 Desde 17/08/2026, com tiers na tela a Lista usa **`TIER_MODE_COLUMN_KEYS`**
-(`work-table-config.ts`) no lugar da config do seletor: `♥ · título · Status · Caps. · Ano ·
+(`work-table-config.ts`) no lugar da config do seletor: `♥ · título · Pub. · Caps. · Ano ·
 Arte · Prioridade · O que a separa · N. Prevista · Interesse · Int. Previsto · Veredito · Média
-externa · Votos` (+ as duas estruturais). Soma **1.772px** ⇒ **fator 0,85** a 1.500px, e o
+externa · Votos` (+ as duas estruturais). Soma **1.797px** ⇒ **fator 0,83** a 1.500px, e o
 separador recebe **296px** — acima dos 292 de que a leitura inteira precisa.
 
-🔴 **O piso é a LARGURA DO SEPARADOR, não o fator.** É por isso que `separator` vale **350** e
+🔴 **O piso é a LARGURA DO SEPARADOR, não o fator.** É por isso que `separator` vale **355** e
 não 300: a largura aqui é uma **share**, então o conjunto crescer encolhe a coluna sem ninguém
 tocar nela. Coluna nova no modo derruba esse piso, e é isso que
 `tests/unit/ranking/modo-agrupar-colunas.test.ts` reprova — não o tamanho da lista.
 
 🔴 **A régua de quem entra: responde "destas empatadas, qual eu escolho?"** — ligar o Agrupar
-troca a PERGUNTA da tela. Entram o eixo da decisão (`decision`), o separador, o estado da obra e
-o seu, as notas que sustentam a escolha, e as forças que o separador compara
+troca a PERGUNTA da tela. Entram o eixo da decisão (`decision`), o separador, o estado da obra,
+as notas que sustentam a escolha, e as forças que o separador compara
 (`why-this-work.ts`: avaliação = `platform_avg`, alcance = `total_votes`).
+
+🔴 **O status da coluna é o de PUBLICAÇÃO, não o seu** (escolha da Ana, 17/08/2026). Ele
+responde *"dá pra começar agora?"* — o mesmo eixo que `startabilityOf` pontua no refino por
+mood —, que é decisão dentro do tier. O `personal_status` que estava ali entrava `iconOnly` e
+era quase-constante **por construção**: o filtro padrão do `/ranking` já recorta a lista em
+Untracked + Want to Read (`BASELINE_PERSONAL_STATUSES`), então a coluna gastava share do
+orçamento para repetir "—". ⚠️ O preço são **20px** de largura natural (130 × 110), e por isso
+`separator` subiu de 350 para 355 na mesma leva: sem compensar, ele caía para **293px**, a 1px
+do piso. ⚠️ E o padrão de publicação é `Completed` só, então quem não abrir esse filtro vê
+"✅ CMP" em toda linha — a coluna paga a share quando a pessoa amplia o filtro.
 ⚠️ **Não existe coluna para a força "chance"** (ela só vive na Bússola), então o conjunto tem 2
 das 3 — inventar uma coluna aqui seria criar dado novo dentro de uma decisão de largura.
 
@@ -1811,8 +1821,8 @@ Foi assim com **"O que a separa"** (achado em 17/08/2026): a coluna com MAIS con
 tabela — trilha de 92px + ícone + valor + frase + σ — era a única sem entrada em
 `DEFAULT_COLUMN_WIDTHS`. Medido no browser: trilha + ícone pedem **144px**, então em 100px
 sobravam **−44px** para a frase, que é o conteúdo da coluna e **nunca chegou a ser desenhada**;
-o título truncava em "O QU…". Hoje: **`separator: 350`** — e são 350 e não 300 porque a largura
-aqui é uma **share**: com as 14 colunas do modo Agrupar (soma 1.772px), 300 daria 255px reais e
+o título truncava em "O QU…". Hoje: **`separator: 355`** — e são 355 e não 300 porque a largura
+aqui é uma **share**: com as 14 colunas do modo Agrupar (soma 1.797px), 300 daria 250px reais e
 a frase sumiria de novo. Guardado por `tests/unit/ui/coluna-declara-largura.test.ts`, que
 **deriva o universo de `WORK_TABLE_COLUMNS`** e exige que toda exceção esteja declarada com
 motivo (conferido com sonda). ⚠️ Na mesma varredura, `art` deixou o fallback e ganhou **70px** (é
@@ -1845,6 +1855,18 @@ um número), e a ordem do sacrifício estava invertida — sumia o σ e depois o
 inalcançável. ⚠️ **Isto não é testável no vitest** (jsdom não tem layout, e casar a string
 `@[270px]` protegeria a grafia): a verificação é no browser, replicando a coluna sobre uma
 página pública com o CSS real.
+
+🔴 **A COR é da força; o PREENCHIMENTO é do sinal** (17/08/2026). Acima da média sai sólido,
+abaixo sai **contorno cheio com o miolo a 30%** — mesma cor nos dois, então a força
+(chance/crítica/alcance) continua identificável de relance. Antes a direção morava só na posição
+da barra, e ler "+2,6σ × −2,4σ" exigia achar o fio central e decidir de que lado o retângulo
+começa, linha a linha, numa lista feita para ser varrida na vertical.
+
+⚠️ **Alfa SOZINHO não serve** — barra translúcida sem borda lê como *desabilitada*, e a coluna
+já tem um estado que significa isso (a trilha vazia da obra sem separador). O `ring-1 ring-inset`
+em força total é o que separa "medida apontando para baixo" de "apagado". ⚠️ E o alfa fica **só
+no preenchimento**: valor e ícone têm 11,5px e seguem na cor cheia — o mesmo motivo pelo qual o
+σ continua imprimindo o sinal (`−2,4σ`). A barra reforça a direção, não é a única a dizê-la.
 
 ## A página da obra tem SEIS abas, e a régua delas é a PERGUNTA — não a procedência
 
@@ -4178,10 +4200,13 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.158 passando (+24 pulados) em 302 arquivos** (297 passando + 5 pulados);
-medido em 2026-08-17 com os três testes novos desta leva (tom do segmentado de filtro, largura
-declarada por coluna, colunas do modo Agrupar). Com `find tests -name '*.test.ts*'` = 302
-conferido contra os 302 executados. Antes: **3.134 em 299** (aposentadoria da auditoria de
+`npm run test` → **3.165 passando (+24 pulados) em 303 arquivos** (298 passando + 5 pulados);
+remedido em 2026-08-17 na troca da coluna de status do modo Agrupar — que **não somou teste
+nenhum**: os +7 casos e o +1 arquivo são `covers/sondar-capa-tri-estado` (commit `69ee961`,
+conferido rodando o arquivo sozinho), e a linha nasceu velha por ter sido escrita antes dele.
+Com `find tests -name '*.test.ts*'` =
+303 conferido contra os 303 executados. Antes: **3.158 em 302** (tom do segmentado de filtro,
+largura declarada por coluna, colunas do modo Agrupar), **3.134 em 299** (aposentadoria da auditoria de
 critérios — o número CAIU ali, e era o esperado: saiu `ai-calibration/politica-de-auditoria`,
 20 casos, junto com o código que ele guardava) e **3.148 em 300** (dicionário dos atributos).
 ⚠️ Esta rodada precisou de `--maxWorkers=4`: com o pool default duas rodadas cheias

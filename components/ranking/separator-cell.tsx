@@ -24,13 +24,43 @@ const Z_SCALE = 2.5
  *  informa direção e "mais ou menos", mas não quanto. */
 const TICKS_SIGMA = [-2, -1, 1, 2] as const
 
-const FORCE_CLASS: Record<ForceKey, { text: string; fill: string }> = {
-  chance: { text: "text-violet-500 dark:text-violet-400", fill: "bg-violet-500 dark:bg-violet-400" },
-  avaliacao: { text: "text-amber-600 dark:text-amber-400", fill: "bg-amber-600 dark:bg-amber-400" },
+/**
+ * A cor é da FORÇA; o preenchimento é do SINAL.
+ *
+ * 🔴 **A direção estava só na posição da barra, e ela é fraca em coluna.** Os dois lados da
+ * baseline usavam o mesmo bloco chapado, então distinguir "+2,6σ" de "−2,4σ" exigia localizar o
+ * fio central e decidir de que lado o retângulo começa — a cada linha, numa lista feita para ser
+ * varrida na vertical. Hoje **acima da média é sólido; abaixo é contorno cheio com o miolo
+ * fraco**, que é a convenção de barra divergente e não gasta uma segunda cor.
+ *
+ * ⚠️ **Alfa SOZINHO não serve, e é por isso que há o `ring` junto.** Barra translúcida sem
+ * borda lê como *desabilitada* — e a coluna já tem um estado que significa exatamente isso (a
+ * trilha vazia da obra sem separador). O contorno em força total é o que diz "isto é uma
+ * medida, e ela aponta para baixo", em vez de "isto está apagado".
+ *
+ * ⚠️ **O ALFA vive só no preenchimento — nunca no texto.** O valor (`8,6`) e o ícone seguem na
+ * cor cheia: são 11,5px, e baixar o contraste deles trocaria uma leitura por outra. O sinal
+ * também continua escrito no σ (`−2,4σ`); a barra reforça, não substitui.
+ */
+const FORCE_CLASS: Record<ForceKey, { text: string; up: string; down: string }> = {
+  chance: {
+    text: "text-violet-500 dark:text-violet-400",
+    up: "bg-violet-500 dark:bg-violet-400",
+    down: "bg-violet-500/30 ring-1 ring-inset ring-violet-500 dark:bg-violet-400/30 dark:ring-violet-400",
+  },
+  avaliacao: {
+    text: "text-amber-600 dark:text-amber-400",
+    up: "bg-amber-600 dark:bg-amber-400",
+    down: "bg-amber-600/30 ring-1 ring-inset ring-amber-600 dark:bg-amber-400/30 dark:ring-amber-400",
+  },
   // ⚠️ slate-500/300, não o slate-400 da Bússola: no /ranking o texto secundário
   // JÁ é slate-400, e as duas cores coincidindo faziam a linha de Alcance ler como
   // desabilitada em vez de "terceira força". Medido: contraste 1,67:1 entre elas.
-  alcance: { text: "text-slate-600 dark:text-slate-300", fill: "bg-slate-600 dark:bg-slate-300" },
+  alcance: {
+    text: "text-slate-600 dark:text-slate-300",
+    up: "bg-slate-600 dark:bg-slate-300",
+    down: "bg-slate-600/30 ring-1 ring-inset ring-slate-600 dark:bg-slate-300/30 dark:ring-slate-300",
+  },
 }
 
 /** Ícone por força — substitui a palavra na linha; a legenda ensina uma vez só. */
@@ -200,9 +230,10 @@ export function SeparatorCell({
   return (
     <span className="@container flex min-w-0 items-center gap-2">
       <Track title={`${FORCE_NAME[force]}: ${value} ${tail(rank)} — desvio da média do grupo, cada divisão vale 1σ`}>
+        {/* Sólido acima da média, contorno abaixo — ver o docblock de `FORCE_CLASS`. */}
         <span
           aria-hidden
-          className={cn("absolute inset-y-[3px] min-w-[2px] rounded-[2px]", cls.fill)}
+          className={cn("absolute inset-y-[3px] min-w-[2px] rounded-[2px]", up ? cls.up : cls.down)}
           style={up ? { left: "50%", width: `${width}%` } : { right: "50%", width: `${width}%` }}
         />
       </Track>
