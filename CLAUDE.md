@@ -3122,7 +3122,13 @@ nota exibida:
 | origem | n | é erro? |
 |---|---|---|
 | `ai_edited` — a curadora trocou a nota | **19** | **não.** É decisão dela, sem crédito na tela |
-| `ai_accepted` — o modelo se contradisse | **1** | sim, e vale 3,84¢ de reavaliação ou nada |
+| `ai_accepted` | **1** | **não** — falso positivo da régua, ver abaixo |
+
+🔴 **E a única "genuína" também não era.** *"Faixa 9-10 aproximando de 7-8"* com nota 8,5: a
+prosa cobre 7 a 10. O conector da régua aceitava UMA palavra de até 10 letras e
+"aproximando" tem 11, então ela lia só "9-10". Corrigido para aceitar até duas palavras.
+**Rodando depois: 0 incoerências em 8.727 atributos.** O modelo não se contradiz — o que
+existia era edição humana sem crédito na tela, e agora tem.
 
 🔴 **Reavaliar as 19 seria destruir curadoria pra perguntar de novo ao modelo que ela já
 corrigiu.** O conserto é atribuir, não reavaliar: o card imprime `Ajustada por você · a IA
@@ -3138,13 +3144,11 @@ reescrever faria o registro da IA dizer o que ela não disse.
 Das 40 notas `ai_calibrated` que a auditoria aposentada deixou: **21 auto-aplicadas** (ninguém
 olhou, |Δ| médio 1,55) e **19 aceitas ou editadas** pela curadora (|Δ| 2,00 / 0,50).
 
-**As 19 ficam** — desfazê-las seria apagar curadoria. Das 21, foram revertidas em 17/08 as
-**3 de 16/08**, as únicas com defeito nomeado individualmente: duas subiram `adult_content`
+**As 19 ficam** — desfazê-las seria apagar curadoria. **E as 18 de junho também ficam
+(decidido em 17/08)**: dois meses de uso sem incomodar, e reverter no escuro descartaria
+acertos junto com erros. Das 21, foram revertidas as **3 de 16/08**, as únicas com defeito nomeado individualmente: duas subiram `adult_content`
 por tag de circunstância (o mecanismo que a **migration 182 rebaixou de propósito**) e uma
-subiu `protagonist` alegando *"user_score altíssimo (9.4)"*. As 18 de junho seguem no ar —
-sobreviveram dois meses de uso sem incomodar, e reverter no escuro descartaria acertos.
-
-Ferramenta: `scripts/reverter-calibracao-auto-aplicada.ts` (ALVO: NUVEM, US$0, ensaio por
+subiu `protagonist` alegando *"user_score altíssimo (9.4)"*. Ferramenta: `scripts/reverter-calibracao-auto-aplicada.ts` (ALVO: NUVEM, US$0, ensaio por
 padrão, `--desde=` para recortar).
 
 🔴 **Ela olha a ÚLTIMA aplicação do par, de qualquer status — não só as automáticas.** Um par
@@ -3164,7 +3168,12 @@ plausível:
 | **citação composta** (`Faixa 7-8/9`, `Faixa 4-6 a 7-8`, `Faixa 7-8 / limiar 9-10`) | comparar só o 1º par por igualdade de string deu **6 de 6 amostrados falso positivo** |
 | **a fresta do meio ponto** | os bins da rubrica são de inteiros e **não se tocam** — nenhum contém 3,5 · 6,5 · 8,5. Contra `[lo, hi]` cru, reprova **226** notas de borda |
 
-Corrigida: **19** contradições reais no escopo do script. ⚠️ Uma varredura em SQL deu **483**
+🔴 **A régua comparava a nota VIGENTE com a prosa, e isso acusava curadoria como defeito.**
+A pergunta certa é se o modelo se contradiz, então ela compara a nota que a IA **propôs**
+(`ai_evaluation_scores.suggested_score`) com a prosa que ela mesma escreveu. Nota trocada
+depois é troca de autor, não incoerência — e a página já credita isso.
+
+Resultado hoje: **0 em 8.727 atributos**. ⚠️ Uma varredura em SQL deu **483**
 antes de amostrar — foi a amostragem que derrubou o número, como o cabeçalho do próprio
 script manda. ⚠️ **A fresta já estava documentada em `bandBarBounds` desde 2026-07-22** e foi
 redescoberta do zero; antes de escrever régua sobre faixa, leia aquele docstring.
@@ -3973,7 +3982,7 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.133 passando (+24 pulados) em 299 arquivos** (294 passando + 5 pulados);
+`npm run test` → **3.134 passando (+24 pulados) em 299 arquivos** (294 passando + 5 pulados);
 medido em 2026-08-16 depois de APOSENTAR a auditoria de critérios — o número CAIU, e é o caso
 em que isso é o esperado: saiu `ai-calibration/politica-de-auditoria` (20 casos) junto com o
 código que ele guardava. Com `find tests -name '*.test.ts*'` = 299 conferido contra os 299
