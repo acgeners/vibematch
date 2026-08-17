@@ -66,6 +66,7 @@ import { FavoriteCell } from "@/components/titles/favorite-cell"
 import type { WorkPreview } from "@/server/actions/works"
 import {
   DEFAULT_COLUMN_WIDTHS,
+  TIER_MODE_COLUMN_WIDTHS,
   getConfiguredWorkColumns,
   getTierModeColumns,
   getDefaultWorkColumnConfig,
@@ -864,16 +865,6 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
     })
   }
 
-  // Larguras naturais viram percentagens do total. Com `tableLayout: fixed` +
-  // `width: 100%` no wrapper sem overflow-x, a tabela sempre cabe exatamente no
-  // container: colunas encolhem proporcionalmente em telas estreitas (mantendo
-  // o sticky header funcionando, já que não há scroll context intermediário).
-  const naturalWidthOf = (key: string): number => {
-    const stored = widths[key]
-    if (stored != null) return stored
-    return DEFAULT_COLUMN_WIDTHS[key] ?? 100
-  }
-
   const router = useRouter()
   const searchParams = useSearchParams()
   const sortRaw = searchParams.get("sort") ?? defaultSort
@@ -991,6 +982,23 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
           ].filter((c) => c.key !== "separator"),
     [config, tiers],
   )
+
+  // Larguras naturais viram percentagens do total. Com `tableLayout: fixed` +
+  // `width: 100%` no wrapper sem overflow-x, a tabela sempre cabe exatamente no
+  // container: colunas encolhem proporcionalmente em telas estreitas (mantendo
+  // o sticky header funcionando, já que não há scroll context intermediário).
+  //
+  // 🔴 Com tiers na tela a largura vem do MODO — inclusive por cima do que a pessoa
+  // arrastou. O modo já ignora QUAIS colunas a config pede; honrar a largura dela aqui
+  // deixaria o orçamento (soma = largura medida da tabela) à mercê de um resize antigo,
+  // e a primeira coisa a sumir seria a frase do separador. Desligar o Agrupar devolve as
+  // duas escolhas intactas — nada é gravado.
+  const naturalWidthOf = (key: string): number => {
+    if (tiers != null) return TIER_MODE_COLUMN_WIDTHS[key] ?? DEFAULT_COLUMN_WIDTHS[key] ?? 100
+    const stored = widths[key]
+    if (stored != null) return stored
+    return DEFAULT_COLUMN_WIDTHS[key] ?? 100
+  }
 
   // Larguras: percentagens do total das colunas EFETIVAMENTE renderizadas — por
   // isso depois do filtro acima, senão a coluna ausente ainda reservaria espaço.
