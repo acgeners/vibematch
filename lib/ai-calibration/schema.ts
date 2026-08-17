@@ -3,25 +3,6 @@ import { CRITERION_SLUGS } from "@/types/domain"
 
 const criterionSlugSchema = z.enum([...CRITERION_SLUGS] as [string, ...string[]])
 
-export const auditToolPayloadSchema = z.object({
-  // O Claude às vezes omite o array quando não tem sugestões a fazer, mesmo com
-  // required: ["audits"] no tool schema. Default [] trata isso como "0 sugestões"
-  // (resultado válido) em vez de erro de parse.
-  audits: z
-    .array(
-      z.object({
-        work_id: z.string().min(1),
-        criterion_slug: criterionSlugSchema,
-        current_score: z.number().min(0).max(10),
-        suggested_score: z.number().min(0).max(10),
-        confidence: z.number().min(0).max(1),
-        justification: z.string().min(1),
-      }),
-    )
-    .default([]),
-})
-
-export type AuditToolPayload = z.infer<typeof auditToolPayloadSchema>
 
 export const biasToolPayloadSchema = z.object({
   summary: z.string().min(1),

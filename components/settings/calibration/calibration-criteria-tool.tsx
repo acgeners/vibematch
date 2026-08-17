@@ -1,11 +1,6 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  AuditTriggerZone,
-  BiasTriggerZone,
-} from "@/components/settings/calibration/calibration-trigger-cards"
-import { SuggestionsList } from "@/components/settings/calibration/suggestions-list"
+import { BiasTriggerZone } from "@/components/settings/calibration/calibration-trigger-cards"
 import { BiasReportView } from "@/components/settings/calibration/bias-report-view"
-import { RunHistoryTable } from "@/components/settings/calibration/run-history-table"
 import { AttributeBiasTable } from "@/components/settings/calibration/attribute-bias-table"
 import { RegenerateCalibratedArtifactsButton } from "@/components/settings/calibration/regenerate-calibrated-artifacts-button"
 import { PredictionHealthCard } from "@/components/settings/calibration/prediction-health-card"
@@ -13,17 +8,9 @@ import { TasteModelHealthPanel } from "@/components/settings/calibration/taste-m
 import { ModelErrorBandsPanel } from "@/components/settings/calibration/model-error-bands-panel"
 import { getPredictionHealth } from "@/server/queries/calibration-guards"
 import { getTasteModelHealth, getOofBucketBreakdown } from "@/server/queries/taste-model-health"
-import {
-  countPendingSuggestions,
-  loadAuditStaleness,
-  loadLastRun,
-  loadRunHistory,
-  loadSuggestions,
-} from "@/server/queries/calibration"
+import { loadLastRun } from "@/server/queries/calibration"
 import { getAttributeBiasOverview } from "@/server/queries/attribute-bias"
-import { getSuggestionReadAckIds } from "@/server/queries/settings-read"
 import { createAdminClient } from "@/lib/supabase/admin"
-import type { ReactNode } from "react"
 
 async function countRatedWorks(): Promise<number> {
   const supabase = createAdminClient()
@@ -47,80 +34,6 @@ const TABS_LIST_CLASS =
 const TAB_TRIGGER_CLASS =
   "-mb-px flex-none rounded-none border-0 border-b-2 border-transparent px-3.5 pb-2.5 pt-1.5 text-sm font-medium after:hidden data-[state=active]:border-primary data-[state=active]:text-foreground"
 
-function TabCount({ children }: { children: ReactNode }) {
-  return (
-    <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground tabular-nums">
-      {children}
-    </span>
-  )
-}
-
-/**
- * Card "Auditoria de critérios IA" — o caminho que ESCREVE notas. A IA revê cada
- * obra e sugere ajustes; aqui você revisa/aceita as sugestões. Carrega só o que a
- * auditoria precisa (o card de viés carrega o resto).
- */
-export async function CalibrationAuditTool() {
-  const [
-    lastAudit,
-    ratedWorksCount,
-    staleness,
-    pendingSuggestions,
-    historySuggestions,
-    pendingCount,
-    runHistory,
-    readIds,
-  ] = await Promise.all([
-    loadLastRun("audit"),
-    countRatedWorks(),
-    loadAuditStaleness(),
-    loadSuggestions({ status: "pending", limit: 1000 }),
-    loadSuggestions({
-      status: ["auto_applied", "accepted", "edited", "rejected", "reverted"],
-      limit: 300,
-    }),
-    countPendingSuggestions(),
-    loadRunHistory(20),
-    getSuggestionReadAckIds(),
-  ])
-
-  return (
-    <div className="space-y-4">
-      <AuditTriggerZone
-        lastAudit={lastAudit}
-        ratedWorksCount={ratedWorksCount}
-        staleness={staleness}
-      />
-
-      <Tabs defaultValue="pending" className="w-full">
-        <TabsList variant="line" className={TABS_LIST_CLASS}>
-          <TabsTrigger value="pending" className={TAB_TRIGGER_CLASS}>
-            Pendentes <TabCount>{pendingCount}</TabCount>
-          </TabsTrigger>
-          <TabsTrigger value="history" className={TAB_TRIGGER_CLASS}>
-            Histórico de sugestões
-          </TabsTrigger>
-          <TabsTrigger value="runs" className={TAB_TRIGGER_CLASS}>
-            Runs
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="pending" className="mt-4">
-          <SuggestionsList
-            suggestions={pendingSuggestions}
-            totalAvailable={pendingCount}
-            readIds={readIds}
-          />
-        </TabsContent>
-        <TabsContent value="history" className="mt-4">
-          <SuggestionsList suggestions={historySuggestions} />
-        </TabsContent>
-        <TabsContent value="runs" className="mt-4">
-          <RunHistoryTable runs={runHistory} />
-        </TabsContent>
-      </Tabs>
-    </div>
-  )
-}
 
 /**
  * Card "Viés & atributos" — só LEITURA. Relatórios agregados que revelam

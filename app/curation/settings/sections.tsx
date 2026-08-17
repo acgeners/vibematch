@@ -74,7 +74,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     id: "notas",
     label: "Calibração das notas",
     hint: "acurácia das notas previstas",
-    info: "Ajusta a acurácia das notas previstas. A calibração automática recalcula MAEs e pseudo-votos (roda sozinha ao salvar uma obra); a de critérios IA audita e corrige vieses nos category_scores. Atualize os embeddings antes.",
+    info: "Ajusta a acurácia das notas previstas. A calibração automática recalcula MAEs e pseudo-votos (roda sozinha ao salvar uma obra); Viés & atributos é diagnóstico e não altera nota. Atualize os embeddings antes.",
     icon: Gauge,
     iconName: "Gauge",
     accent: "violet",
@@ -87,17 +87,6 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         help: "Recalcula os MAEs (o erro médio da Nota Prevista) e os pseudo-votos bayesianos a partir de todas as obras que já têm nota manual. Roda sozinha sempre que você salva ou altera uma obra; o botão aqui força o recálculo na hora. Depende dos Embeddings estarem atualizados — o kNN usa a vizinhança vetorial das obras.",
         icon: Target,
         chips: [{ kind: "cost", tier: "free", label: "Grátis" }],
-      },
-      {
-        id: "ai-audit",
-        title: "Auditoria de critérios IA",
-        panelTitle: "Auditoria de critérios IA",
-        description:
-          "A IA revê cada obra com nota pessoal e sugere ajustes nos atributos. Toda sugestão espera sua decisão — nada é aplicado sozinho.",
-        help: "Percorre obra a obra os atributos que a IA atribuiu (category_scores), confronta com tags, sinopse e seus critérios pós-leitura, e propõe correções que ficam pendentes pra você aceitar, editar ou rejeitar. É o caminho que escreve notas — scores “manual” e “ai_edited” não são tocados, e “adult_content” e “couple_dynamics” estão fora do escopo por terem régua própria. Serve à CONSISTÊNCIA dos atributos (filtros e desempate do ranking); não melhora a Nota Prevista, que é medida e não depende deles.",
-        icon: ScanSearch,
-        chips: [{ kind: "cadence", label: "Frequente" }],
-        collapsible: true,
       },
       {
         id: "ai-bias",
