@@ -235,12 +235,12 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**99 arquivos, remedidos em 2026-08-16**):
+banco declara um dos dois (**97 arquivos, remedidos em 2026-08-16**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **44** | só LÊ ⇒ vai pro local, de graça |
-| `ALVO: NUVEM` no cabeçalho | **48** | GRAVA ⇒ tem que ir pra nuvem |
+| `ALVO: NUVEM` no cabeçalho | **46** | GRAVA ⇒ tem que ir pra nuvem |
 | (não tocam o banco) | 7 | fora da régua |
 
 🔴 **ESTES TRÊS NÚMEROS SÃO CONFERIDOS PELA SUÍTE**, e não por quem editar esta seção —
@@ -3047,204 +3047,76 @@ verdade conferida. Ao anotar pendência aqui, escreva a **data** e a **forma de 
 - ~~`enforceNeutralCoupleDynamicsWhenNoRomance`~~: **removido na v23** (2026-08-09). Forçava `couple_dynamics = 5.0` quando `romance ≤ 3`, partindo de "sem romance, não há dinâmica" — premissa que morreu com a ampliação do critério pra vínculos centrais. Travava **17 das 18** obras sem romance. Quem decide "não aplicável" agora é o prompt, por ausência de VÍNCULO — não de romance. ⚠️ As ~31 justificativas que ele reescreveu seguem no banco (ver `lib/criteria/justification.ts`)
 - `enforceAuditableReviewUsage`: **non-fatal since v20 (2026-06-27)** — generic review citation is accepted ("algumas reviews apontam…"), so it no longer requires/validates specific review IDs (`R1`, `R2`…) nor throws. It only records an informational `reviewAudit` (`required` = "havia reviews no prompt"; `usedReviewIds` = whatever IDs the model happened to cite, often empty with generic citation). `review_usage` is now an OPTIONAL tool/schema field. (Earlier behavior: threw + retried when IDs weren't cited — removed because a citation slip discarded otherwise-valid evals.)
 
-## A auditoria de critérios NÃO escreve mais sozinha
+## A auditoria de critérios IA foi APOSENTADA (2026-08-16) — e o motivo não é qualidade
 
-`/curation/settings?g=notas&open=ai-audit`. A IA relê obra a obra e sugere ajustes nos
-atributos; a curadora aceita, edita ou rejeita. Até 2026-08-16 uma parte escrevia direto no
-banco sem passar por ninguém. **Desligado**, e o motivo é medido — dono único da política:
-`lib/ai-calibration/policy.ts`.
+Ela existia em `/curation/settings?g=notas`: um LLM relia as obras e sugeria ajustes nos
+`category_scores`, com uma faixa auto-aplicando sozinha. Saiu inteira — card, action, prompt,
+fila. **As 1.100+ linhas de `score_calibration_suggestions` e `calibration_runs` ficam no
+banco**, sem migration; o card de **Viés & atributos** continua, porque é diagnóstico.
 
-🔴 **O gate de auto-aplicação exigia `confidence ≥ 0,8` numa escala que o modelo não
-produz.** Medido nas 765 pendentes: a confiança **satura em 0,85**, a mediana é **0,60** e
-só **6 (0,78%)** alcançam 0,80 — a faixa que o próprio prompt define como certeza forte
-(0,9+) **nunca aparece**. O gate vivia na cauda de uma distribuição que ninguém tinha olhado
-(a régua de "o limiar sai da DISTRIBUIÇÃO, nunca do olho", aplicada a um caminho que GRAVA).
+🔴 **O argumento que decidiu é de ARQUITETURA, e ele estava escrito no próprio código.** Os
+9 atributos são read-only no formulário da obra já avaliada, com o motivo em comentário:
+*"o ajuste manual pré-leitura foi removido de propósito. A percepção do usuário entra no
+momento 2 (pós-leitura → attribute_bias), não aqui."* A regra é:
 
-🔴 **E no topo da escala a precisão observada é 0 de 2.** As duas únicas sugestões de 0,85
-foram julgadas erradas pela curadora: uma pôs `fantasy_nobility` em 3,0 numa obra com
-nobreza clara (empatando-a com as que não têm nada — o auditor não vê como o catálogo usa a
-escala), e a outra derrubou `couple_dynamics` para 3,0 lendo `Villain Couple` + tags de
-personagem tóxico como se descrevessem o vínculo ENTRE os protagonistas, **contra o consenso
-das reviews**, que chamava o casal de *"match made in heaven"*.
+| dado | onde mora | de quem é |
+|---|---|---|
+| os 9 atributos | `category_scores` — **sem `user_id`** | da OBRA, compartilhado |
+| percepção pós-leitura | `user_work_state.post_*` (8 colunas) | **do usuário** |
+| correção dessa percepção | `attribute_bias` — por `user_id` | **do usuário** |
 
-✅ **O auditor ERA menos informado que o avaliador que ele corrige** — tinha tags, sinopse,
-`user_score` e os `post_*`, e **zero reviews**, enquanto a avaliação lê até 30 de 8 fontes.
-Corrigido na v3 (ver abaixo): ele recebe o digest e as âncoras de distribuição.
+A auditoria lia `post_*` (per-user) para mover `category_scores` (compartilhado) — **a mesma
+contaminação que o formulário bloqueia, entrando por uma porta lateral com um LLM no meio.**
+E sem `post_*` ela era a IA se re-julgando sobre a mesma evidência: o digest sobrepõe 78,9%
+da amostra de reviews que a avaliação já lia. Não havia configuração legítima.
 
-🔴 **As 3 auto-aplicações do último run mostram os dois vieses de uma vez:** duas subiram
-`adult_content` por tag de circunstância (`Doggy Style` → 9,0 → 10,0) — o mecanismo que a
-**migration 182 rebaixou de propósito** —, e a terceira subiu `protagonist` de 7,0 para 8,5
-justificando com *"user_score altíssimo (9.4)"*, que é a **feature sendo empurrada na direção
-do rótulo**.
+**Os números que sustentam, todos medidos em 2026-08-16:**
 
-**A fila hoje tem 504 pendentes, não 765** — 261 foram fechadas como `superseded` pela
-varredura de `scripts/limpar-fila-calibracao.ts` (204 fora de escopo · 52 baseline morto ·
-5 score travado). Os motivos têm precedência, então não somam em paralelo.
-
-**Escopo por critério, também em `policy.ts`.** `AUDITABLE_CRITERIA` é **derivado** de
-`CRITERION_SLUGS` menos `AUDIT_OUT_OF_SCOPE` — critério novo entra como auditável sozinho, e
-tirar um exige escrever o motivo (o texto vai pro prompt, não é comentário). Fora hoje:
-
-| critério | por quê |
+| | |
 |---|---|
-| `adult_content` | tem piso/teto determinístico por procedência, e **a calibração não chama o clamp** (zero ocorrências em `calibration.ts`) — sugerir ali é uma 2ª régua pro mesmo número |
-| `couple_dynamics` | é o único de VALÊNCIA e a rubrica ampliada (v23) foi **revertida**; a sugestão nasce sobre régua meia-aplicada. Era o 3º maior gerador de fila (88 pendentes) |
+| vazão | **58 decisões humanas em 84 dias** (~0,7/dia) contra **~250 sugestões por execução** |
+| fila ao fim | 504 pendentes · 639 `superseded` · 58 decididas |
+| confiança do modelo | satura em **0,75–0,85**; o gate de auto-apply pedia 0,8 e alcançava **0,78%** |
+| precisão no topo | **0 de 2** julgadas pela curadora |
+| viés sistemático real (IA × pós-leitura) | **−0,19 a +0,06**, erro padrão 0,04, ~110 obras/atributo |
+| desacordo por obra (σ) | **0,32 a 0,65** — e a auditoria propunha **1,44** de média |
 
-⚠️ **São TRÊS camadas, do mesmo desenho de `LOCKED_SOURCES`:** o enum da tool não deixa o
-modelo nomear o critério, o filtro do serviço descarta, e a action não persiste nem como
-pendente. Guardado por `tests/unit/ai-calibration/politica-de-auditoria.test.ts`, que varre a
-grade inteira de (confiança, Δ) em vez de conferir a constante — conferido com sonda: religar
-o auto-apply reprova.
+⚠️ **`attribute_bias` já tinha convergido em ~0.** A auditoria foi construída para corrigir
+um viés sistemático que a medição diz não existir — e o desacordo que sobra por obra é de
+meio ponto, um terço do tamanho das mudanças que ela propunha.
 
-🔴 **`PROMPT_VERSION` sobe junto com a régua (hoje `v3`), e isso tem consequência operacional:** a versão
-entra em `calibration_runs.prompt_version` e é o que `loadLastRun` compara pra detectar drift
-⇒ **o primeiro run depois desta mudança é uma varredura COMPLETA**. Não subir faria o rótulo
-do run mentir e o run seguinte rodar incremental sobre régua diferente.
+⚠️ **Sete tentativas de prompt falharam nesta base** — cinco no gold, a v27 e a v4
+(proeminência × intensidade: defeito 16% → 18%, dentro do ruído). Quem for tentar de novo,
+leia [[project-prompt-v27-veredito-do-piloto]] antes.
 
-### v5: a auditoria é uma PONTE, não uma fila — e a régua é a leitura de quem avaliou
+**O que ficou, e é o que resolve os mesmos problemas:**
 
-Decidido em 2026-08-16, depois de a conta de vazão ficar clara. **O número que decide não é
-precisão, é throughput:** 58 decisões humanas em **84 dias** (~0,7/dia) contra **~250
-sugestões por execução**. Esvaziar a fila levaria mais de dois anos, e cada run recoloca um
-ano de trabalho. Isso não é qualidade de prompt — é descasamento de uma ordem de grandeza, e
-**mais leitores pioram**: escrever em `category_scores` é ação de curador, então usuário novo
-adiciona demanda, não oferta.
-
-🔴 **A fila deixou de ser PENDÊNCIA** — saiu de `getSettingsItemPending` e o badge do card
-morreu. Ela continua consultável dentro do card; o que acabou foi ela se apresentar como
-trabalho esperando por você. Os **583 acks** de "marcar lida" de antes são a medição de que,
-como alarme, ela era silenciada em bloco e não trabalhada. O marcador por sugestão ficou,
-mas o texto dele mudou: prometia "silencia no badge", e não há mais badge.
-
-🔴 **A pool passou a exigir PÓS-LEITURA, e é aqui que mora a régua conceitual.** O banco já
-separa duas coisas que é fácil confundir:
-
-| | o que é | vale como evidência de atributo? |
+| precisa | ferramenta | custo |
 |---|---|---|
-| `user_score` | **gosto** — média dos 7 eixos de taste desde 16/07 | **não.** Diz "gostei muito", não "o romance é intenso" |
-| `post_*` · `user_attribute_assessment` | **observação por dimensão**, feita depois de ler | **sim** — é o que o avaliador nunca viu |
+| atributo errado numa obra | **"Reavaliar com IA"** — lê até 30 reviews de 8 fontes | **3,84¢** (média de 817 chamadas) |
+| ajustar antes de aceitar | o modal de revisão em `/curation/works` (`loadAiEvaluationForReview`) | US$0 |
+| contradição objetiva prosa × nota | `scripts/coherence-audit.ts` + `bandCoherence` | US$0 |
+| sua percepção difere da IA | pós-leitura → `attribute_bias` (offset per-user) | US$0 |
 
-O defeito medido veio do primeiro: a auto-aplicação que subiu `protagonist` 7,0 → 8,5
-justificando com *"user_score altíssimo (9.4)"* — gosto de uma pessoa entrando num atributo
-de catálogo **compartilhado**, que em multi-user vira vazamento entre usuários.
+⚠️ **A procedência das notas calibradas FICA na página da obra.** As 37 notas com
+`source = 'ai_calibrated'` continuam no banco, e sem o chip "Ajustada pela auditoria" elas
+voltariam a exibir a justificativa da avaliação — que fala de outro número em 27 delas.
 
-⚠️ **E sem a pós-leitura o auditor é a MESMA ferramenta relendo a MESMA evidência.** O que
-ele tem de novo sobre a avaliação são três coisas, e só duas são reais: `post_*` (novo),
-âncoras de distribuição (novo) e o digest — que sobrepõe **78,9%** da amostra de reviews que
-a avaliação já lia. Tirada a pós-leitura, sobraria uma tabela de distribuição.
+### `bandCoherence`: a régua que sobreviveu, e os dois falsos positivos dela
 
-**Pool hoje: 174 obras.** Fora: 16 sem digest, 22 sem pós-leitura. ⚠️ **Não ampliar
-afrouxando a exigência** — 851 obras têm digest, e auditar as 851 pareceria cobertura 4×
-maior sendo a IA se re-julgando em 677 delas. A cobertura cresce por LEITURA: cada leitor
-que preenche o pós-leitura amplia a pool sozinho.
-
-🔴 **O caminho durável não é este card.** `attribute_bias` já faz a versão estatística de "a
-IA errou o atributo": IA × você por dimensão, com encolhimento bayesiano, aplicado como
-`valor_calibrado = valor_IA − aplicado` — **1.404 respostas em 156 obras, 9 atributos com
-offset**. Com N leitores na mesma obra, a média cancela o viés individual e isso vira
-consenso humano. **A auditoria por LLM é a ponte para o período em que há uma leitora só.**
-
-⚠️ **A versão pula a v4 de propósito:** ela existiu num piloto e está gravada em
-`ai_api_calls` (3 chamadas). Reusar o rótulo faria duas réguas dividirem o mesmo nome no log.
-
-⚠️ **Sete tentativas de prompt falharam nesta base** — cinco no gold, a v27, e a v4
-(proeminência × intensidade: defeito 16% → 18%, dentro do ruído). A oitava não se justifica;
-o que sobrou de acionável é estrutural, não textual.
-
-### v3: o auditor ganhou evidência e escala — e a confiança CAIU
-
-Piloto de 16/08/2026 (`scripts/pilot-audit.ts`, 30 obras, **US$0,1778 medidos em
-`ai_api_calls`**), depois de o prompt passar a receber o **digest das reviews** e as
-**âncoras de distribuição** do catálogo:
-
-| | v2 (sem evidência) | **v3 (com digest + âncoras)** |
-|---|---|---|
-| confiança máxima | 0,85 | **0,65** |
-| mediana | 0,60 | 0,55 |
-| sugestões ≥ 0,80 | 6 de 765 | **0 de 38** |
-| justificativas citando o consenso | — | **30 de 38** |
-
-🔴 **Dar evidência ao modelo o deixou MENOS confiante, não mais — e isso encerra a questão
-do auto-apply.** Não é regressão: com o consenso das reviews na frente, ele para de afirmar
-a partir de tag. Mas significa que o gate de 0,8 não é alcançável **nem no melhor cenário
-construído pra alcançá-lo**. A auditoria é, por medição, uma fila revisada por humano — e a
-"confiança" do modelo não é sinal utilizável pra automatizar escrita neste desenho.
-
-⚠️ **O que MELHOROU não é contável, é lido.** As justificativas passaram de inferência a
-partir de tag para citação verificável: *"Reviews destacam 'tom geral leve, evitando drama
-pesado'"* sobre um `drama` 5,0 → 3,5. Isso é falsificável abrindo a obra — a régua antiga
-("Tags indicam 'Villain Couple'…") não era.
-
-⚠️ **`drama` (12) e `tragedy` (8) concentram 53% das sugestões**, e são justo os dois com
-viés positivo medido na fila anterior (+1,03 e +1,72). O sinal é consistente entre as duas
-versões do prompt, o que é evidência a favor de ele ser real.
-
-**Duas escolhas de desenho, as duas medidas:**
-
-- 🔴 **Digest, não review crua.** As reviews da pool somam **20.023 chars por obra** (94k no
-  pior caso) — no lote de 10 seriam ~50k tokens por chamada, forçando lote de 1–2. O digest
-  cabe em **2.406** e é o mesmo consenso, já destilado. Custo real do run completo,
-  extrapolado do piloto: **~US$1,16** para as 196 obras.
-- 🔴 **Obra sem digest fica FORA do run** (`temEvidenciaParaAuditar`, em `policy.ts`). São
-  **16 de 212**. Auditar sem o consenso é reproduzir o juiz cego que errou as duas de 85%.
-  Elas não somem caladas: `nSkippedNoDigest` sobe até o resumo do run.
-
-⚠️ **As âncoras vão no USER prompt, nunca no system** — o system tem `cache_control`, e a
-distribuição muda a cada recalibração do catálogo. No system, ela invalidaria o cache a cada
-run.
-
-### A nota calibrada agora diz que é calibrada — e a prosa segue o número
-
-🔴 **A nota mora em `category_scores` e a prosa que a explica mora em `ai_evaluation_scores`,
-então mover uma sem a outra faz a página da obra se contradizer.** Medido em 2026-08-16:
-das 37 notas com `source = 'ai_calibrated'`, **27 exibiam justificativa que contradiz a
-própria nota** — a 1,79 ponto de distância em média —, e `ai_calibrated` **não aparecia em
-nenhuma UI** (grep: zero), então o número reescrito seguia creditado ao selo ✨ da avaliação
-que não o produziu.
-
-Hoje o card lê `getCalibrationProvenanceForWork` e, quando a nota é calibrada, imprime a
-justificativa **da sugestão que a moveu** mais a linha `Ajustada pela auditoria · <quando> ·
-antes <nota>`. ⚠️ A prosa é **recuperada por chave natural**, nunca copiada: a linha da
-sugestão continua dona do próprio texto, e não há duas cópias pra divergir.
-
-⚠️ **A linha é procedência, não estado** — sem cor. Âmbar ali significaria "desatualizado"
-(ver `STATUS_TONE`), e sem alfa no texto: a 10,5px o `/80` derruba o contraste abaixo do AA.
-
-**Duas guardas fecharam o resto do loop:**
-
-- 🔴 **Aceitar sugestão confere o VALOR, não só o `source`.** Uma reavaliação reescreve a nota
-  mantendo `ai_accepted`, então checar procedência deixa passar o caso comum: **132 das 583
-  pendentes (23%) tinham baseline morto**. Divergindo, a sugestão vira `superseded` (ela não
-  errou — envelheceu) com a mensagem dizendo de quanto pra quanto a nota andou.
-- 🔴 **Reavaliar apagava calibração em silêncio: 44 casos.** O upsert de `submitAiReview`
-  sobrescrever está CERTO (evidência mais fresca, revisada no formulário); o que não podia era
-  o silêncio. Hoje as sugestões afetadas viram `superseded` e o caso é logado.
-
-### `bandCoherence`: a única checagem de coerência que sobrevive, e os dois falsos positivos dela
-
-Dono: `lib/criteria/justification.ts`. A pergunta é estrutural — *a nota cai na faixa que a
-prosa citou?* —, sem interpretar uma palavra. Ela já existia como regex dentro do
-`coherence-audit.ts` e tinha **dois** furos, os dois produzindo número alto e plausível:
+Dono: `lib/criteria/justification.ts`. Pergunta estrutural — *a nota cai na faixa que a prosa
+citou?* — sem interpretar uma palavra. Tinha dois furos, os dois produzindo número alto e
+plausível:
 
 | furo | efeito medido |
 |---|---|
-| **citação composta** (`Faixa 7-8/9`, `Faixa 4-6 a 7-8`, `Faixa 7-8 / limiar 9-10`) | ler só o 1º par e comparar por igualdade de string deu **6 de 6 amostrados falso positivo** |
-| **a fresta do meio ponto** | os bins da rubrica são de inteiros e **não se tocam** — nenhum contém 3,5 · 6,5 · 8,5. Comparar contra `[lo, hi]` cru reprova **226** notas de borda, nenhuma erro de julgamento |
+| **citação composta** (`Faixa 7-8/9`, `Faixa 4-6 a 7-8`, `Faixa 7-8 / limiar 9-10`) | comparar só o 1º par por igualdade de string deu **6 de 6 amostrados falso positivo** |
+| **a fresta do meio ponto** | os bins da rubrica são de inteiros e **não se tocam** — nenhum contém 3,5 · 6,5 · 8,5. Contra `[lo, hi]` cru, reprova **226** notas de borda |
 
-Corrigida, a régua dá **19** no escopo do script (nota ↔ a avaliação que a produziu) e **73**
-no escopo da PÁGINA (nota ↔ prosa que ela exibe: 27 calibradas + 25 `ai_accepted` +
-21 `ai_edited`). Os dois números são legítimos e respondem perguntas diferentes — o 2º é o
-que a pessoa vê. ⚠️ Uma varredura minha em SQL deu **483** antes de amostrar; foi a
-amostragem que derrubou o número, exatamente como o cabeçalho do `coherence-audit.ts` manda.
-
-⚠️ **A fresta do meio ponto JÁ ESTAVA documentada** em `bandBarBounds` desde 2026-07-22
-("132 dos 205 pontos-fora-da-faixa eram só isto") — e eu a redescobri do zero. Antes de
-escrever régua nova sobre faixa, leia aquele bloco.
-
-⚠️ **A auditoria serve à CONSISTÊNCIA dos atributos (filtros e desempate do `/ranking`),
-não à Nota Prevista** — os 9 atributos somam 0,002 de MAE, e isso está fechado
-([[project-atributos-nao-chegam-na-nota-prevista]]). A descrição do card diz isso por
-escrito; prometer previsão ali é prometer o que foi medido e não existe.
+Corrigida: **19** contradições reais no escopo do script. ⚠️ Uma varredura em SQL deu **483**
+antes de amostrar — foi a amostragem que derrubou o número, como o cabeçalho do próprio
+script manda. ⚠️ **A fresta já estava documentada em `bandBarBounds` desde 2026-07-22** e foi
+redescoberta do zero; antes de escrever régua sobre faixa, leia aquele docstring.
 
 ## Duas réguas para as notas de atributo, e o que cada uma consegue ver
 
@@ -4050,10 +3922,11 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.148 passando (+24 pulados) em 300 arquivos** (295 passando + 5 pulados);
-medido em 2026-08-16 depois do dicionário dos atributos (+23 casos em
-`guide/dicionario-de-atributos`), com `find tests -name '*.test.ts*'` = 300 conferido contra
-os 300 executados. Antes: **3.125 em 299** (v3 da auditoria).
+`npm run test` → **3.133 passando (+24 pulados) em 299 arquivos** (294 passando + 5 pulados);
+medido em 2026-08-16 depois de APOSENTAR a auditoria de critérios — o número CAIU, e é o caso
+em que isso é o esperado: saiu `ai-calibration/politica-de-auditoria` (20 casos) junto com o
+código que ele guardava. Com `find tests -name '*.test.ts*'` = 299 conferido contra os 299
+executados. Antes: **3.148 em 300** (dicionário dos atributos).
 ⚠️ Esta rodada precisou de `--maxWorkers=4`: com o pool default duas rodadas cheias
 acusaram **1 falha cada, em arquivos DIFERENTES** (`recalibrar-limpa-recalc-pendente` e
 `ranking-status-exclusao`), os dois passando isolados e com a árvore limpa — é a flakiness

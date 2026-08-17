@@ -11,7 +11,6 @@ import { ConsoleSectionNote } from "@/components/console/console-section"
 import { ACCENT_STYLES } from "@/components/console/console-registry"
 import { CalibrationPanel } from "@/components/settings/calibration-panel"
 import {
-  CalibrationAuditTool,
   CalibrationBiasTool,
 } from "@/components/settings/calibration/calibration-criteria-tool"
 import { EmbeddingsPanel } from "@/components/settings/embeddings-panel"
@@ -188,7 +187,7 @@ export default async function SettingsPage({
           // Ferramentas pesadas de calibração: colapso ÚNICO pelo servidor — a
           // seta do header abre/recolhe via `?open=` e o corpo só renderiza quando
           // aberto (adia o load), sem o botão "Abrir auditoria" redundante.
-          const usesServerCollapse = section.id === "ai-audit" || section.id === "ai-bias"
+          const usesServerCollapse = section.id === "ai-bias"
           const serverCollapse = usesServerCollapse
             ? {
                 open: isOpen,
@@ -198,8 +197,7 @@ export default async function SettingsPage({
               }
             : undefined
           // Cards agregados (batch) ganham o botão/selo "Marcar como lido" no
-          // header. O 'ai-audit' NÃO — sua pendência é silenciada 1-a-1 (selo por
-          // sugestão dentro do card). Cards sem pendência acionável: sem controle.
+          // header. Cards sem pendência acionável: sem controle.
           const isBatch = batchReadSet.has(section.id)
           const unread = itemUnread[section.id] ?? 0
           return (
@@ -311,9 +309,6 @@ async function ItemBody({
 
     // Colapso pelo SettingsCard (serverCollapse): o corpo só chega aqui quando o
     // card está aberto, então renderizamos a ferramenta direto — sem "Abrir".
-    case "ai-audit":
-      return <CalibrationAuditTool />
-
     case "ai-bias":
       return <CalibrationBiasTool />
 

@@ -69,7 +69,9 @@ const nextConfig: NextConfig = {
       { source: "/conta/preferencias", destination: "/preferences", permanent: true },
       {
         source: "/settings/calibration",
-        destination: "/curation/settings?g=notas&open=ai-audit",
+        // O card `ai-audit` foi aposentado em 2026-08-16; o destino vivo do tópico é o
+        // diagnóstico de viés, que é o que sobrou da calibração de critérios.
+        destination: "/curation/settings?g=notas&open=ai-bias",
         permanent: true,
       },
       {

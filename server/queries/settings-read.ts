@@ -2,7 +2,6 @@ import { cache } from "react"
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchAllRows } from "@/lib/supabase/paginate"
-import { countPendingSuggestions } from "@/server/queries/calibration"
 import { getSettingsItemPending } from "@/server/queries/settings-pending"
 
 /**
@@ -17,7 +16,6 @@ import { getSettingsItemPending } from "@/server/queries/settings-pending"
  *     snapshot), o piso desce junto (`lowerSettingsReadAcks`, via `after()`) —
  *     senão o snapshot vira marca d'água permanente e "fica lido pra sempre",
  *     silenciando pendências novas que apareçam abaixo dele.
- *   - Seção `ai-audit`: a pendência é por sugestão; o ack é 1 linha por sugestão
  *     (`settings_suggestion_read_acks`). Unread = pendentes sem ack.
  *
  * Toda leitura tolera a tabela/RPC ausente (migration não aplicada): degrada pra
@@ -82,39 +80,7 @@ export async function lowerSettingsReadAcks(
   )
 }
 
-/** IDs das sugestões da auditoria marcadas como lidas. Tolera tabela ausente. */
-export async function getSuggestionReadAckIds(): Promise<string[]> {
-  const supabase = createAdminClient()
-  try {
-    const rows = await fetchAllRows<{ suggestion_id: string }>(
-      (from, to) =>
-        supabase.from("settings_suggestion_read_acks").select("suggestion_id").range(from, to),
-      "getSuggestionReadAckIds",
-    )
-    return rows.map((r) => r.suggestion_id)
-  } catch (err) {
-    console.warn(
-      "[getSuggestionReadAckIds] leitura falhou (migration 134 aplicada?):",
-      err instanceof Error ? err.message : err,
-    )
-    return []
-  }
-}
 
-/** Sugestões PENDENTES ainda não lidas (unread do card 'ai-audit'), via RPC. */
-export async function countUnreadPendingSuggestions(): Promise<number> {
-  const supabase = createAdminClient()
-  const { data, error } = await supabase.rpc("count_unread_pending_suggestions")
-  if (error) {
-    // RPC/migration ausente: cai pro total de pendentes (tudo conta como não-lido).
-    console.warn(
-      "[countUnreadPendingSuggestions] RPC falhou (migration 134 aplicada?):",
-      error.message,
-    )
-    return countPendingSuggestions().catch(() => 0)
-  }
-  return Number(data) || 0
-}
 
 /**
  * IDs de todas as sugestões PENDENTES da auditoria (sem filtro). Usado por
@@ -143,9 +109,6 @@ export async function getPendingSuggestionIds(): Promise<string[]> {
  */
 export const getSettingsItemUnread = cache(
   async (): Promise<Record<string, number>> => {
-    // A contagem de sugestões não lidas saiu daqui junto com o badge do `ai-audit` —
-    // era uma consulta paga em toda navegação pra alimentar um número que não é mais
-    // exibido. `countUnreadPendingSuggestions` segue existindo pro card, se ele quiser.
     const [pending, batchAcks] = await Promise.all([
       getSettingsItemPending(),
       getSettingsReadAcks(),
@@ -160,10 +123,6 @@ export const getSettingsItemUnread = cache(
       if (acked !== undefined && p < acked) decayed.push({ section, count: p })
       unread[section] = Math.max(0, p - (acked ?? 0))
     }
-    // 🔴 `ai-audit` deixou de ter badge em 2026-08-16 — ver `getSettingsItemPending`. A fila
-    // produz ~250 por execução e consome ~20/mês; um contador ali nunca zera. O marcador
-    // "lida" por sugestão CONTINUA existindo, mas como anotação sua, não como silenciador
-    // de alarme: sem alarme, não há o que silenciar.
     if (decayed.length > 0) {
       // Persistência em segundo plano (não bloqueia o render). Fora de um escopo
       // de request `after()` lança — aí só pulamos: o unread desta leitura já

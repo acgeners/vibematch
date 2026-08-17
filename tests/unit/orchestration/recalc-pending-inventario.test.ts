@@ -31,12 +31,9 @@ const INVENTARIO: Record<string, boolean> = {
 
   // ── Marcam sempre: mexem direto em feature ou rótulo ────────────────────────
   submitAiReview: false, // as 9 notas
-  "calibration-auto-apply": false,
-  "calibration-accept": false,
-  "calibration-edit": false,
-  "calibration-revert": false,
-  "calibration-bulk": false,
-  "calibration-bulk-ids": false,
+  // As 6 entradas `calibration-*` saíram em 2026-08-16 com a aposentadoria da auditoria de
+  // critérios — eram os call sites das ações de aceitar/editar/reverter sugestão. O único
+  // caminho que ainda mexe nas 9 notas por decisão humana é o `submitAiReview` acima.
   "adult-content-bounds-clamp": false,
   "adult-content-retroactive-bounds": false,
   updateWorkExternalData: false, // ratings, votos, tags, capítulos, status

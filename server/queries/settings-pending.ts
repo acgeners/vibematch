@@ -145,17 +145,11 @@ export const getSettingsItemPending = cache(
           .catch(() => 0),
       ])
     return {
-      // 🔴 `ai-audit` NÃO entra, e a ausência é a decisão (2026-08-16).
-      //
-      // A fila de calibração produz ~250 sugestões por execução e consome ~20 por mês —
-      // medido: 58 decisões humanas em 84 dias. Um contador sobre isso nunca zera, e alarme
-      // que sempre toca não é lido: as 583 pendentes de então foram silenciadas em bloco
-      // pelo "marcar lida", não revisadas. É a mesma régua do `db:health` e do painel
-      // "Estado da obra" — o que é maioria vira número na tela, só o raro vira alarme.
-      //
-      // A fila continua existindo e consultável dentro do card; ela só deixou de se
-      // apresentar como pendência acionável. O que ficou como fila permanente é a guarda
-      // determinística (contradição prosa × nota), que é limitada e objetiva.
+      // 🔴 A auditoria de critérios IA foi APOSENTADA em 2026-08-16 e não tem entrada aqui.
+      // Ela escrevia num dado COMPARTILHADO (`category_scores`, sem `user_id`) usando a
+      // pós-leitura de UM usuário — a mesma contaminação que o formulário da obra bloqueia
+      // ao deixar os 9 atributos read-only. E a conta de vazão nunca fechou: 58 decisões
+      // humanas em 84 dias contra ~250 sugestões por execução.
       embeddings,
       "synopsis-canonical": canonicalSynopsis,
       "review-synthesis": reviewSummary,

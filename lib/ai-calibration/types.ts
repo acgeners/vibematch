@@ -13,59 +13,9 @@ export type SuggestionStatus =
   // (obra, atributo). Arquivada: não aparece em Pendentes nem no Histórico.
   | "superseded"
 
-export interface AuditWorkInput {
-  workId: string
-  title: string
-  userScore: number
-  isFavorite: boolean
-  synopsis: string | null
-  observation: string | null
-  tags: Array<{ name: string; group: string | null }>
-  categoryScores: Partial<Record<CriterionSlug, { score: number; source: ScoreSource }>>
-  postScores: Partial<Record<string, number>>
-  /**
-   * Consenso das reviews já destilado. É a evidência que faltava ao auditor — ele julgava
-   * com tags e sinopse enquanto a avaliação que ele corrige leu até 30 reviews de 8 fontes.
-   *
-   * ⚠️ É o DIGEST, não a review crua, e a escolha é medida: as reviews da pool somam
-   * **20.023 chars por obra** em média (94k no pior caso), o que estouraria o lote de 10;
-   * o digest cabe em **2.406**. Obra sem digest fica fora do run — ver `loadWorksForAudit`.
-   */
-  digest: ReviewDigestForAudit
-}
 
-/** O recorte do `works.review_digest` que entra no prompt. */
-export interface ReviewDigestForAudit {
-  consensus: string | null
-  divergence: string | null
-  traits: Array<{ axis: string; trait: string; polarity: string }>
-}
 
-/**
- * Distribuição de um critério no catálogo — a âncora que o auditor não tinha.
- *
- * 🔴 Sem ela o modelo julga uma obra por vez sem saber como a escala é USADA aqui, e produz
- * nota que não conversa com o resto: foi assim que ele pôs `fantasy_nobility` em 3,0 numa
- * obra com nobreza clara, empatando-a com as que não têm nada (2026-08-16).
- */
-export interface CriterionAnchor {
-  slug: CriterionSlug
-  mean: number
-  stdev: number
-  p25: number
-  p50: number
-  p75: number
-  n: number
-}
 
-export interface AuditSuggestionFromModel {
-  workId: string
-  criterionSlug: CriterionSlug
-  currentScore: number
-  suggestedScore: number
-  confidence: number
-  justification: string
-}
 
 export interface BiasStatsByCriterion {
   slug: CriterionSlug
