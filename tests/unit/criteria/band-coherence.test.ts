@@ -16,6 +16,8 @@ describe("bandCoherence", () => {
       ["Faixa 7-8/9-10 (Forte a Icônica): Vivian é descrita como 'Cunning Female Lead'…", 8.5],
       ["Faixa 4-6 a 7-8 (limite superior): dinâmica inicial de rejeição fria…", 6.5],
       ["Faixa 7-8 / limiar 9-10 (Core Romance): A sinopse posiciona o romance como eixo…", 8.5],
+      // Conector de DUAS palavras. Era a última acusação da régua no catálogo, e era inócua.
+      ["Faixa 9-10 aproximando de 7-8 (Estrutural): a corte e a magia estruturam o conflito.", 8.5],
     ]
     it.each(compostas)("%s ⇒ coerente com nota %s", (texto, nota) => {
       expect(bandCoherence(nota, texto)).toBe("coerente")

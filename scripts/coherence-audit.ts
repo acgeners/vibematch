@@ -43,7 +43,7 @@ const CHECKS: Check[] = [
     id: "A",
     nome: "faixa citada ≠ faixa da nota",
     porque:
-      "o modelo escreve 'Faixa 4-6' e a nota cai em 7-8. Ou ele se contradisse, ou um pós-processamento mudou a nota sem reescrever a prosa. Nos dois casos, quem lê a ficha vê texto e número discordando.",
+      "o modelo escreve 'Faixa 4-6' e propõe uma nota que cai em 7-8 — ele se contradiz dentro da própria avaliação. Compara a nota PROPOSTA com a prosa dela, não a nota vigente: nota trocada depois é curadoria, não defeito.",
     slugs: null,
     // 🔴 A comparação era `citada !== bandForScore(nota)` sobre o PRIMEIRO par de números
     // da prosa, e isso tem dois falsos positivos grandes: citação composta ("Faixa 7-8/9")
@@ -86,18 +86,26 @@ async function doCatalogo(): Promise<Item[]> {
   for (let from = 0; ; from += 1000) {
     const { data, error } = await sb
       .from("category_scores")
-      .select("work_id, criterion_slug, score, works(title), ai_evaluations(ai_evaluation_scores(criterion_slug, justification))")
+      .select("work_id, criterion_slug, works(title), ai_evaluations(ai_evaluation_scores(criterion_slug, justification, suggested_score))")
       .not("ai_evaluation_id", "is", null)
       .range(from, from + 999)
     if (error) throw new Error(error.message)
     const rows = (data ?? []) as unknown as Array<{
       work_id: string; criterion_slug: string; score: string
       works?: { title?: string } | null
-      ai_evaluations?: { ai_evaluation_scores?: Array<{ criterion_slug: string; justification: string | null }> } | null
+      ai_evaluations?: { ai_evaluation_scores?: Array<{ criterion_slug: string; justification: string | null; suggested_score: number | null }> } | null
     }>
     for (const r of rows) {
-      const j = r.ai_evaluations?.ai_evaluation_scores?.find((x) => x.criterion_slug === r.criterion_slug)?.justification
-      if (j) out.push({ workId: r.work_id, titulo: r.works?.title ?? r.work_id, slug: r.criterion_slug, nota: Number(r.score), just: j })
+      const aes = r.ai_evaluations?.ai_evaluation_scores?.find((x) => x.criterion_slug === r.criterion_slug)
+      // 🔴 Compara a nota que a IA PROPÔS com a prosa que ela mesma escreveu — não a nota
+      // vigente. Medido em 17/08: das 20 acusações contra a nota vigente, **19 eram edições
+      // da curadora** (ela trocou o número, a prosa da IA ficou). Isso não é o modelo se
+      // contradizendo, é troca de autor — e a página já credita isso ("Ajustada por você ·
+      // a IA sugeria X"). Manter aquela comparação fazia a régua acusar curadoria como
+      // defeito, que é o alarme que sempre toca.
+      if (aes?.justification && aes.suggested_score != null) {
+        out.push({ workId: r.work_id, titulo: r.works?.title ?? r.work_id, slug: r.criterion_slug, nota: Number(aes.suggested_score), just: aes.justification })
+      }
     }
     if (rows.length < 1000) break
   }

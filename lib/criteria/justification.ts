@@ -22,12 +22,17 @@ export interface ParsedJustification {
 // que uma varredura minha deu 483 incoerências das quais 6 de 6 amostradas eram falso
 // positivo (2026-08-16). O grupo abaixo consome a citação INTEIRA; `bandBounds` já reduz a
 // qualquer forma dessas ao par mín–máx.
-// A palavra que liga as duas citações varia ("a", "e", "até", "limiar", "tendendo"), então
-// ela é aceita genericamente — mas SÓ quando vem seguida de mais números, senão o grupo
-// engoliria o começo do argumento. Sem casar, o resultado é "sem-faixa": nenhuma afirmação,
-// que é o lado seguro.
+// O que liga as duas citações varia — "a", "e", "até", "limiar", "tendendo", "aproximando
+// de" — então é aceito genericamente, e SÓ quando vier seguido de mais números: sem isso o
+// grupo engoliria o começo do argumento.
+//
+// ⚠️ São até DUAS palavras, e o limite de uma custou um falso positivo. "Faixa 9-10
+// aproximando de 7-8" (nota 8,5) foi a última acusação da régua no catálogo, e era inócua:
+// a prosa cobre 7 a 10. O conector tinha teto de 10 letras e "aproximando" tem 11, então
+// só "9-10" era lido. Sem casar, o resultado é "sem-faixa" — nenhuma afirmação, que é o
+// lado seguro, mas aqui o erro chegou a virar número numa recomendação.
 const BAND_RE =
-  /^\s*Faixa\s+(\d+(?:\s*[-–/]\s*\d+)*(?:\s*[/,]?\s*[a-zà-ú]{1,10}\s*\d+(?:\s*[-–/]\s*\d+)*)?)\s*(?:\(([^)]*)\))?\s*[:,]\s*([\s\S]*)$/i
+  /^\s*Faixa\s+(\d+(?:\s*[-–/]\s*\d+)*(?:\s*[/,]?\s*[a-zà-ú]+(?:\s+[a-zà-ú]+)?\s*\d+(?:\s*[-–/]\s*\d+)*)?)\s*(?:\(([^)]*)\))?\s*[:,]\s*([\s\S]*)$/i
 
 export function parseJustification(text: string): ParsedJustification {
   const m = text.match(BAND_RE)
