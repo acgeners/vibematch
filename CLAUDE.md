@@ -4470,23 +4470,24 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.210 passando (+24 pulados) em 308 arquivos** (303 passando + 5 pulados);
-medido em 2026-08-18 com a normalização de título: **+14 casos e +1 arquivo**
-(`titles/normalizar-titulo`, que cobre a régua E as duas pontas do schema de escrita).
-Com `find tests -name '*.test.ts*'` = **308** conferido contra os 308 executados.
+`npm run test` → **3.214 passando (+24 pulados) em 309 arquivos** (304 passando + 5 pulados);
+medido em 2026-08-18 com o botão de copiar o nome da obra: **+4 casos e +1 arquivo**
+(`ui/copiar-nome-da-obra`).
+Com `find tests -name '*.test.ts*'` = **309** conferido contra os 309 executados.
 
-⚠️ **A linha anterior dizia "3.193 em 306" e estava velha nos DOIS números.** O `main` foi
-remedido no mesmo dia, em worktree limpo: **3.196 em 307**. O worktree resolve a árvore suja
-(o 🔴 abaixo) e não resolve isto — entre escrever o número e o merge, outro PR entra. Por isso
-a régua é re-medir na hora de editar esta linha, nunca somar o próprio delta ao que está escrito
-aqui: fosse esse o caminho, este número teria nascido com o erro de 3 casos embutido.
+⚠️ **Duas linhas seguidas desta seção nasceram velhas, e a causa é a mesma:** o `main` andou
+entre a medição e o merge. Antes desta, a linha dizia "3.193 em 306" enquanto o `main` real era
+**3.196 em 307**. O worktree limpo resolve a árvore suja (o 🔴 abaixo) e **não** resolve isto.
+Por isso a régua é re-medir na hora de editar esta linha, nunca somar o próprio delta ao que
+está escrito aqui — fosse esse o caminho, o erro de 3 casos teria sido herdado duas vezes.
 
 🔴 **Medido num `git worktree` LIMPO do commit, não na árvore de trabalho** — a árvore tinha
 trabalho de outra frente não commitado, e é exatamente assim que este número envelheceu antes.
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.196 em 307** (o `main` que esta branch pegou — MEDIDO, não o que a linha dele dizia),
+Antes: **3.210 em 308** (a normalização de título no nome da obra, +14 casos e +1 arquivo,
+`titles/normalizar-titulo`), **3.196 em 307** (medido, não o que a linha dizia),
 **3.184 em 304** (a exclusão de status parando de apagar os outros pills, +3 casos sem
 arquivo novo — um teste virou quatro em `ui/ranking-status-exclusao`), **3.181 em 304** (o traço virando a legenda de si mesmo no tooltip, +3 casos sem
 arquivo novo), **3.178 em 304** (a rampa do Veredito ganhando dono, +11 casos e +1 arquivo,

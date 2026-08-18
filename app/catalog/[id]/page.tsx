@@ -31,6 +31,7 @@ import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { buildTagStanceLookup, resolveTagStance, segmentTags, lowercasedNameSet } from "@/lib/tags/segment"
 import type { TagStance, TagStanceInfo } from "@/lib/tags/segment"
 import { TagStanceMark, tagStanceTitle } from "@/components/ui/tag-stance-mark"
+import { CopyButton } from "@/components/ui/copy-button"
 import {
   getLatestAiEvaluationAttributes,
   getExistingPostReadingAssessment,
@@ -825,9 +826,15 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       {/* Título (alt titles ficam na aba Visão Geral) */}
       <header className="space-y-1">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-3xl font-bold leading-tight tracking-tight text-foreground md:text-4xl">
-            {work.title}
-          </h1>
+          {/* O botão é IRMÃO do h1, nunca filho: dentro dele o rótulo da ação entraria
+              no nome acessível do título da página. E o gap próprio (1) o cola no
+              título, em vez do gap-3 que separa os selos. */}
+          <div className="flex min-w-0 items-center gap-1">
+            <h1 className="text-3xl font-bold leading-tight tracking-tight text-foreground md:text-4xl">
+              {work.title}
+            </h1>
+            <CopyButton value={work.title} label="Copiar o nome da obra" copiedLabel="Nome copiado!" />
+          </div>
           {work.is_archived && (
             <span className="inline-flex items-center gap-2 rounded-full border bg-red-50 px-3.5 py-1.5 text-base font-bold text-red-900 dark:bg-red-950/40 dark:text-red-200">
               <Archive className="h-4 w-4" />
