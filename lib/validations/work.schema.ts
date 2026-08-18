@@ -56,8 +56,12 @@ const synopsisEntrySchema = z.object({
 // lançar: se um dado corrompido (year_end < year) já existir no banco, você tem que
 // conseguir ABRIR a obra pra corrigi-la — a rejeição vale só na SUBMISSÃO.
 export const workFormBase = z.object({
-  title: z.string().min(1, "Título obrigatório").max(500),
-  original_title: z.string().max(500).nullable().optional(),
+  // ⚠️ `.trim()` ANTES do `.min(1)`: título só de espaço tem que reprovar, não virar "".
+  // Ele estava só em `alternative_titles`, e foi por essa fresta que 3 obras entraram com
+  // espaço nas pontas — invisível no HTML e bem visível ao colar num campo de busca.
+  // Limpar o banco sem fechar a entrada é conserto que precisa ser refeito.
+  title: z.string().trim().min(1, "Título obrigatório").max(500),
+  original_title: z.string().trim().max(500).nullable().optional(),
   alternative_titles: z.array(z.string().trim().min(1).max(500)).default([]),
   synopsis: z.string().max(30000).nullable().optional(),
   genres: z.array(z.string().max(100)).default([]),
@@ -149,9 +153,13 @@ export const workFormSchema = workFormBase.refine(yearEndNotBeforeStart, yearEnd
 export type WorkFormValues = z.infer<typeof workFormSchema>
 export type WorkFormInput = z.input<typeof workFormSchema>
 
+// 🔴 O `title` DERIVA do base — nunca redeclarado. Ele existe aqui só pra desfazer o
+// `.partial()` (no update o título continua obrigatório); escrevê-lo à mão fazia esta
+// cópia sobrescrever a do base em silêncio, e foi o que deixou a EDIÇÃO — o caminho mais
+// usado dos dois — sem o `.trim()` que o formulário de criação tinha.
 export const workUpdateSchema = workFormBase
   .partial()
-  .extend({ title: z.string().min(1).max(500) })
+  .extend({ title: workFormBase.shape.title })
   .refine(yearEndNotBeforeStart, yearEndIssue)
 
 export type WorkUpdateValues = z.infer<typeof workUpdateSchema>
