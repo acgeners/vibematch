@@ -240,13 +240,20 @@ export async function getSynopsisPredictionAccuracy(
   const supabase = createAdminClient()
   // O manual (`synopsis_quality`) é dado PESSOAL do DONO → vem do espelho via a view
   // `works_owner`, não da linha compartilhada de `works` (que vai perder essa coluna).
-  const { data, error } = await supabase
-    .from("synopsis_quality_predictions")
-    .select("predicted_quality, works_owner!work_id(synopsis_quality)")
-    .eq("stale", false)
-    .eq("prompt_version", version)
-  if (error) {
-    console.warn("[synopsis-pred] getSynopsisPredictionAccuracy falhou:", error.message)
+  let data: Array<Record<string, unknown>>
+  try {
+    data = await fetchAllRows<Record<string, unknown>>(
+      (from, to) =>
+        supabase
+          .from("synopsis_quality_predictions")
+          .select("predicted_quality, works_owner!work_id(synopsis_quality)")
+          .eq("stale", false)
+          .eq("prompt_version", version)
+          .range(from, to),
+      "getSynopsisPredictionAccuracy",
+    )
+  } catch (e) {
+    console.warn("[synopsis-pred] getSynopsisPredictionAccuracy falhou:", (e as Error).message)
     return { n: 0, meanDelta: null, mae: null, exactRate: null, within1Rate: null }
   }
 
@@ -334,11 +341,21 @@ export async function getSynopsisVersionComparison(
   const supabase = createAdminClient()
   // O manual (`synopsis_quality`) é dado PESSOAL do DONO → vem do espelho via a view
   // `works_owner`, não da linha compartilhada de `works` (que vai perder essa coluna).
-  const { data, error } = await supabase
-    .from("synopsis_quality_predictions")
-    .select("work_id, predicted_quality, prompt_version, works_owner!work_id(synopsis_quality)")
-  if (error) {
-    console.warn("[synopsis-pred] getSynopsisVersionComparison falhou:", error.message)
+  // 🔴 Sem filtro nenhum: a tabela inteira, **2.384 linhas** em 2026-08-18 contra o corte de
+  // 1000 do PostgREST. É a comparação ENTRE versões de prompt — truncada, ela some com
+  // versões inteiras e ainda assim imprime números plausíveis.
+  let data: Array<Record<string, unknown>>
+  try {
+    data = await fetchAllRows<Record<string, unknown>>(
+      (from, to) =>
+        supabase
+          .from("synopsis_quality_predictions")
+          .select("work_id, predicted_quality, prompt_version, works_owner!work_id(synopsis_quality)")
+          .range(from, to),
+      "getSynopsisVersionComparison",
+    )
+  } catch (e) {
+    console.warn("[synopsis-pred] getSynopsisVersionComparison falhou:", (e as Error).message)
     return null
   }
 
@@ -455,12 +472,19 @@ export async function getShadowComparisonRows(): Promise<ShadowCompareRow[]> {
 
   // O manual (`synopsis_quality`) é dado PESSOAL do DONO → vem do espelho via a view
   // `works_owner`, não da linha compartilhada de `works` (que vai perder essa coluna).
-  const { data: bRows, error: bErr } = await supabase
-    .from("synopsis_quality_predictions")
-    .select("work_id, predicted_quality, confidence, works_owner!work_id(title, synopsis_quality)")
-    .eq("prompt_version", armBVer)
-  if (bErr) {
-    console.warn("[shadow] getShadowComparisonRows (arm B) falhou:", bErr.message)
+  let bRows: Array<Record<string, unknown>>
+  try {
+    bRows = await fetchAllRows<Record<string, unknown>>(
+      (from, to) =>
+        supabase
+          .from("synopsis_quality_predictions")
+          .select("work_id, predicted_quality, confidence, works_owner!work_id(title, synopsis_quality)")
+          .eq("prompt_version", armBVer)
+          .range(from, to),
+      "getShadowComparisonRows.armB",
+    )
+  } catch (e) {
+    console.warn("[shadow] getShadowComparisonRows (arm B) falhou:", (e as Error).message)
     return []
   }
   const bByWork = new Map<string, { quality: string | null; confidence: number | null; title: string; manual: string | null }>()

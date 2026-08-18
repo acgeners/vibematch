@@ -128,22 +128,30 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     return count ?? 0
   }
 
-  const [worksRes, calcRes, rated] = await Promise.all([
+  // 🔴 As duas PAGINADAS: 1019 linhas cada em 2026-08-18, e o PostgREST corta em 1000 sem
+  // erro — os KPIs sairiam calculados sobre um recorte arbitrário do catálogo.
+  const [works, calcs, rated] = await Promise.all([
     // `works` (não a view): serve qualquer usuário e passa pelo overlay abaixo.
-    supabase
-      .from("works")
-      .select("id, ai_eval_status, is_archived, publication_status_id, total_chapters"),
-    supabase
-      .from("calculated_scores")
-      .select("work_id, expected_score"),
+    fetchAllRows<{
+      id: string
+      ai_eval_status: string | null
+      is_archived: boolean | null
+      publication_status_id: number | null
+      total_chapters: number | null
+    }>(
+      (from, to) =>
+        supabase
+          .from("works")
+          .select("id, ai_eval_status, is_archived, publication_status_id, total_chapters")
+          .range(from, to),
+      "getDashboardKpis.works",
+    ),
+    fetchAllRows<{ work_id: string; expected_score: number | null }>(
+      (from, to) => supabase.from("calculated_scores").select("work_id, expected_score").range(from, to),
+      "getDashboardKpis.calculated_scores",
+    ),
     countRated(),
   ])
-
-  if (worksRes.error) throw new Error(worksRes.error.message)
-  if (calcRes.error) throw new Error(calcRes.error.message)
-
-  const works = worksRes.data ?? []
-  const calcs = calcRes.data ?? []
 
   const active = works.filter((w) => !w.is_archived)
   const totalWorks = active.length

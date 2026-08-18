@@ -1,5 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { computeAdultContentBounds, clampAdultContentScore } from "@/lib/ai-evaluation/adult-content-rules"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 
@@ -21,18 +22,21 @@ export interface AdultAuditItem {
  */
 export async function getAdultAuditQueue(): Promise<AdultAuditItem[]> {
   const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from("works")
-    .select(
-      "id, title, work_tags(tags(name, adult_indicator)), category_scores(criterion_slug, score)",
-    )
-    .eq("adult_reason", "ai_review_uncertain")
-    .is("adult_override", null)
-    .order("title", { ascending: true })
+  const data = await fetchAllRows<Record<string, unknown>>(
+    (from, to) =>
+      supabase
+        .from("works")
+        .select(
+          "id, title, work_tags(tags(name, adult_indicator)), category_scores(criterion_slug, score)",
+        )
+        .eq("adult_reason", "ai_review_uncertain")
+        .is("adult_override", null)
+        .order("title", { ascending: true })
+        .range(from, to),
+    "getAdultAuditQueue",
+  )
 
-  if (error) throw new Error(error.message)
-
-  const rows = (data ?? []) as unknown as Array<{
+  const rows = data as unknown as Array<{
     id: string
     title: string
     work_tags: Array<{ tags: { name: string; adult_indicator: boolean } | null } | null> | null

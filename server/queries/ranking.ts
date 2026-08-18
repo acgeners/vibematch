@@ -324,18 +324,20 @@ export async function getRanking(
   // — apenas (work_id, text) das linhas is_primary, apoiada no índice parcial
   // work_synopses_one_primary — evita embutir TODAS as sinopses (várias por obra,
   // texto completo) no JSON aninhado da query principal (~0.9MB → 0.4MB, dedup).
-  const primarySynopsisPromise = supabase
-    .from("work_synopses")
-    .select("work_id, text")
-    .eq("is_primary", true)
-    .then(({ data }) => {
-      const map = new Map<string, string>()
-      for (const r of (data ?? []) as Array<{ work_id: string; text: string | null }>) {
-        const t = r.text?.trim()
-        if (t) map.set(r.work_id, t)
-      }
-      return map
-    })
+  // 🔴 PAGINADA: é uma linha por obra (1019 em 2026-08-18) e o PostgREST corta em 1000 sem
+  // erro — as obras cortadas ficavam sem sinopse no hover, com a lista inteira parecendo certa.
+  const primarySynopsisPromise = fetchAllRows<{ work_id: string; text: string | null }>(
+    (from, to) =>
+      supabase.from("work_synopses").select("work_id, text").eq("is_primary", true).range(from, to),
+    "getRanking.primarySynopsis",
+  ).then((rows) => {
+    const map = new Map<string, string>()
+    for (const r of rows) {
+      const t = r.text?.trim()
+      if (t) map.set(r.work_id, t)
+    }
+    return map
+  })
   const { personalStatusRows, publicationStatusRows } = await getRankingStatusRows()
   const personalStatusOptions = (personalStatusRows ?? []) as Array<{
     id: number
@@ -473,33 +475,47 @@ export async function getRanking(
           .then(({ data }) => [...new Set((data ?? []).map((r) => r.work_id))])
       : Promise.resolve(null),
     filters.tagSlugsAll?.length
-      ? supabase
-          .from("work_tags")
-          .select("work_id, tags!inner(slug)")
-          .in("tags.slug", filters.tagSlugsAll)
-          .then(({ data }) => {
-            const countByWork: Record<string, number> = {}
-            for (const r of data ?? []) {
-              countByWork[r.work_id] = (countByWork[r.work_id] ?? 0) + 1
-            }
-            return Object.entries(countByWork)
-              .filter(([, c]) => c >= filters.tagSlugsAll!.length)
-              .map(([id]) => id)
-          })
+      ? fetchAllRows<{ work_id: string }>(
+          (from, to) =>
+            supabase
+              .from("work_tags")
+              .select("work_id, tags!inner(slug)")
+              .in("tags.slug", filters.tagSlugsAll!)
+              .range(from, to),
+          "getRanking.tagSlugsAll",
+        ).then((rows) => {
+          const countByWork: Record<string, number> = {}
+          for (const r of rows) {
+            countByWork[r.work_id] = (countByWork[r.work_id] ?? 0) + 1
+          }
+          return Object.entries(countByWork)
+            .filter(([, c]) => c >= filters.tagSlugsAll!.length)
+            .map(([id]) => id)
+        })
       : Promise.resolve(null),
     tagAnySlugs?.length
-      ? supabase
-          .from("work_tags")
-          .select("work_id, tags!inner(slug)")
-          .in("tags.slug", tagAnySlugs)
-          .then(({ data }) => [...new Set((data ?? []).map((r) => r.work_id))])
+      ? fetchAllRows<{ work_id: string }>(
+          (from, to) =>
+            supabase
+              .from("work_tags")
+              .select("work_id, tags!inner(slug)")
+              .in("tags.slug", tagAnySlugs!)
+              .range(from, to),
+          "getRanking.tagAnySlugs",
+        ).then((rows) => [...new Set(rows.map((r) => r.work_id))])
       : Promise.resolve(null),
     filters.tagSlugsExclude?.length
-      ? supabase
-          .from("work_tags")
-          .select("work_id, tags!inner(slug)")
-          .in("tags.slug", filters.tagSlugsExclude)
-          .then(({ data }) => [...new Set((data ?? []).map((r) => r.work_id))])
+      ? // ⚠️ EXCLUSÃO: truncar aqui é o pior sentido dos três — obra com a tag evitada some
+        // da lista de exclusão e volta a APARECER, que é o oposto do que a pessoa pediu.
+        fetchAllRows<{ work_id: string }>(
+          (from, to) =>
+            supabase
+              .from("work_tags")
+              .select("work_id, tags!inner(slug)")
+              .in("tags.slug", filters.tagSlugsExclude!)
+              .range(from, to),
+          "getRanking.tagSlugsExclude",
+        ).then((rows) => [...new Set(rows.map((r) => r.work_id))])
       : Promise.resolve(null),
     // Resolve a busca por título para IDs. PostgREST não faz ilike sobre text[]
     // (alternative_titles), então a busca DB antiga só cobria title +

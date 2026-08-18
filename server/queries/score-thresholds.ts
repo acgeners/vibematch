@@ -1,5 +1,6 @@
 import { unstable_cache } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { ColumnThresholds, ScoreColorThresholds } from "@/components/ui/score-badge"
 
@@ -59,12 +60,20 @@ export const getScoreColorThresholds = unstable_cache(
 
     // select("*") em formula_config pra não quebrar quando a coluna de override
     // por critério (criterion_color_pcts) ainda não existe (pré-migration).
-    const [{ data: configRow }, { data: workRows }] = await Promise.all([
+    // 🔴 PAGINADA: são os PERCENTIS que pintam toda nota da interface, e eles descrevem o
+    // catálogo — calculá-los sobre 1000 de 1009 obras é uma régua tirada de um recorte que
+    // ninguém escolheu. O corte do PostgREST não dá erro.
+    const [{ data: configRow }, workRows] = await Promise.all([
       supabase.from("formula_config").select("*").limit(1).single(),
-      supabase
-        .from("works")
-        .select("calculated_scores(expected_score, calc_score), category_scores(criterion_slug, score)")
-        .eq("is_archived", false),
+      fetchAllRows<Record<string, unknown>>(
+        (from, to) =>
+          supabase
+            .from("works")
+            .select("calculated_scores(expected_score, calc_score), category_scores(criterion_slug, score)")
+            .eq("is_archived", false)
+            .range(from, to),
+        "getScoreColorThresholds.works",
+      ),
     ])
 
     if (!configRow) return null

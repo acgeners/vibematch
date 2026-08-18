@@ -1,6 +1,7 @@
 import "server-only"
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { slugifyTagName } from "@/lib/utils"
 import { TAG_GROUP_IDS } from "@/lib/constants/tag-groups"
 import { TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
@@ -303,11 +304,16 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
   // Recomputa adult_auto das obras que carregam as tags recém-flagadas como 18+.
   // recomputeAdultAuto é monotônico (só sobe) e best-effort.
   if (adultTagIds.length > 0) {
-    const { data: wt } = await supabase
-      .from("work_tags")
-      .select("work_id")
-      .in("tag_id", adultTagIds)
-    const workIds = [...new Set((wt ?? []).map((r) => r.work_id as string))]
+    // `.in(<N tags>)`: quantas linhas volta depende de quantas tags a rodada marcou como
+    // 18+. Uma rodada normal marca poucas, mas o TETO é grande — as 167 tags com indicador
+    // adulto de hoje somam 1.614 vínculos, acima do corte de 1000. Truncado, obras ficariam
+    // sem recomputar o flag 18+ e nada acusaria.
+    const wt = await fetchAllRows<{ work_id: string }>(
+      (from, to) =>
+        supabase.from("work_tags").select("work_id").in("tag_id", adultTagIds).range(from, to),
+      "enrichNewTags.adultWorkTags",
+    )
+    const workIds = [...new Set(wt.map((r) => r.work_id))]
     for (const workId of workIds) await recomputeAdultAuto(supabase, workId)
   }
 }
