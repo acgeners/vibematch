@@ -30,15 +30,30 @@ tokens**) e ~14 mil reviews raspadas de 8 fontes.
 node scripts/backup-db.mjs        # → .backups/<timestamp>/ (gitignored)
 ```
 
-Dump lógico de todas as tabelas em NDJSON gzipado (**34,9 MB / 173.806 linhas em 77 tabelas**,
-medido em 2026-08-09) **+ `schema.sql.gz`** (37 KB: 84 tabelas, 67 policies, 13 functions, 9
-triggers, 2 views, schemas `public` e `bkp`). **Pagina e confere contra `count: "exact"`**: se
-faltar uma linha, ele FALHA em vez de gravar um backup truncado — que é a pior forma possível do
-bug das 1000 linhas, porque você só descobre quando precisa restaurar.
+Dump lógico de todas as tabelas em NDJSON gzipado (**39,6 MB / 206.151 linhas em 77 tabelas**,
+remedido em 2026-08-18; eram 34,9 MB / 173.806 em 2026-08-09) **+ `schema.sql.gz`** (42 KB: 67
+policies, **17 functions, 10 triggers** — eram 13 e 9 em 10/08, as migrations desde então
+explicam). **Pagina e confere contra `count: "exact"`**: se faltar uma linha, ele FALHA em vez de
+gravar um backup truncado — que é a pior forma possível do bug das 1000 linhas, porque você só
+descobre quando precisa restaurar.
+
+🔴 **Esse mesmo guard reprova por CORRIDA, e a mensagem diz o contrário do que houve.** Ele
+compara `escritas !== contadas` e imprime "BACKUP INCOMPLETO" nos dois sentidos. Medido em
+2026-08-18 com o dev server no ar: `ai_api_calls: 5557 linhas gravadas, 5556 no banco` — o log
+append-only ganhou uma linha DURANTE o dump, ou seja sobrou, não faltou. Repetir resolve (a
+2ª tentativa passou), mas o backup semanal cai no mesmo se rodar com o app ativo. Antes de
+tratar como corrupção, olhe o SINAL da diferença: `escritas > contadas` é corrida numa tabela
+viva; `escritas < contadas` é o truncamento que o guard existe para pegar.
 
 🟢 **Roda sozinho, semanalmente**: `~/Library/LaunchAgents/com.geners.animedb-backup.plist`,
-domingo 04:00, com `BACKUP_ENV_FILE=.env.supabase-cloud` (obrigatório — sem ele o agente salvaria
-o banco LOCAL reportando sucesso).
+domingo 04:00, com `BACKUP_ENV_FILE=.env.supabase-cloud`.
+
+⚠️ **Por que um env file FIXO, se o `.env.local` já aponta pra nuvem:** porque ele é um
+INTERRUPTOR — `db:local`/`db:cloud` reescrevem o alvo dele (`scripts/db-target.mjs`). Sem o
+`BACKUP_ENV_FILE`, o agente salvaria o banco que estivesse selecionado no domingo de manhã, e um
+`db:local` esquecido na sexta viraria uma semana de "backup" do descartável, com sucesso
+reportado. Esta linha já disse que sem ele o agente salvaria o LOCAL, o que virou meia-verdade no
+cutover de 10/08: hoje o risco é CONDICIONAL, e é por ele existir que não importa.
 
 🔴 **O motivo registrado para ser semanal ("o dump custa ~137 MB de egress, e diário daria
 ~4,1 GB/mês, 82% do teto") estava em bytes SEM compressão, e o que trafega é comprimido.**
@@ -61,6 +76,25 @@ quando vira a única rede. Custa 259 KB e ~3s: **0,24%** do dump completo de 108
 ⚠️ O bloco de schema é **fail-soft**: sem `pg_dump` no PATH ou sem `SUPABASE_DB_PASSWORD` ele
 avisa e segue, porque o dado já está gravado e conferido — abortar ali jogaria fora o que deu
 certo.
+
+🔴 **E esse fail-soft disparava em TODO backup automático: por 8 dias, só o dado foi salvo.**
+Medido em 2026-08-18 sobre os 5 backups completos em disco — **1 tinha `schema.sql.gz`**, o de
+11/08, rodado à MÃO. Os automáticos, nenhum. A linha acima ("o schema entrou no backup em
+2026-08-10") era verdadeira para execução manual e **falsa para a única que roda sozinha**.
+
+**A causa é de UMA linha:** `ENV_FILE = process.env.BACKUP_ENV_FILE ?? ".env.local"` — o script
+carrega **um** env file, e o agente semanal roda com `.env.supabase-cloud`, que tinha três
+chaves e **não tinha `SUPABASE_DB_PASSWORD`** (ela mora no `.env.local`). Corrigido copiando a
+senha para lá.
+
+⚠️ **O modo de falha é o caro:** o aviso vai para o log do launchd, que ninguém lê, e o backup
+termina anunciando sucesso. Você descobriria no dia de restaurar num banco vazio — quando o
+NDJSON não tem onde entrar, porque não há tabelas. É a mesma família do `backup-db.mjs` mirando
+o banco errado: **falha que produz resultado** ([[gotcha-backup-automatico-sem-schema]]).
+
+⚠️ **Ao mexer em `.env.supabase-cloud`, lembre que ele NÃO herda nada do `.env.local`.** É o
+oposto da convenção dos scripts de análise, onde dois `--env-file` se sobrepõem e o segundo
+herda o primeiro. Aqui é substituição total, e o que faltar cai no fail-soft mais próximo.
 
 ⚠️ **Restaurar exige criar as extensions ANTES**: `--schema public` não leva `CREATE EXTENSION`, e
 `vector`/`pg_trgm` moram dentro do `public` (o `db-pull-to-local.mjs` já faz isso no passo 4).
