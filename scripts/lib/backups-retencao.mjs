@@ -52,6 +52,15 @@ export const BASE = path.join(ROOT, ".backups")
  * `push-curation-…` não casa com `/^push-\d{4}/`. Guardado por teste.
  *
  * `keep: null` = diretório fixo, não acumula versões — tem dono, mas não se poda.
+ *
+ * 🔴 `exemplo` NÃO é dado morto: é o nome de diretório real que o teste de arquitetura usa
+ * para provar duas coisas de uma vez — que `casa` reconhece a PRÓPRIA família e que nenhuma
+ * outra o reconhece junto. Ele mora aqui, encostado no regex, porque já morou numa lista fixa
+ * dentro do teste (escrita DUAS vezes, em funções vizinhas): família nova exigia lembrar de
+ * dois lugares que nada ligava um ao outro, e a primeira a entrar depois disso (`normalizar-titulos`,
+ * então em outra branch) entrou sem que ninguém lembrasse — a suíte ficou vermelha sem que
+ * houvesse defeito nenhum na família. Ao declarar uma família, escreva aqui um nome que o
+ * `casa` dela aceite.
  */
 export const FAMILIAS = [
   {
@@ -59,6 +68,7 @@ export const FAMILIAS = [
     dono: "backup-db.mjs",
     oQueE: "dump lógico NDJSON de todas as tabelas — o backup de DADO (sem schema/policies)",
     casa: (n) => /^\d{4}-\d{2}-\d{2}T[\d-]+Z$/.test(n),
+    exemplo: "2026-08-10T15-46-58-638Z",
     keepPadrao: 5,
     env: "BACKUP_KEEP",
   },
@@ -69,6 +79,7 @@ export const FAMILIAS = [
     // schema, policies e functions — o NDJSON do backup-db.mjs não os tem.
     oQueE: "pg_dump da nuvem — único backup COM schema, policies e functions",
     casa: (n) => /^pull-\d{4}-\d{2}-\d{2}T/.test(n),
+    exemplo: "pull-2026-07-30T00-31-49-679Z",
     keepPadrao: 3,
     env: "PULL_KEEP",
   },
@@ -81,6 +92,7 @@ export const FAMILIAS = [
     // declarar é o `podar()` parar de acusá-lo como órfão e o próximo leitor saber quem grava.
     oQueE: "mapa de tags externas → internas gerado pelo backfill (um JSON por execução)",
     casa: (n) => n === "backfill-tags",
+    exemplo: "backfill-tags",
     keepPadrao: 1,
     env: "BACKFILL_TAGS_KEEP",
   },
@@ -93,6 +105,7 @@ export const FAMILIAS = [
     // uma entrada só nunca seria podada e a "retenção" seria decorativa.
     oQueE: "estado anterior das linhas corrigidas (ids externos trocados)",
     casa: (n) => /^fix-external-ids-\d{4}/.test(n),
+    exemplo: "fix-external-ids-2026-08-14T00-15-58-115Z",
     keepPadrao: 10,
     env: "FIX_IDS_KEEP",
   },
@@ -105,6 +118,7 @@ export const FAMILIAS = [
     // alguém olha a capa, o que pode demorar.
     oQueE: "estado anterior de is_primary ao repescar capa morta",
     casa: (n) => /^repick-cover-\d{4}/.test(n),
+    exemplo: "repick-cover-2026-08-15T03-11-22-333Z",
     keepPadrao: 10,
     env: "REPICK_COVER_KEEP",
   },
@@ -115,6 +129,7 @@ export const FAMILIAS = [
     // ⚠️ O dígito logo após o prefixo é o que impede a família `push-evals` (/^push-\d{4}/)
     // de engolir estas entradas — e vice-versa. Famílias têm de ser mutuamente exclusivas.
     casa: (n) => /^push-opening-structure-\d{4}/.test(n),
+    exemplo: "push-opening-structure-2026-08-14T01-00-49-104Z",
     keepPadrao: 10,
     env: "PUSH_OPENING_KEEP",
   },
@@ -123,6 +138,7 @@ export const FAMILIAS = [
     dono: "db-push-curation.mjs",
     oQueE: "STAGING do push de curadoria (~95 MB) — TSV do que foi lido, não é backup",
     casa: (n) => /^push-curation-\d{4}-\d{2}-\d{2}T/.test(n),
+    exemplo: "push-curation-2026-08-10T17-37-07-121Z",
     keepPadrao: 2,
     env: "PUSH_STAGE_KEEP",
   },
@@ -131,6 +147,7 @@ export const FAMILIAS = [
     dono: "db-push-evals.mjs",
     oQueE: "staging do push de avaliações de IA (~2 MB)",
     casa: (n) => /^push-\d{4}-\d{2}-\d{2}T/.test(n),
+    exemplo: "push-2026-08-04T04-19-44-904Z",
     keepPadrao: 3,
     env: "PUSH_EVALS_KEEP",
   },
@@ -139,6 +156,7 @@ export const FAMILIAS = [
     dono: "db-push-new-works.mjs",
     oQueE: "cofre auto-contido das obras novas (~1,3 MB) — grava inclusive em --dry-run",
     casa: (n) => /^new-works-\d{4}-\d{2}-\d{2}T/.test(n),
+    exemplo: "new-works-2026-08-04T15-56-02-670Z",
     keepPadrao: 5,
     env: "COFRE_KEEP",
   },
@@ -147,6 +165,7 @@ export const FAMILIAS = [
     dono: "synopsis-prompt-lab.ts",
     oQueE: "saídas do laboratório de prompt de sinopse (~44 KB)",
     casa: (n) => /^synopsis-lab-\d{4}-\d{2}-\d{2}T/.test(n),
+    exemplo: "synopsis-lab-2026-07-30T05-38-06-927Z",
     keepPadrao: 3,
     env: "SYNOPSIS_LAB_KEEP",
   },
@@ -155,6 +174,7 @@ export const FAMILIAS = [
     dono: "db-table-fingerprint.mjs",
     oQueE: "snapshots de fingerprint por tabela — diretório FIXO, não versionado",
     casa: (n) => n === "fingerprints",
+    exemplo: "fingerprints",
     keepPadrao: null,
     env: null,
   },

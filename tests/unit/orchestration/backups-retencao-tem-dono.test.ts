@@ -16,9 +16,11 @@ import { FAMILIAS, keepDe } from "@/scripts/lib/backups-retencao.mjs"
  * escritores, **3 nunca podavam nada**, e havia 3 entradas órfãs de script nenhum — uma de
  * 33 MB. Nenhuma das retenções existentes estava errada; todas eram cegas por construção.
  *
- * ⚠️ Este teste DERIVA a lista de escritores do filesystem, nunca de uma lista fixa. Uma lista
+ * ⚠️ Este teste DERIVA tudo que varre: os escritores saem do filesystem e os nomes de exemplo
+ * saem das próprias `FAMILIAS` (campo `exemplo`, encostado no `casa` que ele exercita). Lista
  * fixa não acha o que ninguém apontou — que é exatamente a falha que se quer impedir aqui: o
- * próximo script a inventar um prefixo novo.
+ * próximo script a inventar um prefixo novo. ⚠️ Esta linha já prometia isso enquanto DOIS
+ * casos deste arquivo mantinham os mesmos 11 nomes escritos à mão; ver o comentário lá embaixo.
  */
 const SCRIPTS_DIR = path.join(process.cwd(), "scripts")
 
@@ -91,42 +93,40 @@ describe("retenção de .backups: um dono único, e ninguém grava sem família"
     }
   })
 
-  it("as famílias são MUTUAMENTE EXCLUSIVAS", () => {
-    // 🔴 A armadilha concreta: um teste ingênuo de prefixo para `push-` engoliria
-    // `push-curation-`, e o staging de 96 MB passaria a ser contado na política de 2 MB do
-    // vizinho. Por isso todo regex datado exige o dígito do ano logo após o prefixo.
-    const nomes = [
-      "2026-08-10T15-46-58-638Z",
-      "pull-2026-07-30T00-31-49-679Z",
-      "push-2026-08-04T04-19-44-904Z",
-      "push-curation-2026-08-10T17-37-07-121Z",
-      "new-works-2026-08-04T15-56-02-670Z",
-      "synopsis-lab-2026-07-30T05-38-06-927Z",
-      "fingerprints",
-      "backfill-tags",
-      "fix-external-ids-2026-08-14T00-15-58-115Z",
-      "push-opening-structure-2026-08-14T01-00-49-104Z",
-      "repick-cover-2026-08-15T03-11-22-333Z",
-    ]
-    for (const nome of nomes) {
-      const casam = FAMILIAS.filter((f) => f.casa(nome)).map((f) => f.id)
-      expect(casam, `"${nome}" casou com ${casam.length} famílias: ${casam.join(", ")}`).toHaveLength(1)
+  it("toda família declara um `exemplo` — sem ele o regex dela nunca é exercitado", () => {
+    // Precondição do teste seguinte, separada pra a mensagem dizer o que fazer. Família nova
+    // sem exemplo reprova AQUI, no lugar onde ela foi declarada, e não numa lista distante.
+    for (const familia of FAMILIAS) {
+      expect(
+        typeof familia.exemplo === "string" && familia.exemplo.length > 0,
+        `família "${familia.id}" não declara \`exemplo\` em scripts/lib/backups-retencao.mjs — ` +
+          `escreva ali um nome de diretório que o \`casa\` dela aceite`,
+      ).toBe(true)
     }
   })
 
-  it("cada nome de exemplo tem exatamente uma família, e toda família reconhece o seu", () => {
-    // O espelho do teste acima: garante que nenhuma família ficou sem nome de exemplo, o que
-    // deixaria um regex quebrado passar despercebido.
-    const cobertas = new Set(
-      ["2026-08-10T15-46-58-638Z", "pull-2026-07-30T00-31-49-679Z", "push-2026-08-04T04-19-44-904Z",
-       "push-curation-2026-08-10T17-37-07-121Z", "new-works-2026-08-04T15-56-02-670Z",
-       "synopsis-lab-2026-07-30T05-38-06-927Z", "fingerprints", "backfill-tags",
-       "fix-external-ids-2026-08-14T00-15-58-115Z",
-       "push-opening-structure-2026-08-14T01-00-49-104Z",
-       "repick-cover-2026-08-15T03-11-22-333Z"]
-        .flatMap((n) => FAMILIAS.filter((f) => f.casa(n)).map((f) => f.id)),
-    )
-    for (const f of FAMILIAS) expect(cobertas.has(f.id), `família "${f.id}" sem nome de exemplo`).toBe(true)
+  it("cada exemplo casa com exatamente a SUA família", () => {
+    // 🔴 Duas invariantes numa asserção só: a família reconhece o próprio diretório (senão o
+    // regex está quebrado e a poda nunca acha nada) e nenhuma OUTRA o reconhece junto. A
+    // armadilha concreta da segunda metade: um teste ingênuo de prefixo para `push-` engoliria
+    // `push-curation-`, e o staging de 96 MB passaria a ser podado pela política de 2 do
+    // vizinho. Por isso todo regex datado exige o dígito do ano logo após o prefixo.
+    //
+    // ⚠️ Os nomes saem de `FAMILIAS`, nunca de uma lista escrita aqui. Eram DUAS cópias dos
+    // mesmos 11 nomes, em funções vizinhas deste arquivo — e o docstring do topo já prometia
+    // "deriva, nunca lista fixa", promessa que valia só pros escritores. A família seguinte
+    // (`normalizar-titulos`) entrou completa — regex exclusivo, `podar()` chamado — e a suíte
+    // ficou vermelha só porque ninguém lembrou dos dois lugares. Não era uma allowlist, era um
+    // pedágio; e pedágio que nada cobra na hora certa é pago com um vermelho que não é de
+    // ninguém.
+    for (const familia of FAMILIAS) {
+      const casam = FAMILIAS.filter((f) => f.casa(familia.exemplo)).map((f) => f.id)
+      expect(
+        casam,
+        `"${familia.exemplo}" é o exemplo de "${familia.id}" e casou com ${casam.length} ` +
+          `família(s): ${casam.join(", ") || "nenhuma"}`,
+      ).toEqual([familia.id])
+    }
   })
 
   it("keep nunca é 0 nem NaN — isso apagaria o que acabou de ser gravado", () => {
