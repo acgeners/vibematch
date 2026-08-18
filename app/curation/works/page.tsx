@@ -129,15 +129,22 @@ interface LatestEvalRow {
 async function loadLatestEvalsMap(
   supabase: ReturnType<typeof createAdminClient>,
 ): Promise<Map<string, LatestEvalRow>> {
-  const { data, error } = await supabase
-    .from("ai_evaluations")
-    .select("work_id, confidence, model_name, prompt_version, created_at, updated_at")
-    .eq("status", "completed")
-    .order("created_at", { ascending: false })
-  if (error) throw new Error(error.message)
+  // 🔴 2.460 avaliações concluídas em 2026-08-18, contra o corte de 1000 do PostgREST. E a
+  // ordenação é o que dá sentido ao laço abaixo ("a primeira que aparece é a mais nova"):
+  // truncado, o mapa perdia obras inteiras e a fila as classificava pela ausência.
+  const data = await fetchAllRows<LatestEvalRow>(
+    (from, to) =>
+      supabase
+        .from("ai_evaluations")
+        .select("work_id, confidence, model_name, prompt_version, created_at, updated_at")
+        .eq("status", "completed")
+        .order("created_at", { ascending: false })
+        .range(from, to),
+    "curadoria.latestEvals",
+  )
 
   const latest = new Map<string, LatestEvalRow>()
-  for (const row of (data ?? []) as LatestEvalRow[]) {
+  for (const row of data) {
     if (!latest.has(row.work_id)) latest.set(row.work_id, row)
   }
   return latest

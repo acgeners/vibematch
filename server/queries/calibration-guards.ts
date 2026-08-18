@@ -1,6 +1,7 @@
 import "server-only"
 import { unstable_cache } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { getCurrentUserId } from "@/server/queries/current-user"
 
 type GuardStatus = "ok" | "warn" | "unknown"
@@ -73,16 +74,21 @@ async function checkGuard1(
   supabase: ReturnType<typeof createAdminClient>,
   userId: string,
 ): Promise<Guard1Result> {
-  const [{ data: assess }, { data: recent }] = await Promise.all([
+  const [{ data: assess }, recent] = await Promise.all([
     supabase
       .from("user_attribute_assessment")
       .select("ia_model_at_assessment, ia_prompt_version")
       .eq("user_id", userId),
-    supabase
-      .from("ai_evaluations")
-      .select("model_name, prompt_version, created_at")
-      .eq("status", "completed")
-      .gte("created_at", new Date(Date.now() - 30 * 864e5).toISOString()),
+    fetchAllRows<{ model_name: string | null; prompt_version: string | null; created_at: string }>(
+      (from, to) =>
+        supabase
+          .from("ai_evaluations")
+          .select("model_name, prompt_version, created_at")
+          .eq("status", "completed")
+          .gte("created_at", new Date(Date.now() - 30 * 864e5).toISOString())
+          .range(from, to),
+      "calibrationGuards.recentEvals",
+    ),
   ])
 
   const biasDom = dominant(assess ?? [], (r) => `${r.ia_model_at_assessment}|${r.ia_prompt_version}`)
@@ -113,12 +119,13 @@ async function checkGuard1(
 async function computeLowCoverage(
   supabase: ReturnType<typeof createAdminClient>,
 ): Promise<{ unreadIds: string[]; lowCoverageIds: Set<string> }> {
-  const { data: works } = await supabase
-    .from("works_owner")
-    .select("id, user_score, genres")
-    .eq("is_archived", false)
+  const works = await fetchAllRows<Record<string, unknown>>(
+    (from, to) =>
+      supabase.from("works_owner").select("id, user_score, genres").eq("is_archived", false).range(from, to),
+    "calibrationGuards.works",
+  )
 
-  const rows = (works ?? []) as Array<{ id: string; user_score: number | null; genres: string[] | null }>
+  const rows = works as unknown as Array<{ id: string; user_score: number | null; genres: string[] | null }>
   const readCountByGenre = new Map<string, number>()
   for (const w of rows) {
     if (w.user_score == null) continue

@@ -2,7 +2,7 @@ import "server-only"
 import { hiatusFieldsFromRow } from "@/lib/works/hiatus-display"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { fetchAllRowsParallel } from "@/lib/supabase/paginate"
+import { fetchAllRows, fetchAllRowsParallel } from "@/lib/supabase/paginate"
 import { pickPrimaryCover } from "@/lib/work-derived"
 import { PUBLICATION_STATUSES_BY_ID, PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { classifyWorksWithoutTags, type NoTagsWork, type NoTagsFilters, type TagWorkMetaRow } from "@/lib/tags/no-tags-classify"
@@ -60,14 +60,21 @@ export async function getWorksWithoutTags(
   // Seleciona E FILTRA dado PESSOAL do DONO (personal_status_id, synopsis_quality) → lê do
   // espelho via a view `works_owner`, não da linha compartilhada de `works` (que vai perder
   // essas colunas). Os filtros/`.in()` continuam valendo: a view expõe os mesmos nomes.
-  let worksQ = sb
-    .from("works_owner")
-    .select("id, title, ai_eval_status, canonical_synopsis, publication_status_id, personal_status_id, synopsis_quality, hiatus_kind, hiatus_kind_confidence, publication_status_note, work_covers(url, is_primary, position), calculated_scores(expected_score)")
-    .eq("is_archived", false)
-  if (filters.pubStatusIds && filters.pubStatusIds.length > 0) worksQ = worksQ.in("publication_status_id", filters.pubStatusIds)
-  if (filters.personalStatusIds && filters.personalStatusIds.length > 0) worksQ = worksQ.in("personal_status_id", filters.personalStatusIds)
-  const { data: worksData, error: worksErr } = await worksQ
-  if (worksErr) throw new Error(`works: ${worksErr.message}`)
+  const montaWorksQ = () => {
+    let q = sb
+      .from("works_owner")
+      .select("id, title, ai_eval_status, canonical_synopsis, publication_status_id, personal_status_id, synopsis_quality, hiatus_kind, hiatus_kind_confidence, publication_status_note, work_covers(url, is_primary, position), calculated_scores(expected_score)")
+      .eq("is_archived", false)
+    if (filters.pubStatusIds && filters.pubStatusIds.length > 0) q = q.in("publication_status_id", filters.pubStatusIds)
+    if (filters.personalStatusIds && filters.personalStatusIds.length > 0) q = q.in("personal_status_id", filters.personalStatusIds)
+    return q
+  }
+  // 🔴 PAGINADA: `works_owner` tem 1.019 linhas (2026-08-18) e o PostgREST corta em 1000 sem
+  // erro — a fila perderia obras em silêncio, que é o oposto do que uma FILA existe pra fazer.
+  const worksData = await fetchAllRows<Record<string, unknown>>(
+    (from, to) => montaWorksQ().range(from, to),
+    "worksQueue.works_owner",
+  )
 
   type Row = {
     id: string

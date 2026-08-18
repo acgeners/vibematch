@@ -446,19 +446,23 @@ export async function getRanking(
     searchIds,
   ] = await Promise.all([
     filters.genreAll?.length
-      ? supabase
-          .from("work_genres")
-          .select("work_id, genres!inner(name)")
-          .in("genres.name", filters.genreAll)
-          .then(({ data }) => {
-            const countByWork: Record<string, number> = {}
-            for (const r of data ?? []) {
-              countByWork[r.work_id] = (countByWork[r.work_id] ?? 0) + 1
-            }
-            return Object.entries(countByWork)
-              .filter(([, c]) => c >= filters.genreAll!.length)
-              .map(([id]) => id)
-          })
+      ? fetchAllRows<{ work_id: string }>(
+          (from, to) =>
+            supabase
+              .from("work_genres")
+              .select("work_id, genres!inner(name)")
+              .in("genres.name", filters.genreAll!)
+              .range(from, to),
+          "getRanking.genreAll",
+        ).then((rows) => {
+          const countByWork: Record<string, number> = {}
+          for (const r of rows) {
+            countByWork[r.work_id] = (countByWork[r.work_id] ?? 0) + 1
+          }
+          return Object.entries(countByWork)
+            .filter(([, c]) => c >= filters.genreAll!.length)
+            .map(([id]) => id)
+        })
       : Promise.resolve(null),
     genreAnyNames?.length
       ? supabase
@@ -609,6 +613,11 @@ export async function getRanking(
   // (embuti-los inflava o payload ~3.9MB). work_synopses idem: vem de primarySynopsisPromise.
   const hideAdult = await hideAdultPromise
 
+  // leitura-limitada: o teto é aplicado nos DOIS call sites (`.limit(2000)`, logo abaixo),
+  // não aqui — a fábrica é reusada por lote de ids. É teto EXPLÍCITO, não o corte silencioso
+  // de 1000 do PostgREST: o catálogo tem 1009 obras ativas em 2026-08-18. Paginá-la mexe no
+  // payload mais pesado do app (a mesma projeção já mediu 8,6 MB numa tacada em outro ponto)
+  // e precisa de medição de latência PRÓPRIA — `fetchAllRows` seria serial.
   const buildWorksQuery = () => {
     let q = supabase
       .from("works")
