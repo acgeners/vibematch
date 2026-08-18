@@ -347,7 +347,7 @@ async function ItemBody({
         <EmbeddingsPanel
           accent={accent}
           initialCachedCount={embeddingsCount}
-          initialPendingCount={pendingCount}
+          pendingCount={pendingCount}
           totalWorks={worksCount}
           initialLastRun={(lastRunRes.data?.updated_at as string | undefined) ?? null}
         />

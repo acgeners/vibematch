@@ -1,5 +1,6 @@
 import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { countStaleEmbeddings } from "@/server/embeddings/refresh"
 import { getWorksMissingComixHid } from "@/server/queries/comix-coverage"
 import { hasConsolidatableBlocks } from "@/lib/ai-recommendation/synopsis-consolidator"
@@ -27,11 +28,19 @@ import { splitSynopsesFromText } from "@/lib/work-derived"
  */
 export async function countPendingCanonicalSynopses(): Promise<number> {
   const supabase = createAdminClient()
-  const { data } = await supabase
-    .from("works")
-    .select("id, work_synopses(text)")
-    .is("canonical_synopsis", null)
-    .eq("is_archived", false)
+  // Pagina: `select` sem `.range()` corta em 1000 sem erro, e uma regressão em
+  // massa (backfill que zera `canonical_synopsis`) põe o universo acima do corte
+  // justo quando a contagem mais importa. Hoje são 0 obras — é rede, não sintoma.
+  const data = await fetchAllRows<{ id: string; work_synopses?: Array<{ text: string | null }> }>(
+    (from, to) =>
+      supabase
+        .from("works")
+        .select("id, work_synopses(text)")
+        .is("canonical_synopsis", null)
+        .eq("is_archived", false)
+        .range(from, to),
+    "countPendingCanonicalSynopses",
+  )
   let pending = 0
   for (const w of data ?? []) {
     const rawTexts = ((w as { work_synopses?: Array<{ text: string | null }> }).work_synopses ?? [])
@@ -56,12 +65,18 @@ export async function countPendingCanonicalSynopses(): Promise<number> {
  */
 export async function countPendingReviewSummaries(): Promise<number> {
   const supabase = createAdminClient()
-  const { data } = await supabase
-    .from("works")
-    .select("id, work_reviews(count)")
-    .is("review_summary", null)
-    .eq("is_archived", false)
-    .gte("work_reviews.text_length", 40)
+  // Pagina pelo mesmo motivo de `countPendingCanonicalSynopses` (hoje são 8 obras).
+  const data = await fetchAllRows<{ id: string; work_reviews?: Array<{ count: number }> }>(
+    (from, to) =>
+      supabase
+        .from("works")
+        .select("id, work_reviews(count)")
+        .is("review_summary", null)
+        .eq("is_archived", false)
+        .gte("work_reviews.text_length", 40)
+        .range(from, to),
+    "countPendingReviewSummaries",
+  )
   let pending = 0
   for (const w of data ?? []) {
     const rel = (w as { work_reviews?: Array<{ count: number }> }).work_reviews
@@ -70,18 +85,31 @@ export async function countPendingReviewSummaries(): Promise<number> {
   return pending
 }
 
+/**
+ * Obras ATIVAS sem linha em `work_embeddings`.
+ *
+ * 🔴 Ela fazia a diferença em JS entre dois `select` SEM `.range()` — e o PostgREST
+ * corta em 1000 linhas sem avisar. Passado o corte, a conta compara dois recortes
+ * ARBITRÁRIOS de 1000 e devolve um número que NUNCA chega a zero: medido contra a
+ * nuvem em 2026-08-18, 1009 obras ativas × 1016 embeddings davam **15 pendentes**
+ * onde o real é **0**. Era o badge preso — nem rodar "Atualizar embeddings" nem
+ * recarregar a página resolviam, porque não havia o que resolver. (No LOCAL, com
+ * 978 obras, os mesmos dois selects davam 0: o defeito só aparece depois do corte.)
+ *
+ * Hoje é UMA contagem no servidor — LEFT JOIN filtrado por `is null`, com
+ * `count: "exact", head: true`. Sem teto de linhas e sem trafegar linha nenhuma:
+ * a versão antiga puxava ~2000 ids a cada leitura do chrome, que roda a cada
+ * navegação (ver o §Egress do CLAUDE.md).
+ */
 export async function countMissingEmbeddings(): Promise<number> {
   const supabase = createAdminClient()
-  const [works, emb] = await Promise.all([
-    supabase.from("works").select("id").eq("is_archived", false),
-    supabase.from("work_embeddings").select("work_id"),
-  ])
-  const embedded = new Set((emb.data ?? []).map((r) => (r as { work_id: string }).work_id))
-  let missing = 0
-  for (const w of works.data ?? []) {
-    if (!embedded.has((w as { id: string }).id)) missing += 1
-  }
-  return missing
+  const { count, error } = await supabase
+    .from("works")
+    .select("id, work_embeddings!left(work_id)", { count: "exact", head: true })
+    .eq("is_archived", false)
+    .is("work_embeddings", null)
+  if (error) throw new Error(`countMissingEmbeddings: ${error.message}`)
+  return count ?? 0
 }
 
 export interface SettingsPendingCounts {

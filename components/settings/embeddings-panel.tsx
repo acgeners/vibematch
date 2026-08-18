@@ -30,8 +30,16 @@ interface EmbeddingsPanelProps {
    * ⚠️ Não inclui hash desatualizado — vem de `countMissingEmbeddings()`, que só checa
    * existência. Este doc-comment já dizia "OU com hash desatualizado" e era falso; foi essa
    * frase que sustentou o `disabled={pendingCount === 0}` no botão.
+   *
+   * 🔴 Chega SEMPRE do servidor, sem cópia em estado — igual aos painéis irmãos
+   * (`SynopsisConsolidationPanel`, `ReviewSummaryPanel`). Era `useState(initial…)`
+   * e o `onDone` gravava `result.failed` nele, o que criava dois critérios pro
+   * mesmo fato a dois centímetros um do outro: a pílula do cabeçalho (servidor)
+   * dizia "15 pendentes" com o StatCard (cliente) dizendo 0. E `failed` nem é a
+   * mesma grandeza — obra que falhou pode já ter linha antiga, ou seja NÃO está
+   * "sem embedding". Quem atualiza este número é o `refresh()` do `onDone`.
    */
-  initialPendingCount: number
+  pendingCount: number
   totalWorks: number
   initialLastRun: string | null
 }
@@ -42,12 +50,11 @@ function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(2)}M`
 }
 
-export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCount, totalWorks, initialLastRun }: EmbeddingsPanelProps) {
+export function EmbeddingsPanel({ accent, initialCachedCount, pendingCount, totalWorks, initialLastRun }: EmbeddingsPanelProps) {
   const tasks = useAppTasks()
   const isPending = tasks.some((t) => t.id === EMBEDDINGS_TASK_ID && t.status === "running")
   const [lastResult, setLastResult] = useState<RefreshEmbeddingsResult | null>(null)
   const [lastRun, setLastRun] = useState<string | null>(initialLastRun)
-  const [pendingCount, setPendingCount] = useState<number>(initialPendingCount)
   const refresh = useRefresh()
 
   const handleRefresh = () => {
@@ -65,9 +72,11 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
       onDone: (result) => {
         setLastResult(result)
         setLastRun(new Date().toISOString())
-        setPendingCount(result.failed)
-        // Atualiza o badge "Configurações" da sidebar em tempo real (re-fetch sem
-        // patch, que ignora o TTL) quando o pool de pendências de fato mudou.
+        // Re-busca a verdade do servidor quando o pool de pendências mudou: o
+        // `refresh()` é `router.refresh()` (re-renderiza a pílula do card e o
+        // StatCard, que são props de servidor) + re-fetch do chrome (badge da
+        // sidebar e do tópico, que são client) + aviso às outras abas. Sem
+        // mudança não há o que reconciliar.
         if (result.refreshed > 0) refresh()
         if (result.refreshed === 0 && result.failed === 0) {
           toast.info("Tudo em dia — nenhum embedding precisava ser atualizado.")
