@@ -123,6 +123,18 @@ export const FAMILIAS = [
     env: "REPICK_COVER_KEEP",
   },
   {
+    id: "normalizar-titulos",
+    dono: "normalizar-titulos.ts",
+    // Datado, um diretório por execução com o par (antes, depois) de cada obra tocada.
+    // Alguns KB. É a única forma de desfazer — o banco não tem PITR —, e desfazer aqui é
+    // caro de reconstruir de cabeça: ninguém lembra qual era a caixa original.
+    oQueE: "título anterior das obras normalizadas (espaço nas pontas + caixa)",
+    casa: (n) => /^normalizar-titulos-\d{4}/.test(n),
+    exemplo: "normalizar-titulos-2026-08-17T03-11-22-333Z",
+    keepPadrao: 10,
+    env: "NORMALIZAR_TITULOS_KEEP",
+  },
+  {
     id: "push-opening-structure",
     dono: "push-opening-structure.ts",
     oQueE: "estado anterior da nuvem ao resgatar estrutura de abertura do local",

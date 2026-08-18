@@ -254,12 +254,12 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**98 arquivos, remedidos em 2026-08-17**):
+banco declara um dos dois (**99 arquivos, remedidos em 2026-08-18**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **44** | só LÊ ⇒ vai pro local, de graça |
-| `ALVO: NUVEM` no cabeçalho | **47** | GRAVA ⇒ tem que ir pra nuvem |
+| `ALVO: NUVEM` no cabeçalho | **48** | GRAVA ⇒ tem que ir pra nuvem |
 | (não tocam o banco) | 7 | fora da régua |
 
 🔴 **ESTES TRÊS NÚMEROS SÃO CONFERIDOS PELA SUÍTE**, e não por quem editar esta seção —
@@ -2094,6 +2094,68 @@ palavra funcional cai um grupo. Conferido à mão em **70 títulos sorteados**, 
 positivo. ⚠️ `a`, `o`, `e`, `no`, `do` ficaram FORA da lista inglesa: com eles, "A Herdeira
 Acidental" contava como inglês. ⚠️ O título ATUAL e o ORIGINAL não entram na ordenação — não
 são "alternativos", são identidade, e cada um tem marcador próprio.
+
+### O título da obra é NORMALIZADO na escrita, e a régua toca 30 palavras — não o título
+
+`lib/titles/title-normalize.ts` (2026-08-17). Duas coisas: espaço nas pontas e a caixa das
+palavras que estão erradas **por qualquer padrão de título em inglês**.
+
+🔴 **O desenho é o que a torna segura: ela só toca palavras que estão em DUAS listas
+explícitas.** Não é "aplicar title case" — é corrigir 30 palavras conhecidas e copiar o
+resto byte a byte. Título estilizado, romanização, sigla e as preposições de 4+ letras
+passam intactos **por construção**, não por uma exceção que alguém lembrou de escrever.
+
+Medido nas obras do catálogo, contando a caixa de cada palavra em posição do MEIO:
+
+| palavra | maiúscula | minúscula | o que o catálogo já pratica |
+|---|---|---|---|
+| the · a · of · to · and | 9 · 3 · 2 · 2 · 0 | 273 · 120 · 108 · 89 · 38 | **minúscula** (AP) |
+| My · Your · Is · This | 73 · 25 · 47 · 21 | 0 · 0 · 4 · 1 | **maiúscula** |
+| With · Into · From | 45 · 10 · 5 | 8 · 5 · 3 | **empate técnico** |
+
+⚠️ **A terceira linha fica FORA de propósito.** `with`/`from`/`into` são preposições de 4+
+letras, onde AP e Chicago DISCORDAM — padronizá-las mexeria em ~60 títulos que hoje
+concordam entre si para resolver uma discussão de estilo. Decidido em 2026-08-17 não fazer.
+O que entra na régua é só o que **não tem dois lados**: artigo/preposição curta em maiúscula
+no meio, e verbo/pronome em minúscula.
+
+🔴 **A regra ingênua ("palavrinha no meio → minúscula") tem 50% de falso positivo.** Das 18
+obras que ela acusava, **9 já estavam certas**: a palavra abria um SUBTÍTULO
+(`Cassmire: The Loyal Sword`, `Regina Rena: To the Unforgiven`). Sem a régua de fronteira,
+o conserto trocaria 9 erros por 9 erros novos — e sistemáticos.
+
+⚠️ **A VÍRGULA entrou na fronteira por ESCOLHA da curadora, e é o único ponto em que a régua
+diverge do manual.** AP e Chicago rebaixariam o `But` de `…Family of Tyrants, But Isn't Their
+Obsession…` — tecnicamente certo, e a única coisa que consegue é chamar atenção para si.
+Custo medido: 1 título a menos no plano (20 → 19); nenhum outro caso do catálogo tem palavra
+da lista logo depois de vírgula.
+
+⚠️ **A fronteira pode ser PREFIXO do token, não só sufixo do anterior** — e isso só
+apareceu no ensaio contra o catálogo REAL: `Nullitas ~The Counterfeit Bride~` viraria
+`~the Counterfeit Bride~`, porque o `~` gruda na palavra em vez de ficar solto. Nenhum
+teste inventado teria pego. Hoje qualquer prefixo não-alfabético conta como abertura; o
+erro que sobra é deixar de corrigir, nunca estragar o que estava certo.
+
+🔴 **São DUAS metades, e limpar o banco sem a outra é conserto que se refaz.** A entrada é
+o `.trim()` no `workFormBase` (`lib/validations/work.schema.ts`); ele existia só em
+`alternative_titles`, e foi por essa fresta que os títulos com espaço entraram.
+⚠️ O `workUpdateSchema` **redeclarava** `title` por fora do base — a cópia sobrescrevia o
+trim em silêncio, e deixava a EDIÇÃO (o caminho mais usado dos dois) descoberta. Hoje ele
+deriva de `workFormBase.shape.title`, e só existe para desfazer o `.partial()`.
+
+O passivo do banco fecha com `scripts/normalizar-titulos.ts` (**ALVO: NUVEM**, US$0, ensaio
+por padrão). ⚠️ **Ensaie contra a NUVEM, não contra o clone**: medido no dia, o clone tinha
+988 obras e a nuvem 1.019, e os dois planos divergiam nas duas direções — uma obra que só
+existe na nuvem (`Ties that Bind Us`) e uma cujo espaço o clone ainda mostrava.
+
+⚠️ **Custo, medido:** a URL NÃO muda (`titleToSlug` faz `.toLowerCase()` antes de tudo, e
+nada entra em `previous_slugs`); `title` não é input do recalc (quem é `original_title`), o
+badge não acende; o cache de avaliação de IA muda de chave e isso é ~zero (`ai_cache_events`:
+`hit_persistent` foi **4 em 1.017** consultas, 0,4%); e o único gasto real é re-embedar as
+obras tocadas — `text-embedding-3-small` a US$0,02/M ⇒ **~US$0,001** pelas 20.
+
+Guardado por `tests/unit/titles/normalizar-titulo.test.ts`, cujos casos saíram do ensaio
+contra as obras reais — inclusive o do `~`, que era um bug.
 
 ## Dado gerado por IA carrega um SELO — e nenhuma procedência fica solta na tela
 
@@ -4408,17 +4470,24 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.193 passando (+24 pulados) em 306 arquivos** (301 passando + 5 pulados);
-medido em 2026-08-18 com o badge de pendências que travou em 15: **+9 casos e +2 arquivos**
-(`orchestration/contagem-de-pendencias-nao-trunca` e `ui/pendencia-de-embeddings-segue-o-servidor`).
-Com `find tests -name '*.test.ts*'` = **306** conferido contra os 306 executados.
+`npm run test` → **3.210 passando (+24 pulados) em 308 arquivos** (303 passando + 5 pulados);
+medido em 2026-08-18 com a normalização de título: **+14 casos e +1 arquivo**
+(`titles/normalizar-titulo`, que cobre a régua E as duas pontas do schema de escrita).
+Com `find tests -name '*.test.ts*'` = **308** conferido contra os 308 executados.
+
+⚠️ **A linha anterior dizia "3.193 em 306" e estava velha nos DOIS números.** O `main` foi
+remedido no mesmo dia, em worktree limpo: **3.196 em 307**. O worktree resolve a árvore suja
+(o 🔴 abaixo) e não resolve isto — entre escrever o número e o merge, outro PR entra. Por isso
+a régua é re-medir na hora de editar esta linha, nunca somar o próprio delta ao que está escrito
+aqui: fosse esse o caminho, este número teria nascido com o erro de 3 casos embutido.
 
 🔴 **Medido num `git worktree` LIMPO do commit, não na árvore de trabalho** — a árvore tinha
 trabalho de outra frente não commitado, e é exatamente assim que este número envelheceu antes.
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.184 em 304** (a exclusão de status parando de apagar os outros pills, +3 casos sem
+Antes: **3.196 em 307** (o `main` que esta branch pegou — MEDIDO, não o que a linha dele dizia),
+**3.184 em 304** (a exclusão de status parando de apagar os outros pills, +3 casos sem
 arquivo novo — um teste virou quatro em `ui/ranking-status-exclusao`), **3.181 em 304** (o traço virando a legenda de si mesmo no tooltip, +3 casos sem
 arquivo novo), **3.178 em 304** (a rampa do Veredito ganhando dono, +11 casos e +1 arquivo,
 `ui/faixa-do-veredito`), **3.167 em 303** (rateio de largura do modo
