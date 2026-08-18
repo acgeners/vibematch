@@ -70,11 +70,14 @@ extensions e o `pg_dump` as omite de propósito (voltam com a extension). As do 
 Esta linha já disse "162 functions, 47 policies, 11 triggers"; o real, medido na nuvem em
 2026-08-10, é **13 / 67 / 9**.
 
-**Retenção: o dono é `scripts/lib/backups-retencao.mjs`, e é ÚNICO.** Ele declara as **7
-famílias** que podem existir em `.backups/` (quem cria, o que é, quantas guardar, qual env
-ajusta) e todo escritor chama `podar("<família>")`. Ajuste por família: `BACKUP_KEEP` (5),
-`PULL_KEEP` (3), `PUSH_STAGE_KEEP` (2), `PUSH_EVALS_KEEP` (3), `COFRE_KEEP` (5),
-`SYNOPSIS_LAB_KEEP` (3).
+**Retenção: o dono é `scripts/lib/backups-retencao.mjs`, e é ÚNICO.** Ele declara as famílias
+que podem existir em `.backups/` (quem cria, o que é, quantas guardar, qual env ajusta, e um
+nome de diretório de `exemplo`) e todo escritor chama `podar("<família>")`. Ajuste por família
+pela env declarada em cada uma — `BACKUP_KEEP` (5), `PULL_KEEP` (3), `PUSH_STAGE_KEEP` (2),
+`PUSH_EVALS_KEEP` (3), `COFRE_KEEP` (5), `SYNOPSIS_LAB_KEEP` (3), e mais 5.
+
+⚠️ **São 11 hoje** (2026-08-18), e esta linha dizia **7** — a lista de envs acima cobria 6 delas.
+Contagem em prosa não acusa a própria defasagem: **não a repita aqui, leia o `FAMILIAS`.**
 
 ⚠️ **Esta seção já disse "o script mantém os 5 mais recentes" e induzia à conclusão errada.** A
 frase era verdadeira e cobria **6 dos 40 diretórios** — a retenção do `backup-db.mjs` só casa
@@ -99,6 +102,22 @@ prefixo, não os que já conhecemos. Guardado por
 `tests/unit/orchestration/backups-retencao-tem-dono.test.ts`, que **deriva** os escritores do
 filesystem (grava em `.backups` + cria diretório) em vez de listar nomes: lista fixa não acha o
 que ninguém apontou. Conferido criando um script novo sem família — o teste reprova.
+
+🔴 **Esse "deriva" valia só para os ESCRITORES, e a outra metade do teste era lista fixa — os
+mesmos 11 nomes de exemplo escritos à mão, DUAS vezes, em casos vizinhos do mesmo arquivo.**
+Custo medido em 2026-08-18: a família seguinte (`normalizar-titulos`) entrou completa — regex
+exclusivo, `podar()` chamado, o script conferido — e a suíte ficou **vermelha sem que houvesse
+defeito nenhum**, só porque ninguém lembrou dos dois lugares. Vermelho que não é de ninguém é
+pior que teste ausente: o próximo a rodar a suíte não sabe se é dele.
+
+Hoje o nome de exemplo mora **na própria família** (campo `exemplo`, encostado no `casa` que ele
+exercita) e os dois casos derivam de `FAMILIAS`. Isso troca duas listas por zero e vira **duas
+invariantes numa asserção só**: a família reconhece o próprio diretório *e* nenhuma outra o
+reconhece junto (`toEqual([familia.id])`). Família nova sem `exemplo` reprova no caso dedicado,
+com a mensagem dizendo onde escrever. ⚠️ **O `tsc` NÃO pega a falta do campo** (conferido com
+sonda: apaguei um `exemplo` e o typecheck passou limpo) — quem guarda é só o teste. As três
+sondas conferidas: regex que não casa o próprio exemplo, família sem exemplo, e regex frouxo
+engolindo o vizinho.
 
 ⚠️ Famílias precisam ser **mutuamente exclusivas**: `/^push-\d{4}/` não pode engolir
 `push-curation-…` (2 MB × 96 MB por execução, tetos distintos). Por isso todo regex datado
