@@ -2902,6 +2902,36 @@ conexão é exceção LANÇADA pelo `fetch` e subia crua até o toast. Guardado 
 `tests/unit/orchestration/embeddings-leitura-paginada.test.ts`, conferido reprovando a versão
 antiga.
 
+🔴 **Em 2026-08-18 o corte DISPAROU de verdade, uma tabela ao lado — e o sintoma foi um badge
+preso que ninguém conseguia zerar.** `countMissingEmbeddings` (`server/queries/settings-pending.ts`)
+contava "obras sem embedding" lendo `works` e `work_embeddings` INTEIRAS e fazendo a diferença
+num `Set` em JS. Os dois `select` não tinham `.range()`. Medido contra a nuvem:
+
+| | works ativas | work_embeddings | "sem embedding" |
+|---|---|---|---|
+| **HOJE (dois selects crus)** | 1000 de **1009** | 1000 de **1016** | **15** |
+| paginado / contado no banco | 1009 | 1016 | **0** |
+
+⚠️ **Não é "a contagem atrasa": ela NUNCA chega a zero.** Passado o corte, a conta compara dois
+recortes ARBITRÁRIOS de 1000 linhas — o resultado não é função do trabalho pendente, então nem
+rodar "Atualizar embeddings" nem recarregar a página o resolvem. Foi lido como "os badges não
+atualizam sem reload", e o defeito é de CONTAGEM, não de refresh.
+
+🔴 **E a réplica LOCAL não reproduz** (978 obras, abaixo do corte): os mesmos dois selects dão 0
+lá. Toda medição feita no local — que é onde os 44 scripts de análise rodam — dava o defeito por
+inexistente. Quando o universo estiver perto de 1000, meça na NUVEM.
+
+Hoje é **uma contagem no servidor**: `select("id, work_embeddings!left(work_id)", { count:
+"exact", head: true }).is("work_embeddings", null)`. Sem teto de linhas **e** sem trafegar linha
+nenhuma — a versão antiga puxava ~2000 ids a cada leitura do chrome, que roda a cada navegação.
+⚠️ O filtro foi conferido com sonda no local (988 obras × 985 embeddings ⇒ acha exatamente as
+**3 arquivadas** sem linha), porque `is null` sobre join que nunca casa nada devolveria 0 e
+pareceria "tudo em dia". As outras duas contagens do arquivo (sinopse canônica, síntese de
+reviews) passaram a paginar por rede — hoje têm 0 e 8 obras, longe do corte. Guardado por
+`tests/unit/orchestration/contagem-de-pendencias-nao-trunca.test.ts`, que **deriva as leituras
+do próprio source** (todo `.from(...)` precisa de `.range()` ou de count exato com `head`) e
+foi conferido reprovando a versão antiga em 4 casos.
+
 ## Constants generated from DB
 
 These files are **fully overwritten** by `npm run sync-constants` and must not be edited by hand:
@@ -4211,6 +4241,7 @@ Quatro ocorrências MEDIDAS em 2026-08-13/14, todas com suíte verde:
 | lista do `/discover` | percentil sobre as **737 candidatas** (a barra `sim`) | percentil sobre o **pool de ~50** (o número que ORDENA) | a combinação exibia **97** onde as duas barras diziam 100, e 92 onde diziam 99 e 97; a ordem da lista saía diferente da do servidor |
 | botão de prever Interesse | a obra dizia "Prever de novo" | a fila dizia "Reprever" (e o popup, "Prever") | mesma ação com **três nomes**; e uma instrução na tela (`shadow-compare-panel`) mandava clicar num "Reprever" que já não existiria — ver `lib/ui/interest-predict-label.ts` |
 | card da fila de Interesse | chip "Diverge"/"Bate" (`diverges`) | chip `Δ +1`/`Δ 0` (`delta !== 0`) | o **mesmo predicado**, nas mesmas duas cores, desenhado 2× no mesmo card, com uma 3ª cópia da paleta hand-rollada no `Δ`. Medido: o chip aparecia em 45 de 815 obras (5,5%) e nas 45 o `Δ` já dizia o mesmo — e ele PERDIA a precedência pro "Desatualizado" justo nas 676 stale que tinham o que comparar. Ficou o `Δ` |
+| card de embeddings de `/curation/settings` | a pílula do cabeçalho: contagem do SERVIDOR (`getSettingsItemUnread`) | o StatCard "Sem embedding": `useState` que o `onDone` sobrescrevia com `result.failed` | **"15 pendentes" e "0" no mesmo card, a dois centímetros um do outro**. E `failed` nem é a mesma grandeza — obra que falha ao re-embedar pode já ter linha antiga, ou seja não está "sem embedding". Hoje o número vem só da prop, e quem o atualiza é o `router.refresh()` do fim da execução |
 | explicação do Alinhamento | o **texto** do tooltip e o docstring diziam "40% tag + 30% critério + 30% consistência" | o **código** roda `netNameOverlap` (só tags, sem critério) | a fórmula descrita foi APOSENTADA em 27/06 e virou código morto; as duas superfícies seguiram documentando-a por ~2 meses, e quem lesse o arquivo pra entender o número aprenderia a fórmula errada. Aqui o "outro lado" não era um segundo cálculo — era **prosa**, que não tem como divergir barulhentamente |
 | nota calibrada × prosa da avaliação | `category_scores.score`, que a auditoria reescreve | `ai_evaluation_scores.justification`, que ela não toca | **27 das 37** notas calibradas exibiam prosa contradizendo o próprio número (1,79 ponto de distância), sob o selo ✨ de uma avaliação que não as produziu — e `ai_calibrated` não aparecia em UI nenhuma, então nada sinalizava a troca de autor |
 | aceitar sugestão de calibração | a guarda olhava o `source` do score | a nota em si tinha mudado | reavaliação reescreve o valor mantendo `ai_accepted` ⇒ **132 das 583 pendentes (23%)** julgavam um número que já não existia, e aceitar sobrescrevia a reavaliação mais nova sem erro |
@@ -4308,12 +4339,18 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.184 passando (+24 pulados) em 304 arquivos** (299 passando + 5 pulados);
-medido em 2026-08-17 com a exclusão de status parando de apagar os outros pills: **+3 casos,
-sem arquivo novo** (um teste virou quatro em `ui/ranking-status-exclusao` — os outros pills
-seguem marcados, e os dois sentidos do clique no nome). Com
-`find tests -name '*.test.ts*'` = **304** conferido contra os 304 executados.
-Antes: **3.181 em 304** (o traço virando a legenda de si mesmo no tooltip, +3 casos sem
+`npm run test` → **3.193 passando (+24 pulados) em 306 arquivos** (301 passando + 5 pulados);
+medido em 2026-08-18 com o badge de pendências que travou em 15: **+9 casos e +2 arquivos**
+(`orchestration/contagem-de-pendencias-nao-trunca` e `ui/pendencia-de-embeddings-segue-o-servidor`).
+Com `find tests -name '*.test.ts*'` = **306** conferido contra os 306 executados.
+
+🔴 **Medido num `git worktree` LIMPO do commit, não na árvore de trabalho** — a árvore tinha
+trabalho de outra frente não commitado, e é exatamente assim que este número envelheceu antes.
+Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
+custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
+
+Antes: **3.184 em 304** (a exclusão de status parando de apagar os outros pills, +3 casos sem
+arquivo novo — um teste virou quatro em `ui/ranking-status-exclusao`), **3.181 em 304** (o traço virando a legenda de si mesmo no tooltip, +3 casos sem
 arquivo novo), **3.178 em 304** (a rampa do Veredito ganhando dono, +11 casos e +1 arquivo,
 `ui/faixa-do-veredito`), **3.167 em 303** (rateio de largura do modo
 Agrupar, que **não somou arquivo** — os +2 casos eram o teste do modo trocando um piso
