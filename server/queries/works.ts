@@ -253,26 +253,37 @@ export async function getWorks(
   const [searchMatchIds, genreMatchIds, tagMatchIds] = await Promise.all([
     getSearchMatchIds(supabase, searchTerm),
     filters.genres?.length
-      ? supabase
-          .from("work_genres")
-          .select("work_id, genres!inner(name)")
-          .in("genres.name", filters.genres)
-          .then(({ data }) => [...new Set((data ?? []).map((row) => row.work_id))])
+      ? fetchAllRows<{ work_id: string }>(
+          (from, to) =>
+            supabase
+              .from("work_genres")
+              .select("work_id, genres!inner(name)")
+              .in("genres.name", filters.genres!)
+              .range(from, to),
+          "getWorks.genreMatchIds",
+        ).then((rows) => [...new Set(rows.map((row) => row.work_id))])
       : Promise.resolve(null),
     filters.tagSlugs?.length
-      ? supabase
-          .from("work_tags")
-          .select("work_id, tags!inner(slug)")
-          .in("tags.slug", filters.tagSlugs)
-          .then(({ data }) => {
-            const countByWork: Record<string, number> = {}
-            for (const r of data ?? []) {
-              countByWork[r.work_id] = (countByWork[r.work_id] ?? 0) + 1
-            }
-            return Object.entries(countByWork)
-              .filter(([, c]) => c >= filters.tagSlugs!.length)
-              .map(([id]) => id)
-          })
+      ? // Uma tag popular sozinha não estoura o corte de 1000 (a maior do catálogo tem 894
+        // vínculos), mas o filtro é `.in(<N slugs>)`: DUAS já somam mais. Truncado, obras
+        // perdiam vínculo e caíam do "casa com TODAS as tags" — filtro devolvendo menos, sem erro.
+        fetchAllRows<{ work_id: string }>(
+          (from, to) =>
+            supabase
+              .from("work_tags")
+              .select("work_id, tags!inner(slug)")
+              .in("tags.slug", filters.tagSlugs!)
+              .range(from, to),
+          "getWorks.tagMatchIds",
+        ).then((rows) => {
+          const countByWork: Record<string, number> = {}
+          for (const r of rows) {
+            countByWork[r.work_id] = (countByWork[r.work_id] ?? 0) + 1
+          }
+          return Object.entries(countByWork)
+            .filter(([, c]) => c >= filters.tagSlugs!.length)
+            .map(([id]) => id)
+        })
       : Promise.resolve(null),
   ])
 
@@ -282,13 +293,27 @@ export async function getWorks(
     // Two-phase: lightweight fetch to filter+sort by score, then heavy fetch for the
     // page IDs only. Avoids loading WORK_LIST_SELECT (with joined work_tags) for
     // every matching work just to throw most of it away.
-    let lightQuery = supabase
-      .from("works")
-      .select("id, calculated_scores(expected_score, personal_fit, personal_fit_percentile, total_votes)")
-    lightQuery = applyWorkFilters(lightQuery, filters, searchMatchIds, genreMatchIds, tagMatchIds)
-
-    const { data: lightData, error: lightError } = await lightQuery
-    if (lightError) throw new Error(lightError.message)
+    // 🔴 PAGINADA. Esta busca carrega TODAS as obras que casam o filtro pra ordenar por nota
+    // e só então recortar a página — então truncar aqui não devolve menos numa página, some
+    // com a obra de TODAS elas. O comentário acima dizia "o catálogo tem ~882 obras; a busca
+    // leve é barata", e era a premissa que a tornava segura: em 2026-08-18 o catálogo tem
+    // 1009 ativas e o PostgREST corta em 1000 sem erro. Ninguém editou o arquivo — o número
+    // é que mudou.
+    const lightData = await fetchAllRows<Record<string, unknown>>(
+      (from, to) =>
+        applyWorkFilters(
+          supabase
+            .from("works")
+            .select(
+              "id, calculated_scores(expected_score, personal_fit, personal_fit_percentile, total_votes)",
+            ),
+          filters,
+          searchMatchIds,
+          genreMatchIds,
+          tagMatchIds,
+        ).range(from, to),
+      "getWorks.lightQuery",
+    )
 
     type LightRow = {
       id: string

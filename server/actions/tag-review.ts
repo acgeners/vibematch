@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { ensureAdmin } from "@/server/queries/current-user"
 import { recomputeAdultAuto } from "@/lib/tags/adult-classify"
 import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
@@ -127,8 +128,13 @@ export async function setTagAdult(tagId: string, level: AdultLevel): Promise<{ o
   }
   // Recomputa adult_auto (monotônico) das obras com essa tag.
   if (indicator) {
-    const { data: wt } = await supabase.from("work_tags").select("work_id").eq("tag_id", tagId)
-    const workIds = [...new Set((wt ?? []).map((r) => r.work_id as string))]
+    // A tag mais usada do catálogo tem 894 vínculos — abaixo do corte de 1000, mas é o
+    // número de HOJE, e truncar aqui deixaria obras sem recomputar o flag 18+.
+    const wt = await fetchAllRows<{ work_id: string }>(
+      (from, to) => supabase.from("work_tags").select("work_id").eq("tag_id", tagId).range(from, to),
+      "setTagAdultIndicator.work_tags",
+    )
+    const workIds = [...new Set(wt.map((r) => r.work_id))]
     for (const w of workIds) await recomputeAdultAuto(supabase, w)
   }
   revalidatePath("/curation/settings")
@@ -327,8 +333,12 @@ export async function approveGenreProposal(id: string): Promise<{ ok: boolean; e
   // 2) obras com a tag homônima → work_genres.
   const { data: tag } = await supabase.from("tags").select("id").eq("slug", prop.slug as string).maybeSingle()
   if (tag) {
-    const { data: wt } = await supabase.from("work_tags").select("work_id").eq("tag_id", tag.id as string)
-    const rows = [...new Set((wt ?? []).map((r) => r.work_id as string))].map((work_id) => ({
+    const wt = await fetchAllRows<{ work_id: string }>(
+      (from, to) =>
+        supabase.from("work_tags").select("work_id").eq("tag_id", tag.id as string).range(from, to),
+      "approveGenreProposal.work_tags",
+    )
+    const rows = [...new Set(wt.map((r) => r.work_id))].map((work_id) => ({
       work_id,
       genre_id: genre.id as string,
     }))

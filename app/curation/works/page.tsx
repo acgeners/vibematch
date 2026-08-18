@@ -1,6 +1,7 @@
 import { Wrench } from "lucide-react"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { Header } from "@/components/layout/header"
 import { AiEvaluationPanel } from "@/components/ai-evaluation/ai-evaluation-panel"
 import { AiEvaluationFilters } from "@/components/ai-evaluation/ai-evaluation-filters"
@@ -128,15 +129,22 @@ interface LatestEvalRow {
 async function loadLatestEvalsMap(
   supabase: ReturnType<typeof createAdminClient>,
 ): Promise<Map<string, LatestEvalRow>> {
-  const { data, error } = await supabase
-    .from("ai_evaluations")
-    .select("work_id, confidence, model_name, prompt_version, created_at, updated_at")
-    .eq("status", "completed")
-    .order("created_at", { ascending: false })
-  if (error) throw new Error(error.message)
+  // 🔴 2.460 avaliações concluídas em 2026-08-18, contra o corte de 1000 do PostgREST. E a
+  // ordenação é o que dá sentido ao laço abaixo ("a primeira que aparece é a mais nova"):
+  // truncado, o mapa perdia obras inteiras e a fila as classificava pela ausência.
+  const data = await fetchAllRows<LatestEvalRow>(
+    (from, to) =>
+      supabase
+        .from("ai_evaluations")
+        .select("work_id, confidence, model_name, prompt_version, created_at, updated_at")
+        .eq("status", "completed")
+        .order("created_at", { ascending: false })
+        .range(from, to),
+    "curadoria.latestEvals",
+  )
 
   const latest = new Map<string, LatestEvalRow>()
-  for (const row of (data ?? []) as LatestEvalRow[]) {
+  for (const row of data) {
     if (!latest.has(row.work_id)) latest.set(row.work_id, row)
   }
   return latest
@@ -213,12 +221,16 @@ async function getEligibleWorks(
   // Carregamos o conjunto de obras puladas uma vez pra excluí-las desses filtros.
   const skippedIdsPromise = needsLatestEvals
     ? (async () => {
-        const { data, error } = await supabase
-          .from("works")
-          .select("id")
-          .eq("ai_eval_status", "skipped")
-        if (error) throw new Error(error.message)
-        return new Set((data ?? []).map((w) => w.id))
+        const data = await fetchAllRows<{ id: string }>(
+          (from, to) =>
+            supabase
+              .from("works")
+              .select("id")
+              .eq("ai_eval_status", "skipped")
+              .range(from, to),
+          "curadoria.skippedIds",
+        )
+        return new Set(data.map((w) => w.id))
       })()
     : null
 
@@ -230,13 +242,17 @@ async function getEligibleWorks(
   if (filters.includes("pending")) {
     queries.push(
       (async () => {
-        const { data, error } = await supabase
-          .from("works")
-          .select("id")
-          .eq("ai_eval_status", "pending")
-          .eq("is_archived", false)
-        if (error) throw new Error(error.message)
-        return { filter: "pending" as const, ids: new Set((data ?? []).map((w) => w.id)) }
+        const data = await fetchAllRows<{ id: string }>(
+          (from, to) =>
+            supabase
+              .from("works")
+              .select("id")
+              .eq("ai_eval_status", "pending")
+              .eq("is_archived", false)
+              .range(from, to),
+          "curadoria.pendingIds",
+        )
+        return { filter: "pending" as const, ids: new Set(data.map((w) => w.id)) }
       })()
     )
   }
@@ -244,13 +260,17 @@ async function getEligibleWorks(
   if (filters.includes("review-pending")) {
     queries.push(
       (async () => {
-        const { data, error } = await supabase
-          .from("works")
-          .select("id")
-          .eq("ai_eval_status", "review_pending")
-          .eq("is_archived", false)
-        if (error) throw new Error(error.message)
-        return { filter: "review-pending" as const, ids: new Set((data ?? []).map((w) => w.id)) }
+        const data = await fetchAllRows<{ id: string }>(
+          (from, to) =>
+            supabase
+              .from("works")
+              .select("id")
+              .eq("ai_eval_status", "review_pending")
+              .eq("is_archived", false)
+              .range(from, to),
+          "curadoria.reviewPendingIds",
+        )
+        return { filter: "review-pending" as const, ids: new Set(data.map((w) => w.id)) }
       })()
     )
   }
@@ -276,13 +296,17 @@ async function getEligibleWorks(
       (async () => {
         // Avaliação concluída cujo pool de reviews mudou depois (flag mantida por
         // saveWorkReviews — migration 120). Query direta, sem o mapa de avaliações.
-        const { data, error } = await supabase
-          .from("works")
-          .select("id")
-          .eq("ai_eval_reviews_stale", true)
-          .eq("is_archived", false)
-        if (error) throw new Error(error.message)
-        return { filter: "outdated-reviews" as const, ids: new Set((data ?? []).map((w) => w.id)) }
+        const data = await fetchAllRows<{ id: string }>(
+          (from, to) =>
+            supabase
+              .from("works")
+              .select("id")
+              .eq("ai_eval_reviews_stale", true)
+              .eq("is_archived", false)
+              .range(from, to),
+          "curadoria.reviewsStaleIds",
+        )
+        return { filter: "outdated-reviews" as const, ids: new Set(data.map((w) => w.id)) }
       })()
     )
   }

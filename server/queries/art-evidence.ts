@@ -1,5 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { extractArtEvidence, extractArtSignal, type ArtEvidence, type ArtSignal } from "@/lib/art/signal"
 import { artBandFromPercentile, type ArtBand } from "@/lib/art/model"
 
@@ -140,15 +141,20 @@ async function loadArtTagsForWork(
 
   // Quantas obras têm cada uma — é o número que diz se a tag PODE ser aprendida por um
   // modelo de 200 rótulos, ou se ela só serve como evidência para o olho humano.
-  const { data: contagem } = await sb
-    .from("work_tags")
-    .select("tags!inner(slug)")
-    .in(
-      "tags.slug",
-      hits.map((h) => h.slug),
-    )
+  const contagem = await fetchAllRows<Record<string, unknown>>(
+    (from, to) =>
+      sb
+        .from("work_tags")
+        .select("tags!inner(slug)")
+        .in(
+          "tags.slug",
+          hits.map((h) => h.slug),
+        )
+        .range(from, to),
+    "loadArtTagsForWork.contagem",
+  )
   const porSlug = new Map<string, number>()
-  for (const row of contagem ?? []) {
+  for (const row of contagem) {
     const slug = (row as { tags?: { slug?: string } }).tags?.slug
     if (slug) porSlug.set(slug, (porSlug.get(slug) ?? 0) + 1)
   }

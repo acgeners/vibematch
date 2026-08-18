@@ -2951,6 +2951,56 @@ reviews) passaram a paginar por rede — hoje têm 0 e 8 obras, longe do corte. 
 do próprio source** (todo `.from(...)` precisa de `.range()` ou de count exato com `head`) e
 foi conferido reprovando a versão antiga em 4 casos.
 
+🔴 **E o badge não era um caso isolado — era o primeiro sintoma.** O catálogo passou de 1000 e
+transformou em bug ativo tudo que lia essas tabelas sem `.range()`. Varredura de `server/`,
+`lib/` e `app/` em 2026-08-18, com cada suspeita MEDIDA contra a nuvem:
+
+| leitura | linhas | o que o corte fazia |
+|---|---|---|
+| `works.ts` `lightQuery` (**/catalog**) | 1009 | ordenar por Nota Prevista, ou filtrar por favorito/status, **escondia 9 obras de TODAS as páginas** |
+| `curation/works` `latestEvals` | 2460 | o mapa perdia obras, e a fila as classificava pela ausência |
+| `synopsis-quality` comparação de versões | 2384 | compara VERSÕES de prompt lendo 1000 linhas |
+| `calibration-guards` avaliações recentes | 1606 | o guarda decidia "modelo dominante" por um recorte |
+| `ranking.ts` sinopse primária | 1019 | 19 obras sem sinopse no hover |
+| `dashboard.ts` (works + calculated_scores) | 1019 | KPIs sobre um recorte arbitrário |
+| `works_owner` em 3 filas (`sem reviews`, `sem tags`, guards) | 1019 | **fila perdendo item**, que é o oposto do que uma fila faz |
+| `score-thresholds` | 1009 | os percentis que pintam **toda nota da interface**, tirados de 1000 de 1009 |
+
+⚠️ **Dois casos não dependem do TAMANHO, e sim do USO:** os filtros por tag e por gênero do
+`/ranking` e do `/catalog` são `.in("tags.slug", […])`. Nenhuma tag sozinha passa do corte (a
+maior tem **894** vínculos), mas duas populares somam mais. Na **exclusão** o sentido é o pior
+dos três: obra com a tag evitada sai da lista de exclusão e **volta a aparecer**.
+
+🔴 **O comentário do `lightQuery` mostrava a premissa vencendo:** *"o catálogo tem ~882 obras;
+a busca leve é barata"*. Ninguém editou o arquivo — **o número é que mudou**. É a mesma forma do
+cutover que inverteu o sentido de `--env-file=.env.local` em 58 scripts: o código continua
+igual e passa a querer dizer outra coisa.
+
+⚠️ **Paginar o que está LONGE do corte é de graça** — `fetchAllRows` para na primeira página
+curta, então é 1 requisição igual à de antes. Por isso foram junto `ingest` de tags 18+ (teto
+medido de 1.614), `tag-review` (894), `art-evidence` (649), `adult-audit` (0) e os 4 contadores
+de `/curation/works` (558): não custa nada e tira o julgamento do caminho.
+
+Guardado por `tests/unit/orchestration/leitura-de-tabela-grande-tem-teto.test.ts`, que **varre
+`server/`, `lib/` e `app/`** e exige que toda leitura de uma das 18 tabelas grandes pagine,
+conte no servidor (`count: "exact", head: true`), seja escopada por chave, ou traga um teto
+explícito. ⚠️ Quando o teto vem de OUTRO lugar, a exceção é declarada **em código**, encostada
+na query (`// leitura-limitada: <motivo medido>`) — o mesmo formato do `ALVO: NUVEM` dos
+scripts, nunca uma lista dentro do teste. Hoje há **uma**: a query principal do `/ranking`,
+cujo `.limit(2000)` mora nos dois call sites.
+
+⚠️ **`tags` (3.042 linhas) fica FORA da lista de propósito, e é medição:** nenhuma leitura do
+app pega o conjunto todo — a mais larga é por `tag_group_id`, e o **maior grupo tem 394** tags.
+A exclusão é da TABELA, com o número ao lado; entra na lista no dia em que um grupo passar de
+1000.
+
+🔴 **ABERTO, medido e datado:** a query principal do `/ranking` usa `.limit(2000)` com o
+catálogo em 1009 — teto explícito, não o corte silencioso, mas é um penhasco igual, 991 obras
+adiante. Paginá-la mexe no payload mais pesado do app e **precisa de medição de latência
+própria**: `fetchAllRows` é serial (6 idas a ~300ms contra o banco de Ohio), e quem serve pra
+isso é `fetchAllRowsParallel`. Não foi feito aqui porque trocar um penhasco distante por uma
+regressão de latência medida em segundos é pior negócio.
+
 ## Constants generated from DB
 
 These files are **fully overwritten** by `npm run sync-constants` and must not be edited by hand:
