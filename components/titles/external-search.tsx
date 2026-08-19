@@ -31,6 +31,7 @@ import { SMALL_COVER_WIDTH } from "@/lib/cover-quality"
 import { cn, titleToSlug } from "@/lib/utils"
 import { ScopedTaskStrip, useScopedGuard } from "@/components/tasks/scoped-task"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
+import { normalizeAlternativeTitles } from "@/lib/titles/alternative-titles"
 import { SynopsisPicker } from "@/components/titles/synopsis-picker"
 import type { SynopsisChoice } from "@/components/titles/synopsis-picker"
 import { RequestByNameBanner } from "@/components/titles/curation-request-panel"
@@ -450,7 +451,9 @@ export function buildCandidateFromSourceSelection(
   const next: MergedCandidate = {
     title: primaryResult?.title ?? primaryOption.title,
     originalTitle,
-    alternativeTitles: uniqueStringList(selectedResults.flatMap((result) => [
+    // Alias composto ("A / B / C") é quebrado AQUI, antes de virar chip no formulário —
+    // senão a pessoa só descobre depois de salvar. Dono: lib/titles/alternative-titles.ts.
+    alternativeTitles: normalizeAlternativeTitles(selectedResults.flatMap((result) => [
       candidate.originalTitle,
       ...(candidate.alternativeTitles ?? []),
       result.originalTitle,

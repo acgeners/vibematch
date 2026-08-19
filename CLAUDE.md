@@ -288,12 +288,12 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**99 arquivos, remedidos em 2026-08-18**):
+banco declara um dos dois (**100 arquivos, remedidos em 2026-08-18**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **44** | só LÊ ⇒ vai pro local, de graça |
-| `ALVO: NUVEM` no cabeçalho | **48** | GRAVA ⇒ tem que ir pra nuvem |
+| `ALVO: NUVEM` no cabeçalho | **49** | GRAVA ⇒ tem que ir pra nuvem |
 | (não tocam o banco) | 7 | fora da régua |
 
 🔴 **ESTES TRÊS NÚMEROS SÃO CONFERIDOS PELA SUÍTE**, e não por quem editar esta seção —
@@ -2190,6 +2190,95 @@ obras tocadas — `text-embedding-3-small` a US$0,02/M ⇒ **~US$0,001** pelas 2
 
 Guardado por `tests/unit/titles/normalizar-titulo.test.ts`, cujos casos saíram do ensaio
 contra as obras reais — inclusive o do `~`, que era um bug.
+
+### O título ALTERNATIVO chega grudado, e quem quebra é um dono só
+
+`lib/titles/alternative-titles.ts` (2026-08-18). As 9 fontes não têm formato comum pro campo:
+AniList manda `synonyms` (texto livre de usuário), Comix/ComicK mandam `altTitles`/`md_titles`,
+o Mangago vem de uma linha de HTML. Quando o outro lado escreve os cinco títulos numa string
+só, ela chega como UM alias.
+
+🔴 **Não é feiura, é dado morto:** alias composto não casa com nada em `foldTitle`, então não
+serve nem pra busca do `/catalog` nem pra detecção de duplicata — que é o motivo de o campo
+existir. O caso concreto (obra `Trash Will Always Be Trash`, na nuvem) era um chip de 190
+caracteres com **cinco** títulos separados por `" / "` — e os cinco já estavam na lista como
+chips próprios, diferindo só na caixa e no apóstrofo curvo.
+
+Medido em 2026-08-18 (988 obras do clone, 10.072 alternativos):
+
+| forma | chips | é separador? |
+|---|---|---|
+| `" / "` (barra com espaço) | **8** | **sim, 8 de 8** — conferidos um a um |
+| `•` (U+2022) · `&amp;` | 2 · 2 | sim · vira `&` |
+| `/` COLADO (`a/b`) | 2 | sim, e mesmo assim **não** quebra — ver abaixo |
+| `·` (U+00B7) | 2 | **não** — ponto médio DENTRO de nome chinês |
+| `,` `，` `、` | 157 | **não** — pontuação interna do título |
+
+⚠️ **A régua é conservadora nos dois pontos em que errar sai caro.** Barra COLADA fica
+intacta: os 2 casos medidos são de fato dois títulos, mas quebrar `Fate/Zero` INVENTA obra que
+não existe, e deixar 2 chips grudados é cosmético. `;` só quebra seguido de espaço, senão
+`Steins;Gate` vira duas.
+
+🔴 **A régua do Mangago quebrava em VÍRGULA e em `;` colado, e o estrago está no banco:**
+`Ni chasseuse, ni princesse !` está partido em dois chips, cada metade sem sentido. Hoje o
+conector delega ao dono. Vírgula é pontuação de título em toda língua do catálogo.
+
+⚠️ **Troca de escrita sem espaço NÃO é sinal de grude** — a tentação é quebrar
+`…Hunting DogKiếp Này…` onde o alfabeto muda. Medido: 16 chips têm latim encostado em
+CJK/hangul e **15 são legítimos** (`成为BL主人公的妹妹`, `夫をレベルMAXに育てようと思います`,
+`作为NPC被困在…`). Uma regra com 94% de falso positivo estragaria 15 pra consertar 1 — o único
+chip grudado do catálogo fica como está.
+
+🔴 **A chave de dedup NÃO é `foldTitle`, e a diferença foi medida.** `foldTitle` é a régua de
+IDENTIDADE (busca e duplicata): ela apaga acento e pontuação, o que é certo pra casar nomes e
+errado pra escolher qual chip mostrar. Rodada no catálogo, ela colide 5 pares e nos **5** o
+sobrevivente é a versão PIOR, só por ter vindo antes (`Qing Guixia, Dagong Daren!` ficava,
+`Qǐng Guìxia, Dàgōng Dàren!` sumia). A chave daqui dobra só o que é invisível na tela — caixa,
+aspas curvas e espaço repetido — e dá **zero** colisão no mesmo catálogo.
+
+**Onde ela vale:** os três merges de fonte externa (`lib/external/index.ts` ×3 e o do
+`external-search.tsx`, que é o que enche o formulário ANTES de salvar), o conector do Mangago,
+e as **cinco** escritas de `works.alternative_titles` — `createWork`, `updateWork`,
+`absorbIncomingAliases`, o "Atualizar dados" e o backfill de aliases. O schema
+(`workFormBase`) quebra na fronteira de escrita, com `.transform()` ANTES do `.pipe(max(500))`:
+o teto passou a valer sobre o TÍTULO, não sobre a lista colada — antes, cinco títulos longos
+reprovavam com "máximo 500 caracteres" em vez de virar cinco chips.
+
+O passivo fecha com `scripts/normalizar-titulos-alternativos.ts` (**ALVO: NUVEM**, US$0,
+ensaio por padrão). Plano medido na nuvem em 18/08: **14 obras, 15 chips tocados, saldo de 6 a
+menos**. ⚠️ Nada re-embeda e nada reavalia — `alternative_titles` não é input do recalc nem do
+hash de `work_embeddings` (quem é: `title`/`original_title`).
+
+Guardado por `tests/unit/titles/titulos-alternativos.test.ts`, cujos casos saíram todos do
+catálogo real, e cuja última parte é teste de ARQUITETURA: ele deriva do git os arquivos que
+gravam `alternative_titles` e exige que o valor venha do dono — direto ou pela variável que o
+dono produziu. Conferido com 6 sondas (separador frouxo em `,` `;` `/` `·`, e duas escritas
+desviando do dono).
+
+### O chip do formulário era desenhado FORA do card
+
+O mesmo bug tinha uma segunda metade, e ela é de layout: `badgeVariants` é
+`inline-flex w-fit shrink-0 whitespace-nowrap`, então num container `flex-wrap` um chip mais
+largo que o campo **não encolhe e não quebra** — ele é pintado por cima do vizinho (aqui, por
+cima da coluna da capa). Medido no browser em 18/08 com o CSS real, campo de **710px**:
+
+| | maior chip | vazamento | `scrollWidth − clientWidth` |
+|---|---|---|---|
+| antes | **1.369px** | **672px** para fora | **0** |
+| depois | 684px | −13px (dentro) | 0 |
+
+🔴 **Os três canais de sempre ficam mudos**: sem `overflow-hidden` no pai nada é cortado, sem
+`overflow:auto` nada rola, e a página não ganha rolagem horizontal. `tsc` e a suíte passam. Só
+a tela denuncia — foi a Ana quem viu, num screenshot.
+
+O conserto é `max-w-full` no Badge + `min-w-0 truncate` no TEXTO (o `×` fica `shrink-0` e
+segue alcançável), com o título completo no `title=` — o mesmo arranjo que o `AltTitlesChips`
+da página da obra já usava. ⚠️ Truncar e não quebrar linha porque o chip é uma unidade
+removível: chip de 3 linhas empurra o campo inteiro. O corte só toca a cauda — os alternativos
+têm mediana de **24** caracteres e p99 de **69**, e só 16 passam de 100.
+
+⚠️ **Isto não é testável no vitest** (jsdom não tem layout, e casar a string `truncate`
+protegeria a grafia): a verificação é no browser, com a rota de shot na cópia do app.
 
 ## Dado gerado por IA carrega um SELO — e nenhuma procedência fica solta na tela
 

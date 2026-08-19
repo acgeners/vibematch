@@ -321,13 +321,29 @@ function ChipBadge({
   onRemove: (chip: string) => void
 }) {
   return (
-    <Badge variant="secondary" className="gap-1 pr-1">
-      {chip}
+    /**
+     * 🔴 `max-w-full` + `truncate` no TEXTO, não no Badge: o `badgeVariants` é
+     * `inline-flex w-fit shrink-0 whitespace-nowrap`, e num container `flex-wrap` isso
+     * significa que um chip mais largo que o campo **não encolhe e não quebra** — ele é
+     * desenhado por fora, por cima do vizinho (aqui, por cima da capa). Sem
+     * `overflow-hidden` no pai, nada é cortado e nada rola: `scrollWidth - clientWidth`
+     * fica 0 e só a tela denuncia. Mesma família do `shrink-0` com `flex-wrap` que o
+     * CLAUDE.md documenta.
+     *
+     * ⚠️ Truncar e não quebrar linha porque o chip é uma unidade removível — chip de 3
+     * linhas empurra o campo inteiro. O texto completo fica no `title`, e é o mesmo
+     * arranjo do `AltTitlesChips` da página da obra. Medido no catálogo: os títulos
+     * alternativos têm mediana de 24 caracteres e p99 de 69, então o corte só toca a
+     * cauda (16 chips passam de 100).
+     */
+    <Badge variant="secondary" className="max-w-full gap-1 pr-1" title={chip}>
+      <span className="min-w-0 truncate">{chip}</span>
       {!disabled && (
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onRemove(chip) }}
-          className="rounded-full p-0.5 hover:bg-muted-foreground/20"
+          aria-label={`Remover ${chip}`}
+          className="shrink-0 rounded-full p-0.5 hover:bg-muted-foreground/20"
         >
           <X className="h-3 w-3" />
         </button>

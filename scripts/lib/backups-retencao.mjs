@@ -135,6 +135,22 @@ export const FAMILIAS = [
     env: "NORMALIZAR_TITULOS_KEEP",
   },
   {
+    id: "normalizar-titulos-alternativos",
+    dono: "normalizar-titulos-alternativos.ts",
+    // Datado, um diretório por execução com a lista ANTES e DEPOIS de cada obra tocada.
+    // Alguns KB. É a única forma de desfazer — o banco não tem PITR —, e reconstruir de
+    // cabeça é impossível: ninguém lembra em que ordem os aliases estavam.
+    //
+    // ⚠️ O prefixo é MAIOR que o da família `normalizar-titulos`, e as duas continuam
+    // mutuamente exclusivas porque lá o dígito do ano vem logo depois do prefixo:
+    // `normalizar-titulos-alternativos-…` tem um "a" naquela posição.
+    oQueE: "lista anterior de títulos alternativos das obras normalizadas",
+    casa: (n) => /^normalizar-titulos-alternativos-\d{4}/.test(n),
+    exemplo: "normalizar-titulos-alternativos-2026-08-18T03-11-22-333Z",
+    keepPadrao: 10,
+    env: "NORMALIZAR_ALT_TITULOS_KEEP",
+  },
+  {
     id: "push-opening-structure",
     dono: "push-opening-structure.ts",
     oQueE: "estado anterior da nuvem ao resgatar estrutura de abertura do local",

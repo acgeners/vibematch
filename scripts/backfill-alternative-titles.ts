@@ -33,6 +33,7 @@
 import { createClient } from "@supabase/supabase-js"
 import { config } from "dotenv"
 import { foldTitle, isWeakDuplicateAlias } from "../lib/title-match"
+import { normalizeAlternativeTitles } from "../lib/titles/alternative-titles"
 import { fetchMangaDexById } from "../lib/external/mangadex"
 import { fetchComicKByHid } from "../lib/external/comick"
 import { fetchAniListById } from "../lib/external/anilist"
@@ -215,7 +216,11 @@ async function main() {
       continue
     }
 
-    const next = [...(work.alternative_titles ?? []), ...toAdd].slice(0, MAX_ALTERNATIVE_TITLES)
+    // Quebra alias composto que a fonte mandou grudado — dono: lib/titles/alternative-titles.ts.
+    const next = normalizeAlternativeTitles([...(work.alternative_titles ?? []), ...toAdd]).slice(
+      0,
+      MAX_ALTERNATIVE_TITLES,
+    )
     if (DRY_RUN) {
       updated++
       totalAdded += toAdd.length

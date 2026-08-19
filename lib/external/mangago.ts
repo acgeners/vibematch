@@ -1,6 +1,7 @@
 import type { PublicationStatus } from "@/types/domain"
 import type { ExternalSearchResult } from "./types"
 import { fetchHtmlWithCfFallback, isCfBypassUnavailable } from "./flaresolverr"
+import { normalizeAlternativeTitles } from "@/lib/titles/alternative-titles"
 
 // ============================================================================
 // Mangago (www.mangago.me) — fonte externa: metadados + rating + reviews
@@ -397,14 +398,19 @@ function labeledValue(html: string, label: string): string | undefined {
   return cleanHtml(html.match(re)?.[1])
 }
 
+/**
+ * A linha "Alternative(s)" do detalhe traz vários títulos numa string só. Quem quebra é o
+ * dono único (`lib/titles/alternative-titles.ts`), não uma régua local.
+ *
+ * 🔴 A régua local que estava aqui quebrava em VÍRGULA e em `;` colado, e as duas custaram
+ * caro: `Ni chasseuse, ni princesse !` está no catálogo partido em dois chips sem sentido,
+ * e `Steins;Gate` viraria duas obras. Vírgula é pontuação de título — 157 chips do catálogo
+ * têm uma —, nunca separador de lista.
+ */
 function extractAlternativeTitles(html: string): string[] {
   const raw = labeledValue(html, "alternative")
   if (!raw) return []
-  return raw
-    .split(/[;/｜|,]/)
-    .map((title) => title.trim())
-    .filter((title) => title.length > 1)
-    .slice(0, 12)
+  return normalizeAlternativeTitles([raw]).slice(0, 12)
 }
 
 /**
