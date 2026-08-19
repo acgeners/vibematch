@@ -128,7 +128,12 @@ export function WorkHoverPreview({ preview, anchorRect, onMouseEnter, onMouseLea
   const margin = 2
   const screenMargin = 8
   const popupWidth = compact ? 340 : 420
-  const popupHeight = 250
+  // Altura da prévia COLAPSADA, usada pra decidir o `top` perto do rodapé da janela — e, por
+  // tabela, o `maxHeight` de baixo. Medida no browser em 2026-08-18 com título de 2 linhas
+  // (o pior caso, `line-clamp-2`): a "full" fecha em 381px. Subestimar não estoura nada, mas
+  // faz a prévia colapsada ROLAR por dentro nas linhas do fim da lista — era o que o 250 fixo
+  // já fazia com os 293px de antes. 390 dá a folga.
+  const popupHeight = compact ? 250 : 390
   const willOverflowRight = anchorRect.right + margin + popupWidth > window.innerWidth
   const left = willOverflowRight
     ? Math.max(screenMargin, anchorRect.left - popupWidth - margin)
@@ -138,7 +143,7 @@ export function WorkHoverPreview({ preview, anchorRect, onMouseEnter, onMouseLea
     window.innerHeight - popupHeight - screenMargin
   )
   // Teto de altura ancorado no `top`: a prévia expandida ("Ler mais") cresce até aqui e então
-  // rola por dentro, sem estourar a viewport. Colapsada (~250px) cabe folgado, sem scroll.
+  // rola por dentro, sem estourar a viewport. Colapsada cabe folgado, sem scroll.
   const maxHeight = window.innerHeight - top - screenMargin
 
   // "Ler mais": mede o overflow da sinopse com o clamp ligado; o botão só aparece se transbordar.
@@ -259,83 +264,93 @@ export function WorkHoverPreview({ preview, anchorRect, onMouseEnter, onMouseLea
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
-      <div className="flex gap-4 p-4">
-        {preview.coverUrl ? (
-          <div className="relative h-44 w-32 shrink-0 rounded-md overflow-hidden bg-muted">
-            <CoverImage url={preview.coverUrl} className="h-full w-full object-cover" />
-          </div>
-        ) : (
-          <div className="h-44 w-32 shrink-0 rounded-md bg-muted flex items-center justify-center text-xs text-muted-foreground">
-            Sem capa
-          </div>
-        )}
-        <div className="flex flex-col min-w-0 flex-1 min-h-[11rem]">
-          {/* Título + chip 18+ (mesmo tratamento do cabeçalho da obra) */}
-          <div className="flex items-start gap-1.5 shrink-0">
-            <p className="font-semibold text-[15px] leading-tight line-clamp-2 min-w-0 flex-1 break-words">{preview.title}</p>
-            {preview.isAdult && (
-              <AdultBadge className="mt-px shrink-0 px-1.5 py-0 text-[10px] leading-tight" />
+      <div className="p-4">
+        {/* Cabeçalho: capa + IDENTIFICAÇÃO (título, 18+, ano/capítulos/status, interesse).
+            🔴 A sinopse NÃO mora aqui — ela desce pra faixa de baixo, na largura toda.
+            Medido no browser em 2026-08-18 (popup de 420px): ao lado da capa ela tinha
+            242px e a mesma sinopse ocupava 27 linhas expandida (686px de prévia); embaixo
+            tem 386px (+59%) e cai pra 17 linhas (609px). O que a coluna estreita produzia
+            era texto espremido com um vão de ~90px vazio embaixo da capa — o espaço existia,
+            só estava do lado errado.
+            `items-center`: a identificação tem ~86px (título de 2 linhas + as duas faixas) e
+            a capa tem 160px, então sobra ar por construção. Centrado ele vira respiro dos
+            dois lados em vez de um buraco embaixo do último chip. */}
+        <div className="flex items-center gap-3.5">
+          {preview.coverUrl ? (
+            <div className="relative h-40 w-28 shrink-0 rounded-md overflow-hidden bg-muted">
+              <CoverImage url={preview.coverUrl} className="h-full w-full object-cover" />
+            </div>
+          ) : (
+            <div className="h-40 w-28 shrink-0 rounded-md bg-muted flex items-center justify-center text-xs text-muted-foreground">
+              Sem capa
+            </div>
+          )}
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            {/* Título + chip 18+ (mesmo tratamento do cabeçalho da obra) */}
+            <div className="flex items-start gap-1.5">
+              <p className="font-semibold text-[15px] leading-tight line-clamp-2 min-w-0 flex-1 break-words">{preview.title}</p>
+              {preview.isAdult && (
+                <AdultBadge className="mt-px shrink-0 px-1.5 py-0 text-[10px] leading-tight" />
+              )}
+            </div>
+
+            {/* Linha 1: ano · capítulos · status curto (discreto) */}
+            {hasMeta1 && (
+              <div className="flex items-center gap-1.5 flex-wrap text-xs font-medium text-foreground/75">
+                {preview.year != null && <span className="opacity-90">{preview.year}</span>}
+                {preview.year != null && preview.totalChapters != null && (
+                  <span className="text-foreground/40">·</span>
+                )}
+                {preview.totalChapters != null && (
+                  <span className="inline-flex items-center gap-1 tabular-nums">
+                    <BookOpen className="size-3 text-muted-foreground/70" />
+                    {preview.totalChapters}
+                  </span>
+                )}
+                {(preview.year != null || preview.totalChapters != null) &&
+                  preview.publicationStatusId != null && <span className="text-foreground/40">·</span>}
+                {preview.publicationStatusId != null && (
+                  <StatusFacet statusId={preview.publicationStatusId} />
+                )}
+              </div>
+            )}
+            {/* Linha 2: interesses (manual + previsto) */}
+            {hasInterest && (
+              <InterestHearts
+                manual={preview.synopsisQuality}
+                manualFromPrediction={preview.synopsisFromPrediction}
+                predicted={preview.predictedSynopsisQuality}
+                predictedStale={preview.predictedSynopsisStale}
+              />
             )}
           </div>
-
-          {(hasMeta1 || hasInterest) && (
-            <div className="mt-1.5 pb-2 border-b border-border/60 shrink-0 flex flex-col gap-1.5">
-              {/* Linha 1: ano · capítulos · status curto (discreto) */}
-              {hasMeta1 && (
-                <div className="flex items-center gap-1.5 flex-wrap text-xs font-medium text-foreground/75">
-                  {preview.year != null && <span className="opacity-90">{preview.year}</span>}
-                  {preview.year != null && preview.totalChapters != null && (
-                    <span className="text-foreground/40">·</span>
-                  )}
-                  {preview.totalChapters != null && (
-                    <span className="inline-flex items-center gap-1 tabular-nums">
-                      <BookOpen className="size-3 text-muted-foreground/70" />
-                      {preview.totalChapters}
-                    </span>
-                  )}
-                  {(preview.year != null || preview.totalChapters != null) &&
-                    preview.publicationStatusId != null && <span className="text-foreground/40">·</span>}
-                  {preview.publicationStatusId != null && (
-                    <StatusFacet statusId={preview.publicationStatusId} />
-                  )}
-                </div>
-              )}
-              {/* Linha 2: interesses (manual + previsto) */}
-              {hasInterest && (
-                <InterestHearts
-                  manual={preview.synopsisQuality}
-                  manualFromPrediction={preview.synopsisFromPrediction}
-                  predicted={preview.predictedSynopsisQuality}
-                  predictedStale={preview.predictedSynopsisStale}
-                />
-              )}
-            </div>
-          )}
-
-          {preview.synopsis && (
-            <div className="mt-2">
-              <p
-                ref={synopsisRef}
-                className={cn(
-                  "text-[13px] italic text-muted-foreground break-words whitespace-normal leading-snug",
-                  !expanded && "line-clamp-5",
-                )}
-              >
-                {preview.synopsis}
-              </p>
-              {(synopsisOverflow || expanded) && (
-                <button
-                  type="button"
-                  onClick={() => setExpanded((v) => !v)}
-                  className="mt-1 inline-flex items-center gap-0.5 text-[11px] font-semibold not-italic text-primary hover:underline"
-                >
-                  {expanded ? "Ler menos" : "Ler mais"}
-                  {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-                </button>
-              )}
-            </div>
-          )}
         </div>
+
+        {/* Sinopse: largura toda, abaixo da capa. O divisor é o border-t (antes ele ficava só
+            sob a coluna da direita, cortando a prévia pela metade). */}
+        {preview.synopsis && (
+          <div className="mt-3 border-t border-border/60 pt-2.5">
+            <p
+              ref={synopsisRef}
+              className={cn(
+                "text-[13px] italic text-muted-foreground break-words whitespace-normal leading-snug",
+                !expanded && "line-clamp-5",
+              )}
+            >
+              {preview.synopsis}
+            </p>
+            {(synopsisOverflow || expanded) && (
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                className="mt-1 inline-flex items-center gap-0.5 text-[11px] font-semibold not-italic text-primary hover:underline"
+              >
+                {expanded ? "Ler menos" : "Ler mais"}
+                {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Rodapé: tags + reviews à esquerda · externa + votos à direita */}
