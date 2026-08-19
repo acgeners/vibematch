@@ -67,6 +67,19 @@ echo "▶ worktree limpo em $WT"
 ( cd "$WT" && flyctl deploy --app "$APP" )
 
 echo
-echo "✅ publicado. Confira o que subiu — 200 NÃO basta:"
-echo "   curl -s --max-time 90 https://$APP.fly.dev/api/health"
-echo "   (o corpo tem que trazer \"ok\":true — a rota exercita o banco)"
+echo "✅ publicado. Conferindo o que subiu…"
+echo
+
+# ── smoke: 200 NÃO basta ──────────────────────────────────────────────────────
+#
+# 🔴 Aqui antes havia um `echo` mandando conferir o /api/health à mão. Em 19/08/2026 um
+# deploy de 90 PRs subiu com a /ranking QUEBRADA — 200 na resposta, erro de Server
+# Components e zero obras na tela — e o health respondeu `{"ok":true}` do mesmo jeito,
+# porque ele exercita o banco mas não abre a /ranking. A instrução impressa foi seguida,
+# passou, e o defeito ficou no ar até alguém abrir a página num browser.
+#
+# ⚠️ O smoke roda DEPOIS de publicar, de propósito: o que ele verifica é o que está no ar,
+# e não há como saber isso antes. Ele não desfaz o deploy — reprovar aqui significa "está
+# no ar e quebrado", que é exatamente quando alguém precisa saber, e o `set -e` propaga o
+# código de saída para quem chamou.
+node "$REPO_ROOT/scripts/smoke-producao.mjs" --base="https://$APP.fly.dev"

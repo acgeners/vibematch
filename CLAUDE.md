@@ -288,13 +288,13 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**100 arquivos, remedidos em 2026-08-18**):
+banco declara um dos dois (**101 arquivos, remedidos em 2026-08-19**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **44** | só LÊ ⇒ vai pro local, de graça |
 | `ALVO: NUVEM` no cabeçalho | **49** | GRAVA ⇒ tem que ir pra nuvem |
-| (não tocam o banco) | 7 | fora da régua |
+| (não tocam o banco) | 8 | fora da régua |
 
 🔴 **ESTES TRÊS NÚMEROS SÃO CONFERIDOS PELA SUÍTE**, e não por quem editar esta seção —
 `scripts-apontam-pro-local.test.ts` lê a tabela daqui e a compara com a varredura real. É a
@@ -3083,6 +3083,40 @@ que mordem ao rodar local:
 - **`server.js` não lê `.env.local`** (em prod quem injeta as env é a plataforma). Sem isso, toda
   página morre com `supabaseKey is required` numa tela genérica. O script injeta local.
 
+🔴 **`npm run deploy` CONFERE o que subiu, e o `/api/health` sozinho não serve.** Em
+19/08/2026 um deploy levou 90 PRs ao ar e a **`/ranking` subiu quebrada** — HTTP 200, erro de
+Server Components no render, **zero obras na tela** — enquanto o health respondia
+`{"ok":true,"works":1009}`. Ele não estava mentindo: exercita o banco de verdade. Só que **não
+abre a `/ranking`**, e a instrução impressa pelo script mandava conferir exatamente ele. A
+instrução foi seguida, passou, e o defeito ficou no ar até alguém abrir a página num browser.
+
+Hoje o `deploy.sh` termina rodando `scripts/smoke-producao.mjs`, que bate em **11 rotas** e
+conta o CONTEÚDO de cada uma:
+
+```bash
+node scripts/smoke-producao.mjs                        # contra satoria.fly.dev
+node scripts/smoke-producao.mjs --base=http://localhost:3001
+```
+
+⚠️ **O piso de cada rota é baixo de propósito** — ele separa "renderizou" de "veio vazia", que
+é o defeito real. Cravar o número de hoje (a `/ranking` traz 42 linhas) faria qualquer mudança
+de filtro padrão reprovar um deploy, e smoke que grita à toa é desligado na segunda vez. O que
+se perde é a detecção de "veio pela metade", que ele não promete.
+
+⚠️ **As rotas gateadas entram esperando 307**, não 200: sem sessão elas TÊM que mandar pro
+`/login`, e é isso que prova que o gate está de pé. Trocar por 200 esconderia o gate caindo.
+
+⚠️ **Sem browser, e isso é escolha medida:** o Playwright pegaria também erro client-side, mas
+não está na raiz do repo e o smoke passaria a depender de um download de ~150 MB no meio do
+deploy. O HTML SERVIDO já denuncia esta família — a `/ranking` quebrada trazia 0 `<tr>` e a sã
+traz 42. O preço declarado é não ver o que só quebra depois da hidratação.
+
+⚠️ **Ele roda DEPOIS de publicar e NÃO desfaz nada.** Não há como verificar o que está no ar
+antes de pôr no ar; reprovar aqui quer dizer "está no ar e quebrado", que é justamente quando
+alguém precisa saber. Conferido com sonda: revertendo a correção da `/ranking` num dev server,
+o smoke acusa `só 0 linhas de obra (mínimo 5) — a rota respondeu 200 e subiu VAZIA` e sai com
+código 1.
+
 Corolário do file tracing: ele erra pro lado de **incluir demais**. Já puxou `.cache/comix-chrome/`
 (o Chrome de 90 MB do sidecar, que o Next nunca executa) pra dentro do artefato —
 `outputFileTracingExcludes: { "**/*": [".cache/**"] }` corta. Ao adicionar dependência pesada que só um
@@ -5097,10 +5131,11 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 ## Tests
 
 `npm run test` → **3.321 passando (+24 pulados) em 320 arquivos** (315 passando + 5 pulados);
-medido em 2026-08-19 com o contrato de colunas da `works_owner`: **+4 casos e +1 arquivo**
-(`orchestration/works-owner-colunas-existem`). Com `find tests -name '*.test.ts*'` = **320**
-conferido contra os 320 executados, num worktree limpo de `origin/main` (`e3fe5a8`) + só os
-arquivos deste trabalho.
+medido em 2026-08-19 com o smoke pós-deploy, que **não somou caso nenhum** — ele é script, não
+teste, e o único efeito na suíte foi mexer na contagem de arquivos da tabela de alvo (100 →
+101), que `scripts-apontam-pro-local.test.ts` confere. Com `find tests -name '*.test.ts*'` =
+**320** conferido contra os 320 executados, num worktree limpo de `origin/main` (`d1e0ede`) +
+só os arquivos deste trabalho.
 
 ⚠️ **Medido num worktree de `origin/main` + só os arquivos deste trabalho**, e as duas metades
 importam: a árvore tinha trabalho de OUTRA frente não commitado (`server/queries/calibration-guards.ts`
