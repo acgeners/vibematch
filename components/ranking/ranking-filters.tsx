@@ -12,7 +12,6 @@ import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue, selectedOptionLabel } from "@/components/ui/select"
-import { Slider } from "@/components/ui/slider"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -25,13 +24,14 @@ import {
   readCriterionUnit,
   scoreToSigma,
   sigmaDomain,
-  sigmaToScore,
-  snapToScoreGrid,
   SCORE_GRID,
   SD_PRESETS,
   SD_STEP,
 } from "@/lib/ranking/criterion-unit"
 import type { CriterionMoments, CriterionUnit } from "@/lib/ranking/criterion-unit"
+import { numParam } from "@/lib/ranking/score-threshold"
+import { fmtScore, ScorePill, ScoreThresholdEditor, VotesThresholdEditor } from "@/components/ranking/score-pills"
+import type { ScoreDef } from "@/components/ranking/score-pills"
 import { MY_RANGE_STEPS, myRangeParams, ownedSlugs, readMyRangeState } from "@/lib/ranking/my-range"
 import type { IdealRange } from "@/lib/ranking/my-range"
 import type { CriterionScorePresets } from "@/types/domain"
@@ -742,27 +742,8 @@ function FilterSection({
   )
 }
 
-const VOTES_PRESETS: Array<{ label: string; min: number | null }> = [
-  { label: "Qualquer", min: null },
-  { label: "≥100", min: 100 },
-  { label: "≥500", min: 500 },
-  { label: "≥1k", min: 1000 },
-  { label: "≥5k", min: 5000 },
-  { label: "≥10k", min: 10000 },
-]
-
-function formatVotes(n: number): string {
-  if (n >= 1000 && n % 1000 === 0) return `${n / 1000}k`
-  if (n >= 10000) return `${(n / 1000).toFixed(0)}k`
-  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`
-  return String(n)
-}
-
-function num(v: string | null | undefined): number | undefined {
-  if (!v) return undefined
-  const n = parseFloat(v)
-  return isNaN(n) ? undefined : n
-}
+/** Dono do parse: o mesmo que o pill e o editor de limiar usam. */
+const num = numParam
 
 // ============================================================================
 // Redesign dos filtros: toggles de Interesse com tons distintos (Manual = rosa /
@@ -1007,41 +988,6 @@ function TierBandSection({
 
 // ---- Grade de pills de nota (aba Notas) ----
 
-type ScoreDef = {
-  key: string
-  emoji: string
-  label: string
-  minKey: string
-  maxKey: string
-  min: number
-  max: number
-  step: number
-  presets: number[]
-  kind?: "votes"
-  fullWidth?: boolean
-  /**
-   * Unidade de EXIBIÇÃO/EDIÇÃO. Ausente = pontos. "sd" = o controle mostra e
-   * edita em desvios-padrão contra a média do catálogo.
-   *
-   * 🔴 A URL guarda SEMPRE pontos, em qualquer unidade. σ é uma lente, não um
-   * formato de armazenamento — e é isso que mantém todo consumidor correto sem
-   * saber que σ existe: `getRanking`, os presets salvos
-   * (`ranking_filter_presets` guarda a query crua) e o
-   * `parseFiltersFromSearchParams` do diálogo de recomendação, que lê a URL do
-   * /ranking pra montar o universo de candidatos. Guardar σ na URL fazia
-   * `min_romance=-0.5` virar "romance ≥ −0,5 PONTOS" lá — isto é, filtro
-   * nenhum, sem erro e com resultado.
-   *
-   * Corolário de graça: trocar a unidade não mexe em nenhum valor, então NUNCA
-   * muda o resultado — vira só outra forma de ler o mesmo limiar.
-   */
-  unit?: "sd"
-  /** Momentos do atributo — sem eles não há conversão, e o pill fica em pontos. */
-  moment?: { mean: number; sd: number }
-  /** Texto do ⓘ ao lado do rótulo do filtro (explica o que a métrica é). */
-  help?: string
-}
-
 /** Segmentado Pontos | σ do cabeçalho de "Notas por critério". */
 function CriterionUnitToggle({
   unit,
@@ -1134,6 +1080,12 @@ function buildCriterionScoreDefs(
       max: 10,
       step: 1,
       presets: presets.overrides[slug] ?? presets.default,
+      // Os 9 atributos existem em múltiplos de 0,5 — medido em 2026-08-19:
+      // 8.811 de 8.811 notas de `category_scores` caem na grade (contra 2,3%
+      // da Nota Prevista e 0% da média externa). É o que autoriza o campo
+      // manual a dizer que "≥ 7,3 recorta o mesmo que ≥ 7,5" aqui e a ficar
+      // calado nas notas contínuas.
+      grid: SCORE_GRID,
     }
   })
 }
@@ -1146,300 +1098,6 @@ const GENERAL_SCORE_DEFS: ScoreDef[] = [
   { key: "votes", emoji: "🗳️", label: LABELS.total_votes.full, minKey: "min_votes", maxKey: "max_votes", min: 0, max: 0, step: 1, presets: [], kind: "votes", fullWidth: true, help: "Soma dos votos das plataformas externas (MyAnimeList, AniList, Kitsu…) — o tamanho da amostra da opinião pública. Quanto mais votos, mais a média do público pesa na Nota Prevista; abaixo do limiar de confiança (marcado ✓ nos presets) a nota é puxada pra IA. Filtrar acima dele deixa só as obras onde a nota externa é estatisticamente confiável." },
 ]
 
-function scoreDecimals(step: number): number {
-  return step < 1 ? (step.toString().split(".")[1]?.length ?? 1) : 0
-}
-function fmtScore(def: ScoreDef, v: number): string {
-  if (def.kind === "votes") return formatVotes(v)
-  if (def.unit === "sd") return fmtSigma(v)
-  return v.toFixed(scoreDecimals(def.step))
-}
-
-/**
- * Pontos (como está na URL) → domínio de EXIBIÇÃO do controle. Identidade em
- * pontos; σ quando a lente está ligada e o atributo tem momentos.
- */
-function toDisplay(def: ScoreDef, points: number | undefined): number | undefined {
-  if (points == null) return undefined
-  if (def.unit !== "sd") return points
-  return scoreToSigma(points, def.moment) ?? undefined
-}
-
-/**
- * Domínio de exibição → pontos, que é o que vai pra URL.
- *
- * Encaixa na grade de 0,5 (o passo real das notas) porque um limiar fracionário
- * faz o pill em Pontos mentir: `+0,5σ` em romance dá 8,01, o pill mostra "≥ 8" e
- * o filtro exclui as 421 obras com romance exatamente 8,0. Ver snapToScoreGrid.
- */
-function toPoints(def: ScoreDef, display: number, bound: "min" | "max"): number | null {
-  if (def.unit !== "sd") return display
-  const p = sigmaToScore(display, def.moment)
-  return p == null ? null : snapToScoreGrid(p, bound)
-}
-
-/** Estado/rótulo atual de uma nota: Qualquer / ≥X / X–Y / ≤X. */
-function scoreValueInfo(def: ScoreDef, searchParams: Pick<URLSearchParams, "get">) {
-  const rawMin = searchParams.get(def.minKey)
-  const rawMax = searchParams.get(def.maxKey)
-  const hasMin = rawMin != null && rawMin !== ""
-  const hasMax = rawMax != null && rawMax !== ""
-  const vMin = toDisplay(def, num(rawMin))
-  const vMax = toDisplay(def, num(rawMax))
-  let label = "Qualquer"
-  if (hasMin && hasMax && vMin != null && vMax != null) label = `${fmtScore(def, vMin)}–${fmtScore(def, vMax)}`
-  else if (hasMin && vMin != null) label = `≥ ${fmtScore(def, vMin)}`
-  else if (hasMax && vMax != null) label = `≤ ${fmtScore(def, vMax)}`
-  return { hasMin, hasMax, vMin, vMax, active: hasMin || hasMax, maxOnly: hasMax && !hasMin, label }
-}
-
-function editorChip(on: boolean): string {
-  return `inline-flex h-7 items-center rounded-lg border px-3 text-xs font-semibold tabular-nums transition-colors ${
-    on
-      ? "border-transparent bg-primary text-primary-foreground"
-      : "border-border/70 bg-background text-muted-foreground hover:border-border hover:text-foreground"
-  }`
-}
-
-function ScorePill({
-  def,
-  searchParams,
-  selected,
-  onSelect,
-}: {
-  def: ScoreDef
-  searchParams: Pick<URLSearchParams, "get">
-  selected: boolean
-  onSelect: () => void
-}) {
-  const info = scoreValueInfo(def, searchParams)
-  const tint = info.maxOnly
-    ? "border-amber-400/45 bg-amber-400/[0.08]"
-    : info.active
-      ? "border-primary/45 bg-primary/[0.08]"
-      : "border-border/65 bg-background/45 hover:border-border"
-  const ring = selected ? "ring-1 ring-primary/60 !border-primary/70 bg-primary/[0.12]" : ""
-  const valCls = info.maxOnly
-    ? "bg-amber-400/15 text-amber-500 dark:text-amber-300"
-    : info.active
-      ? "bg-primary/15 text-primary"
-      : "text-muted-foreground"
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      className={`flex min-w-0 items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors ${tint} ${ring} ${def.fullWidth ? "col-span-full" : ""}`}
-    >
-      <span className="flex min-w-0 items-center gap-2">
-        <span className="text-base leading-none">{def.emoji}</span>
-        <span className="truncate text-sm font-medium">{def.label}</span>
-      </span>
-      <span className="flex shrink-0 items-center gap-1">
-        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${valCls}`}>{info.label}</span>
-        {selected && <ChevronDown className="h-3.5 w-3.5 text-primary" />}
-      </span>
-    </button>
-  )
-}
-
-function ScoreThresholdEditor({
-  def,
-  searchParams,
-  updateParams,
-}: {
-  def: ScoreDef
-  searchParams: Pick<URLSearchParams, "get">
-  updateParams: (updates: Record<string, string | null>) => void
-}) {
-  const info = scoreValueInfo(def, searchParams)
-  const [dragValue, setDragValue] = useState<[number, number] | null>(null)
-  const committed: [number, number] = [info.vMin ?? def.min, info.vMax ?? def.max]
-  const display = dragValue ?? committed
-  // O slider trabalha no domínio de EXIBIÇÃO (σ quando a lente está ligada), mas
-  // o que vai pra URL é sempre ponto — ver a nota em ScoreDef.unit.
-  const write = (v: number | null, bound: "min" | "max") => {
-    if (v == null) return null
-    const p = toPoints(def, v, bound)
-    if (p == null) return null
-    // Limiar nas pontas da escala não é filtro: "≤ 10" e "≥ 0" não excluem nada.
-    // Em Pontos o `lo > def.min` / `hi < def.max` já resolve, mas na lente o
-    // domínio em σ tem pontas fracionárias e o thumb pode parar um passo aquém —
-    // gravando um chip que promete recorte e não recorta.
-    if (bound === "max" && p >= 10) return null
-    if (bound === "min" && p <= 0) return null
-    return String(p)
-  }
-  const commit = (next: number[]) => {
-    const [lo, hi] = next as [number, number]
-    updateParams({
-      [def.minKey]: lo > def.min ? write(lo, "min") : null,
-      [def.maxKey]: hi < def.max ? write(hi, "max") : null,
-    })
-    setDragValue(null)
-  }
-  const setMinPreset = (p: number | null) => {
-    setDragValue(null)
-    updateParams({ [def.minKey]: p != null ? write(p, "min") : null, [def.maxKey]: null })
-  }
-  // Em σ o preset não bate exato: ele é gravado em pontos e encaixado na grade
-  // de 0,5, então "+0,5σ" volta como +0,49σ. Comparar por igualdade deixaria o
-  // chip que o usuário acabou de clicar apagado.
-  // Em σ o preset volta deslocado: ele é gravado em pontos e encaixado na grade
-  // de 0,5, então "+0,5σ" pode voltar como +0,33σ. A tolerância é meia casa da
-  // GRADE convertida pro σ daquele atributo — usar um número fixo deixava o chip
-  // recém-clicado apagado nos atributos de σ estreito (protagonista, σ 0,89).
-  const presetActive = (p: number) => {
-    if (info.hasMax || info.vMin == null) return false
-    if (def.unit !== "sd") return info.vMin === p
-    const sd = def.moment?.sd
-    if (!sd) return false
-    return Math.abs(info.vMin - p) < SCORE_GRID / (2 * sd)
-  }
-  return (
-    <>
-      <div className="flex flex-wrap gap-1.5">
-        <button type="button" onClick={() => setMinPreset(null)} className={editorChip(!info.active)}>
-          Qualquer
-        </button>
-        {def.presets.map((p) => (
-          <button key={p} type="button" onClick={() => setMinPreset(p)} className={editorChip(presetActive(p))}>
-            ≥ {fmtScore(def, p)}
-          </button>
-        ))}
-      </div>
-      <div className="flex items-center gap-3">
-        <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Faixa</span>
-        <Slider
-          value={display}
-          min={def.min}
-          max={def.max}
-          step={def.step}
-          minStepsBetweenThumbs={1}
-          onValueChange={(v) => setDragValue([v[0], v[1]] as [number, number])}
-          onValueCommit={commit}
-          className="flex-1"
-        />
-        <span className="w-24 shrink-0 text-right text-xs font-semibold tabular-nums text-primary">
-          {fmtScore(def, display[0])} – {fmtScore(def, display[1])}
-        </span>
-      </div>
-      {/* Em σ o número não diz nada sozinho: "+1σ" é 6,7 em humor e 8,6 em
-          romance. Sem esta linha o controle vira um filtro cego — que foi
-          exatamente o defeito da Assinatura que este modo substitui. */}
-      {def.unit === "sd" && (
-        <p className="text-[11px] leading-relaxed text-muted-foreground">
-          {def.moment && def.moment.sd > 0 ? (
-            <>
-              Hoje, em {def.label.toLowerCase()}: {fmtScore(def, display[0])} ={" "}
-              <span className="font-semibold tabular-nums text-foreground">
-                {(sigmaToScore(display[0], def.moment) ?? 0).toFixed(1)}
-              </span>{" "}
-              pts e {fmtScore(def, display[1])} ={" "}
-              <span className="font-semibold tabular-nums text-foreground">
-                {(sigmaToScore(display[1], def.moment) ?? 0).toFixed(1)}
-              </span>{" "}
-              pts (média {def.moment.mean.toFixed(1)}, σ {def.moment.sd.toFixed(2)}).
-            </>
-          ) : (
-            "Sem média do catálogo para este atributo — o limiar em σ não se aplica."
-          )}
-        </p>
-      )}
-    </>
-  )
-}
-
-
-function VotesThresholdEditor({
-  searchParams,
-  updateParams,
-  confidenceVotes,
-}: {
-  searchParams: Pick<URLSearchParams, "get">
-  updateParams: (updates: Record<string, string | null>) => void
-  confidenceVotes?: number | null
-}) {
-  const currentMin = num(searchParams.get("min_votes"))
-  const hasMax = searchParams.get("max_votes") != null
-  const presetActive = (p: number | null) =>
-    !hasMax && (p == null ? currentMin === undefined : currentMin === p)
-  // Limiar de confiança do público (pseudo-votos): acima dele a média externa pesa
-  // ≥50%. Marca o preset mais perto e oferece um clique pra usar o valor exato.
-  const C = confidenceVotes != null && confidenceVotes > 0 ? Math.round(confidenceVotes) : null
-  const nearestMin =
-    C == null
-      ? null
-      : VOTES_PRESETS.reduce<number | null>((best, p) => {
-          if (p.min == null) return best
-          return best == null || Math.abs(p.min - C) < Math.abs(best - C) ? p.min : best
-        }, null)
-  return (
-    <>
-      <div className="flex flex-wrap gap-1.5">
-        {VOTES_PRESETS.map((preset) => (
-          <button
-            key={preset.label}
-            type="button"
-            onClick={() =>
-              updateParams({ min_votes: preset.min != null ? String(preset.min) : null, max_votes: null })
-            }
-            title={preset.min === nearestMin ? "≈ limiar de confiança do público" : undefined}
-            className={cn(
-              editorChip(presetActive(preset.min)),
-              preset.min === nearestMin && "ring-1 ring-emerald-500/50",
-            )}
-          >
-            {preset.label}
-            {preset.min === nearestMin && <span className="ml-1 text-emerald-500">✓</span>}
-          </button>
-        ))}
-      </div>
-      {C != null && (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-          <span>
-            <span className="text-emerald-600 dark:text-emerald-400">Confiável</span> ≈{" "}
-            <span className="font-mono font-semibold text-foreground">{C.toLocaleString("pt-BR")}</span>{" "}
-            votos — acima disso a média externa pesa ≥ 50% na Nota Prevista.
-          </span>
-          <button
-            type="button"
-            onClick={() => updateParams({ min_votes: String(C), max_votes: null })}
-            className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-semibold text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-300"
-          >
-            usar
-          </button>
-        </div>
-      )}
-      <div className="flex items-center gap-2">
-        <Label className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-          Manual
-        </Label>
-        <Input
-          type="number"
-          min={0}
-          step={1}
-          placeholder="Mín"
-          size="sm"
-          className="h-8 w-24 text-xs"
-          value={searchParams.get("min_votes") ?? ""}
-          onChange={(e) => updateParams({ min_votes: e.target.value || null })}
-        />
-        <span className="text-xs text-muted-foreground">–</span>
-        <Input
-          type="number"
-          min={0}
-          step={1}
-          placeholder="Máx"
-          size="sm"
-          className="h-8 w-24 text-xs"
-          value={searchParams.get("max_votes") ?? ""}
-          onChange={(e) => updateParams({ max_votes: e.target.value || null })}
-        />
-      </div>
-    </>
-  )
-}
 
 function ScorePillGroup({
   title,
@@ -3164,11 +2822,22 @@ export function RankingFilters({
   }
   pushRangeChip("chapters", LABELS.chapters_total.short, "min_chapters", "max_chapters")
   pushRangeChip("year", LABELS.year.short, "min_year", "max_year")
-  pushRangeChip("expected", LABELS.expected_score.full, "min_expected", "max_expected")
-  pushRangeChip("fit", LABELS.personal_fit.full, "min_fit", "max_fit")
-  pushRangeChip("align", LABELS.alignment_score.full, "min_align", "max_align")
-  pushRangeChip("platform", LABELS.platform_avg.full, "min_platform_avg", "max_platform_avg")
-  pushRangeChip("votes", LABELS.total_votes.full, "min_votes", "max_votes")
+  // O chip fala o MESMO número que o pill, pelo mesmo formatador: com o limiar
+  // manual o valor tem casas ("7,42"), e uma segunda convenção aqui produziria
+  // "7.42" no chip ao lado de "7,42" no painel — dois critérios pro mesmo fato.
+  const defFmt = (def: ScoreDef | undefined) =>
+    def
+      ? (raw: string) => {
+          const n = parseFloat(raw)
+          return Number.isFinite(n) ? fmtScore(def, n) : raw
+        }
+      : undefined
+  const generalFmt = (key: string) => defFmt(GENERAL_SCORE_DEFS.find((d) => d.key === key))
+  pushRangeChip("expected", LABELS.expected_score.full, "min_expected", "max_expected", generalFmt("expected"))
+  pushRangeChip("fit", LABELS.personal_fit.full, "min_fit", "max_fit", generalFmt("fit"))
+  pushRangeChip("align", LABELS.alignment_score.full, "min_align", "max_align", generalFmt("align"))
+  pushRangeChip("platform", LABELS.platform_avg.full, "min_platform_avg", "max_platform_avg", generalFmt("platform"))
+  pushRangeChip("votes", LABELS.total_votes.full, "min_votes", "max_votes", generalFmt("votes"))
   for (const slug of CRITERION_SLUGS) {
     // Com a lente ligada o chip fala σ, igual ao pill. O valor guardado segue em
     // pontos — quem traduz é só a exibição. Sem momento pro slug, fica em pontos.
@@ -3179,7 +2848,7 @@ export function RankingFilters({
             const z = scoreToSigma(parseFloat(raw), m)
             return z == null ? raw : fmtSigma(z)
           }
-        : undefined
+        : defFmt(criterionScoreDefs.find((d) => d.key === slug))
     pushRangeChip(`crit-${slug}`, CRITERION_LABELS[slug] ?? slug, `min_${slug}`, `max_${slug}`, fmt)
   }
   if (searchParams.get("rated") === "1") {
