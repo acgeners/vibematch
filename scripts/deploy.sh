@@ -49,7 +49,14 @@ echo "▶ alvo: origin/main @ $TARGET"
 
 LOCAL_HEAD="$(git rev-parse --short HEAD 2>/dev/null || echo '?')"
 if [ "$LOCAL_HEAD" != "$TARGET" ]; then
-  echo "  ⚠️  seu HEAD local está em $LOCAL_HEAD — o deploy publica origin/main assim mesmo."
+  # ⚠️ Duas coisas diferentes, e a segunda é a que morde: o CÓDIGO publicado é sempre
+  # origin/main (não o seu checkout), mas as GUARDAS e as verificações que rodam são as
+  # DESTE arquivo — a versão que está no seu checkout. Melhoria no próprio deploy só passa
+  # a valer depois de atualizá-lo. O smoke escapa disso porque sai do worktree publicado.
+  echo "  ⚠️  seu HEAD local está em $LOCAL_HEAD, e origin/main está em $TARGET."
+  echo "      O CÓDIGO publicado é o de origin/main — isso não muda."
+  echo "      Mas as guardas deste script são as do seu checkout: se o deploy.sh mudou no"
+  echo "      main, atualize antes ('git checkout main && git pull') ou elas ficam de fora."
 fi
 
 if [ "${DEPLOY_CHECK_ONLY:-}" = "1" ]; then
@@ -82,4 +89,15 @@ echo
 # e não há como saber isso antes. Ele não desfaz o deploy — reprovar aqui significa "está
 # no ar e quebrado", que é exatamente quando alguém precisa saber, e o `set -e` propaga o
 # código de saída para quem chamou.
-node "$REPO_ROOT/scripts/smoke-producao.mjs" --base="https://$APP.fly.dev"
+# 🔴 O smoke sai do "$WT" (o worktree de origin/main que este script acabou de publicar),
+# NUNCA de "$REPO_ROOT". Medido em 19/08/2026, uma hora depois de o smoke entrar no main: o
+# deploy rodou, publicou o código novo e **não rodou o smoke** — porque quem executa é o
+# `deploy.sh` do CHECKOUT LOCAL, que estava numa branch já mergeada e ainda tinha a versão
+# anterior. Saiu a mensagem antiga, o deploy reportou sucesso, e a verificação que existe
+# para pegar rota quebrada simplesmente não aconteceu.
+#
+# É "dois critérios pro mesmo fato" aplicado ao próprio deploy: o que é PUBLICADO
+# (origin/main) e o que EXECUTA (o checkout de quem digitou o comando) são coisas
+# diferentes, e só a primeira estava sob controle. Verificar o que subiu com o script de
+# outra versão é verificar outra coisa.
+node "$WT/scripts/smoke-producao.mjs" --base="https://$APP.fly.dev"
