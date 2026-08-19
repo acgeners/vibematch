@@ -10,6 +10,9 @@ import {
   prewarmEvaluationContext,
   loadAiEvaluationForReview,
 } from "@/server/actions/ai"
+import { prepareAndEvaluate } from "@/server/actions/prepare-and-evaluate"
+import type { PrepSummary } from "@/server/actions/prepare-and-evaluate"
+import type { EvalPrep, MainReviewSource } from "@/lib/ai-evaluation/eval-readiness"
 import { getComixHealthStatus } from "@/server/actions/comix-resolver"
 import { useRefresh } from "@/lib/use-refresh"
 import { useCostConfirm } from "@/components/cost/cost-confirm"
@@ -62,6 +65,9 @@ interface PendingWork {
    * ela apareceu", que é outra pergunta e depende de quais filtros estão ligados.
    */
   aiEvalStatus?: string | null
+  /** O que falta preparar antes de avaliar. Ausente = a aba não hidratou (trata como
+   *  "nada a preparar", que degrada pro botão "Avaliar" de sempre). */
+  prep?: EvalPrep | null
   evaluation?: {
     confidence: number | null
     modelName: string | null
@@ -94,6 +100,8 @@ interface ReviewData {
 type EvalOutcome =
   | { kind: "review"; data: ReviewData }
   | { kind: "needs-confirm"; work: PendingWork; noReviewsReason: NoReviewsReason | null }
+  /** Faltou fonte principal — a avaliação NÃO rodou e nada foi gasto. */
+  | { kind: "blocked"; work: PendingWork; missingSources: MainReviewSource[] }
   | { kind: "none" }
 
 /**
@@ -131,6 +139,38 @@ function evalCascadePerWork() {
   ])
 }
 
+/**
+ * Custo por obra com o preparo — a mesma cascata acima MAIS a inferência de tags.
+ *
+ * 🔴 O acréscimo é só `infer_tags` (0,99¢ medido em 603 chamadas), e é isso que faz
+ * "Preparar e avaliar" ser o caminho padrão em vez de um modo caro: a aquisição de
+ * reviews é scraping (US$0) e cai no cache de 5 min que a avaliação consulta logo
+ * depois, e resumo/digest **já estavam nesta lista** porque a avaliação sozinha já os
+ * dispara ao persistir reviews novas.
+ */
+function prepareCascadePerWork() {
+  return previewCascade([
+    { action: "infer_tags", label: "Inferir tags com as reviews novas" },
+    { action: "ai_evaluation", label: "Avaliação dos 9 critérios" },
+    { action: "review_summary", label: "Resumo de reviews" },
+    { action: "review_digest", label: "Digest de reviews" },
+  ])
+}
+
+const SOURCE_LABEL: Record<MainReviewSource, string> = { comix: "Comix", mangago: "Mangago" }
+
+/** "Comix" · "Comix e Mangago" — a frase que o chip e o aviso usam, num lugar só. */
+function listMissingSources(sources: readonly MainReviewSource[]): string {
+  const nomes = sources.map((s) => SOURCE_LABEL[s] ?? s)
+  if (nomes.length <= 1) return nomes.join("")
+  return `${nomes.slice(0, -1).join(", ")} e ${nomes[nomes.length - 1]}`
+}
+
+/** A obra precisa de preparo antes de avaliar? `prep` ausente ⇒ não (degrada pro fluxo antigo). */
+function needsPrep(work: PendingWork): boolean {
+  return Boolean(work.prep && (work.prep.blocked || work.prep.needsTagRefresh))
+}
+
 export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPanelProps) {
   const confirmCost = useCostConfirm()
   // refresh() atualiza os contadores das abas (server component) E o chrome da
@@ -163,6 +203,12 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
     works: PendingWork[]
     reviews: ReviewData[]
   } | null>(null)
+  // Obras que o gate de fontes recusou — aviso agregado, com o destino que resolve.
+  const [blockedWorks, setBlockedWorks] = useState<
+    { work: PendingWork; missingSources: MainReviewSource[] }[]
+  >([])
+  // O que o preparo fez em cada obra do lote — vira UMA frase no fim, não N toasts.
+  const prepLogRef = useRef<PrepSummary[]>([])
   const queueCancelledRef = useRef(false)
   // Cancela a avaliação atual (single ou item da fila). A chamada do server
   // action continua e o resultado é salvo no DB; só ignoramos o resultado no
@@ -261,21 +307,54 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
     }
   }
 
+  /**
+   * A bifurcação preparar × avaliar, num lugar só — os três caminhos (obra, fila,
+   * reavaliar-com-modelo) passam por aqui.
+   *
+   * ⚠️ `prepare` NÃO é oferecido na reavaliação por modelo (o modal de comparação):
+   * ali a pergunta é "o que OUTRO modelo diz sobre a MESMA entrada", e mexer nas tags
+   * no meio trocaria a entrada — a comparação deixaria de comparar.
+   */
+  const callEvaluate = async (
+    work: PendingWork,
+    opts: {
+      model?: "sonnet" | "opus" | "haiku"
+      proceedWithoutReviews?: boolean
+      prepare?: boolean
+    } = {},
+  ): Promise<EvalOutcome> => {
+    if (!opts.prepare) {
+      return toOutcome(work, await triggerAiEvaluation(work.id, opts))
+    }
+    const res = await prepareAndEvaluate(work.id, {
+      proceedWithoutReviews: opts.proceedWithoutReviews,
+    })
+    if (res.kind === "blocked_sources") {
+      return { kind: "blocked", work, missingSources: res.missingSources }
+    }
+    if (res.kind === "error") {
+      toast.error(`Erro ao preparar "${work.title}": ${res.error}`)
+      return { kind: "none" }
+    }
+    prepLogRef.current.push(res.prep)
+    return toOutcome(work, res.result)
+  }
+
   // Queue logic
   const runEvaluation = async (
     work: PendingWork,
-    opts?: { model?: "sonnet" | "opus" | "haiku"; proceedWithoutReviews?: boolean }
+    opts?: { model?: "sonnet" | "opus" | "haiku"; proceedWithoutReviews?: boolean; prepare?: boolean }
   ): Promise<EvalOutcome> => {
     evaluationCancelledRef.current = false
     setEvaluatingId(work.id)
-    const result = await triggerAiEvaluation(work.id, opts)
+    const outcome = await callEvaluate(work, opts)
     setEvaluatingId(null)
 
     if (evaluationCancelledRef.current) {
       evaluationCancelledRef.current = false
       return { kind: "none" }
     }
-    return toOutcome(work, result)
+    return outcome
   }
 
   // Variante da avaliação usada no lote (fila): NÃO mexe em `evaluatingId`
@@ -283,11 +362,11 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
   // do lote é mostrado pelo overlay da fila (queueProcessedCount).
   const runQueuedEvaluation = async (
     work: PendingWork,
-    opts?: { proceedWithoutReviews?: boolean }
+    opts?: { proceedWithoutReviews?: boolean; prepare?: boolean }
   ): Promise<EvalOutcome> => {
-    const result = await triggerAiEvaluation(work.id, opts)
+    const outcome = await callEvaluate(work, opts)
     if (queueCancelledRef.current) return { kind: "none" }
-    return toOutcome(work, result)
+    return outcome
   }
 
   const handleCancelEvaluation = () => {
@@ -298,21 +377,67 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
     )
   }
 
-  const handleEvaluate = async (work: PendingWork) => {
-    const c = evalCascadePerWork()
+  const handleEvaluate = async (work: PendingWork, opts: { prepare?: boolean } = {}) => {
+    const prepare = Boolean(opts.prepare)
+
+    // 🔴 Falta fonte principal e o CLIENTE já sabe ⇒ nem pede autorização de gasto.
+    // Sem isto o fluxo era: popup pedindo ~9,4¢ → você confirma → o servidor barra e
+    // não gasta nada. Pedir para autorizar um gasto que não vai acontecer é o jeito
+    // mais rápido de ensinar a clicar "ok" sem ler — e é justamente esse popup que
+    // precisa ser levado a sério no botão ao lado.
+    //
+    // ⚠️ Isto NÃO substitui o gate do servidor, duplica-o: a prontidão aqui é a foto do
+    // load da página, e um vínculo pode ter entrado desde então (o resolve do Comix/
+    // Mangago roda em background). Quem decide de verdade é `prepareAndEvaluate`; aqui
+    // só evitamos o popup inútil no caso que já é conhecido.
+    if (prepare && work.prep?.blocked) {
+      setBlockedWorks([{ work, missingSources: work.prep.missingSources }])
+      return
+    }
+
+    const c = prepare ? prepareCascadePerWork() : evalCascadePerWork()
     const ok = await confirmCost({
       estimate: { likelyUsd: c.likelyUsd, upperBoundUsd: c.upperBoundUsd, etaSeconds: c.etaSeconds, background: true, scale: 1 },
       steps: c.steps,
-      title: `Avaliar "${work.title}" com IA?`,
-      description: "Avaliação dos 9 critérios e, se as reviews externas mudarem, resumo + digest.",
-      confirmLabel: "Avaliar",
+      title: prepare ? `Preparar e avaliar "${work.title}"?` : `Avaliar "${work.title}" com IA?`,
+      description: prepare
+        ? "Busca reviews novas, regera o digest se elas mudaram, reinfere as tags com esse contexto e só então avalia os 9 critérios."
+        : "Avaliação dos 9 critérios e, se as reviews externas mudarem, resumo + digest.",
+      confirmLabel: prepare ? "Preparar e avaliar" : "Avaliar",
     })
     if (!ok) return
-    const outcome = await runEvaluation(work)
-    if (outcome.kind === "review") setReviewData(outcome.data)
-    else if (outcome.kind === "needs-confirm") {
+    prepLogRef.current = []
+    const outcome = await runEvaluation(work, { prepare })
+    if (outcome.kind === "review") {
+      setReviewData(outcome.data)
+      notifyPrepDone()
+    } else if (outcome.kind === "needs-confirm") {
       setNoReviewConfirm({ work, noReviewsReason: outcome.noReviewsReason })
+    } else if (outcome.kind === "blocked") {
+      setBlockedWorks([{ work: outcome.work, missingSources: outcome.missingSources }])
     }
+  }
+
+  /**
+   * UMA frase sobre o que o preparo fez, no fim — nunca um toast por passo.
+   * Silencioso quando não houve preparo (o caminho "Avaliar" puro).
+   */
+  const notifyPrepDone = () => {
+    const log = prepLogRef.current
+    prepLogRef.current = []
+    if (log.length === 0) return
+    const reviews = log.reduce((s, p) => s + p.reviews, 0)
+    const comTags = log.filter((p) => p.tagsAdded != null)
+    const tagsAdded = comTags.reduce((s, p) => s + (p.tagsAdded ?? 0), 0)
+    const partes = [`${reviews} review(s) conferida(s)`]
+    // "reinferiu em N obras" e "somou T tags" são fatos diferentes: reinferir e achar
+    // zero tags novas é resultado legítimo, e some se só o total for impresso.
+    partes.push(
+      comTags.length === 0
+        ? "tags já estavam em dia"
+        : `tags reinferidas em ${comTags.length} obra(s) (+${tagsAdded})`,
+    )
+    toast.info(`Preparo: ${partes.join(" · ")}`)
   }
 
   /**
@@ -345,8 +470,13 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
     if (!noReviewConfirm) return
     const { work } = noReviewConfirm
     setNoReviewConfirm(null)
+    // Sem `prepare`: o preparo JÁ rodou na 1ª tentativa (foi ele que trouxe as reviews
+    // e as tags); o que o gate barrou foi só a avaliação. Repeti-lo pagaria de novo.
     const outcome = await runEvaluation(work, { proceedWithoutReviews: true })
-    if (outcome.kind === "review") setReviewData(outcome.data)
+    if (outcome.kind === "review") {
+      setReviewData(outcome.data)
+      notifyPrepDone()
+    }
   }
 
   // Roda um lote em PARALELO com concorrência limitada (o gargalo é o LLM,
@@ -354,10 +484,11 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
   // Retorna as avaliações prontas e as que precisam de confirmação (sem reviews).
   const runBatch = async (
     works: PendingWork[],
-    opts?: { proceedWithoutReviews?: boolean }
+    opts?: { proceedWithoutReviews?: boolean; prepare?: boolean }
   ): Promise<{
     reviews: ReviewData[]
     needConfirm: PendingWork[]
+    blocked: { work: PendingWork; missingSources: MainReviewSource[] }[]
   }> => {
     setQueue(works)
     setQueueResults([])
@@ -394,12 +525,14 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
 
     const reviews: ReviewData[] = []
     const needConfirm: PendingWork[] = []
+    const blocked: { work: PendingWork; missingSources: MainReviewSource[] }[] = []
     for (const o of slots) {
       if (!o) continue
       if (o.kind === "review") reviews.push(o.data)
       else if (o.kind === "needs-confirm") needConfirm.push(o.work)
+      else if (o.kind === "blocked") blocked.push({ work: o.work, missingSources: o.missingSources })
     }
-    return { reviews, needConfirm }
+    return { reviews, needConfirm, blocked }
   }
 
   const finishQueueWithReviews = (reviews: ReviewData[]) => {
@@ -434,34 +567,48 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
     }
   }
 
-  const startQueue = async (works?: PendingWork[]) => {
+  const startQueue = async (works?: PendingWork[], opts: { prepare?: boolean } = {}) => {
     const source = works ?? sortedWorks.slice(0, Math.max(1, Math.min(queueSize, sortedWorks.length)))
     if (source.length === 0) return
 
     const n = source.length
+    const prepare = Boolean(opts.prepare)
+    // 🔴 O CUSTO do lote é medido pelas obras que de fato vão preparar, não pelo modo.
+    // Cobrar o preparo de todas quando só metade precisa infla o número que a pessoa usa
+    // pra decidir — e um teto inflado ensina a ignorar o popup, que é o oposto do que ele
+    // existe pra fazer. `needsPrep` é a MESMA régua do rótulo do botão e do chip do card.
+    const aPreparar = prepare ? source.filter(needsPrep).length : 0
     const per = evalCascadePerWork()
+    const extra = previewCascade([{ action: "infer_tags", label: "Inferir tags com as reviews novas" }])
     const ok = await confirmCost({
       estimate: {
-        likelyUsd: per.likelyUsd * n,
-        upperBoundUsd: per.upperBoundUsd * n,
+        likelyUsd: per.likelyUsd * n + extra.likelyUsd * aPreparar,
+        upperBoundUsd: per.upperBoundUsd * n + extra.upperBoundUsd * aPreparar,
         // Rodam em paralelo (QUEUE_CONCURRENCY workers).
-        etaSeconds: per.etaSeconds * Math.ceil(n / QUEUE_CONCURRENCY),
+        etaSeconds: (per.etaSeconds + (aPreparar > 0 ? extra.etaSeconds : 0)) * Math.ceil(n / QUEUE_CONCURRENCY),
         background: true,
         scale: n,
       },
-      title: `Avaliar ${n} obra${n !== 1 ? "s" : ""} da fila?`,
-      description: "Cada obra: avaliação dos 9 critérios + resumo/digest de reviews. Rodam em paralelo.",
-      confirmLabel: `Avaliar ${n}`,
+      title: prepare
+        ? `Preparar e avaliar ${n} obra${n !== 1 ? "s" : ""} da fila?`
+        : `Avaliar ${n} obra${n !== 1 ? "s" : ""} da fila?`,
+      description: prepare
+        ? `Cada obra: reviews novas + digest, depois avaliação dos 9 critérios. ${aPreparar} de ${n} também reinferem as tags. Rodam em paralelo.`
+        : "Cada obra: avaliação dos 9 critérios + resumo/digest de reviews. Rodam em paralelo.",
+      confirmLabel: prepare ? `Preparar e avaliar ${n}` : `Avaliar ${n}`,
     })
     if (!ok) return
 
     queueCancelledRef.current = false
     setReviewData(null)
     setBatchNoReview(null)
+    setBlockedWorks([])
+    prepLogRef.current = []
 
-    const { reviews, needConfirm } = await runBatch(source)
+    const { reviews, needConfirm, blocked } = await runBatch(source, { prepare })
     if (queueCancelledRef.current) return
     void notifyIfComixImpaired()
+    if (blocked.length > 0) setBlockedWorks(blocked)
 
     // Algumas obras sem reviews: pausa e mostra UM aviso agregado. As que têm
     // review já ficam prontas; o usuário decide se avalia as demais mesmo assim.
@@ -469,6 +616,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
       setBatchNoReview({ works: needConfirm, reviews })
       return
     }
+    notifyPrepDone()
     finishQueueWithReviews(reviews)
   }
 
@@ -480,6 +628,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
     setBatchNoReview(null)
     const { reviews: extra } = await runBatch(works, { proceedWithoutReviews: true })
     if (queueCancelledRef.current) return
+    notifyPrepDone()
     finishQueueWithReviews([...reviews, ...extra])
   }
 
@@ -488,6 +637,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
     if (!batchNoReview) return
     const { reviews } = batchNoReview
     setBatchNoReview(null)
+    notifyPrepDone()
     finishQueueWithReviews(reviews)
   }
 
@@ -528,10 +678,10 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
     refreshQueue()
   }
 
-  const handleEvaluateSelected = async () => {
+  const handleEvaluateSelected = async (opts: { prepare?: boolean } = {}) => {
     const works = pendingWorks.filter((w) => selection.isSelected(w.id))
     selection.clear()
-    await startQueue(works)
+    await startQueue(works, opts)
   }
 
   const handleSkipSelected = async () => {
@@ -684,9 +834,21 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
                 onChange={(e) => setQueueSize(Math.max(1, parseInt(e.target.value) || 1))}
                 className="h-7 w-16 text-xs"
               />
-              <Button variant="outline" size="xs" onClick={() => startQueue()}>
+              {/* 🔴 A fila PREPARA por padrão: medido em 2026-08-19, só 6,7% das obras
+                  desta fila estão prontas pra avaliar sem preparo. O botão que não prepara
+                  é que é a exceção — e por isso ele fica em `ghost`, não escondido: reavaliar
+                  sem mexer em nada é legítimo quando se quer só a régua nova do prompt. */}
+              <Button variant="outline" size="xs" onClick={() => startQueue(undefined, { prepare: true })}>
                 <ListChecks className="h-3 w-3" />
-                Avaliar em fila
+                Preparar e avaliar em fila
+              </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => startQueue()}
+                title="Avalia com os dados como estão — sem buscar reviews nem reinferir tags"
+              >
+                Só avaliar
               </Button>
             </div>
           }
@@ -696,9 +858,9 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
                 <SkipForward className="mr-1 h-3.5 w-3.5" />
                 Pular selecionadas
               </Button>
-              <Button size="sm" onClick={handleEvaluateSelected} disabled={selection.count === 0}>
+              <Button size="sm" onClick={() => handleEvaluateSelected({ prepare: true })} disabled={selection.count === 0}>
                 <Sparkles className="mr-1 h-3.5 w-3.5" />
-                Avaliar selecionadas ({selection.count})
+                Preparar e avaliar ({selection.count})
               </Button>
             </>
           }
@@ -713,8 +875,19 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
           const isOutdatedModel = work.matchedFilters?.includes("outdated-model")
           const isOutdatedReviews = work.matchedFilters?.includes("outdated-reviews")
 
+          const prep = work.prep ?? null
+          const blockedBySources = Boolean(prep?.blocked)
+
           // 1 chip de estado, por precedência.
-          const state: WorkQueueState | null = isOutdatedModel
+          //
+          // 🔴 "Sem <fonte>" vem PRIMEIRO porque é o único que diz que a ação não roda —
+          // os outros descrevem por que a obra está na fila, e este descreve por que ela
+          // não sai. Ele é raro (19,9% da fila) e acionável, que é a régua pra virar chip;
+          // "tags desatualizadas" é 76% e por isso NÃO é chip nenhum — vive no rótulo do
+          // botão, que é onde a informação vira decisão.
+          const state: WorkQueueState | null = blockedBySources
+            ? { label: `Sem ${listMissingSources(prep!.missingSources)}`, tone: "rose" }
+            : isOutdatedModel
             ? { label: "Modelo antigo", tone: "rose" }
             : isOutdatedReviews
               ? { label: "Reviews novas", tone: "orange" }
@@ -790,20 +963,37 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
                   {loadingReviewId === work.id ? "Abrindo..." : "Revisar"}
                 </Button>
               )}
+              {/* 🔴 O rótulo segue a PRONTIDÃO, não o modo: prometer "Avaliar" numa obra
+                  cujas tags são anteriores às reviews é o que fazia abrir obra por obra
+                  antes. `needsPrep` é a mesma régua do custo do lote — dois rótulos pro
+                  mesmo fato divergiriam na primeira mudança. */}
               <Button
                 size="sm"
                 variant={awaitsReview ? "outline" : "default"}
-                onClick={() => handleEvaluate(work)}
+                // `whitespace-normal` + `h-auto`: o `buttonVariants` traz `whitespace-nowrap`
+                // e `h-8` fixos, e "Preparar e avaliar" (164,2px) não cabe nos 144 do trilho.
+                // Quebrar sai MAIS BARATO que alargar — ver o tier medido em `WorkQueueCard`.
+                className="h-auto min-h-8 whitespace-normal py-1.5 leading-tight"
+                onClick={() => handleEvaluate(work, { prepare: needsPrep(work) })}
                 onMouseEnter={() => prewarm(work)}
                 onFocus={() => prewarm(work)}
                 disabled={busy}
+                title={
+                  blockedBySources
+                    ? `Sem vínculo com ${listMissingSources(prep!.missingSources)} — essas duas fontes carregam 78% das reviews do catálogo. Resolva o vínculo antes de avaliar.`
+                    : prep?.needsTagRefresh
+                      ? "Busca reviews novas, regera o digest se mudaram, reinfere as tags com esse contexto e só então avalia"
+                      : "Avalia os 9 critérios com os dados atuais"
+                }
               >
                 <Sparkles className="h-3.5 w-3.5 mr-1" />
                 {evaluatingId === work.id
                   ? "Avaliando..."
-                  : work.evaluation
-                    ? "Reavaliar"
-                    : "Avaliar"}
+                  : needsPrep(work)
+                    ? "Preparar e avaliar"
+                    : work.evaluation
+                      ? "Reavaliar"
+                      : "Avaliar"}
               </Button>
               <Button
                 size="sm"
@@ -836,6 +1026,9 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
               details={details}
               showDetailsDirectly
               actions={actions}
+              // "Preparar e avaliar" pede 164,2px — ver o tier medido em `WorkQueueCard`.
+              // Sem isto o rótulo é cortado, e o corte não aparece em canal nenhum.
+              wideActions
               selectable
               selected={selection.isSelected(work.id)}
               onToggleSelect={() => selection.toggle(work.id)}
@@ -977,6 +1170,53 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
         cancelText="Cancelar"
         onConfirm={proceedSingleWithoutReviews}
       />
+
+      {/*
+        Obras que o gate de fontes recusou. NÃO é o mesmo diálogo do "sem reviews": ali a
+        obra foi avaliada com o que havia; aqui ela NÃO foi avaliada e nada foi gasto.
+
+        ⚠️ Sem "avaliar mesmo assim". O gate existe porque mangago e comix carregam 78% das
+        reviews do catálogo — um escape a um clique de distância vira o caminho normal, e a
+        nota entra no catálogo compartilhado com um quinto da evidência, sem nada acusar
+        depois. O destino que resolve é a aba Fontes, e ela já sabe fazer isso (vincular ou
+        declarar ausente, que também destrava).
+      */}
+      <Dialog open={blockedWorks.length > 0} onOpenChange={(open) => !open && setBlockedWorks([])}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {blockedWorks.length} obra{blockedWorks.length !== 1 ? "s" : ""} sem fonte principal
+            </DialogTitle>
+            <DialogDescription>
+              Não {blockedWorks.length !== 1 ? "foram avaliadas" : "foi avaliada"} e nada foi
+              gasto. Comix e Mangago carregam <strong>78%</strong> das reviews do catálogo —
+              avaliar sem elas usaria um quinto da evidência. Resolva o vínculo (ou declare que
+              a obra não existe na fonte) na aba Fontes.
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="max-h-40 space-y-0.5 overflow-y-auto rounded-md border border-border/60 bg-muted/30 p-2 text-xs text-muted-foreground">
+            {blockedWorks.map(({ work, missingSources }) => (
+              <li key={work.id} className="flex items-center justify-between gap-2">
+                <span className="truncate">{work.title}</span>
+                <span className="shrink-0 text-rose-500">
+                  sem {listMissingSources(missingSources)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button variant="ghost" onClick={() => setBlockedWorks([])}>
+              Fechar
+            </Button>
+            <Button asChild>
+              <Link href="/curation/works?tab=fontes">
+                <ExternalLink className="h-3.5 w-3.5" />
+                Abrir a aba Fontes
+              </Link>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Aviso agregado do lote: obras sem reviews externas. */}
       <Dialog open={batchNoReview != null} onOpenChange={(open) => !open && handleCancel()}>
