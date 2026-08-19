@@ -2664,7 +2664,8 @@ some do padrão, continua no seletor porque é o único jeito de ORDENAR por ano
 e alinhamento misto faz o olho reancorar. A exceção é Gêneros·Tags, texto corrido em muitos
 chips, onde a borda esquerda é o que dá o que ler.
 
-⚠️ **Mudar CHAVE de linha exige bump do `ROWS_CONFIG_STORAGE_KEY`** (hoje `v6`).
+⚠️ **Mudar CHAVE de linha exige bump do `ROWS_CONFIG_STORAGE_KEY`** (hoje `v8` — esta
+linha já disse `v6` com o código em `v7`; o teste confere, a prosa não).
 `normalizeRowsConfig` descarta chave desconhecida: sem o bump, quem tinha "status" escondido
 veria as duas linhas novas VISÍVEIS — a escolha da pessoa invertida em silêncio.
 
@@ -2675,6 +2676,61 @@ nada é pior que título nenhum, e o seletor de Linhas pode esconder as cinco.
 ⚠️ **O tooltip do título traz os alternativos**, ordenados por `sortByTitleLanguage` (o mesmo
 dono da página da obra — sem ele, o alternativo legível cai em posição aleatória entre
 romanizações). Corta em 3 + "(+N)": `title=` nativo não rola nem tem largura máxima.
+
+### A linha "Tags no seu gosto": a contagem visível era de TAGS, não de gosto
+
+Entrou em 2026-08-18. A célula de Gêneros·Tags mostra 5 chips e um "+N ver", e o que dava pra
+comparar de olho era ABSOLUTO. Medido no clone local (978 obras): corr(nº de tags, nº de
+amadas) = **+0,80**, contra **−0,40** entre nº de tags e a PROPORÇÃO de amadas. *Elissa's
+Whirlwind Marriage* tem **65** tags amadas — o recorde do catálogo — e isso é **25%** dela;
+*Villainess in Love* tem 45 em 80 = **56%**. Lado a lado, as duas mostravam cinco chips verdes
+iguais.
+
+| | |
+|---|---|
+| tags por obra | p10 **19** · mediana **36** · p90 **74** · máx 261 · mín **5** |
+| amadas | mediana **41%** (p10 24% · p90 58%) |
+| evitadas | mediana **1,7%** · p90 7,7% · máx 27% — e **zero em 44% das obras** |
+
+**Dono único: `lib/tags/density.ts`** (`describeWorkTags` + `tagDensity` + `formatTagShare`).
+Ele devolve a segmentação E a densidade no MESMO objeto, e o drawer o computa **uma vez por
+obra** (`tagsOf`): a linha em %, a nuvem de chips, a ordenação e o "só diferenças" leem esse
+resultado. Quatro contagens próprias seriam quatro chances de o % discordar dos chips a dois
+centímetros dele. ⚠️ **Custo ZERO de query** — `CompareWork` já trazia toda tag com `stance`.
+
+🔴 **Isto é COBERTURA, não previsão de gosto — não é "o Alinhamento normalizado".** Dividir
+`netNameOverlap` por nº de tags já foi medido e REPROVADO (acc-par −0,040, IC excluindo zero,
+03/07/2026): o volume de tags carrega sinal real. A pergunta desta linha é outra — "de tudo que
+descreve esta obra, que fatia é gosto meu?" —, e ela serve pra comparar obras de tamanhos
+diferentes, não pra ordenar o catálogo por gosto.
+
+⚠️ **Gênero fica FORA do denominador**: não tem stance, e somá-lo diluiria o % de todo mundo
+proporcionalmente ao que a obra tem de gênero — não ao que ela tem de você.
+
+⚠️ **O absoluto anda GRUDADO no seu %** (`♥ 25% (65)`), nunca num rodapé com os dois juntos: a
+obra mais magra do catálogo tem **5** tags, onde cada tag vale 20%, e num "3 · 1 de 5" qual
+número é qual depende de lembrar a ordem. Medido no app: o pior caso real
+(`♥ 25% (65) ⊘ 6% (10)`) fecha em **156px de 156** na coluna MÍNIMA (180px), altura 20px, sem
+quebra — o teto só estoura com 100% dos dois lados, que não existe.
+
+⚠️ **♥/⊘ na célula, porque a cor não pode ser o único sinal** — mesma régua do `TagStanceMark`.
+Dentro de um CHIP o glifo significa ênfase 2×; aqui, como nos cabeçalhos do popover da nuvem,
+ele rotula a seção ("amadas" / "evitadas").
+
+⚠️ **Piso de 3px no segmento da barra:** 1 tag em 261 é 0,38% da largura, e fiapo sub-pixel não
+se distingue de "não tem nenhuma", que é o fato OPOSTO. Pelo mesmo motivo `formatTagShare`
+imprime **`<1%`** em vez de arredondar pra "0%".
+
+⚠️ **As evitadas NÃO ganharam linha própria** (variante recusada no mockup): mediana 1,7% e zero
+em 44% das obras ⇒ a segunda linha ficaria vazia no caso comum, e o "só diferenças" a esconderia
+justo aí. Quando a obra não tem nenhuma, a célula não imprime "0%" nem desenha o segmento rosa;
+o zero de AMADAS imprime, em cinza — 1 obra do catálogo está assim, e em verde ele leria como
+valor bom apagado.
+
+Guardado por `tests/unit/tags/densidade-de-tags.test.ts` (a conta e a fonte única, 4 sondas) e
+`tests/unit/ui/comparador-densidade-de-tags.test.tsx` — este de RENDER de propósito: um teste
+que lesse a densidade passaria verde com o número fora da tela, com o absoluto num rodapé
+ambíguo ou com o segmento sub-pixel (4 sondas).
 
 Guardado por `tests/unit/ui/comparador-linhas-e-cabecalho.test.ts`.
 
@@ -4504,10 +4560,12 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.214 passando (+24 pulados) em 309 arquivos** (304 passando + 5 pulados);
-medido em 2026-08-18 com o botão de copiar o nome da obra: **+4 casos e +1 arquivo**
-(`ui/copiar-nome-da-obra`).
-Com `find tests -name '*.test.ts*'` = **309** conferido contra os 309 executados.
+`npm run test` → **3.229 passando (+24 pulados) em 311 arquivos** (306 passando + 5 pulados);
+medido em 2026-08-18 com a linha de densidade de tags do comparador: **+15 casos e +2 arquivos**
+(`tags/densidade-de-tags`, `ui/comparador-densidade-de-tags`).
+Com `find tests -name '*.test.ts*'` = **311** conferido contra os 311 executados, e
+`git diff HEAD origin/main` VAZIO — o `main` não andou entre a medição e agora, que é o outro
+jeito de esta linha nascer velha.
 
 ⚠️ **Duas linhas seguidas desta seção nasceram velhas, e a causa é a mesma:** o `main` andou
 entre a medição e o merge. Antes desta, a linha dizia "3.193 em 306" enquanto o `main` real era
@@ -4520,7 +4578,7 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.210 em 308** (a normalização de título no nome da obra, +14 casos e +1 arquivo,
+Antes: **3.214 em 309** (o botão de copiar o nome da obra), **3.210 em 308** (a normalização de título no nome da obra, +14 casos e +1 arquivo,
 `titles/normalizar-titulo`), **3.196 em 307** (medido, não o que a linha dizia),
 **3.184 em 304** (a exclusão de status parando de apagar os outros pills, +3 casos sem
 arquivo novo — um teste virou quatro em `ui/ranking-status-exclusao`), **3.181 em 304** (o traço virando a legenda de si mesmo no tooltip, +3 casos sem

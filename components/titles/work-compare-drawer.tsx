@@ -61,7 +61,9 @@ import { CRITERIA_INFO, PERSONAL_STATUSES_BY_ID, PUBLICATION_STATUSES_BY_ID } fr
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug } from "@/types/domain"
 import { computeMoodAdjusted, isMoodActive, type MoodPracticalDimension, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
-import { segmentTags, lowercasedNameSet } from "@/lib/tags/segment"
+import { TagDensityCell } from "@/components/titles/tag-density-cell"
+import { describeWorkTags, formatTagShare } from "@/lib/tags/density"
+import type { TagDensity, WorkTagBreakdown } from "@/lib/tags/density"
 import type { TagStance, TagStanceInfo } from "@/lib/tags/segment"
 import { TagStanceMark, tagStanceTitle } from "@/components/ui/tag-stance-mark"
 import { cn } from "@/lib/utils"
@@ -92,7 +94,9 @@ const HIDDEN_ROWS_STORAGE_KEY = "compare_hidden_rows_v1"
 // `normalizeRowsConfig` descarta chave desconhecida, então o `hidden` salvo evaporava e
 // a escolha da pessoa se invertia em silêncio. O bump zera a personalização — que é
 // visível e reversível — em vez de contradizê-la sem avisar.
-const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v7"
+// v7 → v8: entra "tags-density" (o % de amadas/evitadas). Sem o bump ela cairia no
+// FIM da ordem salva — depois da nuvem de chips que ela resume.
+const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v8"
 // Tabela (grid) ⇄ Bússola (plano 2D das 3 forças). Persistido entre aberturas.
 const COMPARE_VIEW_STORAGE_KEY = "compare_view_v1"
 type CompareView = "table" | "bussola"
@@ -154,7 +158,13 @@ const COMPARE_ROW_GROUPS: CompareRowGroup[] = [
   {
     id: "outros",
     label: "Outros",
-    rows: [{ key: "tags-genres", label: "Gêneros · Tags" }],
+    rows: [
+      // Quanto das tags da obra é gosto seu, em % — a nuvem de chips embaixo só
+      // dá a contagem absoluta, que é 80% explicada por "quão tagueada a obra é"
+      // (ver lib/tags/density.ts). É LINHA porque compara as obras entre si.
+      { key: "tags-density", label: "Tags no seu gosto" },
+      { key: "tags-genres", label: "Gêneros · Tags" },
+    ],
   },
 ]
 
@@ -1002,6 +1012,16 @@ function CompareGrid({
 }: CompareGridProps) {
   const n = works.length
 
+  // Segmentação + densidade das tags, UMA vez por obra. A linha "Tags no seu gosto",
+  // a nuvem de chips, a ordenação e o "só diferenças" leem deste mesmo objeto — quatro
+  // contagens próprias seriam quatro chances de o % discordar dos chips ao lado.
+  const tagsById = useMemo(() => {
+    const map = new Map<string, WorkTagBreakdown<CompareWork["tags"][number]>>()
+    for (const w of works) map.set(w.id, describeWorkTags(w.genres, w.tags, (t) => t.stance ?? null))
+    return map
+  }, [works])
+  const tagsOf = (w: CompareWork) => tagsById.get(w.id) ?? describeWorkTags(w.genres, w.tags, (t) => t.stance ?? null)
+
   const moodActive = moodRefine != null && isMoodActive(moodRefine)
   // Prioridade ajustada ao mood (0–10) por obra — correção limitada ao MAE.
   //
@@ -1231,7 +1251,18 @@ function CompareGrid({
       allEqualScore((w) => w.criteria.find((c) => c.slug === slug)?.score ?? null)
     )
   )
+  // "Só diferenças" compara o que a célula IMPRIME — os dois percentuais já
+  // arredondados —, nunca o decimal cru: duas obras exibindo "38%" e "38%"
+  // precisam sumir juntas, senão o filtro parece quebrado (mesma correção que
+  // Capítulos precisou).
+  const tagsDensityVisible = isRowVisible("tags-density", () =>
+    allEqual((w) => {
+      const d = tagsOf(w).density
+      return `${formatTagShare(d.lovedPct)}|${formatTagShare(d.avoidedPct)}`
+    })
+  )
   const tagsGenresVisible = isRowVisible("tags-genres")
+  const showTagsSection = tagsDensityVisible || tagsGenresVisible
 
   const showBasicoSection =
     pubStatusVisible || perStatusVisible || gruposVisible || interestVisible || chaptersVisible || yearVisible
@@ -1249,6 +1280,10 @@ function CompareGrid({
   }> = [
     { key: "chapters", label: "Capítulos", get: (w: CompareWork) => w.totalChapters },
     { key: "ano", label: "Ano", get: (w: CompareWork) => w.year },
+    // Ordena pelo % de AMADAS. As evitadas não ganham ordenação própria: são
+    // mediana 1,7% e zero em 44% das obras — uma segunda linha ficaria vazia
+    // no caso comum (ver a variante C do mockup, recusada por isso).
+    { key: "tags-density", label: "Tags no seu gosto", get: (w: CompareWork) => tagsOf(w).density.lovedPct },
     ...(moodRow ? [moodRow] : []),
     ...orderedNotasRows,
     ...CRITERION_SLUGS.map((slug) => ({
@@ -1535,20 +1570,30 @@ function CompareGrid({
             )
           })}
 
-        {/* Gêneros · Tags */}
-        {tagsGenresVisible && (
+        {/* Gêneros · Tags — duas linhas: o resumo em % e a nuvem que ele resume */}
+        {showTagsSection && (
           <SectionTitle
             label="Gêneros · Tags"
             collapsed={isCollapsed("tags-generos")}
             onToggle={() => toggleSection("tags-generos")}
           />
         )}
-        {tagsGenresVisible && !isCollapsed("tags-generos") && (
+        {showTagsSection && !isCollapsed("tags-generos") && tagsDensityVisible && (
+          <>
+            <SectionLabel label="Tags no seu gosto" sort={sortControl("tags-density")} />
+            {displayed.map((w) => (
+              <CompareCell key={w.id} horizontalAlign="center">
+                <TagDensityCell density={tagsOf(w).density} />
+              </CompareCell>
+            ))}
+          </>
+        )}
+        {showTagsSection && !isCollapsed("tags-generos") && tagsGenresVisible && (
           <>
             <SectionLabel label="" />
             {displayed.map((w) => (
               <CompareCell key={w.id} verticalAlign="top" horizontalAlign="left">
-                <GenresTagsCell genres={w.genres} tags={w.tags} />
+                <GenresTagsCell genres={w.genres} breakdown={tagsOf(w)} />
               </CompareCell>
             ))}
           </>
@@ -1780,19 +1825,17 @@ function StanceChip({
 
 function GenresTagsCell({
   genres,
-  tags,
+  breakdown,
 }: {
   genres: string[]
-  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null; subGroupName?: string | null; stance?: TagStanceInfo | null }>
+  /** Segmentação + densidade prontas — a MESMA que a linha de cima imprime em %. */
+  breakdown: WorkTagBreakdown<{ slug: string; name: string; groupId: string | null; groupName: string | null; subGroupName?: string | null; stance?: TagStanceInfo | null }>
 }) {
-  const total = genres.length + tags.length
+  const { loved, avoided, rest, density } = breakdown
+  const total = genres.length + density.total
   if (total === 0) {
     return <span className="text-xs italic text-muted-foreground">—</span>
   }
-  // Segmenta: Categorias (gêneros) › Amadas › Evitadas › Resto. Tags com nome de
-  // gênero saem da segmentação (já aparecem em Categorias) — sem duplicar.
-  const genreNameSet = lowercasedNameSet(genres)
-  const { loved, avoided, rest } = segmentTags(tags, (t) => t.stance ?? null, genreNameSet)
 
   // Preview inline: gêneros, depois amadas › evitadas › resto (ordem de prioridade).
   const orderedTags = [...loved, ...avoided, ...rest]
@@ -1871,7 +1914,9 @@ function GenresTagsCell({
               <div>
                 <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
                   <Heart className="h-2.5 w-2.5" /> Amadas{" "}
-                  <span className="text-emerald-600/60 dark:text-emerald-400/60">({loved.length})</span>
+                  <span className="text-emerald-600/60 dark:text-emerald-400/60">
+                    ({loved.length} · {formatTagShare(density.lovedPct)} das tags)
+                  </span>
                 </p>
                 <div className="flex flex-wrap gap-1">
                   {loved.map((t) => (
@@ -1884,7 +1929,9 @@ function GenresTagsCell({
               <div>
                 <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-rose-600 dark:text-rose-400">
                   <Ban className="h-2.5 w-2.5" /> Evitadas{" "}
-                  <span className="text-rose-600/60 dark:text-rose-400/60">({avoided.length})</span>
+                  <span className="text-rose-600/60 dark:text-rose-400/60">
+                    ({avoided.length} · {formatTagShare(density.avoidedPct)})
+                  </span>
                 </p>
                 <div className="flex flex-wrap gap-1">
                   {avoided.map((t) => (

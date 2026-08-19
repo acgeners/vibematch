@@ -57,7 +57,8 @@ describe("o que compara é LINHA, o que identifica é cabeçalho", () => {
     // escondido veria as linhas novas VISÍVEIS — a escolha da pessoa invertida em silêncio.
     // O bump zera a personalização, que é visível e refazível.
     //   v6 → v7: entra a linha "grupos" (recorrência nos grupos de favoritos).
-    expect(drawer).toContain('const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v7"')
+    //   v7 → v8: entra "tags-density" (o % de tags amadas/evitadas).
+    expect(drawer).toContain('const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v8"')
   })
 })
 
