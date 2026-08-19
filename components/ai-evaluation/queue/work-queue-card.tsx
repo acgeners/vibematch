@@ -77,7 +77,32 @@ export interface WorkQueueCardProps {
 
   // Ação(ões) da aba (coluna direita).
   actions?: ReactNode
-  /** Trilho de ação mais largo (rótulos longos, ex.: "Buscar reviews"). */
+  /**
+   * Trilho de ação mais largo, para rótulos longos ("Preparar e avaliar",
+   * "Buscar reviews"). São **144px** (`w-36`) contra os 112 do padrão.
+   *
+   * 🔴 **Rótulo que não couber aqui QUEBRA EM DUAS LINHAS — não alarga o trilho.**
+   * Medido no browser em 2026-08-19 (CSS e fonte reais, card de 594px, 500 cards):
+   *
+   * | | trilho | títulos truncados | altura média do card |
+   * |---|---|---|---|
+   * | hoje, sem `wideActions` | 112 | 23 de 500 | 242 |
+   * | **`w-36` + botão em 2 linhas** | **144** | **51 de 500** | **240** |
+   * | `w-40` + 2 linhas | 160 | 89 de 500 | 241 |
+   * | `w-44`, 1 linha | 176 | **132 de 500** | 242 |
+   *
+   * Alargar o trilho tira largura da coluna de INFO (288 → 224px em `w-44`), e quem
+   * paga é o título: 1 em cada 4 passa a truncar. A altura não muda em nenhuma das
+   * variantes porque o trilho tem `min-h-[144px]` e o conteúdo ocupa ~80px — a 2ª
+   * linha do botão cabe na folga que já existe, de graça.
+   *
+   * ⚠️ **`scrollWidth − clientWidth` MENTE aqui** — num botão flex ele deu 16px para um
+   * vazamento real de 28,1px, e **zero** para um de 12,1px. Quem mede é o rect do NÓ DE
+   * TEXTO (`Range.getBoundingClientRect`) contra a borda de conteúdo do botão. Com o
+   * trilho em `w-28` o texto de "Preparar e avaliar" passava 1,1px além do próprio CARD,
+   * sem corte, sem rolagem e com `document.scrollWidth − clientWidth` em 0: os três
+   * canais mudos de sempre.
+   */
   wideActions?: boolean
 
   // Seleção universal.

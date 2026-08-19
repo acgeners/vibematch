@@ -37,11 +37,28 @@ import { filterWorkIdsByInterest } from "@/server/queries/interest-filter"
 import { MarkReadButton } from "@/components/ai-evaluation/mark-read-button"
 import { AiEvalSettingsDialog } from "@/components/ai-evaluation/ai-eval-settings-dialog"
 import type { FormulaConfig } from "@/types/domain"
+import { loadEvalPrep } from "@/server/queries/eval-prep"
+import { getCuradoriaBadgeUnreadCount } from "@/server/queries/ai-eval-read"
+import type { EvalPrep } from "@/lib/ai-evaluation/eval-readiness"
 
 const ALL_FILTERS = ["pending", "review-pending", "low-confidence", "outdated-model", "outdated-reviews"] as const
 export type EvaluationFilter = (typeof ALL_FILTERS)[number]
 
-const DEFAULT_FILTERS: EvaluationFilter[] = ["pending", "review-pending"]
+/**
+ * 🔴 **A aba abria VAZIA, e era a causa nº 1 de ela não ser usada.** O default era
+ * `["pending","review-pending"]`; contado na NUVEM em 2026-08-19, esses dois filtros
+ * dão **0 e 0** — o catálogo está construído, e o trabalho que existe hoje é
+ * REAVALIAÇÃO: `outdated-reviews` são **556 obras**. A tela abria zerada e só quem
+ * sabia trocar o filtro à mão encontrava alguma coisa.
+ *
+ * ⚠️ `outdated-model` (929 no clone) fica FORA do default de propósito: ele traz quase
+ * o catálogo inteiro — 9 versões de prompt convivem hoje —, e uma fila que é "tudo"
+ * não é fila. `outdated-reviews` tem um gatilho por obra (chegou review nova) e é o
+ * que a curadoria de fato persegue.
+ *
+ * ⚠️ O `dot` da aba NÃO acompanha este default — ver `TabCounts.attrDot`.
+ */
+const DEFAULT_FILTERS: EvaluationFilter[] = ["pending", "review-pending", "outdated-reviews"]
 const DEFAULT_LOW_CONFIDENCE_THRESHOLD = 0.8
 
 function parseFilters(raw: string | string[] | undefined): EvaluationFilter[] {
@@ -75,6 +92,11 @@ interface EligibleWork {
   matchedFilters: EvaluationFilter[]
   /** Estado REAL da obra (works.ai_eval_status) — é ele que libera o "Revisar". */
   aiEvalStatus: string | null
+  /**
+   * O que falta preparar antes de avaliar (`classifyEvalPrep`). Hidratado só na aba
+   * ativa; ausente no caminho do cache de contagens, onde ninguém desenha card.
+   */
+  prep?: EvalPrep | null
   evaluation: {
     confidence: number | null
     modelName: string | null
@@ -344,6 +366,8 @@ async function getEligibleWorks(
     return {
       works: [] as EligibleWork[],
       totalCount: 0,
+      matchedCount: 0,
+      truncated: false,
       activeFilters: filters,
       promptVersionTolerance,
       lowConfidenceThreshold,
@@ -396,10 +420,18 @@ async function getEligibleWorks(
   if (worksResult.error) throw new Error(String((worksResult.error as { message?: string }).message ?? worksResult.error))
 
   // Ordena por título em JS e limita aos 500 que serão exibidos.
-  const displayedWorks = worksResult.data
+  //
+  // ⚠️ O corte é REAL e passou a morder quando `outdated-reviews` entrou no default:
+  // são 556 obras na nuvem contra o teto de 500. Antes desta linha o `totalCount` saía
+  // DEPOIS do slice, então a tela dizia "500" e as 56 restantes sumiam sem nada acusar —
+  // um teto silencioso, que é exatamente o que o resto deste arquivo combate. Agora o
+  // tamanho real vai junto (`matchedCount`) e a UI o imprime.
+  const MAX_DISPLAYED = 500
+  const sortedWorks = worksResult.data
     .slice()
     .sort((a, b) => String(a.title ?? "").localeCompare(String(b.title ?? "")))
-    .slice(0, 500)
+  const matchedCount = sortedWorks.length
+  const displayedWorks = sortedWorks.slice(0, MAX_DISPLAYED)
   const displayedIds = displayedWorks.map((w) => w.id)
 
   // Hidrata covers + calculated_scores + última aval em chunks, tudo em paralelo
@@ -495,6 +527,9 @@ async function getEligibleWorks(
   return {
     works,
     totalCount: works.length,
+    /** Quantas obras casaram os filtros ANTES do teto de exibição. */
+    matchedCount,
+    truncated: matchedCount > works.length,
     activeFilters: filters,
     promptVersionTolerance,
     lowConfidenceThreshold,
@@ -516,6 +551,7 @@ function IaAttributesTab({
   personalStatusNames,
   synopsisQualities,
   predictionQualities,
+  hiddenByCap,
 }: {
   works: EligibleWork[]
   readIds: string[]
@@ -526,6 +562,8 @@ function IaAttributesTab({
   personalStatusNames: string[]
   synopsisQualities: string[]
   predictionQualities: string[]
+  /** Obras que casaram os filtros e NÃO couberam no teto de exibição. */
+  hiddenByCap: number
 }) {
   return (
     <div className="space-y-4">
@@ -541,6 +579,16 @@ function IaAttributesTab({
         activeSynopsisQualities={synopsisQualities}
         activePredictionQualities={predictionQualities}
       />
+      {/* ⚠️ O teto de 500 é payload, não escolha de curadoria — mas silencioso ele vira
+          "a fila acabou". Com `outdated-reviews` no default a fila tem 556 na nuvem, então
+          isto imprime em uso normal, não em caso de borda. */}
+      {hiddenByCap > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Mostrando as {works.length} primeiras (por título) — <strong>{hiddenByCap}</strong>{" "}
+          {hiddenByCap === 1 ? "obra casa os filtros e não coube" : "obras casam os filtros e não couberam"}
+          . Processe estas e recarregue.
+        </p>
+      )}
       <AiEvaluationPanel pendingWorks={works} readIds={readIds} />
     </div>
   )
@@ -567,7 +615,7 @@ function EvalTabBar({
   const n = (v: number | undefined) => (counts ? ` (${v ?? 0})` : " (…)")
   return (
     <div className="flex items-center gap-1 border-b border-border/60">
-      <EvalTabLink href={hrefs.attr} active={activeTab === "atributos"} dot={(counts?.attr ?? 0) > 0}>IA Atributos{n(counts?.attr)}</EvalTabLink>
+      <EvalTabLink href={hrefs.attr} active={activeTab === "atributos"} dot={(counts?.attrDot ?? 0) > 0}>IA Atributos{n(counts?.attr)}</EvalTabLink>
       <EvalTabLink href={hrefs.tagsReviews} active={activeTab === "tags-reviews"}>Tags &amp; Reviews{n(counts?.tagsReviews)}</EvalTabLink>
       {/* Sem `dot`: o digest é backfill pago e opt-in, então NÃO soma no badge da
           barra superior — um contador de 100+ ali faria o badge viver cheio e parar
@@ -597,6 +645,18 @@ interface CountArgs {
 
 interface TabCounts {
   attr: number
+  /**
+   * Quantas obras da fila de atributos são DECISÃO esperando — nunca avaliadas ou
+   * aguardando revisão, não-lidas.
+   *
+   * 🔴 Separado de `attr` porque o default da aba passou a incluir `outdated-reviews`
+   * (556 obras na nuvem): derivar o ponto do tamanho da lista o deixaria aceso para
+   * sempre, e ponto que sempre toca não é lido — a mesma régua que já mantém Digests
+   * e Fontes sem `dot`. E ele sai de `getCuradoriaBadgeUnreadCount`, a MESMA função
+   * que alimenta o badge da barra superior: dois critérios pro mesmo fato a dois
+   * centímetros um do outro é como o ponto da aba acende com o badge apagado.
+   */
+  attrDot: number
   tagsReviews: number
   /** Só as ELEGÍVEIS (passam no piso de reviews) — é o que dá pra rodar. */
   digests: number
@@ -614,7 +674,7 @@ interface TabCounts {
  */
 const getCuradoriaTabCounts = unstable_cache(
   async (args: CountArgs): Promise<TabCounts> => {
-    const [attr, revC, tagsC, ackSets, digestQueue, sourceQueue] = await Promise.all([
+    const [attr, revC, tagsC, ackSets, digestQueue, sourceQueue, attrDot] = await Promise.all([
       getEligibleWorks(args.activeFilters, args.pubStatusIds, args.personalStatusIds, [], args.toleranceOverride),
       getWorksWithoutReviews({ pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, minReviews: args.minReviews, maxReviews: args.maxReviews }, { countOnly: true }),
       getWorksWithoutTags({ pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, minTags: args.minTags, maxTags: args.maxTags }, { countOnly: true }),
@@ -628,6 +688,8 @@ const getCuradoriaTabCounts = unstable_cache(
       // status pessoal nem com interesse. O número global é o tamanho da fila; quando a
       // aba está aberta, o `activeCount` o sobrescreve pelo que está na tela.
       getSourceGapQueue({}, { countOnly: true }),
+      // Ver `TabCounts.attrDot`: mesma fonte do badge da barra superior.
+      getCuradoriaBadgeUnreadCount(),
     ])
     const ackAttr = ackSets.get("attr")!
     const ackTR = ackSets.get("tags_reviews")!
@@ -639,6 +701,7 @@ const getCuradoriaTabCounts = unstable_cache(
     ])
     return {
       attr: attrIds.filter((id) => keepAttr.has(id) && !ackAttr.has(id)).length,
+      attrDot,
       tagsReviews: trIds.filter((id) => keepTR.has(id) && !ackTR.has(id)).length,
       // Só as elegíveis: o contador da aba promete o que dá pra rodar, não o
       // tamanho da lista (que inclui as barradas pelo piso de reviews).
@@ -666,6 +729,8 @@ const ACTIVE_TAB_COUNT_KEY: Record<string, keyof TabCounts> = {
  */
 async function TabCountsBar({ activeTab, hrefs, args, activeCount }: { activeTab: string; hrefs: TabHrefs; args: CountArgs; activeCount: number }) {
   const counts = await getCuradoriaTabCounts(args)
+  // ⚠️ `ACTIVE_TAB_COUNT_KEY` nunca aponta pra `attrDot`: o número da aba ativa é a
+  // lista exibida, e o ponto é outra pergunta ("tem decisão esperando?").
   const merged: TabCounts = { ...counts, [ACTIVE_TAB_COUNT_KEY[activeTab] ?? "attr"]: activeCount }
   return <EvalTabBar activeTab={activeTab} hrefs={hrefs} counts={merged} />
 }
@@ -917,10 +982,12 @@ export default async function CuradoriaDaObraPage({
     const keep = await filterWorkIdsByInterest(attrResult.works.map((w) => w.id), synopsisQualities, predictionQualities)
     const members = attrResult.works.filter((w) => keep.has(w.id))
     const counts = await getWorkTagReviewCounts(members.map((w) => w.id))
+    const prep = await loadEvalPrep(members.map((w) => w.id))
     const works = members.map((w) => ({
       ...w,
       tagCount: counts.get(w.id)?.tagCount ?? 0,
       reviewCount: counts.get(w.id)?.reviewCount ?? 0,
+      prep: prep.get(w.id) ?? null,
     }))
     const readIds = readIdsFor("attr", works)
     activeCount = works.length - readIds.length
@@ -935,6 +1002,7 @@ export default async function CuradoriaDaObraPage({
         personalStatusNames={personalStatusNames}
         synopsisQualities={synopsisQualities}
         predictionQualities={predictionQualities}
+        hiddenByCap={Math.max(0, attrResult.matchedCount - attrResult.totalCount)}
       />
     )
   }

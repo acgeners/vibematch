@@ -3470,6 +3470,159 @@ Guardado por `tests/unit/calculations/recalc-inputs.test.ts` e
 os call sites do SOURCE e falha quando um aparece, some ou muda de declaração, que
 é a defesa contra o próximo caller entrar no badge sem ninguém decidir nada.
 
+## A fila de atributos PREPARA antes de avaliar — e a régua é a prontidão, não o modo
+
+A aba "IA Atributos" de `/curation/works` estava sendo pulada: para avaliar de verdade era
+preciso abrir cada obra antes, buscar reviews e reinferir tags à mão, e no fim clicava-se
+"Avaliar com IA" pela página da obra. Corrigido em 2026-08-19. Três causas, todas medidas:
+
+🔴 **1. A aba abria VAZIA.** O default era `["pending","review-pending"]` e esses dois filtros
+valem **0 e 0 na NUVEM** — o catálogo está construído, e o trabalho que existe é REAVALIAÇÃO:
+`outdated-reviews` são **556 obras**. A tela abria zerada e só quem sabia trocar o filtro à mão
+achava alguma coisa. Hoje `outdated-reviews` entra no default.
+
+⚠️ **`outdated-model` fica FORA** (929 obras no clone): traz quase o catálogo inteiro — 9
+versões de prompt convivem —, e fila que é "tudo" não é fila.
+
+🔴 **2. A avaliação já fazia metade do preparo e APAGAVA o sinal do resto.**
+`triggerAiEvaluation` rebusca e persiste reviews, mas lê `work_tags` **antes** disso, e no fim
+zera `ai_eval_reviews_stale`. Logo: avaliar uma obra da fila "Reviews novas" a **tira da fila
+com as tags que ela tinha antes daquelas reviews**, e o único sinal visível some junto. O
+defeito se auto-ocultava.
+
+🔴 **3. Preparar é a REGRA, não a exceção** — e é isso que decide o desenho. Medido na fila de
+552 obras (clone local):
+
+| | obras | % |
+|---|---|---|
+| tags anteriores ao contexto de reviews | 422 | **76,4%** |
+| sem `comix` e/ou `mangago` vinculado | 110 | 19,9% |
+| **prontas pra avaliar sem preparo** | **37** | **6,7%** |
+| <4 reviews úteis (piso do digest) | 26 | 4,7% |
+
+Com 93% precisando de preparo, **avisar** acenderia em quase todo card — o alarme que sempre
+toca. Por isso o preparo é o caminho padrão e "Só avaliar" é que virou o botão secundário.
+
+**A cadeia, e por que a ordem não é a intuitiva** (`server/actions/prepare-and-evaluate.ts`):
+`fontes → reviews (+digest) → tags → avaliação`. `inferAndPersistTagsForWork` lê
+`works.review_digest`/`review_summary`, **não** `work_reviews` — inferir antes do digest releria
+o texto antigo e produziria as mesmas tags, a 0,99¢ por obra, com a tela dizendo "preparado".
+
+🔴 **O custo NOVO é só a inferência de tags.** Medido em `ai_api_calls`: `ai_evaluation` 3,81¢
+(p50 17,8s) · `tag_inference` **0,99¢** (7,6s) · `review_digest` 1,83¢ (13,5s) ·
+`review_summarizer` 0,42¢. O digest **já rodava** dentro da própria avaliação (`saveWorkReviews`
+dispara resumo+digest sob gate de materialidade), e a aquisição do passo 2 cai no **cache de
+contexto externo de 5 min** que a avaliação do passo 4 consulta — a chave bate exatamente, porque
+os dois caminhos usam `{ total: 30, maxPerSource: 12 }`. Preparar antes **não** paga o scraping
+duas vezes.
+
+⚠️ **A prontidão é reclassificada DEPOIS do passo 2**, nunca reusada da tela: adquirir reviews
+pode ter regerado o digest, e é justamente esse caso que torna a inferência necessária.
+
+🔴 **A régua tem dono único e é PURA: `lib/ai-evaluation/eval-readiness.ts`** (`classifyEvalPrep`).
+Dela saem as três coisas que a tela promete — o rótulo do botão, o chip de bloqueio e quantas
+obras o lote vai cobrar de `infer_tags`. Escrever qualquer uma delas à parte é a família "dois
+critérios pro mesmo fato", aqui decidindo se a ação existe e quanto ela custa.
+
+⚠️ **A régua de tags é o CARIMBO DO DIGEST, não a data da review mais nova.** Medido na mesma
+fila: por review crua ela acusa **502 obras (90,9%)**, por digest **422 (76,4%)**. As 80 de
+diferença são obras cujas reviews chegaram mas cujo digest o gate de materialidade não regerou —
+reinferir ali releria o mesmo texto. A régua barata é também a correta, e não custa query nenhuma
+(é comparação de colunas dentro de `works`).
+
+🔴 **Fonte principal faltando BLOQUEIA — e "principal" é medido.** Reviews persistidas por fonte:
+**mangago 19.234 · comix 14.921** contra 2.768 do 3º lugar; as duas somam **78% de todas as
+reviews do catálogo**. Avaliar sem elas usa um quinto da evidência, e nada acusa depois. O gate
+para **antes de qualquer passo** — nada é buscado, nada é gasto — e devolve o destino que resolve
+(a aba Fontes).
+
+⚠️ **Sem "avaliar mesmo assim" no diálogo, de propósito.** Um escape a um clique vira o caminho
+normal. Quem destrava é vincular OU **declarar ausência** (`absent` não bloqueia — o contrário
+travaria pra sempre a obra que de fato não está na fonte).
+
+⚠️ **O CLIENTE também barra, e isso não é redundância inútil.** Sem o atalho, clicar numa obra
+travada abria o popup pedindo autorização de **~9,4¢** para uma ação que o servidor recusa sem
+gastar nada — pedir para autorizar gasto que não vai acontecer é o jeito mais rápido de ensinar
+a clicar "ok" sem ler, e é justamente esse popup que precisa ser levado a sério no botão ao
+lado. Quem DECIDE segue sendo `prepareAndEvaluate`: a prontidão do cliente é a foto do load, e
+um vínculo pode ter entrado desde então (o resolve de Comix/Mangago roda em background). É a
+mesma forma de "rota + fonte" do gate de sessão.
+
+⚠️ **Não é auto-resolvível, e isso é medição do próprio projeto**: casamento automático por
+título erra ~7% e `absent` é permanente. Detectar é barato; consertar sozinho, não.
+
+⚠️ **O que vira chip e o que vira rótulo:** "Sem Comix/Mangago" é chip (19,9%, raro e acionável)
+e tem **precedência sobre "Reviews novas"** — é o único que diz que a ação NÃO roda. "Tags
+desatualizadas" (76,4%) **não é chip nenhum**: vive no rótulo do botão ("Preparar e avaliar" ×
+"Reavaliar"), que é onde a informação vira decisão.
+
+🔴 **"Evidência escassa" NÃO virou chip, e a decisão é MEDIDA — não esquecimento.** Existiu um
+`EvalPrep.lowEvidence` (reviews úteis abaixo do piso de 4 do digest) e ele foi **removido em
+2026-08-19, antes de chegar à tela**. Medido na fila de 552:
+
+| | obras |
+|---|---|
+| evidência escassa (<4 reviews úteis) | 26 (4,7%) |
+| ↳ **já travadas por falta de fonte** | **16 (61,5%)** |
+| ↳ sobram, onde um chip acrescentaria algo | **10 — 1,8% da fila** |
+| ↳ dessas 10, com confiança < 0,80 já impressa no card | **8** |
+
+Três razões, em ordem de peso:
+
+1. 🔴 **O limiar é de OUTRO artefato.** `MIN_USEFUL_REVIEWS_FOR_DIGEST = 4` foi medido contra
+   *digest magro* (`salient_traits < 3`), não contra qualidade da avaliação de atributo — que
+   também lê sinopse, tags e gêneros, e já tem gate próprio para reviews ZERO. Reusá-lo aqui é
+   a mesma troca de régua que reprovou a v23–v25 pelo gold set.
+2. ⚠️ **Não é acionável, e a régua desta base é "raro E acionável".** Nas 10 restantes as fontes
+   já estão vinculadas: não há o que resolver. Para a decisão "pular em vez de gastar 3,81¢", o
+   card **já imprime `💬 N`** (reviews ÚTEIS) — o que o chip acrescentaria é só o julgamento.
+3. ⚠️ **Onde seria acionável, o bloqueio já age e é mais forte** — 61,5% dessas obras já estão
+   travadas por fonte, e resolver a fonte é o que traz reviews (medido na aba Fontes: 0 lacunas
+   → 57,2 reviews úteis; 5 lacunas → 7,4).
+
+⚠️ **Se um dia houver piso para a AVALIAÇÃO, ele precisa de medição própria** — e aí esbarra
+noutra pendência: o `WorkQueueCard` tem paleta nomeada por COR (`tone: "amber"`, onde âmbar já é
+"Confiança baixa"), então ligar um chip ali é **escolher a cor**, que é o PR de decisão que este
+arquivo já registra como aberto.
+
+🔴 **O teto de exibição de 500 deixou de ser silencioso.** `getEligibleWorks` cortava em 500 e
+devolvia `totalCount` DEPOIS do corte: com 556 obras a tela dizia "500" e as 56 sumiam sem nada
+acusar. Hoje `matchedCount` viaja junto e a aba imprime quantas não couberam.
+
+⚠️ **O `dot` da aba NÃO segue o default.** Ele sai de `getCuradoriaBadgeUnreadCount()` — a MESMA
+função do badge da barra superior —, senão as 556 o deixariam aceso para sempre. Número da aba =
+lista exibida; ponto = decisão esperando. São perguntas diferentes.
+
+🔴 **`wideActions` do `WorkQueueCard` era estreito demais, e rótulo que não cabe QUEBRA EM DUAS
+LINHAS — não alarga o trilho.** Medido no browser (500 cards, card de 594px):
+
+| | trilho | títulos truncados | altura média do card |
+|---|---|---|---|
+| sem `wideActions` | 112 | 23 de 500 | 242 |
+| **`w-36` + botão em 2 linhas** | **144** | **51 de 500** | **240** |
+| `w-44`, 1 linha | 176 | **132 de 500** | 242 |
+
+Alargar o trilho tira largura da coluna de info (288 → 224px) e quem paga é o título: 1 em cada 4
+passa a truncar. A 2ª linha do botão cabe na folga que o trilho já tem (`min-h-[144px]` contra
+~80px de conteúdo) e não muda a altura de nada.
+
+⚠️ **`scrollWidth − clientWidth` MENTE em botão flex** — deu 16px para um vazamento real de
+28,1px e **zero** para um de 12,1px. Quem mede é o rect do NÓ DE TEXTO
+(`Range.getBoundingClientRect`) contra a borda de conteúdo. Com o trilho em `w-28` o texto passava
+1,1px além do próprio CARD, sem corte, sem rolagem e com `document.scrollWidth − clientWidth` em
+0: os três canais mudos de sempre. ⚠️ Resíduo conhecido e NÃO corrigido: "Buscar reviews" (aba
+Tags & Reviews) vaza **2,2px** no mesmo trilho de 144 — é pré-existente e não foi tocado aqui.
+
+🔴 **NÃO use `generateAllWorkData` para isto.** Ele **auto-aceita** as 9 notas (mata a revisão,
+que é o ponto da aba) e paga sinopse + interesse + veredito + embedding: **~US$0,13** contra
+~4,8¢ da cadeia daqui.
+
+Guardado por `tests/unit/ai-evaluation/prontidao-para-avaliar.test.ts` (a régua pura, 4 sondas
+conferidas), `preparar-e-avaliar-ordem.test.ts` (a ORDEM das chamadas e o gate parando antes de
+gastar, 4 sondas) e `preparar-e-avaliar-card.test.tsx` (RENDER — a régua pode estar perfeita e o
+card continuar dizendo "Avaliar"; 3 sondas). O gate de fontes foi exercitado ponta a ponta no app
+(popup de custo → bloqueio em ~1s, zero chamada paga).
+
 ## AI evaluation flow
 
 Two distinct paths both ultimately call `requestAiEvaluation()` in `lib/ai-evaluation/service.ts`:
@@ -4755,12 +4908,16 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.243 passando (+24 pulados) em 313 arquivos** (308 passando + 5 pulados);
-medido em 2026-08-18 com a correção do popup de revisão IA: **+14 casos e +2 arquivos**
-(`text/pg-safe-text`, `ai-evaluation/revisao-sobrevive-a-desmontagem`).
-Com `find tests -name '*.test.ts*'` = **313** conferido contra os 313 executados, e
-`git diff HEAD origin/main` VAZIO — o `main` não andou entre a medição e agora, que é o outro
-jeito de esta linha nascer velha.
+`npm run test` → **3.289 passando (+24 pulados) em 317 arquivos** (312 passando + 5 pulados);
+medido em 2026-08-19 com o "Preparar e avaliar" da fila de atributos: **+46 casos e +3 arquivos**
+(`ai-evaluation/prontidao-para-avaliar`, `preparar-e-avaliar-ordem`, `preparar-e-avaliar-card`).
+Com `find tests -name '*.test.ts*'` = **317** conferido contra os 317 executados.
+
+⚠️ **Medido num worktree de `origin/main` + só os arquivos deste trabalho**, e as duas metades
+importam: a árvore tinha trabalho de OUTRA frente não commitado (`server/queries/calibration-guards.ts`
+e `tests/unit/orchestration/works-owner-colunas-existem.test.ts`), que inflava o número em 1
+arquivo, e o `main` estava 1 commit à frente do `HEAD` local. Na árvore suja dava "3.293 em 313
+passando", que não seria verdade em commit nenhum.
 
 ⚠️ **Duas linhas seguidas desta seção nasceram velhas, e a causa é a mesma:** o `main` andou
 entre a medição e o merge. Antes desta, a linha dizia "3.193 em 306" enquanto o `main` real era
@@ -4773,7 +4930,8 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.229 em 311** (a densidade de tags do comparador), **3.214 em 309** (o botão de copiar o nome da obra), **3.210 em 308** (a normalização de título no nome da obra, +14 casos e +1 arquivo,
+Antes: **3.243 em 313** (o popup de revisão IA, +14 casos e +2 arquivos: `text/pg-safe-text`,
+`ai-evaluation/revisao-sobrevive-a-desmontagem`), **3.229 em 311** (a densidade de tags do comparador), **3.214 em 309** (o botão de copiar o nome da obra), **3.210 em 308** (a normalização de título no nome da obra, +14 casos e +1 arquivo,
 `titles/normalizar-titulo`), **3.196 em 307** (medido, não o que a linha dizia),
 **3.184 em 304** (a exclusão de status parando de apagar os outros pills, +3 casos sem
 arquivo novo — um teste virou quatro em `ui/ranking-status-exclusao`), **3.181 em 304** (o traço virando a legenda de si mesmo no tooltip, +3 casos sem
