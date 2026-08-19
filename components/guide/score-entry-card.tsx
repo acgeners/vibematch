@@ -63,7 +63,16 @@ interface ScoreEntryCardProps {
 }
 
 export function ScoreEntryCard({ entry, coverage, coverageNeedsSession, first }: ScoreEntryCardProps) {
-  const pct = coverage && coverage.total > 0 ? Math.round((coverage.n / coverage.total) * 100) : null
+  // 🔴 `floor`, não `round`: com 975 de 978 o arredondamento imprime "100%", que afirma
+  // "todas" a dois centímetros de um numerador que diz o contrário. Aqui 100% só sai quando
+  // é 100% de verdade. É a mesma régua do `formatTagShare`, que imprime "<1%" em vez de
+  // arredondar para zero — nas pontas, arredondar troca o número por uma afirmação falsa.
+  const pct =
+    coverage && coverage.total > 0
+      ? coverage.n >= coverage.total
+        ? 100
+        : Math.max(1, Math.floor((coverage.n / coverage.total) * 100))
+      : null
 
   return (
     <article

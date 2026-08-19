@@ -115,19 +115,41 @@ export const getScoreCoverage = cache(async (): Promise<ScoreCoverage> => {
   if (!sessionId) return { total, counts, hasPersonal: false }
 
   const isOwner = sessionId === ownerId
+
+  // 🔴 O `works!inner` + `is_archived` não é enfeite: sem ele a conta ULTRAPASSA o total.
+  // `calculated_scores`, `user_calculated_scores` e `user_work_state` guardam linha de obra
+  // ARQUIVADA (e de obra que saiu do catálogo), enquanto o denominador é `works` ativas.
+  // Medido no clone local em 19/08/2026, com 978 ativas e 10 arquivadas:
+  //
+  //   | contagem            | sem filtro | com filtro |
+  //   |---------------------|-----------:|-----------:|
+  //   | Nota Prevista       |    **981** |        975 |
+  //   | seu Interesse       |    **886** |        883 |
+  //
+  // Ou seja a tela imprimiria "existe em 981 de 978 · 100%" para quem estivesse logado —
+  // um número impossível, na página que existe justamente para explicar os números. O ramo
+  // sem sessão nunca mostrou isso, e foi por isso que passou: a verificação inicial rodou
+  // só como visitante.
+  const somenteAtivas = "work_id, works!inner(id)"
+
   const scores = () =>
     isOwner
-      ? supabase.from("calculated_scores").select("work_id", { count: "exact", head: true })
+      ? supabase
+          .from("calculated_scores")
+          .select(somenteAtivas, { count: "exact", head: true })
+          .eq("works.is_archived", false)
       : supabase
           .from("user_calculated_scores")
-          .select("work_id", { count: "exact", head: true })
+          .select(somenteAtivas, { count: "exact", head: true })
           .eq("user_id", sessionId)
+          .eq("works.is_archived", false)
 
   const estado = () =>
     supabase
       .from("user_work_state")
-      .select("work_id", { count: "exact", head: true })
+      .select(somenteAtivas, { count: "exact", head: true })
       .eq("user_id", sessionId)
+      .eq("works.is_archived", false)
 
   const pessoal: Array<[(typeof COVERAGE_PESSOAL)[number], Promise<number | null>]> = [
     ["nota_prevista", contar(() => scores().not("expected_score", "is", null))],
