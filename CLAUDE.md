@@ -2029,6 +2029,43 @@ em força total é o que separa "medida apontando para baixo" de "apagado". ⚠�
 no preenchimento**: valor e ícone têm 11,5px e seguem na cor cheia — o mesmo motivo pelo qual o
 σ continua imprimindo o sinal (`−2,4σ`). A barra reforça a direção, não é a única a dizê-la.
 
+## Na prévia de hover, a sinopse mora ABAIXO da capa — o vão existia, estava do lado errado
+
+`components/titles/work-hover-preview.tsx`, variante `full` (a de todas as listas: `/catalog`,
+`/ranking`, `/reading`, `/favorites`, `/my-ai-scores`, calendário, cards de fila). Até 2026-08-18 a
+sinopse dividia a coluna estreita à direita da capa: texto espremido em cima, **~90px de vão vazio
+embaixo da capa**. Medido no browser em 18/08 (popup de 420px, CSS e fonte reais, a mesma sinopse):
+
+| | ao lado da capa | abaixo dela |
+|---|---|---|
+| largura da sinopse | 242px | **386px (+59%)** |
+| expandida ("Ler mais") | 27 linhas · prévia de **686px** | **17 linhas · 596px** |
+| colapsada (5 linhas) | 293px, com o vão | 381px, sem vão |
+
+Hoje o cabeçalho é capa + IDENTIFICAÇÃO (título, 18+, ano · capítulos · status, corações de
+Interesse) e a sinopse desce numa faixa própria, largura toda. O divisor virou `border-t` de ponta
+a ponta — antes ele existia só sob a coluna da direita, cortando a prévia pela metade.
+
+⚠️ **A capa encolheu (128×176 → 112×160) e a identificação virou `items-center`: as duas coisas são
+a MESMA decisão.** A identificação pede ~86px, então sobra ar por construção — mantendo a capa
+antiga, o vão só mudaria de lugar (ia pro lado direito dela). Foram desenhados 3 tamanhos × 2
+alinhamentos lado a lado antes de escolher; centrado, a sobra vira respiro dos dois lados em vez de
+buraco embaixo do último chip.
+
+🔴 **`popupHeight` não é enfeite — é ela que decide o `top` quando o gatilho está no fim da lista, e
+o `maxHeight` DERIVA dela.** Estava em 250 com a prévia colapsada medindo 293: a prévia já rolava
+por dentro nas últimas linhas, sem que nada acusasse. Hoje é **390 contra os 381 medidos com título
+de 2 linhas** (o pior caso, `line-clamp-2`). Ao mexer no cabeçalho da prévia, remeça isto junto.
+
+⚠️ **A variante `compact` (view de Cards do `/ranking`) ficou como estava** — lá a sinopse já ocupa
+a largura toda, porque não há capa.
+
+⚠️ **Isto não é testável no vitest** (jsdom não tem layout, e casar `line-clamp-5` protegeria a
+grafia): a verificação é no browser. O caminho, sem sessão e sem banco: rota de shot temporária + o
+componente REAL atrás de um gate de `mounted` — ele lê `window` no RENDER, então o SSR estoura —,
+com 4 estados instanciados de uma vez (cheio · sinopse curta · sem capa com 18+ e título de 2
+linhas · ancorado no rodapé da janela) e `scrollWidth − clientWidth` zero nos quatro.
+
 ## A página da obra tem SEIS abas, e a régua delas é a PERGUNTA — não a procedência
 
 Medido em 13/08/2026 na obra mais completa do catálogo (*Villains Are Destined to Die*, 196
