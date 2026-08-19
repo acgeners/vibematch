@@ -3153,6 +3153,42 @@ própria**: `fetchAllRows` é serial (6 idas a ~300ms contra o banco de Ohio), e
 isso é `fetchAllRowsParallel`. Não foi feito aqui porque trocar um penhasco distante por uma
 regressão de latência medida em segundos é pior negócio.
 
+## Texto vindo de FORA quebra a escrita inteira — e o caractere é invisível
+
+🔴 Medido em 2026-08-18 na nuvem: duas escritas da MESMA avaliação voltaram **400**.
+
+| quando | requisição | quem recusou |
+|---|---|---|
+| 00:04:57 | `POST /rest/v1/work_reviews` | o **Postgres**: `invalid input syntax for type json`, DETAIL *"Unicode low surrogate must follow a high surrogate"* |
+| 00:05:21 | `PATCH /rest/v1/ai_evaluations` | o **PostgREST**, antes de chegar ao banco (o MESMO texto, dentro do `raw_response`) |
+
+A causa é o `.slice(0, 900)` que **os 7 conectores de review** aplicam: ele corta por
+unidade **UTF-16**, então cortar no meio de um emoji deixa metade de um par surrogate.
+`JSON.stringify` preserva a metade órfã e o UTF-8 do banco não tem como representá-la — o
+corpo INTEIRO é recusado. O caractere NUL cai pelo mesmo motivo, em qualquer coluna de texto.
+
+🔴 **O caro não é o 400, é o que cada lado fez com ele.** `saveWorkReviews` só LOGA o erro
+do insert — e o delete por fonte já rodou, então a obra fica sem as reviews daquelas fontes
+(a obra medida ficou com **1 review de 1 fonte**). E o update de `ai_evaluations` **não
+checava erro nenhum**: o código seguiu, releu a linha ainda `processing` e a devolveu ao
+cliente como avaliação pronta. Retrato: as 9 notas gravadas e aplicadas, `status:
+processing`, sem summary, sem confidence, sem model_name e sem `raw_response` — **a única
+assim em 2.538 avaliações** (as outras 9 `processing` presas não têm nota nenhuma). Na
+tela, o popup de revisão abriu com o topo em branco e as notas presentes; sem erro, sem log.
+
+**Dono único: `lib/text/pg-safe-text.ts`** (`pgSafeText` / `pgSafeDeep`). Surrogate
+desemparelhado e NUL saem; **emoji INTEIRO fica** — senão a correção vira censura de texto.
+Aplicado na fronteira de ESCRITA: o `toRow` do `saveWorkReviews` e o `raw_response` do
+`triggerAiEvaluation`, que hoje também **checa o erro** e regrava sem o `raw_response`
+(que é diagnóstico) antes de desistir — abortar jogaria fora a chamada PAGA já feita.
+
+⚠️ **Varrido: os 7 cortes de 900 são todos em REVIEW.** Sinopse, capa e tag externas não
+truncam, então lá o risco é residual (a fonte teria que entregar texto já quebrado). O
+`.slice()` sobre texto de fora é o gesto que reintroduz isto.
+
+⚠️ **O `git` trata `lib/external/persist-reviews.ts` como BINÁRIO, e é pré-existente:** a
+chave de dedup em memória usa um byte NUL como separador. Use `git diff --text` nele.
+
 ## Constants generated from DB
 
 These files are **fully overwritten** by `npm run sync-constants` and must not be edited by hand:
@@ -3331,6 +3367,28 @@ currentEvaluation }`) porque quem consome é o mesmo `AiEvaluationReviewForm`. U
 faria as duas telas divergirem na primeira mudança do formulário. E **não** passa pelo
 `confirmCost`: pedir confirmação de gasto numa leitura ensina a clicar "ok" sem ler, e é
 justamente esse popup que precisa ser levado a sério no botão ao lado.
+
+🔴 **O popup de revisão da PÁGINA DA OBRA "às vezes" não abria — e não era
+intermitente.** O `AiEvaluationButton` mora dentro de `<TabsContent value="ai">`, e o
+Radix **desmonta a aba inativa** (`<Presence present={forceMount || isSelected}>`, e não
+há `forceMount` aqui). Com o resultado em `useState`, trocar de aba — ou navegar —
+durante os ~17,5s da avaliação matava o `setEvaluation` do `onDone`: no-op silencioso,
+avaliação gravada em `review_pending`, popup nunca aberto, e a tarefa azul ainda
+anunciando "pronto". Hoje o resultado vive num store de MÓDULO
+(`lib/ai-evaluation/pending-review-store.ts`), como o `tasks-store` — e **a presença nele
+É o "aberto"**: um `reviewOpen` em estado de componente traz o bug de volta pela outra
+metade. Guardado por `tests/unit/ai-evaluation/revisao-sobrevive-a-desmontagem.test.tsx`,
+cujo caso do MEIO é o único que reprova o arranjo antigo (conferido com sonda: os outros
+três passam verdes com o bug inteiro no lugar).
+
+⚠️ **O mesmo diálogo tinha 512px numa tela de 1512** — `max-w-4xl` **sem `sm:`**, e o
+`DialogContent` traz `sm:max-w-lg`, que vence acima de 640px. É a armadilha que a seção
+do refino por mood já documentava, reincidindo em outro diálogo. Medido no browser com o
+CSS e o dado reais: justificativa de 500 caracteres em **6 linhas**, 1,5 critério por tela;
+com `sm:max-w-[min(64rem,calc(100vw-4rem))]`, **1024px e 2 linhas**. O `min()` em vez de
+`sm:max-w-5xl` seco é MARGEM: o 5xl também vence o `max-w-[calc(100%-2rem)]` da base, e
+entre 640 e 1088px o diálogo encostava nas duas bordas (janela de 900px → diálogo de 900px;
+com o clamp, 836).
 
 🔴 **O botão sai de `works.ai_eval_status`, NUNCA de `matchedFilters`.** `matchedFilters` responde
 "por que a obra apareceu" — a intersecção com os filtros LIGADOS. Uma obra em `review_pending`
@@ -4560,10 +4618,10 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.229 passando (+24 pulados) em 311 arquivos** (306 passando + 5 pulados);
-medido em 2026-08-18 com a linha de densidade de tags do comparador: **+15 casos e +2 arquivos**
-(`tags/densidade-de-tags`, `ui/comparador-densidade-de-tags`).
-Com `find tests -name '*.test.ts*'` = **311** conferido contra os 311 executados, e
+`npm run test` → **3.243 passando (+24 pulados) em 313 arquivos** (308 passando + 5 pulados);
+medido em 2026-08-18 com a correção do popup de revisão IA: **+14 casos e +2 arquivos**
+(`text/pg-safe-text`, `ai-evaluation/revisao-sobrevive-a-desmontagem`).
+Com `find tests -name '*.test.ts*'` = **313** conferido contra os 313 executados, e
 `git diff HEAD origin/main` VAZIO — o `main` não andou entre a medição e agora, que é o outro
 jeito de esta linha nascer velha.
 
@@ -4578,7 +4636,7 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.214 em 309** (o botão de copiar o nome da obra), **3.210 em 308** (a normalização de título no nome da obra, +14 casos e +1 arquivo,
+Antes: **3.229 em 311** (a densidade de tags do comparador), **3.214 em 309** (o botão de copiar o nome da obra), **3.210 em 308** (a normalização de título no nome da obra, +14 casos e +1 arquivo,
 `titles/normalizar-titulo`), **3.196 em 307** (medido, não o que a linha dizia),
 **3.184 em 304** (a exclusão de status parando de apagar os outros pills, +3 casos sem
 arquivo novo — um teste virou quatro em `ui/ranking-status-exclusao`), **3.181 em 304** (o traço virando a legenda de si mesmo no tooltip, +3 casos sem
