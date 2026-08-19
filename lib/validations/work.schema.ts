@@ -6,6 +6,7 @@ import {
   AI_EVAL_STATUSES,
 } from "@/types/domain"
 import { UNTRACKED_PERSONAL_STATUS } from "@/lib/constants/status-lookups"
+import { normalizeAlternativeTitles } from "@/lib/titles/alternative-titles"
 
 const scoreField = (label: string) =>
   z
@@ -62,7 +63,18 @@ export const workFormBase = z.object({
   // Limpar o banco sem fechar a entrada é conserto que precisa ser refeito.
   title: z.string().trim().min(1, "Título obrigatório").max(500),
   original_title: z.string().trim().max(500).nullable().optional(),
-  alternative_titles: z.array(z.string().trim().min(1).max(500)).default([]),
+  /**
+   * 🔴 Quebra o que veio grudado ANTES de validar o tamanho, e o `.pipe` depois do
+   * `.transform` é o que mantém o teto de 500 valendo sobre o TÍTULO, não sobre a lista
+   * colada. Um alias composto ("A / B / C / D / E") chegava aqui como um valor só: passava
+   * na validação, era gravado e vazava do card na tela. Dono da régua:
+   * `lib/titles/alternative-titles.ts`.
+   */
+  alternative_titles: z
+    .array(z.string())
+    .default([])
+    .transform(normalizeAlternativeTitles)
+    .pipe(z.array(z.string().min(1).max(500))),
   synopsis: z.string().max(30000).nullable().optional(),
   genres: z.array(z.string().max(100)).default([]),
   tags: z.array(z.string().max(100)).default([]),

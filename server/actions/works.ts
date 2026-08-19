@@ -36,6 +36,7 @@ import {
 } from "@/lib/server/predictions/resolve-prediction"
 import { markWorkAlignmentStale } from "@/server/queries/alignment"
 import { duplicateKeys, foldTitle, isWeakDuplicateAlias } from "@/lib/title-match"
+import { normalizeAlternativeTitles } from "@/lib/titles/alternative-titles"
 import { fetchAllRows } from "@/lib/supabase/paginate"
 import { startUpdateJob, finishUpdateJob } from "@/lib/background/update-jobs"
 import { fetchExternalData } from "./external"
@@ -238,7 +239,7 @@ function getComparableNames(values: Pick<WorkFormValues, "title" | "original_tit
   return duplicateKeys({
     title: values.title,
     original_title: values.original_title ?? "",
-    alternative_titles: normalizeTextList(values.alternative_titles ?? []),
+    alternative_titles: normalizeAlternativeTitles(values.alternative_titles ?? []),
   })
 }
 
@@ -247,7 +248,7 @@ function getSavedComparableNames(work: any) {
   return duplicateKeys({
     title: work.title,
     original_title: work.original_title,
-    alternative_titles: normalizeTextList(work.alternative_titles ?? []),
+    alternative_titles: normalizeAlternativeTitles(work.alternative_titles ?? []),
   })
 }
 
@@ -964,7 +965,10 @@ async function absorbIncomingAliases(
     }
     if (!toAdd.length) return
 
-    const next = [...(work.alternative_titles ?? []), ...toAdd].slice(0, MAX_ALTERNATIVE_TITLES)
+    const next = normalizeAlternativeTitles([...(work.alternative_titles ?? []), ...toAdd]).slice(
+      0,
+      MAX_ALTERNATIVE_TITLES,
+    )
     const { error } = await supabase
       .from("works")
       .update({ alternative_titles: next })
@@ -1226,7 +1230,7 @@ async function persistNewWork(
     .insert({
       title: data.title,
       original_title: data.original_title ?? null,
-      alternative_titles: normalizeTextList(data.alternative_titles ?? []),
+      alternative_titles: normalizeAlternativeTitles(data.alternative_titles ?? []),
       year: data.year ?? null,
       year_end: data.year_end ?? null,
       publication_status_id:
@@ -1809,7 +1813,7 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
     .update({
       title: data.title,
       original_title: data.original_title ?? null,
-      alternative_titles: normalizeTextList(data.alternative_titles ?? []),
+      alternative_titles: normalizeAlternativeTitles(data.alternative_titles ?? []),
       year: data.year ?? null,
       year_end: data.year_end ?? null,
       publication_status_id:
@@ -2876,7 +2880,9 @@ async function doUpdateWorkExternalData(
     const workFields: Record<string, unknown> = {}
     if (updates.title !== undefined) workFields.title = updates.title
     if (updates.originalTitle !== undefined) workFields.original_title = updates.originalTitle ?? null
-    if (updates.alternativeTitles !== undefined) workFields.alternative_titles = updates.alternativeTitles
+    if (updates.alternativeTitles !== undefined) {
+      workFields.alternative_titles = normalizeAlternativeTitles(updates.alternativeTitles)
+    }
     if (updates.publicationStatus !== undefined) {
       workFields.publication_status_id = getPublicationStatusIdByName(updates.publicationStatus)
     }

@@ -12,6 +12,7 @@
  *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/fix-milady-invader-aliases.ts --apply    # grava
  */
 import { createAdminClient } from "@/lib/supabase/admin"
+import { normalizeAlternativeTitles } from "@/lib/titles/alternative-titles"
 
 const WORK_ID = "2f904f7b-0fe1-42f3-8cbb-d368ff98dcc9"
 const APPLY = process.argv.includes("--apply")
@@ -70,7 +71,7 @@ async function main() {
 
   const { error: upErr } = await sb
     .from("works")
-    .update({ alternative_titles: next })
+    .update({ alternative_titles: normalizeAlternativeTitles(next) })
     .eq("id", WORK_ID)
   if (upErr) throw new Error(upErr.message)
   console.log("✅ GRAVADO.")

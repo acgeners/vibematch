@@ -24,6 +24,7 @@ import { searchMangaDex, fetchMangaDexById, fetchMangaDexForumComments } from ".
 import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews, fetchMangaUpdatesAlternativeTitles } from "./mangaupdates"
 import { withTimeout } from "./with-timeout"
 import { normalizeText, bestTitleMatch, bestTitleMatchDetailed } from "./title-match"
+import { normalizeAlternativeTitles } from "@/lib/titles/alternative-titles"
 // Re-export: fonte única mora em ./title-match; preservado aqui porque vários
 // módulos (matcher de import, chapter-sources, server actions) importam de ./index.
 export { bestTitleMatch, bestTitleMatchDetailed } from "./title-match"
@@ -434,7 +435,10 @@ function mergeSearchResults(query: string, results: ExternalSearchResult[]): Mer
     return {
       title: primary.title,
       originalTitle: primary.originalTitle,
-      alternativeTitles: uniqueStrings(results.flatMap((result) => [
+      // Quebra alias composto ("A / B / C") na entrada: aqui é onde as 9 fontes convergem, e
+      // um valor colado não casa com nada em `foldTitle` — não serve nem pra busca nem pra
+      // duplicata. Dono: lib/titles/alternative-titles.ts.
+      alternativeTitles: normalizeAlternativeTitles(results.flatMap((result) => [
         result.originalTitle,
         ...(result.alternativeTitles ?? []),
       ])),
@@ -821,7 +825,7 @@ async function refineWithAlternativeTitles(
     if (candidate.muId != null) {
       const muAlts = await fetchMangaUpdatesAlternativeTitles(candidate.muId)
       if (muAlts.length > 0) {
-        candidate.alternativeTitles = uniqueStrings([
+        candidate.alternativeTitles = normalizeAlternativeTitles([
           ...(candidate.alternativeTitles ?? []),
           ...muAlts,
         ])
@@ -1830,7 +1834,7 @@ function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[],
   return {
     title: primary.title,
     originalTitle: primary.originalTitle ?? candidate.originalTitle ?? accepted.find((result) => result.originalTitle)?.originalTitle,
-    alternativeTitles: uniqueStrings([
+    alternativeTitles: normalizeAlternativeTitles([
       candidate.originalTitle,
       ...(candidate.alternativeTitles ?? []),
       ...accepted.flatMap((result) => [result.originalTitle, ...(result.alternativeTitles ?? [])]),
