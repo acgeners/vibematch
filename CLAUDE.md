@@ -288,7 +288,7 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**101 arquivos, remedidos em 2026-08-19**):
+banco declara um dos dois (**102 arquivos, remedidos em 2026-08-19**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
@@ -5130,12 +5130,24 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.321 passando (+24 pulados) em 320 arquivos** (315 passando + 5 pulados);
-medido em 2026-08-19 com o smoke pós-deploy, que **não somou caso nenhum** — ele é script, não
-teste, e o único efeito na suíte foi mexer na contagem de arquivos da tabela de alvo (100 →
-101), que `scripts-apontam-pro-local.test.ts` confere. Com `find tests -name '*.test.ts*'` =
-**320** conferido contra os 320 executados, num worktree limpo de `origin/main` (`d1e0ede`) +
-só os arquivos deste trabalho.
+`npm run test` → **3.327 passando (+24 pulados) em 321 arquivos** (316 passando + 5 pulados);
+medido em 2026-08-19 com o teste do deploy: **+6 casos e +1 arquivo**
+(`orchestration/deploy-verifica-o-que-publica`). Com `find tests -name '*.test.ts*'` = **321**
+conferido contra os 321 executados, num worktree limpo de `origin/main` (`ee865f6`) + só os
+arquivos deste trabalho.
+
+🔴 **Meça DEPOIS do `git add`, não só com a árvore limpa — e isto acabou de morder.** O
+`scripts-apontam-pro-local.test.ts` deriva o universo de **`git ls-files`**, que enxerga o
+ÍNDICE do git, não o disco. No PR do smoke (#478) o número foi medido com
+`scripts/smoke-producao.mjs` ainda **untracked**: a varredura via 101 arquivos, o CLAUDE.md
+foi escrito com 101, e no `git add` seguinte o universo virou **102** — deixando o `main` com
+esse teste vermelho, num PR cuja suíte tinha passado. É a versão INVERSA da armadilha da
+árvore suja registrada abaixo: lá o excesso vem do que não está commitado, aqui a falta vem do
+que ainda não entrou no índice.
+
+⚠️ A conferência que fecha os dois lados é comparar **disco com índice**:
+`find tests -name '*.test.ts*' | wc -l` contra `git ls-files tests | grep -c test.ts`. Números
+iguais ⇒ o que você mediu é o que vai virar commit.
 
 ⚠️ **Medido num worktree de `origin/main` + só os arquivos deste trabalho**, e as duas metades
 importam: a árvore tinha trabalho de OUTRA frente não commitado (`server/queries/calibration-guards.ts`
