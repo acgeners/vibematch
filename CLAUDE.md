@@ -1486,6 +1486,63 @@ de slider FIXO em vez de derivado dos momentos — este apagava o filtro do usu�
 Radix clampava o valor fora do domínio e o `commit` gravava `null`. Ver
 `lib/ranking/criterion-unit.ts`, onde cada um está documentado com o número medido.
 
+### O limiar de nota também se DIGITA — o passo do controle não é o passo do dado
+
+Até 2026-08-19 o único jeito de pôr limiar era o preset ou o slider, e o passo deles é o da
+**leitura** (1 ponto nos 9 atributos, 0,5 na Nota Prevista, 5 nos dois percentuais), não o da
+distribuição. Medido no clone local em 19/08:
+
+| nota | linhas | caem na grade do controle |
+|---|---|---|
+| os 9 atributos (`category_scores`) | 8.811 | **100%** (na grade de 0,5; o controle andava de 1 em 1) |
+| Nota Prevista | 981 | **2,3%** |
+| Média externa | 984 | **0%** |
+| Alinhamento (percentil) | 988 | 0,2% |
+
+Ou seja o slider da Nota Prevista pulava faixas inteiras: entre 7,0 e 7,5 moram **275 obras**, e
+entre 7,5 e 8,0 outras **325**. Hoje o editor tem uma linha **Manual** com as duas pontas, do
+mesmo formato do "Manual" dos votos que já existia ao lado.
+
+🔴 **Ele grava pela MESMA régua do slider** (`thresholdToParam`, `lib/ranking/score-threshold.ts`),
+e não por um `updateParams` próprio: é ela que mantém a URL em PONTOS sob a lente σ, que encaixa
+o valor convertido na grade de 0,5 e que descarta limiar na ponta da escala. Um segundo caminho
+de escrita ao lado do primeiro é a família "dois critérios pro mesmo fato" decidindo o que a
+query aplica.
+
+🔴 **O guard de ponta de escala era `p >= 10` FIXO, e com ele todo MÁXIMO de Alinhamento e
+Veredito (escala 0–100) virava `null`** — o slider mostrava a faixa, o chip não aparecia e a URL
+não recebia nada. O servidor sempre soube ler (`maxPersonalFitPct`/`maxAlignment` estão em
+`parseFiltersFromSearchParams` e no `app/ranking/page.tsx`); quem descartava era a UI. Hoje o
+extremo vem de `pointsBounds`, que é 0–10 sob a lente σ (lá o valor gravado é ponto) e `def.min`/
+`def.max` fora dela.
+
+🔴 **E o rótulo do pill arredondava pelas casas do PASSO**: com 7,5 gravado num atributo (passo 1)
+ele imprimia "≥ 8". Não era hipótese — 7,5 já era alcançável pela lente σ antes deste campo. Quem
+formata agora é `formatThresholdNumber`, que usa as casas do VALOR e nunca menos que as do passo.
+
+⚠️ **Vírgula, dos dois lados.** O campo aceita `7,3` e `7.3` (num `type="number"` o Chrome devolve
+string vazia para a vírgula — filtro nenhum, calado, num app em pt-BR), e o pill, a faixa do
+slider e o chip de filtro ativo imprimem em vírgula pelo mesmo formatador. O que **não** mudou é a
+URL: lá o separador segue sendo ponto, porque quem lê é `parseFloat`.
+
+⚠️ **Nos 9 atributos o valor intermediário não compra resolução, e a tela diz isso.** Como as
+notas estão 100% na grade de 0,5, `≥ 7,3` recorta exatamente o que `≥ 7,5` recorta — uma linha
+abaixo do campo explica, e só aparece quando o valor está fora da grade. 🔴 O vizinho é o de
+CIMA no mínimo (e o de BAIXO no máximo), **o oposto do `snapToScoreGrid`**: aquele existe pra
+ALARGAR limiar convertido de σ, e reusá-lo aqui faria a dica dizer "≥ 7,0", que exclui obras que
+o filtro admite.
+
+⚠️ A dica é gateada pelo campo `grid` do def, que só os atributos têm — nas notas contínuas ela
+fica calada, porque lá o intermediário recorta de verdade. Conferido no app: `min_platform_avg`
+8,7 → **4 obras**, 8,75 → **2**, 8,8 → **1**.
+
+⚠️ O pill e o editor saíram do `ranking-filters.tsx` para `components/ranking/score-pills.tsx` —
+é a única parte daquele painel que se monta com 3 props, e é o que permite o teste RENDERIZAR o
+controle real em vez de uma réplica. Guardado por
+`tests/unit/ranking/limiar-manual-de-nota.test.tsx` (14 casos), com 5 sondas conferidas: formatar
+pelas casas do passo, ponta de escala fixa em 10, dica na direção do `snapToScoreGrid`, vírgula
+recusada, e o campo manual removido.
+
 ## Quem ordena, colore ou agrupa por nota tem que ver o MESMO número da tela
 
 Três invariantes do `/ranking`, todas descobertas pelo mesmo sintoma — resultado plausível na
@@ -4908,16 +4965,17 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.289 passando (+24 pulados) em 317 arquivos** (312 passando + 5 pulados);
-medido em 2026-08-19 com o "Preparar e avaliar" da fila de atributos: **+46 casos e +3 arquivos**
-(`ai-evaluation/prontidao-para-avaliar`, `preparar-e-avaliar-ordem`, `preparar-e-avaliar-card`).
-Com `find tests -name '*.test.ts*'` = **317** conferido contra os 317 executados.
+`npm run test` → **3.303 passando (+24 pulados) em 318 arquivos** (313 passando + 5 pulados);
+medido em 2026-08-19 com o limiar manual de nota: **+14 casos e +1 arquivo**
+(`ranking/limiar-manual-de-nota`). Com `find tests -name '*.test.ts*'` = **318** conferido
+contra os 318 executados.
 
 ⚠️ **Medido num worktree de `origin/main` + só os arquivos deste trabalho**, e as duas metades
 importam: a árvore tinha trabalho de OUTRA frente não commitado (`server/queries/calibration-guards.ts`
 e `tests/unit/orchestration/works-owner-colunas-existem.test.ts`), que inflava o número em 1
-arquivo, e o `main` estava 1 commit à frente do `HEAD` local. Na árvore suja dava "3.293 em 313
-passando", que não seria verdade em commit nenhum.
+arquivo, e é preciso conferir que o `HEAD` local ainda é o `origin/main` (`git diff --stat HEAD
+origin/main` vazio). Na árvore suja dava "3.306 em 314 passando", que não seria verdade em commit
+nenhum.
 
 ⚠️ **Duas linhas seguidas desta seção nasceram velhas, e a causa é a mesma:** o `main` andou
 entre a medição e o merge. Antes desta, a linha dizia "3.193 em 306" enquanto o `main` real era
@@ -4930,7 +4988,9 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.243 em 313** (o popup de revisão IA, +14 casos e +2 arquivos: `text/pg-safe-text`,
+Antes: **3.289 em 317** (o "Preparar e avaliar" da fila de atributos, +46 casos e +3
+arquivos: `ai-evaluation/prontidao-para-avaliar`, `preparar-e-avaliar-ordem`,
+`preparar-e-avaliar-card`), **3.243 em 313** (o popup de revisão IA, +14 casos e +2 arquivos: `text/pg-safe-text`,
 `ai-evaluation/revisao-sobrevive-a-desmontagem`), **3.229 em 311** (a densidade de tags do comparador), **3.214 em 309** (o botão de copiar o nome da obra), **3.210 em 308** (a normalização de título no nome da obra, +14 casos e +1 arquivo,
 `titles/normalizar-titulo`), **3.196 em 307** (medido, não o que a linha dizia),
 **3.184 em 304** (a exclusão de status parando de apagar os outros pills, +3 casos sem
