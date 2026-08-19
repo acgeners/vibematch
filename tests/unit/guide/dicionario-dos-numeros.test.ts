@@ -186,6 +186,51 @@ describe("dicionário dos números", () => {
     ).toBe(true)
   })
 
+  it("toda contagem é restrita a obra ATIVA — senão ela ultrapassa o total", () => {
+    // 🔴 O defeito que este caso existe para impedir, medido no clone em 19/08/2026:
+    // `calculated_scores`, `user_calculated_scores` e `user_work_state` guardam linha de obra
+    // ARQUIVADA, e o denominador da página é `works` ativas (978, com 10 arquivadas). Sem o
+    // filtro, a Nota Prevista contava **981** e o Interesse **886** — a tela imprimia
+    // "existe em 981 de 978 · 100%" para quem estivesse logado.
+    //
+    // ⚠️ Ele escapou da primeira verificação porque o ramo pessoal só roda COM sessão, e a
+    // conferência no app foi feita como visitante: o caminho que quebrava nunca executou.
+    // Por isso a guarda é sobre a FORMA da query, que vale para os dois ramos.
+    //
+    // ⚠️ A varredura é por BLOCO de `.from(...)`, não por janela de N caracteres. A primeira
+    // versão olhava 320 chars depois de cada `.select(` e passou verde com o defeito de volta:
+    // a janela alcançava a query VIZINHA, que tinha o filtro, e o caso aprovava a que não
+    // tinha. Conferido com sonda — protegia a vizinhança, não a chamada.
+    const src = readFileSync("server/queries/score-coverage.ts", "utf8")
+    const blocos: Array<{ tabela: string; corpo: string }> = []
+    const re = /\.from\("([a-z_]+)"\)/g
+    let m: RegExpExecArray | null
+    const inicios: Array<{ tabela: string; i: number }> = []
+    while ((m = re.exec(src))) inicios.push({ tabela: m[1], i: m.index })
+    inicios.forEach(({ tabela, i }, k) => {
+      const fim = k + 1 < inicios.length ? inicios[k + 1].i : src.length
+      blocos.push({ tabela, corpo: src.slice(i, fim) })
+    })
+
+    expect(blocos.length, "a varredura não achou as consultas").toBeGreaterThan(3)
+    for (const { tabela, corpo } of blocos) {
+      if (!corpo.includes(".select(")) continue
+      // ⚠️ O filtro é a prova suficiente: `works.is_archived` só é aceito pelo PostgREST se a
+      // projeção trouxer o embed `works!inner` — sem ele a query devolve erro, não zero. Por
+      // isso o caso NÃO procura a string `works!inner` no bloco: ela mora numa constante
+      // compartilhada (`somenteAtivas`), e casar o nome dela seria proteger a grafia.
+      const restringe =
+        tabela === "works" ? /is_archived/.test(corpo) : /works\.is_archived/.test(corpo)
+      expect(
+        restringe,
+        `a contagem sobre "${tabela}" não está restrita a obra ativa — ela pode ultrapassar o total`
+      ).toBe(true)
+    }
+
+    // a projeção que as três tabelas com dono compartilham precisa fechar o universo
+    expect(src, "a projeção do ramo pessoal perdeu o embed de works").toMatch(/works!inner\(/)
+  })
+
   it("nenhuma contagem traz linha do banco", () => {
     // O catálogo já passou de 1.000 obras: somar no cliente cairia no corte silencioso do
     // PostgREST e devolveria um número plausível e errado. Todo `select` daqui é count

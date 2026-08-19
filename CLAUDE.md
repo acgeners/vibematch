@@ -4440,9 +4440,32 @@ reprova em vez de deixar a página afirmando o contrário. O par que mais confun
 igual para todo mundo e não separa nada. E `original_title` é string VAZIA em 102 obras, que
 `not null` não pega: contá-las como preenchidas inflava a cobertura de `Origin` em 10 pontos.
 
-Guardado por `tests/unit/guide/dicionario-dos-numeros.test.ts` (13 casos), com **6 sondas
+🔴 **As contagens pessoais precisam restringir a obra ATIVA, e a primeira versão não
+restringia.** `calculated_scores`, `user_calculated_scores` e `user_work_state` guardam linha
+de obra arquivada, e o denominador é `works` ativas: medido em 19/08 (978 ativas, 10
+arquivadas), a Nota Prevista contava **981** e o Interesse **886** — a tela imprimia
+**"existe em 981 de 978 · 100%"** para quem estivesse logado. Hoje as três fecham o universo
+pelo embed (`works!inner` + `works.is_archived`).
+
+⚠️ **Ele escapou porque o ramo pessoal só roda COM sessão**, e a conferência no app tinha sido
+feita como visitante — o caminho que quebrava nunca executou. Ver
+[[feedback-ver-a-tela-gateada-com-playwright]]: gate de sessão é justamente o que separa "eu
+olhei a página" de "eu olhei o código que a página executa".
+
+⚠️ **A porcentagem usa `floor`, não `round`:** com 975 de 978 o arredondamento imprimia
+"100%", que afirma "todas" a dois centímetros de um numerador dizendo o contrário. Hoje 100%
+só sai quando é 100%. Mesma régua do `formatTagShare` (`<1%` em vez de "0%") — nas pontas,
+arredondar troca o número por uma afirmação falsa.
+
+Guardado por `tests/unit/guide/dicionario-dos-numeros.test.ts` (14 casos), com **10 sondas
 conferidas**: feature do Ridge sem verbete, contagem pessoal sem gate de sessão, `select` sem
-`head`, exclusão listando algo que entra, ressalva órfã e âncora com parêntese.
+`head`, exclusão listando algo que entra, ressalva órfã, âncora com parêntese, e as quatro da
+restrição a obra ativa (dono, outra pessoa, `user_work_state`, projeção sem o embed).
+
+⚠️ **A varredura da restrição é por BLOCO de `.from(...)`, não por janela de caracteres.** A
+1ª versão olhava 320 chars depois de cada `.select(` e **passou verde com o defeito de volta**:
+a janela alcançava a query vizinha, que tinha o filtro. Conferido com sonda — protegia a
+vizinhança, não a chamada.
 
 ## Quem escreve prosa sobre uma obra precisa saber o que os números dela QUEREM DIZER
 
@@ -5012,11 +5035,10 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.316 passando (+24 pulados) em 319 arquivos** (314 passando + 5 pulados);
-medido em 2026-08-19 com o dicionário dos números: **+13 casos e +1 arquivo**
-(`guide/dicionario-dos-numeros`). Com `find tests -name '*.test.ts*'` = **319** conferido
-contra os 319 executados, num worktree limpo de `origin/main` (`c49572e`) + só os arquivos
-deste trabalho.
+`npm run test` → **3.317 passando (+24 pulados) em 319 arquivos** (314 passando + 5 pulados);
+medido em 2026-08-19 com a restrição a obra ativa na cobertura do dicionário: **+1 caso, sem
+arquivo novo**. Com `find tests -name '*.test.ts*'` = **319** conferido contra os 319
+executados, num worktree limpo de `origin/main` (`104f0e7`) + só os arquivos deste trabalho.
 
 ⚠️ **Medido num worktree de `origin/main` + só os arquivos deste trabalho**, e as duas metades
 importam: a árvore tinha trabalho de OUTRA frente não commitado (`server/queries/calibration-guards.ts`
