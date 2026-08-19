@@ -573,18 +573,52 @@ local (`update auth.users set encrypted_password = extensions.crypt('…', exten
 Refazer depois de cada `db:pull`. Desde 2026-08-06 há também **"Esqueci minha senha"**
 (`/forgot-password` → e-mail → `/reset-password`), e no local o e-mail cai no **Mailpit** (`:54324`).
 
-🔴 **PENDENTE: a recuperação de senha NÃO funciona em produção — falta SMTP.** Medido na
-Management API (2026-08-06): `smtp_host`, `smtp_user`, `smtp_pass` e `smtp_admin_email` são
+🔴 **PENDENTE: a recuperação de senha NÃO funciona em produção — falta SMTP.** Remedido na
+Management API em **2026-08-19** (o retrato de 06/08 continua valendo, campo a campo):
+`smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_admin_email` e `smtp_sender_name` são
 **todos `None`**, `hook_send_email_enabled = false`, e `rate_limit_email_sent = 2` **por hora, no
-projeto inteiro**. Com o provedor embutido do Supabase — que é declaradamente de desenvolvimento —
-o e-mail não chega de forma confiável a usuário real. **O código está pronto e testado ponta a
-ponta; o que falta é só configuração.** Três consequências que se explicam mal quando se esquece
-disto:
+projeto inteiro**.
+
+⚠️ **A urgência é BAIXA hoje, e isso é medição — não impressão.** A nuvem tem **2 contas**
+(ambas da dona, 2 ativas em 30 dias) e **`mailer_autoconfirm` está LIGADO**, ou seja o cadastro
+**não depende de e-mail nenhum**. O único fluxo quebrado é o "esqueci minha senha". Decidido em
+19/08/2026: **adiar**, em vez de ligar um Gmail pessoal em produção para 2 contas — e deixar o
+caminho pronto.
+
+```bash
+node scripts/configurar-smtp.mjs                    # ENSAIO: estado atual + plano (não escreve)
+node scripts/configurar-smtp.mjs --executar         # aplica (pede a App Password sem ecoar)
+node scripts/configurar-smtp.mjs --testar=a@b.com   # dispara um reset REAL
+```
+
+🔴 **`--testar` devolvendo 200 NÃO prova que o e-mail chegou** — prova que o Supabase aceitou o
+pedido. Sem SMTP o provedor embutido engole a mensagem e a resposta é exatamente a mesma. A
+única prova é a caixa de entrada. O script imprime isso junto do status, porque é o erro que
+faria alguém marcar a pendência como resolvida sem ela estar.
+
+⚠️ **O script NÃO desliga `mailer_autoconfirm`, de propósito.** Desligá-lo passa a exigir
+confirmação por e-mail no cadastro — com um SMTP recém-configurado e não comprovado, isso troca
+"não dá para recuperar senha" por "não dá para criar conta", que é pior. É passo separado,
+depois de o envio estar comprovado.
+
+⚠️ **Ele sobe `rate_limit_email_sent` de 2 para 30**: o teto é do PROJETO, não por usuário —
+com duas pessoas pedindo reset na mesma hora, a segunda não recebe nada e a tela dela não tem
+como saber.
+
+Com o provedor embutido do Supabase — que é declaradamente de desenvolvimento — o e-mail não
+chega de forma confiável a usuário real. **O código está pronto e testado ponta a ponta
+(`/forgot-password` → e-mail → `/reset-password`, com `resetPasswordForEmail` em
+`server/actions/auth.ts`); o que falta é só configuração.** Três consequências que se explicam
+mal quando se esquece disto:
 
 1. **Traduzir os e-mails é o MESMO item.** `PATCH /v1/projects/{ref}/config/auth` devolve **400**:
    *"Email template modification is not available for free tier projects using the default email
    provider."* Os templates em português já existem em `supabase/templates/*.html` e valem **só no
    local** (via `[auth.email.template.*]`); sobem pra nuvem no dia em que houver SMTP.
+   ⚠️ **Vale RE-TESTAR o PATCH depois de configurar**: a mensagem de erro culpa o *provedor
+   default*, então com SMTP próprio o endpoint pode passar a aceitar. Nunca foi tentado nessa
+   condição — o `configurar-smtp.mjs` imprime o lembrete em vez de tentar sozinho, porque falhar
+   ali abortaria uma configuração que já deu certo.
 2. **Sem domínio próprio, Resend/SendGrid/Mailgun não servem** — exigem domínio verificado
    (SPF/DKIM) pra enviar a terceiros; sem isso só deixam mandar pra você mesmo. O app é
    `satoria.fly.dev`, sem domínio. Então a escolha real é **"Gmail com App Password agora"** ou
@@ -592,7 +626,8 @@ disto:
 3. **Gmail resolve, com dois preços.** `smtp.gmail.com:587` + App Password (exige 2FA na conta).
    Mas o Gmail **reescreve o `From`** pro endereço autenticado — um e-mail de redefinição de senha
    sai de um Gmail pessoal, que é o formato que as pessoas aprenderam a tratar como phishing. E é
-   uso fora do previsto pra conta pessoal. Pro volume atual (3 contas) o teto de envio não pesa.
+   uso fora do previsto pra conta pessoal. Pro volume atual (**2 contas**, medidas em 19/08) o
+   teto de envio não pesa.
 
 ✅ O que **já** está certo na nuvem, não mexer achando que é pendência: `site_url` =
 `https://satoria.fly.dev` e a allow-list já cobre `satoria.fly.dev/**`, `localhost:3001/**` e
