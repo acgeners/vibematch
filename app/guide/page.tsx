@@ -35,6 +35,7 @@ const CARDS: GuideCard[] = [
     details:
       "Um modelo treinado nas notas que você mesmo deu. Ele cruza os nove atributos avaliados pela IA, a média das plataformas, o tamanho e a idade da obra, e o quanto as tags dela batem com o que você ama ou evita. Enquanto você tiver menos de 20 obras avaliadas, ele ainda não tem material — e a SatorIA avisa isso na cara, em vez de chutar.",
     where: "/ranking · card da obra · recomendações",
+    more: { href: "/guide/scores", label: "Ver todos os números e o que move cada um" },
   },
   {
     tier: "a leitura da obra",
