@@ -61,6 +61,7 @@ const PAGES: Array<Omit<SearchEntry, "kind" | "crumb">> = [
   { id: "page-sobre", title: "Sobre a SatorIA", description: "a marca, o método e os 4 passos", href: "/about", minRole: "leitor", requiresSession: false, iconName: "Info" },
   { id: "page-guia", title: "Guia do app", description: "como usar, do zero", href: "/guide", minRole: "leitor", requiresSession: false, iconName: "BookOpenText" },
   { id: "page-guia-atributos", title: "Dicionário dos atributos", description: "o que cada nota de 0 a 10 quer dizer, critério por critério", href: "/guide/attributes", minRole: "leitor", requiresSession: false, iconName: "BookOpenText" },
+  { id: "page-guia-numeros", title: "Dicionário dos números", description: "Prioridade, Nota Prevista, Alinhamento, Veredito — o que cada um quer dizer e o que o move", href: "/guide/scores", minRole: "leitor", requiresSession: false, iconName: "ChartLine" },
 
   { id: "page-my-list", title: "Minha lista", description: "tudo em que você se pronunciou, por status de leitura", href: "/my-list", minRole: "leitor", requiresSession: true, iconName: "Library" },
   { id: "page-leitura", title: "Acompanhamento", description: "o que você está lendo e o ritmo de cada obra", href: "/reading", minRole: "leitor", requiresSession: true, iconName: "BookMarked" },

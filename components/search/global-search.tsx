@@ -6,6 +6,7 @@ import {
   BookMarked,
   BookOpen,
   BookOpenText,
+  ChartLine,
   ChartNoAxesCombined,
   Clock,
   Gauge,
@@ -46,7 +47,7 @@ import { cn } from "@/lib/utils"
 const ICONS: Record<string, LucideIcon> = {
   Home, BookOpen, Trophy, Wand2, Info, BookOpenText, BookMarked, Heart, Clock,
   Upload: BookOpenText, UserCircle, Sparkles, Gauge, Wrench, Activity,
-  ChartNoAxesCombined, Plus, Settings, Globe, Scale, Palette, ShieldAlert,
+  ChartNoAxesCombined, ChartLine, Plus, Settings, Globe, Scale, Palette, ShieldAlert,
   SlidersHorizontal,
 }
 

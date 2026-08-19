@@ -4397,6 +4397,53 @@ conferido com **5 sondas**. Uma delas pegou um caso fraco: a versão inicial che
 cobertura impressa CAI na faixa, e "0,0–3" também cai — passava verde escondendo o meio ponto.
 Hoje o limite é testado pelos dois lados.
 
+### O dicionário dos NÚMEROS é a outra metade — e ele deriva do cálculo, não da prosa
+
+`/guide/scores` (2026-08-19). O dicionário dos atributos responde "o que significa romance
+7,5?"; este responde o que a **Prioridade**, o **Alinhamento** e o **Veredito** querem dizer,
+e o que **não entra** em nenhum deles. São 26 verbetes em três camadas — o que a tela mostra
+(11), o que alimenta a Nota Prevista (9 + 5 referências) e o que você controla (6) — mais a
+lista de exclusões e o mapa do fluxo.
+
+🔴 **A derivação que dá sentido à página é a das FEATURES.** `buildScoreGlossary` percorre
+`EXPECTED_BASELINE_FEATURES` (as entradas reais do Ridge) e o teste reprova feature sem
+verbete. Sem isso, alguém adiciona uma entrada ao modelo, a página continua abrindo, o `tsc`
+continua passando — e o dicionário passa a descrever um cálculo que não é o que roda. Não
+fica quebrado, fica **desatualizado**, que é indistinguível de correto para quem lê. Mesma
+classe do `CRITERIA_SCALE_LEGEND`. As outras duas fontes são `LABELS` (`ui_labels`) e
+`*_RECALC_INPUTS`.
+
+🔴 **A cobertura ("existe em 695 de 978") é CONTADA AO VIVO, e é a informação mais útil da
+página** — ela responde "por que essa coluna está vazia?", que não tinha resposta em tela
+nenhuma. Toda contagem é `count: "exact", head: true`: o catálogo passou de 1.000 obras, e
+somar no cliente cairia no corte silencioso do PostgREST devolvendo um número plausível e
+errado. `head: true` mantém o egress em zero, que é o que permite isto numa página pública.
+
+🔴 **As contagens PESSOAIS não são servidas sem sessão, e a bifurcação é a MESMA do
+`getScoresReader`.** `calculated_scores` não tem `user_id`: a Nota Prevista, o Alinhamento e
+o Veredito que moram lá são do DONO. Sem sessão → nenhuma contagem pessoal; dono →
+`calculated_scores`; outra pessoa → `user_calculated_scores` dela. Servir a do dono a um
+visitante publica o gosto dele com cara de estatística — a falha já medida em `/dashboard`.
+
+⚠️ **Cinco entradas do modelo SÃO medidas que a página já explicou** (`Nota.M` é a Média
+externa, `SinopseScore` é o seu Interesse). Elas viram uma linha de referência, nunca um
+segundo verbete: dois textos para o mesmo número divergem na primeira edição, e esta é a
+página que menos pode se contradizer. Quem declara isso é o campo `sameAs`.
+
+⚠️ **A lista "o que não entra" é escrita à mão porque é o complemento de um universo aberto**
+— mas o teste cruza cada item contra `RECALC_INPUTS`, então ligar `work_genres` ao modelo
+reprova em vez de deixar a página afirmando o contrário. O par que mais confunde está aí:
+**`work_tags` entra e `work_genres` não**, e na página da obra os dois ficam lado a lado.
+
+⚠️ **Achado da varredura, medido no clone em 19/08:** `year_end` existe em **272 de 978 obras
+(27,8%)**, então a feature `RunLength` é imputada pela mediana em 72% do catálogo — contribui
+igual para todo mundo e não separa nada. E `original_title` é string VAZIA em 102 obras, que
+`not null` não pega: contá-las como preenchidas inflava a cobertura de `Origin` em 10 pontos.
+
+Guardado por `tests/unit/guide/dicionario-dos-numeros.test.ts` (13 casos), com **6 sondas
+conferidas**: feature do Ridge sem verbete, contagem pessoal sem gate de sessão, `select` sem
+`head`, exclusão listando algo que entra, ressalva órfã e âncora com parêntese.
+
 ## Quem escreve prosa sobre uma obra precisa saber o que os números dela QUEREM DIZER
 
 Ranking e Deep Dive recebem `category_scores: tragedy=6.0, couple_dynamics=8.0, …` como números
@@ -4868,7 +4915,7 @@ Quatro ocorrências MEDIDAS em 2026-08-13/14, todas com suíte verde:
 | botão de prever Interesse | a obra dizia "Prever de novo" | a fila dizia "Reprever" (e o popup, "Prever") | mesma ação com **três nomes**; e uma instrução na tela (`shadow-compare-panel`) mandava clicar num "Reprever" que já não existiria — ver `lib/ui/interest-predict-label.ts` |
 | card da fila de Interesse | chip "Diverge"/"Bate" (`diverges`) | chip `Δ +1`/`Δ 0` (`delta !== 0`) | o **mesmo predicado**, nas mesmas duas cores, desenhado 2× no mesmo card, com uma 3ª cópia da paleta hand-rollada no `Δ`. Medido: o chip aparecia em 45 de 815 obras (5,5%) e nas 45 o `Δ` já dizia o mesmo — e ele PERDIA a precedência pro "Desatualizado" justo nas 676 stale que tinham o que comparar. Ficou o `Δ` |
 | card de embeddings de `/curation/settings` | a pílula do cabeçalho: contagem do SERVIDOR (`getSettingsItemUnread`) | o StatCard "Sem embedding": `useState` que o `onDone` sobrescrevia com `result.failed` | **"15 pendentes" e "0" no mesmo card, a dois centímetros um do outro**. E `failed` nem é a mesma grandeza — obra que falha ao re-embedar pode já ter linha antiga, ou seja não está "sem embedding". Hoje o número vem só da prop, e quem o atualiza é o `router.refresh()` do fim da execução |
-| explicação do Alinhamento | o **texto** do tooltip e o docstring diziam "40% tag + 30% critério + 30% consistência" | o **código** roda `netNameOverlap` (só tags, sem critério) | a fórmula descrita foi APOSENTADA em 27/06 e virou código morto; as duas superfícies seguiram documentando-a por ~2 meses, e quem lesse o arquivo pra entender o número aprenderia a fórmula errada. Aqui o "outro lado" não era um segundo cálculo — era **prosa**, que não tem como divergir barulhentamente |
+| explicação do Alinhamento | o **texto** do tooltip e o docstring diziam "40% tag + 30% critério + 30% consistência" | o **código** roda `netNameOverlap` (só tags, sem critério) | a fórmula descrita foi APOSENTADA em 27/06 e virou código morto; as duas superfícies seguiram documentando-a por ~2 meses, e quem lesse o arquivo pra entender o número aprenderia a fórmula errada. Aqui o "outro lado" não era um segundo cálculo — era **prosa**, que não tem como divergir barulhentamente. ✅ **A terceira superfície fechou em 19/08 (migration 194)**: `ui_labels.personal_fit.tooltip_full` ainda dizia "faixas ideais de critério e consistência geral", e ela alimenta o seletor de colunas, o heatmap e o painel de filtros — corrigir o docstring não alcançava o texto que a pessoa LÊ. Guardado por um caso em `dicionario-dos-numeros.test.ts` que casa a AFIRMAÇÃO, não a palavra (o texto novo cita "critério" de propósito, pra dizer que ele não entra) |
 | nota calibrada × prosa da avaliação | `category_scores.score`, que a auditoria reescreve | `ai_evaluation_scores.justification`, que ela não toca | **27 das 37** notas calibradas exibiam prosa contradizendo o próprio número (1,79 ponto de distância), sob o selo ✨ de uma avaliação que não as produziu — e `ai_calibrated` não aparecia em UI nenhuma, então nada sinalizava a troca de autor |
 | aceitar sugestão de calibração | a guarda olhava o `source` do score | a nota em si tinha mudado | reavaliação reescreve o valor mantendo `ai_accepted` ⇒ **132 das 583 pendentes (23%)** julgavam um número que já não existia, e aceitar sobrescrevia a reavaliação mais nova sem erro |
 | régua de coerência faixa × nota | um regex por script, com o 1º par de números | `bandForScore`, que usa bin semiaberto | **483 acusações**, das quais 226 eram meio ponto na borda e 6 de 6 amostradas eram citação composta. O real são 71 — e quem derrubou o número foi a AMOSTRAGEM, que o cabeçalho do próprio script já mandava fazer |
@@ -4965,10 +5012,11 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.303 passando (+24 pulados) em 318 arquivos** (313 passando + 5 pulados);
-medido em 2026-08-19 com o limiar manual de nota: **+14 casos e +1 arquivo**
-(`ranking/limiar-manual-de-nota`). Com `find tests -name '*.test.ts*'` = **318** conferido
-contra os 318 executados.
+`npm run test` → **3.316 passando (+24 pulados) em 319 arquivos** (314 passando + 5 pulados);
+medido em 2026-08-19 com o dicionário dos números: **+13 casos e +1 arquivo**
+(`guide/dicionario-dos-numeros`). Com `find tests -name '*.test.ts*'` = **319** conferido
+contra os 319 executados, num worktree limpo de `origin/main` (`c49572e`) + só os arquivos
+deste trabalho.
 
 ⚠️ **Medido num worktree de `origin/main` + só os arquivos deste trabalho**, e as duas metades
 importam: a árvore tinha trabalho de OUTRA frente não commitado (`server/queries/calibration-guards.ts`
@@ -4988,7 +5036,8 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.289 em 317** (o "Preparar e avaliar" da fila de atributos, +46 casos e +3
+Antes: **3.303 em 318** (o limiar manual de nota, +14 casos e +1 arquivo,
+`ranking/limiar-manual-de-nota`), **3.289 em 317** (o "Preparar e avaliar" da fila de atributos, +46 casos e +3
 arquivos: `ai-evaluation/prontidao-para-avaliar`, `preparar-e-avaliar-ordem`,
 `preparar-e-avaliar-card`), **3.243 em 313** (o popup de revisão IA, +14 casos e +2 arquivos: `text/pg-safe-text`,
 `ai-evaluation/revisao-sobrevive-a-desmontagem`), **3.229 em 311** (a densidade de tags do comparador), **3.214 em 309** (o botão de copiar o nome da obra), **3.210 em 308** (a normalização de título no nome da obra, +14 casos e +1 arquivo,
