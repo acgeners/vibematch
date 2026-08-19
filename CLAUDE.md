@@ -3323,11 +3323,44 @@ healthcheck genérico**: depois de publicar, bata nas rotas de verdade e olhe o 
 o status.
 
 Guardado por `tests/unit/orchestration/works-owner-colunas-existem.test.ts`, que **deriva as
-colunas da view da migration vigente** e as compara com o que o source pede. ⚠️ Ele declara o
-próprio alcance: cobre os `.select("literal")` do `calibration-guards.ts`, e os outros **9
-consumidores** de `works_owner` montam o select em template literal com embeds — extrair isso
-pede um parser de argumento com parênteses balanceados, e vale PR próprio. Um teste que
-checasse só o que sabe parsear, sem dizer quanto pulou, daria falso conforto.
+colunas da view da migration vigente** e as compara com o que o source pede.
+
+### 🔴 ABERTO: a varredura de `works_owner` cobre 8 de 27 leituras — e o resto foi medido
+
+Inventário levantado em 2026-08-19, depois de o defeito da `/ranking` ser corrigido. O número
+"9 consumidores" que esta seção trazia estava errado: saiu de um `grep | head`, nunca de uma
+contagem.
+
+| | |
+|---|---|
+| arquivos que leem `works_owner` | **18** |
+| leituras (`.from().select()`) | **27** |
+| ↳ com string literal | **16** |
+| ↳ ↳ que a regex do teste HOJE alcança | **8** |
+| ↳ template literal · variável · constante | 5 · 4 · 2 |
+
+⚠️ **O teste perde metade dos LITERAIS, não só os dinâmicos.** A regex exige o `.select(`
+colado no `.from("works_owner")`, e 8 das 16 leituras literais quebram a linha entre os dois
+(o Prettier faz isso quando o select é longo). Isso não estava registrado — a seção dizia que
+o buraco eram só os selects montados, e ele começa antes.
+
+✅ **Nenhum defeito VIVO, e isso é medição, não impressão.** Rodando um parser de vírgula em
+nível zero sobre as 16 leituras literais, **zero** pedem coluna que a view não expõe. Logo o
+PR que estender a varredura é **preventivo**, não corretivo — e a urgência dele é a de uma
+rede, não a de um conserto.
+
+🔴 **O parser PRECISA de parênteses balanceados, e a prova é um falso positivo real.** Uma
+quebra ingênua por vírgula sobre
+`"id, user_score, calculated_scores(expected_score, calc_score, personal_fit, …)"`
+(`lib/server/predictions/record-prediction.ts`) acusa `calc_score` e `personal_fit` como
+colunas ausentes de `works_owner` — elas são do EMBED, e o embed tem régua própria. Sem o
+balanceamento, a varredura nova nasceria acusando código correto, que é o jeito mais rápido de
+um teste ser desligado.
+
+⚠️ **O que sobra sem solução estática são as 11 leituras montadas** (template literal com
+interpolação, variável e constante). Resolver isso pede seguir a variável até a definição — e
+um teste que checasse só o que sabe parsear, **sem dizer quanto pulou**, daria falso conforto.
+Se o parser não alcançar todas, ele tem que IMPRIMIR a lista das que ficaram de fora.
 
 🔴 **O caso mais próximo de disparar, achado em 2026-08-14 e corrigido:** a leitura de
 `work_embeddings` em `loadEmbeddingCandidates` não tinha `.range()` NEM `.limit()`. Medido no
