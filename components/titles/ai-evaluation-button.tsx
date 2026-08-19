@@ -380,14 +380,23 @@ export function AiEvaluationButton({
       >
         {/* 🔴 `sm:` obrigatório: o `DialogContent` traz `sm:max-w-lg`, e a variante
             responsiva VENCE a classe base acima de 640px — com `max-w-4xl` (sem
-            `sm:`) este diálogo ficava em **512px** numa tela de 1512, medido no
-            browser em 2026-08-18: justificativa de 500 caracteres em **6 linhas**,
-            1,5 critério por tela. Com o teto abaixo: **1024px** e **2 linhas**.
-            O `min()` em vez de `sm:max-w-5xl` seco é MARGEM: o 5xl também vence o
-            `max-w-[calc(100%-2rem)]` da base, então entre 640 e 1088px o diálogo
-            encostava nas duas bordas (medido: janela de 900px → diálogo de 900px;
-            com o clamp, 836). */}
-        <DialogContent className="max-h-[90vh] sm:max-w-[min(64rem,calc(100vw-4rem))] overflow-y-auto">
+            `sm:`) este diálogo ficava em **512px** numa tela de 1512.
+
+            🔴 **E largura NÃO é "quanto mais melhor": ela satura.** Medido no
+            browser em 2026-08-18, mesma obra, janela de 1035px, somando as linhas
+            das NOVE justificativas:
+
+              512px → 20 linhas · 672px → 18 · 768px → 18 · 896px → 17 · 971px → 17
+
+            De 672 para 971 ganha-se **uma linha em nove justificativas** (4% de
+            altura) e paga-se com o diálogo ocupando **94% da janela** em vez de
+            65% — foi assim que a 1ª correção passou de estreito demais a largo
+            demais. 42rem é onde o texto já cabe.
+
+            O `min()` em vez de `sm:max-w-2xl` seco é MARGEM: qualquer `sm:max-w-*`
+            vence o `max-w-[calc(100%-2rem)]` da base, então sem o clamp o diálogo
+            encosta nas duas bordas em janela estreita. */}
+        <DialogContent className="max-h-[90vh] sm:max-w-[min(42rem,calc(100vw-4rem))] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Revisar avaliação IA</DialogTitle>
             <DialogDescription>

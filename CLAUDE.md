@@ -3383,12 +3383,23 @@ três passam verdes com o bug inteiro no lugar).
 
 ⚠️ **O mesmo diálogo tinha 512px numa tela de 1512** — `max-w-4xl` **sem `sm:`**, e o
 `DialogContent` traz `sm:max-w-lg`, que vence acima de 640px. É a armadilha que a seção
-do refino por mood já documentava, reincidindo em outro diálogo. Medido no browser com o
-CSS e o dado reais: justificativa de 500 caracteres em **6 linhas**, 1,5 critério por tela;
-com `sm:max-w-[min(64rem,calc(100vw-4rem))]`, **1024px e 2 linhas**. O `min()` em vez de
-`sm:max-w-5xl` seco é MARGEM: o 5xl também vence o `max-w-[calc(100%-2rem)]` da base, e
-entre 640 e 1088px o diálogo encostava nas duas bordas (janela de 900px → diálogo de 900px;
-com o clamp, 836).
+do refino por mood já documentava, reincidindo em outro diálogo.
+
+🔴 **A 1ª correção errou para o outro lado, e o motivo é medido: LARGURA SATURA.** Com
+`min(64rem, …)` o diálogo ocupava **94% da janela** de quem reportou (971px em 1035) —
+"muito largo". Somando as linhas das NOVE justificativas da mesma obra, na mesma janela:
+
+| largura | 512 (era) | 672 | 768 | 896 | 971 |
+|---|---|---|---|---|---|
+| linhas somadas | **20** | **18** | 18 | 17 | 17 |
+| altura do conteúdo | 2519px | 2249 | 2229 | 2161 | 2161 |
+| % da janela de 1035px | 49% | **65%** | 74% | 87% | 94% |
+
+Ou seja: de 672 para 971 compra-se **uma linha em nove**, ao custo de encher a tela. Hoje é
+`sm:max-w-[min(42rem,calc(100vw-4rem))]`. ⚠️ O `min()` não é preciosismo: qualquer
+`sm:max-w-*` vence o `max-w-[calc(100%-2rem)]` da base, então sem o clamp o diálogo
+encosta nas duas bordas em janela estreita (medido com o teto antigo: janela de 900px →
+diálogo de 900px; com o clamp, 836).
 
 🔴 **O botão sai de `works.ai_eval_status`, NUNCA de `matchedFilters`.** `matchedFilters` responde
 "por que a obra apareceu" — a intersecção com os filtros LIGADOS. Uma obra em `review_pending`
