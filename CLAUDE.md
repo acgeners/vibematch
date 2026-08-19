@@ -4565,12 +4565,35 @@ no celular vê uma parede de ícones antes de "Como ler a escala". A saída dese
 horizontal rolável** (uma linha, artes ~56px, ~110px de altura) só abaixo de 660px, sem tocar no
 desktop. ⚠️ É uma media query, não um redesenho — o número a bater é 561px.
 
-⚠️ **Também aberto: a página tem UMA porta de entrada só** (o card do `/guide` + a busca ⌘K).
-O lugar que falta é o cabeçalho do bloco "Notas por critério" da aba Análise da IA — quem está
-olhando as 9 notas de uma obra é exatamente quem quer saber o que elas significam. **Não** ponha
-no chip de faixa (são 9 por obra, e o chip já mostra a rubrica daquela faixa no tooltip) nem
-DENTRO de um tooltip: o do Radix fecha quando o mouse sai do gatilho, e o link fica
-inalcançável.
+✅ **As portas de entrada foram abertas (2026-08-19).** Até então os DOIS dicionários tinham
+**zero** links fora do próprio `/guide` e do índice do ⌘K — ou seja, só chegava neles quem já
+sabia que existiam, que é quem menos precisa. Conteúdo publicado e inalcançável é pior que
+conteúdo ausente: envelhece sem ninguém ler, e quem mantém acha que está servindo alguém.
+
+Hoje `GlossaryLink` (`components/guide/glossary-link.tsx`) leva ao dicionário **a partir da tela
+onde o número está sendo lido**: os atributos pelo cabeçalho de "Notas por critério" (aba Análise
+da IA) e os números pelo rodapé de "Notas calculadas" (aba Notas & Avaliações).
+
+🔴 **Os dois lugares são DIFERENTES por MEDIÇÃO, não por gosto.** No bloco de atributos o
+cabeçalho tem 459px de folga e o link (181×20) entra sem tocar em nada. No de "Notas calculadas"
+o topo tem **374px** e o bloco da Nota Prevista ocupa a direita: com o link ali, o título QUEBRA
+em duas linhas — medido no browser, **86×48 contra 136×24**. Por isso ali ela desceu pro rodapé,
+onde tem a largura toda e fica logo abaixo dos números que explica. Medido nas quatro larguras
+(1500/1280/1024/820): zero vazamento do card, zero rolagem horizontal, título em uma linha.
+
+⚠️ **Não** ponha no chip de faixa (são 9 por obra, e o chip já mostra a rubrica daquela faixa no
+tooltip) nem **DENTRO de um tooltip**: o `TooltipContent` do Radix fecha quando o mouse sai do
+gatilho, e o link fica inalcançável — capacidade construída e desligada. E **sem ✨**: a marca
+significa "um modelo escreveu isto", e o dicionário é texto do projeto.
+
+⚠️ **A verificação foi como VISITANTE**, então o card de "Notas calculadas" apareceu no ramo
+DEGRADADO (sem `expected_score`, que é pessoal). O rodapé é o mesmo nos dois ramos, mas o card
+cheio não foi visto — se ele ficar apertado, é ali que aparece.
+
+Guardado por `tests/unit/guide/portas-de-entrada.test.ts`, que **deriva os dicionários do
+filesystem** (`app/guide/<x>/page.tsx`): dicionário novo nasce precisando de porta ou reprova. Ele
+também recusa porta dentro de `<TooltipContent>`. Quatro sondas conferidas — remover cada uma das
+duas portas, movê-la pra dentro de um tooltip, e criar um dicionário novo sem porta.
 
 Guardado por `tests/unit/guide/dicionario-de-atributos.test.ts`, que **deriva de
 `CRITERION_SLUGS`** (critério novo no Supabase entra na página sozinho, ou reprova) e foi
@@ -5216,13 +5239,12 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.360 passando (+24 pulados) em 321 arquivos** (316 passando + 5 pulados);
-medido em 2026-08-19 com a cobertura de FILTRO/ORDER na varredura de `works_owner`: **+9 casos
-e ZERO arquivo** — o teste que cresceu já existia (`orchestration/works-owner-colunas-existem`,
-de 28 para 37 casos). Com `git ls-files` = **321** conferido contra os 321 executados, num worktree limpo de
+`npm run test` → **3.367 passando (+24 pulados) em 322 arquivos** (317 passando + 5 pulados);
+medido em 2026-08-19 com as portas de entrada dos dicionários: **+7 casos e +1 arquivo**
+(`guide/portas-de-entrada`). Com `git ls-files` = **321** conferido contra os 321 executados, num worktree limpo de
 `origin/main` (`05aa87a`) + só os arquivos deste trabalho.
 
-⚠️ **O antes E o depois foram medidos no MESMO worktree, na mesma sessão** (3.351 → 3.360), em
+⚠️ **O antes E o depois foram medidos no MESMO worktree, na mesma sessão** (3.360 → 3.367), em
 vez de subtrair do número escrito aqui. É a única forma que sobrevive ao `main` ter andado
 entre a medição e o merge — o modo como esta linha envelheceu todas as vezes anteriores.
 
@@ -5257,7 +5279,8 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.351 em 321** (a varredura de `works_owner` cobrindo os 32 pontos de LEITURA,
+Antes: **3.360 em 321** (a varredura de `works_owner` cobrindo FILTRO/ORDER, +9 casos),
+**3.351 em 321** (a varredura de `works_owner` cobrindo os 32 pontos de LEITURA,
 +24 casos), **3.327 em 321** (o teste do deploy, +6 casos e +1 arquivo,
 `orchestration/deploy-verifica-o-que-publica`), **3.303 em 318** (o limiar manual de nota, +14 casos e +1 arquivo,
 `ranking/limiar-manual-de-nota`), **3.289 em 317** (o "Preparar e avaliar" da fila de atributos, +46 casos e +3

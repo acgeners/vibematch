@@ -99,6 +99,7 @@ import { hasEditionNoteTag } from "@/lib/tags/edition-note-tags"
 import { TagRowAction } from "@/components/ai-evaluation/tag-actions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { GlossaryLink } from "@/components/guide/glossary-link"
 import { CriterionIcon } from "@/components/titles/criterion-icon"
 import { CriterionBandChip } from "@/components/titles/criterion-band-chip"
 import { CriterionFitBar } from "@/components/titles/criterion-fit-bar"
@@ -1254,6 +1255,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             {/* Mesmo objeto de proveniência do "Resumo da última avaliação IA": as
                 9 notas e o resumo saem da MESMA avaliação. */}
             {aiEvalProvenance && <AiProvenanceSeal {...aiEvalProvenance} />}
+            {/* A porta do dicionário mora AQUI, e não no chip de faixa: quem está olhando as
+                9 notas de uma obra é exatamente quem quer saber o que elas significam. */}
+            <GlossaryLink href="/guide/attributes">O que cada nota quer dizer</GlossaryLink>
           </div>
         </CardHeader>
         <CardContent>
@@ -1766,6 +1770,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 </div>
               </div>
             )}
+          {/* 🔴 A porta deste card NÃO cabe no cabeçalho: medido em 2026-08-19, o topo tem
+              374px e o bloco da Nota Prevista ocupa a direita — com o link ali o título
+              "Notas calculadas" QUEBRA em duas linhas (86x48). No rodapé ela tem a largura
+              toda, e fica logo abaixo dos números que explica. */}
+          <div className="mt-4 flex justify-end border-t border-border/40 pt-3">
+            <GlossaryLink href="/guide/scores">De onde vem cada número</GlossaryLink>
+          </div>
           </CardContent>
         </Card>
 
