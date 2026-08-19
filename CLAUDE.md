@@ -3335,14 +3335,27 @@ contagem.
 |---|---|
 | arquivos que leem `works_owner` | **18** |
 | leituras (`.from().select()`) | **27** |
-| ↳ com string literal | **16** |
-| ↳ ↳ que a regex do teste HOJE alcança | **8** |
-| ↳ template literal · variável · constante | 5 · 4 · 2 |
+| ↳ literal **sem** parêntese — a regex do teste alcança | **8** |
+| ↳ literal **com embed** — rejeitado | **8** |
+| ↳ não-literal (template · variável · constante) | **11** |
 
-⚠️ **O teste perde metade dos LITERAIS, não só os dinâmicos.** A regex exige o `.select(`
-colado no `.from("works_owner")`, e 8 das 16 leituras literais quebram a linha entre os dois
-(o Prettier faz isso quando o select é longo). Isso não estava registrado — a seção dizia que
-o buraco eram só os selects montados, e ele começa antes.
+⚠️ **O teste perde metade dos LITERAIS, não só os dinâmicos** — e a causa **não** é a que esta
+seção afirmou primeiro. A regex é
+
+```
+/\.from\("works_owner"\)\s*\.select\(\s*"([^"()]*)"/
+```
+
+e o `\s*` **já aceita quebra de linha**: o Prettier quebrando o `.select(` para a linha de
+baixo não tira nada dela. Quem rejeita 8 leituras literais é a classe **`[^"()]`** — ela
+descarta qualquer select que contenha um EMBED, e embed é o caso comum aqui
+(`work_covers(url, is_primary)`, `calculated_scores(expected_score)`).
+
+🔴 **A correção do texto importa mais que o número**, porque a causa errada manda consertar a
+coisa errada: "soltar a regex para aceitar quebra de linha" não mudaria **nada**. O conserto
+barato é tirar o `()` da classe e quebrar por vírgula em nível ZERO — que é o mesmo parser de
+parênteses balanceados que o resto do trabalho já exige. Ou seja, o passo 1 e o passo 2 são o
+mesmo passo.
 
 ✅ **Nenhum defeito VIVO, e isso é medição, não impressão.** Rodando um parser de vírgula em
 nível zero sobre as 16 leituras literais, **zero** pedem coluna que a view não expõe. Logo o
