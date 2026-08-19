@@ -49,8 +49,10 @@ import { join, dirname, resolve as resolvePath } from "node:path"
  * embed e o `pageAll` apareceram. Checar só o que se sabe parsear, calado, dá falso conforto.
  *
  * ⚠️ Select que o parser não conseguir resolver também REPROVA, com o texto da expressão. A
- * saída não é apagar a asserção: é declarar na linha `// works-owner-dinamico: <motivo>`, e
- * o teste imprime quantas declarações existem (hoje **0**) pra elas não se acumularem caladas.
+ * saída não é apagar a asserção: é declarar `// works-owner-dinamico: <motivo>` em qualquer
+ * linha da cadeia. A declaração é PERMITIDA (exigir zero faria a válvula não abrir) mas
+ * precisa carregar motivo, e a contagem vai no TÍTULO do caso — é o que aparece em toda
+ * execução da suíte, então elas não se acumulam caladas. Hoje: **0**.
  */
 
 const ROOT = join(__dirname, "../../..")
@@ -92,7 +94,7 @@ const VIEW = colunasDaView("works_owner")
 type Ler = (rel: string) => string | null
 
 interface Pedido { arquivo: string; linha: number; coluna: string; via: string }
-interface Pendencia { arquivo: string; linha: number; motivo: string }
+interface Pendencia { arquivo: string; linha: number; motivo: string; declaracao?: string }
 interface Varredura {
   pedidos: Pedido[]
   naoResolvidos: Pendencia[]
@@ -534,19 +536,33 @@ export function varrerWorksOwner(arquivos: string[], ler: Ler): Varredura {
     const linhasBrutas = bruto.split("\n")
     const classificadas = new Set<number>()
 
-    /** `// works-owner-dinamico: <motivo>` na linha da leitura ou nas 3 acima. */
-    const declaradoPerto = (linha: number) =>
-      linhasBrutas.slice(Math.max(0, linha - 4), linha).some((l) => l.includes("works-owner-dinamico:"))
+    /**
+     * `// works-owner-dinamico: <motivo>` em qualquer linha da leitura — das 3 ACIMA do
+     * `.from` até o fim do argumento.
+     *
+     * 🔴 A janela precisa cobrir a cadeia INTEIRA, não só o que vem antes: o lugar natural
+     * de escrever o marcador é encostado no `.select(`, que fica ABAIXO do `.from`. Com a
+     * janela só pra cima, a declaração era ignorada e a válvula não abria — capacidade
+     * construída e desligada, que é pior que válvula nenhuma.
+     */
+    const declaracaoPerto = (linha: number, linhaFim: number): string | null => {
+      for (const l of linhasBrutas.slice(Math.max(0, linha - 4), Math.max(linha, linhaFim))) {
+        const m = l.match(/works-owner-dinamico:(.*)$/)
+        if (m) return m[1].trim()
+      }
+      return null
+    }
 
     const registrar = (idx: number, linha: number, via: string, colunas: string[]) => {
       locais.add(`${f}:${linha}`)
       for (const c of colunas) pedidos.push({ arquivo: f, linha, coluna: c, via })
       classificadas.add(idx)
     }
-    const pendente = (idx: number, linha: number, motivo: string) => {
+    const pendente = (idx: number, linha: number, motivo: string, linhaFim = linha) => {
       classificadas.add(idx)
       locais.add(`${f}:${linha}`)
-      if (declaradoPerto(linha)) declarados.push({ arquivo: f, linha, motivo })
+      const declaracao = declaracaoPerto(linha, linhaFim)
+      if (declaracao != null) declarados.push({ arquivo: f, linha, motivo, declaracao })
       else naoResolvidos.push({ arquivo: f, linha, motivo })
     }
 
@@ -562,11 +578,11 @@ export function varrerWorksOwner(arquivos: string[], ler: Ler): Varredura {
       const primeiro = fatiarNivelZero(arg.texto)[0] ?? ""
       if (met[1] === "select") {
         const strings = comoStrings(f, primeiro)
-        if (!strings) { pendente(idx, linha, `.select(${resumir(primeiro)})`); continue }
+        if (!strings) { pendente(idx, linha, `.select(${resumir(primeiro)})`, linhaDe(src, arg.fim)); continue }
         registrar(idx, linha, ".select()", strings.flatMap(colunasDoSelect))
       } else if (met[1] === "update" || met[1] === "insert" || met[1] === "upsert") {
         const chaves = chavesDoObjeto(f, primeiro)
-        if (!chaves) { pendente(idx, linha, `.${met[1]}(${resumir(primeiro)})`); continue }
+        if (!chaves) { pendente(idx, linha, `.${met[1]}(${resumir(primeiro)})`, linhaDe(src, arg.fim)); continue }
         registrar(idx, linha, `.${met[1]}()`, chaves)
       } else {
         // `.delete()` e afins não nomeiam coluna — a cadeia está classificada e não pede nada.
@@ -594,7 +610,7 @@ export function varrerWorksOwner(arquivos: string[], ler: Ler): Varredura {
       if (!arg) { pendente(idx, linha, `${m[1]}("works_owner", …) ilegível`); continue }
       const cols = fatiarNivelZero(arg.texto)[1] ?? ""
       const strings = comoStrings(f, cols)
-      if (!strings) { pendente(idx, linha, `${m[1]}("works_owner", ${resumir(cols)})`); continue }
+      if (!strings) { pendente(idx, linha, `${m[1]}("works_owner", ${resumir(cols)})`, linhaDe(src, arg.fim)); continue }
       registrar(idx, linha, `${m[1]}()`, strings.flatMap(colunasDoSelect))
     }
 
@@ -683,8 +699,23 @@ describe("contrato de colunas da view works_owner", () => {
         "conferidas contra a view. Extraia a lista pra uma const legível, ou declare o motivo " +
         "na linha com `// works-owner-dinamico: <motivo medido>`.",
     ).toEqual([])
-    // Exceção declarada não pode virar hábito: hoje são ZERO, e o número aparece aqui.
-    expect(REPO.declarados.map((d) => `${d.arquivo}:${d.linha}`)).toEqual([])
+  })
+
+  /**
+   * ⚠️ A contagem vai no TÍTULO de propósito: é ela que aparece em toda execução da suíte,
+   * então exceção declarada não se acumula calada. Exigir ZERO aqui seria a válvula não
+   * abrir — declarar só trocaria qual linha reprova, que foi o defeito da 1ª versão.
+   */
+  it(`exceção declarada carrega MOTIVO (hoje ${REPO.declarados.length})`, () => {
+    const semMotivo = REPO.declarados
+      .filter((d) => (d.declaracao ?? "").length < 12)
+      .map((d) => `${d.arquivo}:${d.linha} → "${d.declaracao ?? ""}"`)
+    expect(
+      semMotivo,
+      "`// works-owner-dinamico:` sem motivo escrito é só um jeito de calar o teste. " +
+        "Diga POR QUE as colunas não podem ser estáticas — quem ler daqui a seis meses " +
+        "precisa saber se a razão ainda vale.",
+    ).toEqual([])
   })
 
   it("🔴 nenhuma leitura pede coluna que a view não expõe", () => {
@@ -793,6 +824,22 @@ describe("o que a varredura não sabe ler, ela DENUNCIA", () => {
     })
     expect(v.naoResolvidos).toEqual([])
     expect(v.declarados).toHaveLength(1)
+    expect(v.declarados[0].declaracao).toBe("as colunas vêm da escolha do usuário")
+  })
+
+  it("🔴 o marcador vale ABAIXO do `.from` — é onde a pessoa naturalmente escreve", () => {
+    // A 1ª versão só olhava as linhas ACIMA do `.from`, então a válvula não abria e
+    // declarar apenas trocava qual asserção reprovava.
+    const v = sondar({
+      "a.ts": `sb\n  .from("works_owner")\n  // works-owner-dinamico: as colunas dependem dos filtros da tela\n  .select(montaColunas(opts))`,
+    })
+    expect(v.naoResolvidos).toEqual([])
+    expect(v.declarados).toHaveLength(1)
+  })
+
+  it("marcador SEM motivo não conta como declaração útil", () => {
+    const v = sondar({ "a.ts": `// works-owner-dinamico:\nsb.from("works_owner").select(montaColunas(opts))` })
+    expect(v.declarados[0].declaracao).toBe("")
   })
 
   it("🔴 forma NOVA de tocar a view não passa calada", () => {

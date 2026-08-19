@@ -3371,21 +3371,34 @@ migration mais recente que a recria (hoje a **184**). O PR é REDE, não consert
 medição, não impressão.
 
 ⚠️ **Select que o parser não resolver REPROVA, com o texto da expressão.** A saída não é apagar
-a asserção: é declarar `// works-owner-dinamico: <motivo>` na linha, e o teste conta quantas
-declarações existem (**hoje 0**) pra elas não se acumularem caladas. Checar só o que se sabe
-parsear, sem dizer quanto pulou, é o falso conforto que a versão anterior evitava por
-declarar o próprio alcance — agora não precisa mais.
+a asserção: é declarar `// works-owner-dinamico: <motivo>` em qualquer linha da cadeia. Checar
+só o que se sabe parsear, sem dizer quanto pulou, é o falso conforto que a versão anterior
+evitava por declarar o próprio alcance — agora não precisa mais.
+
+🔴 **A válvula nasceu CONSTRUÍDA E DESLIGADA, e as duas metades falhavam sozinhas.** A janela
+só olhava 3 linhas ACIMA do `.from` — e o lugar natural de escrever o marcador é encostado no
+`.select(`, que fica ABAIXO. E mesmo quando enxergava, a declaração era asserida como lista
+VAZIA: declarar apenas trocava qual linha reprovava. A sonda não pegou porque testava o
+MECANISMO (a função devolve `declarados` com 1 item) e não a POLÍTICA (o repo passa a suíte).
+Mesma família do `CoverImage` com o fallback promissor na docstring e desligado em 34 telas.
+
+⚠️ Hoje a declaração é **permitida** — exigir zero é a válvula não abrir —, precisa carregar
+motivo com pelo menos uma frase, e a **contagem vai no TÍTULO do caso** (`exceção declarada
+carrega MOTIVO (hoje 0)`), que é o que aparece em toda execução da suíte. É assim que ela não
+se acumula calada.
 
 ⚠️ **A próxima forma já tem nome: `.from(<variável>)`.** O parser não segue a variável até a
 tabela, e é de propósito — ele a REPORTA como não classificada em vez de fingir cobertura. Há
 sonda pra isso.
 
-Guardado por `tests/unit/orchestration/works-owner-colunas-existem.test.ts` (25 casos), com as
-sondas conferidas nos DOIS níveis: 11 formas sintéticas exercitando o mesmo código do repo, e
-**7 injeções da coluna morta em arquivos REAIS** — embed, ternário, literal-com-embed, o
+Guardado por `tests/unit/orchestration/works-owner-colunas-existem.test.ts` (28 casos), com as
+sondas conferidas nos DOIS níveis: 14 formas sintéticas exercitando o mesmo código do repo, e
+**11 injeções em arquivos REAIS** — 7 da coluna morta — embed, ternário, literal-com-embed, o
 `pageAll` do `.mjs`, o `.update()`, template interpolado e a cadeia cross-file
-`POST_READING_FIELDS → Object.keys → objeto num 3º arquivo`. Nas 7 o teste reprova e o teste
-ANTIGO passa verde, que é a medida do que a extensão comprou.
+`POST_READING_FIELDS → Object.keys → objeto num 3º arquivo` (nas 7 o teste reprova e o ANTIGO
+passa verde, que é a medida do que a extensão comprou) + 4 da válvula de escape: select
+dinâmico sem declarar reprova, declarado ACIMA e ABAIXO do `.from` passa, e marcador sem
+motivo reprova.
 
 🔴 **O caso mais próximo de disparar, achado em 2026-08-14 e corrigido:** a leitura de
 `work_embeddings` em `loadEmbeddingCandidates` não tinha `.range()` NEM `.limit()`. Medido no
@@ -5188,13 +5201,13 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.348 passando (+24 pulados) em 321 arquivos** (316 passando + 5 pulados);
-medido em 2026-08-19 com a extensão da varredura de `works_owner`: **+21 casos e ZERO arquivo**
-— o teste que cresceu já existia (`orchestration/works-owner-colunas-existem`, de 4 para 25
+`npm run test` → **3.351 passando (+24 pulados) em 321 arquivos** (316 passando + 5 pulados);
+medido em 2026-08-19 com a extensão da varredura de `works_owner`: **+24 casos e ZERO arquivo**
+— o teste que cresceu já existia (`orchestration/works-owner-colunas-existem`, de 4 para 28
 casos). Com `git ls-files` = **321** conferido contra os 321 executados, num worktree limpo de
 `origin/main` (`05aa87a`) + só os arquivos deste trabalho.
 
-⚠️ **O antes E o depois foram medidos no MESMO worktree, na mesma sessão** (3.327 → 3.348), em
+⚠️ **O antes E o depois foram medidos no MESMO worktree, na mesma sessão** (3.327 → 3.351), em
 vez de subtrair do número escrito aqui. É a única forma que sobrevive ao `main` ter andado
 entre a medição e o merge — o modo como esta linha envelheceu todas as vezes anteriores.
 
