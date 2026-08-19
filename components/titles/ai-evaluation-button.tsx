@@ -15,6 +15,11 @@ import {
   updatePrimarySynopsis,
 } from "@/server/actions/manual-reviews"
 import { AiEvaluationReviewForm } from "@/components/ai-evaluation/ai-evaluation-review-form"
+import {
+  clearPendingAiReview,
+  setPendingAiReview,
+  usePendingAiReview,
+} from "@/lib/ai-evaluation/pending-review-store"
 import type { CurrentEvaluationMeta } from "@/components/ai-evaluation/ai-evaluation-review-form"
 import { AiEvaluationCompare } from "@/components/ai-evaluation/ai-evaluation-compare"
 import type { CompareEval } from "@/components/ai-evaluation/ai-evaluation-compare"
@@ -78,13 +83,17 @@ export function AiEvaluationButton({
   const tasks = useAppTasks()
   const myEvalRunning = tasks.some((t) => t.id === evalTaskId && t.status === "running")
   const [evaluating, setEvaluating] = useState(false)
-  const [reviewOpen, setReviewOpen] = useState(false)
+  // 🔴 O resultado que espera revisão vive num store de MÓDULO, não em estado de
+  // componente. Este botão mora dentro de `<TabsContent value="ai">`, e o Radix
+  // DESMONTA a aba inativa — trocar de aba (ou navegar) durante os ~17,5s da
+  // avaliação destruía o resultado, e o `setEvaluation` do `onDone` virava no-op
+  // silencioso: a avaliação ficava em `review_pending` e o popup nunca abria.
+  // A presença no store É o "aberto": um `reviewOpen` local traria o bug de volta
+  // pela outra metade.
+  const pendingReview = usePendingAiReview(workId)
   // Guarda o fechamento acidental do popup de revisão (clique fora / Esc / X): o
   // resultado da IA ainda não foi aplicado, então dispara uma confirmação antes de descartar.
   const [confirmDiscardReview, setConfirmDiscardReview] = useState(false)
-  const [evaluation, setEvaluation] = useState<AiEvaluation | null>(null)
-  const [currentScores, setCurrentScores] = useState<Record<string, number>>({})
-  const [currentEvaluation, setCurrentEvaluation] = useState<CurrentEvaluationMeta | null>(null)
   const [noReviewConfirm, setNoReviewConfirm] = useState<NoReviewsReason | null | "none">(null)
   // Comparação Sonnet (existente) vs. Haiku (recém-rodado).
   // `aFull` só existe quando a coluna A é uma avaliação COMPLETA (tem id) e
@@ -95,6 +104,10 @@ export function AiEvaluationButton({
     a: CompareEval
     aFull: AiEvaluation | null
     b: AiEvaluation
+    // Viajam junto com a comparação porque é a escolha dela que vira revisão —
+    // soltos em estado próprio, morriam na mesma desmontagem do resultado.
+    currentScores: Record<string, number>
+    currentEvaluation: CurrentEvaluationMeta | null
   } | null>(null)
   // Editor de entradas (sinopse + reviews EXTERNAS manuais) antes de rodar a IA. As reviews
   // externas são persistidas pelo próprio ExternalManualReviewsSection (imediato); aqui só a
@@ -182,11 +195,13 @@ export function AiEvaluationButton({
           toast.error(`Erro na avaliação IA: ${("error" in result && result.error) || "resposta vazia"}`)
           return
         }
-        // Se ainda montado (não navegou), abre o review inline.
-        setEvaluation(result.data.evaluation)
-        setCurrentScores(result.data.currentScores ?? {})
-        setCurrentEvaluation(result.data.currentEvaluation ?? null)
-        setReviewOpen(true)
+        // Vai pro store de módulo: abre agora se a aba estiver montada, e espera
+        // por ela se não estiver (navegação/troca de aba não perdem mais o resultado).
+        setPendingAiReview(workId, {
+          evaluation: result.data.evaluation,
+          currentScores: result.data.currentScores ?? {},
+          currentEvaluation: result.data.currentEvaluation ?? null,
+        })
       },
     })
   }
@@ -241,9 +256,13 @@ export function AiEvaluationButton({
       toast.error(`Erro na avaliação: ${("error" in result && result.error) || "resposta vazia"}`)
       return
     }
-    setCurrentScores(result.data.currentScores ?? {})
-    setCurrentEvaluation(result.data.currentEvaluation ?? null)
-    setCompareData({ a: baseline, aFull: baselineFull, b: result.data.evaluation })
+    setCompareData({
+      a: baseline,
+      aFull: baselineFull,
+      b: result.data.evaluation,
+      currentScores: result.data.currentScores ?? {},
+      currentEvaluation: result.data.currentEvaluation ?? null,
+    })
   }
 
   const runHaikuCompare = () => runModelCompare("haiku", latestEvaluation ?? null)
@@ -351,7 +370,7 @@ export function AiEvaluationButton({
         // Some enquanto o comparador está aberto — senão o de comparar empilha por
         // cima do de revisar, e fechar um revela o outro por baixo. Mesmo padrão
         // do painel da fila.
-        open={reviewOpen && compareData == null}
+        open={pendingReview != null && compareData == null}
         onOpenChange={(open) => {
           // Fechar via X/Esc/clique-fora NÃO fecha direto: confirma antes de perder o
           // resultado. Salvar chama setReviewOpen(false) direto e passa por fora daqui.
@@ -359,30 +378,39 @@ export function AiEvaluationButton({
           if (!open && compareData == null) setConfirmDiscardReview(true)
         }}
       >
-        <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
+        {/* 🔴 `sm:` obrigatório: o `DialogContent` traz `sm:max-w-lg`, e a variante
+            responsiva VENCE a classe base acima de 640px — com `max-w-4xl` (sem
+            `sm:`) este diálogo ficava em **512px** numa tela de 1512, medido no
+            browser em 2026-08-18: justificativa de 500 caracteres em **6 linhas**,
+            1,5 critério por tela. Com o teto abaixo: **1024px** e **2 linhas**.
+            O `min()` em vez de `sm:max-w-5xl` seco é MARGEM: o 5xl também vence o
+            `max-w-[calc(100%-2rem)]` da base, então entre 640 e 1088px o diálogo
+            encostava nas duas bordas (medido: janela de 900px → diálogo de 900px;
+            com o clamp, 836). */}
+        <DialogContent className="max-h-[90vh] sm:max-w-[min(64rem,calc(100vw-4rem))] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Revisar avaliação IA</DialogTitle>
             <DialogDescription>
               Revise as notas da IA e escolha entre a nota atual e a sugerida antes de aplicar na obra.
             </DialogDescription>
           </DialogHeader>
-          {evaluation && (
+          {pendingReview && (
             <AiEvaluationReviewForm
-              evaluation={evaluation}
+              evaluation={pendingReview.evaluation}
               workId={workId}
               workTitle={workTitle}
               coverUrl={coverUrl}
-              currentScores={currentScores}
-              currentEvaluation={currentEvaluation}
+              currentScores={pendingReview.currentScores}
+              currentEvaluation={pendingReview.currentEvaluation}
               onReevaluate={async (model) => {
                 // Compara em vez de SUBSTITUIR. Antes o resultado do modelo novo
                 // sobrescrevia o formulário e a avaliação anterior sumia da tela
                 // sem chance de comparar — o painel da fila já fazia certo, só
                 // esta porta de entrada é que trocava em silêncio.
-                await runModelCompare(model, evaluation, evaluation)
+                await runModelCompare(model, pendingReview.evaluation, pendingReview.evaluation)
               }}
               onSaved={() => {
-                setReviewOpen(false)
+                clearPendingAiReview(workId)
                 refresh()
               }}
             />
@@ -397,7 +425,7 @@ export function AiEvaluationButton({
         description="Você perderá o resultado da IA que ainda não foi aplicado. Ele continua pendente e pode ser revisado depois."
         confirmText="Descartar"
         cancelText="Continuar revisando"
-        onConfirm={() => setReviewOpen(false)}
+        onConfirm={() => clearPendingAiReview(workId)}
       />
 
       {/* Editor de entradas: sinopse usada pela IA + reviews manuais. */}
@@ -485,8 +513,11 @@ export function AiEvaluationButton({
                 // escolhê-la é mesmo só fechar.
                 const chosen = which === "b" ? compareData.b : compareData.aFull
                 if (chosen) {
-                  setEvaluation(chosen)
-                  setReviewOpen(true)
+                  setPendingAiReview(workId, {
+                    evaluation: chosen,
+                    currentScores: compareData.currentScores,
+                    currentEvaluation: compareData.currentEvaluation,
+                  })
                 }
                 setCompareData(null)
               }}

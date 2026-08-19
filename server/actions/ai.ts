@@ -23,6 +23,7 @@ import { pickPrimaryCover, splitSynopsesForEvaluation } from "@/lib/work-derived
 import { isSameSynopsis } from "@/lib/synopsis-text"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { SONNET_MODEL } from "@/lib/ai/models"
+import { pgSafeDeep, pgSafeText } from "@/lib/text/pg-safe-text"
 import { ensureAdmin } from "@/server/queries/current-user"
 
 const OPUS_MODEL_ID = "claude-opus-4-7"
@@ -446,7 +447,10 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     // Injeta noReviewsReason no evaluationContext do raw_response. O service
     // monta o evaluationContext mas não tem visibilidade do estado de
     // work_external_ids — esse diagnóstico só faz sentido aqui.
-    const mergedRawResponse: Record<string, unknown> = (() => {
+    // `pgSafeDeep`: o raw_response embute o texto CRU das reviews externas, e uma
+    // review cortada no meio de um emoji (`.slice(0, 900)` dos conectores) deixa
+    // meio par surrogate que o PostgREST recusa — o jsonb inteiro volta 400.
+    const mergedRawResponse: Record<string, unknown> = pgSafeDeep((() => {
       const base = (response.rawResponse ?? {}) as Record<string, unknown>
       const existingCtx = (base.evaluationContext ?? {}) as Record<string, unknown>
       return {
@@ -459,29 +463,50 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
           reviewsRecoveredFromPersisted: recovered,
         },
       }
-    })()
+    })())
 
     const scoresToInsert = response.scores.map((s) => ({
       ai_evaluation_id: evaluation.id,
       criterion_slug: s.criterionSlug,
       suggested_score: s.suggestedScore,
-      justification: s.justification,
+      justification: pgSafeText(s.justification),
     }))
 
-    await supabase.from("ai_evaluation_scores").insert(scoresToInsert)
+    const { error: scoresError } = await supabase.from("ai_evaluation_scores").insert(scoresToInsert)
+    if (scoresError) throw new Error(`falha ao gravar as notas da avaliação: ${scoresError.message}`)
 
-    await supabase
+    // 🔴 Estes dois `await` não checavam erro, e o preço foi medido em 2026-08-18:
+    // o PATCH voltou **400** (surrogate solto vindo de uma review), o código seguiu
+    // em frente, e a obra ficou com uma avaliação MEIO GRAVADA — `status:
+    // processing`, sem summary, sem confidence, sem model_name, sem raw_response —
+    // que o select abaixo leu e devolveu ao cliente como se estivesse pronta. O
+    // popup de revisão abriu com o topo em branco e as 9 notas presentes: erro que
+    // produz resultado, sem erro nenhum na tela.
+    const completedPatch = {
+      status: "completed" as const,
+      model_name: response.modelName,
+      prompt_version: response.promptVersion,
+      summary: pgSafeText(response.summary ?? null),
+      confidence: response.confidence,
+      input_hash: response.inputHash,
+    }
+    const { error: completeError } = await supabase
       .from("ai_evaluations")
-      .update({
-        status: "completed",
-        model_name: response.modelName,
-        prompt_version: response.promptVersion,
-        summary: response.summary,
-        confidence: response.confidence,
-        raw_response: mergedRawResponse,
-        input_hash: response.inputHash,
-      })
+      .update({ ...completedPatch, raw_response: mergedRawResponse })
       .eq("id", evaluation.id)
+    if (completeError) {
+      // 2ª tentativa SEM o `raw_response`: ele é o único campo que carrega texto
+      // externo em bruto, e é diagnóstico. Descartá-lo custa o painel "Dados usados
+      // na avaliação"; abortar aqui jogaria fora a chamada PAGA que já foi feita.
+      console.error(
+        `[ai-eval] update da avaliação falhou (${completeError.message}) — regravando sem raw_response`,
+      )
+      const { error: retryError } = await supabase
+        .from("ai_evaluations")
+        .update(completedPatch)
+        .eq("id", evaluation.id)
+      if (retryError) throw new Error(`falha ao concluir a avaliação: ${retryError.message}`)
+    }
 
     const { data: completedEvaluation, error: completedError } = await supabase
       .from("ai_evaluations")
@@ -491,11 +516,16 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
 
     if (completedError) return { error: completedError.message }
 
-    await supabase
+    const { error: workStatusError } = await supabase
       .from("works")
       // avaliação fresca ⇒ não está mais desatualizada por reviews (migration 120)
       .update({ ai_eval_status: "review_pending", ai_eval_reviews_stale: false })
       .eq("id", workId)
+    // Não aborta: a avaliação está gravada e revisável. Mas sem log a obra sumiria
+    // da fila de revisão sem nada acusar.
+    if (workStatusError) {
+      console.error(`[ai-eval] não deu pra marcar review_pending: ${workStatusError.message}`)
+    }
 
     revalidatePath(`/catalog/${workId}`)
     revalidatePath("/curation/works")
