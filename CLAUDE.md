@@ -3325,42 +3325,80 @@ o status.
 Guardado por `tests/unit/orchestration/works-owner-colunas-existem.test.ts`, que **deriva as
 colunas da view da migration vigente** e as compara com o que o source pede.
 
-### 🔴 ABERTO: a varredura de `works_owner` cobre 8 de 27 leituras — e o resto foi medido
+### A varredura de `works_owner` cobre as 32 leituras — e o universo é o TOKEN
 
-Inventário levantado em 2026-08-19, depois de o defeito da `/ranking` ser corrigido. O número
-"9 consumidores" que esta seção trazia estava errado: saiu de um `grep | head`, nunca de uma
-contagem.
+Fechado em 2026-08-19. O teste que nasceu do defeito da `/ranking` cobria os
+`.select("literal")` de UM arquivo; hoje cobre **todos os pontos que nomeiam coluna da view**.
+Três coisas foram medidas no caminho, e as três contradizem o que esta seção afirmava:
 
-| | |
-|---|---|
-| arquivos que leem `works_owner` | **18** |
-| leituras (`.from().select()`) | **27** |
-| ↳ com string literal | **16** |
-| ↳ ↳ que a regex do teste HOJE alcança | **8** |
-| ↳ template literal · variável · constante | 5 · 4 · 2 |
+| forma | n | o que ela exigiu do parser |
+|---|---|---|
+| `.from("works_owner").select(…)` | **27** | literal · template com `${}` · variável · ternário (os DOIS ramos) · `[…].join(", ")` com spread · const IMPORTADA · `Object.keys(obj)` |
+| `.from("works_owner").update({…})` | **1** | as CHAVES do objeto |
+| embed `works_owner!fk(…)` a partir de OUTRA tabela | **3** | não passa pelo `.from` — invisível a qualquer scanner ancorado nele |
+| `pageAll("works_owner", "id", …)` | **1** | tabela no 1º argumento de um helper |
+| **total** | **32** | 162 referências de coluna, **30 distintas** |
 
-⚠️ **O teste perde metade dos LITERAIS, não só os dinâmicos.** A regex exige o `.select(`
-colado no `.from("works_owner")`, e 8 das 16 leituras literais quebram a linha entre os dois
-(o Prettier faz isso quando o select é longo). Isso não estava registrado — a seção dizia que
-o buraco eram só os selects montados, e ele começa antes.
+🔴 **Eram 32 pontos, não 27 — e os 5 que faltavam são justamente os que nenhuma contagem
+ancorada no `.from()` acha.** Os 3 embeds vivem em `server/queries/synopsis-quality.ts`
+(`works_owner!work_id(synopsis_quality)`) e o `pageAll` num script `.mjs`. A conta anterior
+media a forma que já se conhecia, então ela só podia confirmar o alcance que já tinha. Por
+isso o universo do teste passou a ser o **TOKEN** `works_owner`: toda ocorrência fora de
+comentário tem que cair num balde conhecido, e o que sobrar REPROVA com `arquivo:linha`.
 
-✅ **Nenhum defeito VIVO, e isso é medição, não impressão.** Rodando um parser de vírgula em
-nível zero sobre as 16 leituras literais, **zero** pedem coluna que a view não expõe. Logo o
-PR que estender a varredura é **preventivo**, não corretivo — e a urgência dele é a de uma
-rede, não a de um conserto.
+⚠️ **E "27 leituras" era leitura mesmo: são 28 cadeias `.from()`, das quais 1 é `.update()`.**
+Escrever coluna inexistente falha igual, então ela entra na régua — pelas chaves do objeto.
 
-🔴 **O parser PRECISA de parênteses balanceados, e a prova é um falso positivo real.** Uma
-quebra ingênua por vírgula sobre
-`"id, user_score, calculated_scores(expected_score, calc_score, personal_fit, …)"`
-(`lib/server/predictions/record-prediction.ts`) acusa `calc_score` e `personal_fit` como
-colunas ausentes de `works_owner` — elas são do EMBED, e o embed tem régua própria. Sem o
-balanceamento, a varredura nova nasceria acusando código correto, que é o jeito mais rápido de
-um teste ser desligado.
+🔴 **A causa de perder 8 literais era o `[^"()]`, NÃO a quebra de linha.** A regex antiga tinha
+`\s*` entre o `.from` e o `.select`, então o Prettier não tirava nada dela; quem rejeitava era
+a classe, que descarta todo select com EMBED — e embed é o caso comum aqui
+(`work_covers(url, is_primary)`). Ou seja "soltar a regex pra aceitar quebra de linha" não
+mudaria nada, e o conserto barato e o parser balanceado eram **o mesmo passo**.
 
-⚠️ **O que sobra sem solução estática são as 11 leituras montadas** (template literal com
-interpolação, variável e constante). Resolver isso pede seguir a variável até a definição — e
-um teste que checasse só o que sabe parsear, **sem dizer quanto pulou**, daria falso conforto.
-Se o parser não alcançar todas, ele tem que IMPRIMIR a lista das que ficaram de fora.
+🔴 **O balanceamento serve aos DOIS lados, e o falso positivo é o lado que desliga teste.** Sem
+vírgula em nível zero, `calculated_scores(expected_score, calc_score, …)` em
+`lib/server/predictions/record-prediction.ts` vira colunas soltas e `calc_score` é cobrado
+desta view, quando é da OUTRA tabela. Produzi esse falso positivo ao medir o inventário.
+
+🔴 **O stripper de comentários precisa conhecer REGEX LITERAL.** `/^["']|["']$/g` tem aspas
+dentro; um stripper que só conhece string entra em modo string ali e **dessincroniza o arquivo
+inteiro dali pra frente**. Medido em `scripts/e2e/verify-fase-d-dono.mjs`, onde isso escondia a
+leitura de baixo — a falha silenciosa de sempre, agora dentro da própria rede.
+
+✅ **Nenhum defeito vivo nos 32** (0 colunas forasteiras, 0 selects não resolvidos, 0
+ocorrências não classificadas) contra as **52 colunas** da view, definida por extenso na
+migration mais recente que a recria (hoje a **184**). O PR é REDE, não conserto — e isso é
+medição, não impressão.
+
+⚠️ **Select que o parser não resolver REPROVA, com o texto da expressão.** A saída não é apagar
+a asserção: é declarar `// works-owner-dinamico: <motivo>` em qualquer linha da cadeia. Checar
+só o que se sabe parsear, sem dizer quanto pulou, é o falso conforto que a versão anterior
+evitava por declarar o próprio alcance — agora não precisa mais.
+
+🔴 **A válvula nasceu CONSTRUÍDA E DESLIGADA, e as duas metades falhavam sozinhas.** A janela
+só olhava 3 linhas ACIMA do `.from` — e o lugar natural de escrever o marcador é encostado no
+`.select(`, que fica ABAIXO. E mesmo quando enxergava, a declaração era asserida como lista
+VAZIA: declarar apenas trocava qual linha reprovava. A sonda não pegou porque testava o
+MECANISMO (a função devolve `declarados` com 1 item) e não a POLÍTICA (o repo passa a suíte).
+Mesma família do `CoverImage` com o fallback promissor na docstring e desligado em 34 telas.
+
+⚠️ Hoje a declaração é **permitida** — exigir zero é a válvula não abrir —, precisa carregar
+motivo com pelo menos uma frase, e a **contagem vai no TÍTULO do caso** (`exceção declarada
+carrega MOTIVO (hoje 0)`), que é o que aparece em toda execução da suíte. É assim que ela não
+se acumula calada.
+
+⚠️ **A próxima forma já tem nome: `.from(<variável>)`.** O parser não segue a variável até a
+tabela, e é de propósito — ele a REPORTA como não classificada em vez de fingir cobertura. Há
+sonda pra isso.
+
+Guardado por `tests/unit/orchestration/works-owner-colunas-existem.test.ts` (28 casos), com as
+sondas conferidas nos DOIS níveis: 14 formas sintéticas exercitando o mesmo código do repo, e
+**11 injeções em arquivos REAIS** — 7 da coluna morta — embed, ternário, literal-com-embed, o
+`pageAll` do `.mjs`, o `.update()`, template interpolado e a cadeia cross-file
+`POST_READING_FIELDS → Object.keys → objeto num 3º arquivo` (nas 7 o teste reprova e o ANTIGO
+passa verde, que é a medida do que a extensão comprou) + 4 da válvula de escape: select
+dinâmico sem declarar reprova, declarado ACIMA e ABAIXO do `.from` passa, e marcador sem
+motivo reprova.
 
 🔴 **O caso mais próximo de disparar, achado em 2026-08-14 e corrigido:** a leitura de
 `work_embeddings` em `loadEmbeddingCandidates` não tinha `.range()` NEM `.limit()`. Medido no
@@ -5163,11 +5201,15 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.327 passando (+24 pulados) em 321 arquivos** (316 passando + 5 pulados);
-medido em 2026-08-19 com o teste do deploy: **+6 casos e +1 arquivo**
-(`orchestration/deploy-verifica-o-que-publica`). Com `find tests -name '*.test.ts*'` = **321**
-conferido contra os 321 executados, num worktree limpo de `origin/main` (`ee865f6`) + só os
-arquivos deste trabalho.
+`npm run test` → **3.351 passando (+24 pulados) em 321 arquivos** (316 passando + 5 pulados);
+medido em 2026-08-19 com a extensão da varredura de `works_owner`: **+24 casos e ZERO arquivo**
+— o teste que cresceu já existia (`orchestration/works-owner-colunas-existem`, de 4 para 28
+casos). Com `git ls-files` = **321** conferido contra os 321 executados, num worktree limpo de
+`origin/main` (`05aa87a`) + só os arquivos deste trabalho.
+
+⚠️ **O antes E o depois foram medidos no MESMO worktree, na mesma sessão** (3.327 → 3.351), em
+vez de subtrair do número escrito aqui. É a única forma que sobrevive ao `main` ter andado
+entre a medição e o merge — o modo como esta linha envelheceu todas as vezes anteriores.
 
 🔴 **Meça DEPOIS do `git add`, não só com a árvore limpa — e isto acabou de morder.** O
 `scripts-apontam-pro-local.test.ts` deriva o universo de **`git ls-files`**, que enxerga o
@@ -5200,7 +5242,8 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.303 em 318** (o limiar manual de nota, +14 casos e +1 arquivo,
+Antes: **3.327 em 321** (o teste do deploy, +6 casos e +1 arquivo,
+`orchestration/deploy-verifica-o-que-publica`), **3.303 em 318** (o limiar manual de nota, +14 casos e +1 arquivo,
 `ranking/limiar-manual-de-nota`), **3.289 em 317** (o "Preparar e avaliar" da fila de atributos, +46 casos e +3
 arquivos: `ai-evaluation/prontidao-para-avaliar`, `preparar-e-avaliar-ordem`,
 `preparar-e-avaliar-card`), **3.243 em 313** (o popup de revisão IA, +14 casos e +2 arquivos: `text/pg-safe-text`,
