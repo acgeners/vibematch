@@ -3325,7 +3325,7 @@ o status.
 Guardado por `tests/unit/orchestration/works-owner-colunas-existem.test.ts`, que **deriva as
 colunas da view da migration vigente** e as compara com o que o source pede.
 
-### A varredura de `works_owner` cobre as 32 leituras — e o universo é o TOKEN
+### A varredura de `works_owner` cobre os 86 pontos — e o universo é o TOKEN
 
 Fechado em 2026-08-19. O teste que nasceu do defeito da `/ranking` cobria os
 `.select("literal")` de UM arquivo; hoje cobre **todos os pontos que nomeiam coluna da view**.
@@ -3337,7 +3337,8 @@ Três coisas foram medidas no caminho, e as três contradizem o que esta seção
 | `.from("works_owner").update({…})` | **1** | as CHAVES do objeto |
 | embed `works_owner!fk(…)` a partir de OUTRA tabela | **3** | não passa pelo `.from` — invisível a qualquer scanner ancorado nele |
 | `pageAll("works_owner", "id", …)` | **1** | tabela no 1º argumento de um helper |
-| **total** | **32** | 162 referências de coluna, **30 distintas** |
+| **filtro e `.order()`** | **62** | a coluna é o 1º argumento — e **20 (32%) só existem na cadeia quebrada por variável** |
+| **total** | **86 pontos** | 224 referências de coluna, **34 distintas** |
 
 🔴 **Eram 32 pontos, não 27 — e os 5 que faltavam são justamente os que nenhuma contagem
 ancorada no `.from()` acha.** Os 3 embeds vivem em `server/queries/synopsis-quality.ts`
@@ -3365,7 +3366,21 @@ dentro; um stripper que só conhece string entra em modo string ali e **dessincr
 inteiro dali pra frente**. Medido em `scripts/e2e/verify-fase-d-dono.mjs`, onde isso escondia a
 leitura de baixo — a falha silenciosa de sempre, agora dentro da própria rede.
 
-✅ **Nenhum defeito vivo nos 32** (0 colunas forasteiras, 0 selects não resolvidos, 0
+🔴 **Filtro erra igual ao select — e a cadeia quase nunca é direta.** `.eq("genres", …)` faz o
+PostgREST devolver erro do mesmo jeito que um select com coluna morta. Mas o padrão do repo é
+`let q = sb.from("works_owner")…` seguido de `if (…) q = q.in("publication_status_id", …)`, e
+medido em 2026-08-19 são **20 das 62** referências nessa forma — justamente os filtros
+CONDICIONAIS, que são os que mudam. Uma varredura que parasse na cadeia direta deixaria um
+terço fora. Por isso ela segue a VARIÁVEL, e **para na primeira reatribuição que não seja
+`q = q.<algo>`**: seguir adiante atribuiria filtro de outra tabela a esta view, que é o falso
+positivo que desliga teste.
+
+⚠️ **Coluna com PONTO fica fora da régua** (`.eq("pilot_taste_scores.user_id", …)`): é de
+tabela EMBUTIDA, mesmo motivo do embed dentro do select. Hoje **1**. E método fora das duas
+listas (`FILTRA_POR_COLUNA` / `SEM_COLUNA`) é **reportado**, porque pode nomear coluna e estar
+passando batido — hoje 0.
+
+✅ **Nenhum defeito vivo nos 86 pontos** (0 colunas forasteiras, 0 selects não resolvidos, 0
 ocorrências não classificadas) contra as **52 colunas** da view, definida por extenso na
 migration mais recente que a recria (hoje a **184**). O PR é REDE, não conserto — e isso é
 medição, não impressão.
@@ -3391,14 +3406,14 @@ se acumula calada.
 tabela, e é de propósito — ele a REPORTA como não classificada em vez de fingir cobertura. Há
 sonda pra isso.
 
-Guardado por `tests/unit/orchestration/works-owner-colunas-existem.test.ts` (28 casos), com as
-sondas conferidas nos DOIS níveis: 14 formas sintéticas exercitando o mesmo código do repo, e
-**11 injeções em arquivos REAIS** — 7 da coluna morta — embed, ternário, literal-com-embed, o
+Guardado por `tests/unit/orchestration/works-owner-colunas-existem.test.ts` (37 casos), com as
+sondas conferidas nos DOIS níveis: 23 formas sintéticas exercitando o mesmo código do repo, e
+**17 injeções em arquivos REAIS** — 7 da coluna morta — embed, ternário, literal-com-embed, o
 `pageAll` do `.mjs`, o `.update()`, template interpolado e a cadeia cross-file
 `POST_READING_FIELDS → Object.keys → objeto num 3º arquivo` (nas 7 o teste reprova e o ANTIGO
 passa verde, que é a medida do que a extensão comprou) + 4 da válvula de escape: select
 dinâmico sem declarar reprova, declarado ACIMA e ABAIXO do `.from` passa, e marcador sem
-motivo reprova.
+motivo reprova) + 6 de FILTRO (`.eq` direto, `q = q.in(…)` por variável, `return q.order(…)` solto, `.order` com opções, `.not` de 3 argumentos e o `.eq` do `.update`).
 
 🔴 **O caso mais próximo de disparar, achado em 2026-08-14 e corrigido:** a leitura de
 `work_embeddings` em `loadEmbeddingCandidates` não tinha `.range()` NEM `.limit()`. Medido no
@@ -5201,13 +5216,13 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.351 passando (+24 pulados) em 321 arquivos** (316 passando + 5 pulados);
-medido em 2026-08-19 com a extensão da varredura de `works_owner`: **+24 casos e ZERO arquivo**
-— o teste que cresceu já existia (`orchestration/works-owner-colunas-existem`, de 4 para 28
-casos). Com `git ls-files` = **321** conferido contra os 321 executados, num worktree limpo de
+`npm run test` → **3.360 passando (+24 pulados) em 321 arquivos** (316 passando + 5 pulados);
+medido em 2026-08-19 com a cobertura de FILTRO/ORDER na varredura de `works_owner`: **+9 casos
+e ZERO arquivo** — o teste que cresceu já existia (`orchestration/works-owner-colunas-existem`,
+de 28 para 37 casos). Com `git ls-files` = **321** conferido contra os 321 executados, num worktree limpo de
 `origin/main` (`05aa87a`) + só os arquivos deste trabalho.
 
-⚠️ **O antes E o depois foram medidos no MESMO worktree, na mesma sessão** (3.327 → 3.351), em
+⚠️ **O antes E o depois foram medidos no MESMO worktree, na mesma sessão** (3.351 → 3.360), em
 vez de subtrair do número escrito aqui. É a única forma que sobrevive ao `main` ter andado
 entre a medição e o merge — o modo como esta linha envelheceu todas as vezes anteriores.
 
@@ -5242,7 +5257,8 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.327 em 321** (o teste do deploy, +6 casos e +1 arquivo,
+Antes: **3.351 em 321** (a varredura de `works_owner` cobrindo os 32 pontos de LEITURA,
++24 casos), **3.327 em 321** (o teste do deploy, +6 casos e +1 arquivo,
 `orchestration/deploy-verifica-o-que-publica`), **3.303 em 318** (o limiar manual de nota, +14 casos e +1 arquivo,
 `ranking/limiar-manual-de-nota`), **3.289 em 317** (o "Preparar e avaliar" da fila de atributos, +46 casos e +3
 arquivos: `ai-evaluation/prontidao-para-avaliar`, `preparar-e-avaliar-ordem`,

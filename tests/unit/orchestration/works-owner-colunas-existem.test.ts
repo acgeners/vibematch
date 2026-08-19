@@ -37,10 +37,24 @@ import { join, dirname, resolve as resolvePath } from "node:path"
  * | `.from("works_owner").update({…})` | **1** | as CHAVES do objeto — escrever coluna que não existe falha igual |
  * | embed `works_owner!fk(…)` a partir de OUTRA tabela | **3** | nunca passa por `.from("works_owner")`; um scanner ancorado no `.from` é cego pros três |
  * | `pageAll("works_owner", "id", …)` | **1** | helper com a tabela no 1º argumento |
+ * | **filtro e `.order()`** (`.eq` · `.in` · `.not` · `.is` · `.neq` · `.order`) | **62** | a coluna é o 1º argumento; **20 delas (32%) só existem na cadeia quebrada por variável** |
  *
- * ✅ **Nenhum defeito vivo** nos 32 (162 referências de coluna, 30 distintas): este teste é
- * REDE, não conserto. O `synopsis_interest_skipped` da sonda defensiva da migration 121 está
- * na view — não é exceção.
+ * ✅ **Nenhum defeito vivo** (224 referências de coluna, 34 distintas, 86 pontos): este teste
+ * é REDE, não conserto. O `synopsis_interest_skipped` da sonda defensiva da migration 121
+ * está na view — não é exceção.
+ *
+ * 🔴 **Filtro erra igual ao select, e a cadeia quase nunca é direta.** `.eq("genres", …)` faz
+ * o PostgREST devolver erro do mesmo jeito. Mas o padrão do repo é
+ * `let q = sb.from("works_owner")…` seguido de `if (…) q = q.in("publication_status_id", …)`,
+ * e são justamente os filtros CONDICIONAIS que ficam nessa forma — os que mudam. Por isso a
+ * varredura segue a VARIÁVEL, e para na primeira reatribuição que não seja `q = q.<algo>`:
+ * seguir adiante atribuiria filtro de outra tabela a esta view.
+ *
+ * ⚠️ Coluna com PONTO (`.eq("pilot_taste_scores.user_id", …)`) é de tabela EMBUTIDA e fica
+ * fora da régua — mesmo motivo do embed dentro do select. Hoje: 1.
+ *
+ * ⚠️ Método fora das duas listas (`FILTRA_POR_COLUNA` / `SEM_COLUNA`) é REPORTADO, porque
+ * pode nomear coluna e estar passando batido. Hoje: 0.
  *
  * 🔴 **O universo é DERIVADO, não uma lista de formas conhecidas.** Toda ocorrência do token
  * `works_owner` fora de comentário tem que cair num dos baldes acima (ou ser consumo do
@@ -102,6 +116,8 @@ interface Varredura {
   declarados: Pendencia[]
   locais: string[]
   cadeias: number
+  /** Colunas de tabela EMBUTIDA (`.eq("outra.coluna")`) — fora da régua desta view. */
+  embutidas: number
 }
 
 /**
@@ -511,6 +527,24 @@ function criarResolvedor(ler: Ler) {
   return { fonte, comoStrings, comoArray, chavesDoObjeto }
 }
 
+/**
+ * Métodos do PostgREST cujo 1º argumento é uma COLUNA. Filtro que nomeia coluna inexistente
+ * falha igual ao select — o PostgREST devolve erro, e quem ignora o `error` fica com zero
+ * linhas e uma tela plausível.
+ */
+const FILTRA_POR_COLUNA = [
+  "eq", "neq", "gt", "gte", "lt", "lte", "like", "ilike", "is", "in", "contains", "containedBy",
+  "overlaps", "not", "order", "filter", "textSearch", "likeAllOf", "likeAnyOf", "ilikeAllOf",
+  "ilikeAnyOf", "rangeGt", "rangeGte", "rangeLt", "rangeLte", "rangeAdjacent",
+]
+
+/** Métodos que NÃO nomeiam coluna. Tudo fora das duas listas é reportado, nunca ignorado. */
+const SEM_COLUNA = [
+  "select", "insert", "update", "upsert", "delete", "range", "limit", "single", "maybeSingle",
+  "csv", "geojson", "explain", "returns", "throwOnError", "abortSignal", "then", "catch",
+  "finally", "setHeader", "rollback", "maybeSingle",
+]
+
 const linhaDe = (src: string, idx: number) => src.slice(0, idx).split("\n").length
 const resumir = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 70)
 
@@ -528,6 +562,7 @@ export function varrerWorksOwner(arquivos: string[], ler: Ler): Varredura {
   const declarados: Pendencia[] = []
   const locais = new Set<string>()
   let cadeias = 0
+  let embutidas = 0
 
   for (const f of arquivos) {
     const bruto = ler(f)
@@ -566,27 +601,84 @@ export function varrerWorksOwner(arquivos: string[], ler: Ler): Varredura {
       else naoResolvidos.push({ arquivo: f, linha, motivo })
     }
 
-    // (A) cadeia `.from("works_owner").<metodo>(…)`
+    /**
+     * Percorre uma cadeia a partir de `pos` e registra o que cada método nomeia.
+     * Devolve a posição onde a cadeia acabou.
+     */
+    const percorrerCadeia = (idx: number, pos: number, primeiraChamada: boolean): number => {
+      let i = pos
+      let inicio = primeiraChamada
+      for (;;) {
+        const met = src.slice(i).match(/^\s*\.(\w+)\s*\(/)
+        if (!met) return i
+        const arg = argumentoEm(src, i + met[0].length - 1)
+        if (!arg) return i
+        const linha = linhaDe(src, i)
+        const nome = met[1]
+        const primeiro = fatiarNivelZero(arg.texto)[0] ?? ""
+
+        if (inicio && nome === "select") {
+          const strings = comoStrings(f, primeiro)
+          if (!strings) pendente(idx, linha, `.select(${resumir(primeiro)})`, linhaDe(src, arg.fim))
+          else registrar(idx, linha, ".select()", strings.flatMap(colunasDoSelect))
+        } else if (inicio && (nome === "update" || nome === "insert" || nome === "upsert")) {
+          const chaves = chavesDoObjeto(f, primeiro)
+          if (!chaves) pendente(idx, linha, `.${nome}(${resumir(primeiro)})`, linhaDe(src, arg.fim))
+          else registrar(idx, linha, `.${nome}()`, chaves)
+        } else if (FILTRA_POR_COLUNA.includes(nome)) {
+          const strings = comoStrings(f, primeiro)
+          if (!strings) pendente(idx, linha, `.${nome}(${resumir(primeiro)})`, linhaDe(src, arg.fim))
+          else {
+            // ⚠️ Coluna com PONTO é de tabela EMBUTIDA (`.eq("pilot_taste_scores.user_id", …)`)
+            // — cobrá-la desta view seria o mesmo falso positivo do embed no select.
+            const daView = strings.filter((c) => !c.includes("."))
+            embutidas += strings.length - daView.length
+            registrar(idx, linha, `.${nome}()`, daView)
+          }
+        } else if (!SEM_COLUNA.includes(nome)) {
+          // Método que a régua não conhece: pode nomear coluna e estar passando batido.
+          naoClassificados.push({ arquivo: f, linha, motivo: `.${nome}() numa cadeia works_owner` })
+        }
+        inicio = false
+        i = arg.fim + 1
+      }
+    }
+
+    // (A) cadeia `.from("works_owner").<metodo>(…)` — a cadeia INTEIRA, não só o 1º método
     for (const m of src.matchAll(/\.from\(\s*["'`]works_owner["'`]\s*\)/g)) {
       const idx = m.index! + m[0].indexOf("works_owner")
       const linha = linhaDe(src, idx)
       cadeias++
-      const met = src.slice(m.index! + m[0].length).match(/^\s*\.(\w+)\s*\(/)
-      if (!met) { pendente(idx, linha, "cadeia `.from()` sem método legível"); continue }
-      const arg = argumentoEm(src, m.index! + m[0].length + met[0].length - 1)
-      if (!arg) { pendente(idx, linha, `.${met[1]}() sem argumento legível`); continue }
-      const primeiro = fatiarNivelZero(arg.texto)[0] ?? ""
-      if (met[1] === "select") {
-        const strings = comoStrings(f, primeiro)
-        if (!strings) { pendente(idx, linha, `.select(${resumir(primeiro)})`, linhaDe(src, arg.fim)); continue }
-        registrar(idx, linha, ".select()", strings.flatMap(colunasDoSelect))
-      } else if (met[1] === "update" || met[1] === "insert" || met[1] === "upsert") {
-        const chaves = chavesDoObjeto(f, primeiro)
-        if (!chaves) { pendente(idx, linha, `.${met[1]}(${resumir(primeiro)})`, linhaDe(src, arg.fim)); continue }
-        registrar(idx, linha, `.${met[1]}()`, chaves)
-      } else {
-        // `.delete()` e afins não nomeiam coluna — a cadeia está classificada e não pede nada.
-        classificadas.add(idx)
+      classificadas.add(idx)
+      const fim = percorrerCadeia(idx, m.index! + m[0].length, true)
+      if (fim === m.index! + m[0].length) { pendente(idx, linha, "cadeia `.from()` sem método legível"); continue }
+
+      /**
+       * 🔴 A cadeia costuma ser QUEBRADA por variável — `let q = sb.from(…)…` e depois
+       * `if (…) q = q.in("publication_status_id", …)`. Medido em 2026-08-19: **20 das 62**
+       * referências de coluna em filtro (32%) só existem nessa forma. Parar na cadeia direta
+       * deixaria um terço fora, e justamente os filtros CONDICIONAIS, que são os que mudam.
+       */
+      const antesDoFrom = src.slice(Math.max(0, m.index! - 400), m.index!)
+      const atrib = [...antesDoFrom.matchAll(
+        /(?:let|const|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]*)?=\s*(?:await\s+)?(?:[A-Za-z_$][\w$.]*\s*)?$/g,
+      )]
+      const v = atrib.length ? atrib[atrib.length - 1][1] : null
+      if (!v) continue
+
+      const re = new RegExp(`\\b${v}\\b`, "g")
+      re.lastIndex = fim
+      for (let uso = re.exec(src); uso; uso = re.exec(src)) {
+        const depois = src.slice(uso.index + v.length)
+        const reatrib = depois.match(/^\s*=\s*/)
+        if (reatrib) {
+          // ⚠️ `v = <outra coisa>` significa que a variável deixou de ser ESTA query.
+          // Seguir adiante atribuiria filtros de outra tabela a `works_owner`.
+          if (!new RegExp(`^${v}\\s*\\.`).test(depois.slice(reatrib[0].length))) break
+          re.lastIndex = percorrerCadeia(idx, uso.index + v.length + reatrib[0].length + v.length, false)
+        } else if (/^\s*\.\w+\s*\(/.test(depois)) {
+          re.lastIndex = percorrerCadeia(idx, uso.index + v.length, false)
+        }
       }
     }
 
@@ -630,7 +722,7 @@ export function varrerWorksOwner(arquivos: string[], ler: Ler): Varredura {
     }
   }
 
-  return { pedidos, naoResolvidos, naoClassificados, declarados, locais: [...locais].sort(), cadeias }
+  return { pedidos, naoResolvidos, naoClassificados, declarados, locais: [...locais].sort(), cadeias, embutidas }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -676,8 +768,8 @@ describe("contrato de colunas da view works_owner", () => {
 
   it("a varredura enxerga o repositório (contraprova de vacuidade)", () => {
     // Se o parser ficar cego, `pedidos` esvazia e TODO o resto passa sem checar nada.
-    expect(REPO.locais.length).toBeGreaterThan(20) // 32 em 2026-08-19
-    expect(REPO.pedidos.length).toBeGreaterThan(100) // 162
+    expect(REPO.locais.length).toBeGreaterThan(50) // 86 em 2026-08-19
+    expect(REPO.pedidos.length).toBeGreaterThan(150) // 224 = 162 no select + 62 em filtro/order
     // E a contagem do parser tem que bater com a contagem crua da MESMA coisa.
     expect(REPO.cadeias).toBe(CADEIAS_CRUAS)
   })
@@ -808,6 +900,62 @@ describe("a varredura NÃO acusa o que está certo", () => {
       "a.ts": `const v = s.replace(/^["']|["']$/g, "")\nsb.from("works_owner").select("id, genres")`,
     })
     expect(pede(v, "genres")).toBe(true)
+  })
+})
+
+describe("FILTRO e ORDER também nomeiam coluna", () => {
+  it("na cadeia direta", () => {
+    const v = sondar({ "a.ts": `sb.from("works_owner").select("id").eq("genres", 1)` })
+    expect(pede(v, "genres")).toBe(true)
+  })
+
+  it("`.not(col, op, val)` — a coluna é o 1º argumento", () => {
+    const v = sondar({ "a.ts": `sb.from("works_owner").select("id").not("genres", "is", null)` })
+    expect(pede(v, "genres")).toBe(true)
+  })
+
+  it("`.order(col, { ascending })` — as opções não confundem", () => {
+    const v = sondar({ "a.ts": `sb.from("works_owner").select("id").order("genres", { ascending: false })` })
+    expect(pede(v, "genres")).toBe(true)
+  })
+
+  it("🔴 cadeia QUEBRADA por variável (`q = q.in(…)`) — 32% dos filtros só existem assim", () => {
+    const v = sondar({
+      "a.ts": `let q = sb.from("works_owner").select("id")\nif (x) q = q.in("genres", x)\nreturn q`,
+    })
+    expect(pede(v, "genres")).toBe(true)
+  })
+
+  it("uso SOLTO da variável, sem reatribuir (`return q.order(…)`)", () => {
+    const v = sondar({ "a.ts": `let q = sb.from("works_owner").select("id")\nreturn q.order("genres").range(0, 9)` })
+    expect(pede(v, "genres")).toBe(true)
+  })
+
+  it("🔴 variável REBINDADA pra outra tabela para a varredura ali", () => {
+    // Seguir adiante atribuiria filtros de OUTRA tabela a `works_owner` — falso positivo
+    // que acusa código correto, o jeito mais rápido de um teste ser desligado.
+    const v = sondar({
+      "a.ts": `let q = sb.from("works_owner").select("id")\nq = sb.from("outra_tabela").select("x")\nq = q.eq("genres", 1)`,
+    })
+    expect(pede(v, "genres")).toBe(false)
+  })
+
+  it("coluna de tabela EMBUTIDA (com ponto) não é cobrada desta view", () => {
+    const v = sondar({ "a.ts": `sb.from("works_owner").select("id").eq("pilot_taste_scores.user_id", u)` })
+    expect(v.pedidos.map((p) => p.coluna)).toEqual(["id"])
+    expect(v.embutidas).toBe(1)
+  })
+
+  it("🔴 método DESCONHECIDO na cadeia é reportado — pode nomear coluna", () => {
+    const v = sondar({ "a.ts": `sb.from("works_owner").select("id").metodoNovoDoPostgrest("genres")` })
+    expect(v.naoClassificados).toHaveLength(1)
+    expect(v.naoClassificados[0].motivo).toContain("metodoNovoDoPostgrest")
+  })
+
+  it("método sem coluna (`.range`, `.limit`, `.then`) não vira ruído", () => {
+    const v = sondar({ "a.ts": `sb.from("works_owner").select("id").range(0, 9).limit(5).then(f)` })
+    expect(v.naoClassificados).toEqual([])
+    expect(v.pedidos.map((p) => p.coluna)).toEqual(["id"])
   })
 })
 
