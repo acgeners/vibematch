@@ -114,37 +114,62 @@ async function checkGuard1(
 /**
  * Núcleo compartilhado da cobertura de gênero: retorna o conjunto de obras
  * não-lidas com baixa cobertura (algum gênero com < LOW_COVERAGE_MIN_READ obras
- * lidas, ou sem gênero algum). Usa works.genres (array de texto), não tags.
+ * lidas, ou sem gênero algum).
+ *
+ * 🔴 O gênero vem de `work_genres`, NUNCA de uma coluna de `works`/`works_owner`.
+ * A coluna legada `works.genres` (text[]) foi DROPADA na migration 024, e este
+ * cálculo continuou pedindo `genres` no select por muito tempo: o PostgREST
+ * devolvia `{ data: null, error: "column does not exist" }`, o chamador ignorava
+ * o `error` e o conjunto saía VAZIO — o guard 2 dizia "unknown" e o badge ⚠ do
+ * /ranking nunca acendia, sem erro e sem log. Quem denunciou foi a paginação
+ * (`fetchAllRows` LANÇA no erro do PostgREST), que transformou o resultado
+ * silencioso em Runtime Error na /ranking.
+ *
+ * ⚠️ A chave da contagem é o `genre_id` (uuid), não o nome: o nome só existiria
+ * pra ser reagrupado por igualdade de string, e buscá-lo custaria um join que
+ * nenhuma saída daqui usa (o retorno são workIds).
  */
 async function computeLowCoverage(
   supabase: ReturnType<typeof createAdminClient>,
 ): Promise<{ unreadIds: string[]; lowCoverageIds: Set<string> }> {
-  const works = await fetchAllRows<Record<string, unknown>>(
-    (from, to) =>
-      supabase.from("works_owner").select("id, user_score, genres").eq("is_archived", false).range(from, to),
-    "calibrationGuards.works",
-  )
+  const [works, links] = await Promise.all([
+    fetchAllRows<{ id: string; user_score: number | null }>(
+      (from, to) =>
+        supabase.from("works_owner").select("id, user_score").eq("is_archived", false).range(from, to),
+      "calibrationGuards.works",
+    ),
+    fetchAllRows<{ work_id: string; genre_id: string }>(
+      (from, to) => supabase.from("work_genres").select("work_id, genre_id").range(from, to),
+      "calibrationGuards.workGenres",
+    ),
+  ])
 
-  const rows = works as unknown as Array<{ id: string; user_score: number | null; genres: string[] | null }>
+  const genresByWork = new Map<string, string[]>()
+  for (const l of links) {
+    const atual = genresByWork.get(l.work_id)
+    if (atual) atual.push(l.genre_id)
+    else genresByWork.set(l.work_id, [l.genre_id])
+  }
+
   const readCountByGenre = new Map<string, number>()
-  for (const w of rows) {
+  for (const w of works) {
     if (w.user_score == null) continue
-    for (const g of w.genres ?? []) {
+    for (const g of genresByWork.get(w.id) ?? []) {
       readCountByGenre.set(g, (readCountByGenre.get(g) ?? 0) + 1)
     }
   }
 
   const unreadIds: string[] = []
   const lowCoverageIds = new Set<string>()
-  for (const w of rows) {
+  for (const w of works) {
     if (w.user_score != null) continue
     unreadIds.push(w.id)
-    const genres = (w.genres ?? []).filter(Boolean)
-    if (genres.length === 0) {
+    const generos = genresByWork.get(w.id) ?? []
+    if (generos.length === 0) {
       lowCoverageIds.add(w.id)
       continue
     }
-    const minCov = Math.min(...genres.map((g) => readCountByGenre.get(g) ?? 0))
+    const minCov = Math.min(...generos.map((g) => readCountByGenre.get(g) ?? 0))
     if (minCov < LOW_COVERAGE_MIN_READ) lowCoverageIds.add(w.id)
   }
   return { unreadIds, lowCoverageIds }

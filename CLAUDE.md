@@ -3269,6 +3269,32 @@ terminado "com sucesso" tendo processado 6% do trabalho. É o padrão mais perig
 **um erro que produz resultado**. Ao contar qualquer coisa acima de ~1k linhas, confirme com
 `count: "exact"` antes de confiar no `select`.
 
+🔴 **O irmão dessa família é IGNORAR o `error` — e ele já custou a `/ranking` em produção
+(19/08/2026).** `computeLowCoverage` (`calibration-guards.ts`) pedia `works_owner.genres`, uma
+coluna dropada na **migration 024** em favor de `work_genres`. O PostgREST devolve
+`{ data: null, error: "column ... does not exist" }`; o chamador lia só o `data`, e o cálculo
+rodava sobre **zero linhas** — o guard 2 respondia "unknown" e o badge ⚠ de baixa cobertura
+**nunca acendia**. A página abria certa, sem erro e sem log, e ficou assim por meses.
+
+⚠️ **Quem o denunciou foi uma correção NÃO relacionada.** Quando `fetchAllRows` passou a
+LANÇAR no erro do PostgREST (a leva de 18/08 contra o corte de 1000), o silêncio virou
+`Runtime Error` na `/ranking` — 200 na resposta, erro no render e **zero obras na tela**.
+Trocar "engolir o erro" por "estourar" **não criou** o defeito: tornou visível um que já
+existia, e essa é a única razão pela qual ele foi consertado.
+
+🔴 **A lição de operação é sobre o SMOKE, não sobre a query.** O deploy foi verificado por
+`/api/health`, que responde `{"ok":true}` porque exercita o banco — e passou verde com a
+`/ranking` quebrada, porque o health não abre a `/ranking`. **Rota principal não é coberta por
+healthcheck genérico**: depois de publicar, bata nas rotas de verdade e olhe o CONSOLE, não só
+o status.
+
+Guardado por `tests/unit/orchestration/works-owner-colunas-existem.test.ts`, que **deriva as
+colunas da view da migration vigente** e as compara com o que o source pede. ⚠️ Ele declara o
+próprio alcance: cobre os `.select("literal")` do `calibration-guards.ts`, e os outros **9
+consumidores** de `works_owner` montam o select em template literal com embeds — extrair isso
+pede um parser de argumento com parênteses balanceados, e vale PR próprio. Um teste que
+checasse só o que sabe parsear, sem dizer quanto pulou, daria falso conforto.
+
 🔴 **O caso mais próximo de disparar, achado em 2026-08-14 e corrigido:** a leitura de
 `work_embeddings` em `loadEmbeddingCandidates` não tinha `.range()` NEM `.limit()`. Medido no
 mesmo dia: **985 linhas — 15 do corte.** Passando de 1000, as linhas truncadas sumiriam do mapa
@@ -5070,10 +5096,11 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.317 passando (+24 pulados) em 319 arquivos** (314 passando + 5 pulados);
-medido em 2026-08-19 com a restrição a obra ativa na cobertura do dicionário: **+1 caso, sem
-arquivo novo**. Com `find tests -name '*.test.ts*'` = **319** conferido contra os 319
-executados, num worktree limpo de `origin/main` (`104f0e7`) + só os arquivos deste trabalho.
+`npm run test` → **3.321 passando (+24 pulados) em 320 arquivos** (315 passando + 5 pulados);
+medido em 2026-08-19 com o contrato de colunas da `works_owner`: **+4 casos e +1 arquivo**
+(`orchestration/works-owner-colunas-existem`). Com `find tests -name '*.test.ts*'` = **320**
+conferido contra os 320 executados, num worktree limpo de `origin/main` (`e3fe5a8`) + só os
+arquivos deste trabalho.
 
 ⚠️ **Medido num worktree de `origin/main` + só os arquivos deste trabalho**, e as duas metades
 importam: a árvore tinha trabalho de OUTRA frente não commitado (`server/queries/calibration-guards.ts`
