@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 
@@ -150,5 +151,72 @@ describe("o smoke de browser", () => {
     // invisível para quem desenvolve.
     expect(SMOKE).toMatch(/page\.goto\(/)
     expect(SMOKE, "smoke que clica não reproduz a família").not.toMatch(/\.click\(/)
+  })
+})
+
+/**
+ * A ENTRADA dos smokes fora do deploy.
+ *
+ * 🔴 Em 2026-08-20 um deploy foi feito com `flyctl deploy` direto — que pula o `deploy.sh`
+ * inteiro, ou seja as três guardas E os dois smokes. Depois não havia comando curto para
+ * verificar o que subiu: era digitar dois caminhos de arquivo à mão. Verificação sem entrada
+ * barata é verificação que não acontece.
+ *
+ * ⚠️ Este bloco NÃO exige que o `deploy.sh` chame o wrapper. Manter as duas invocações diretas
+ * foi escolha: o `deploy.sh` acabara de ser verificado ponta a ponta (inclusive a simulação do
+ * worktree) e reestruturá-lo de novo no mesmo dia custaria mais do que compra. O que fecha o
+ * risco de as duas listas divergirem é o último caso daqui, que DERIVA os smokes do disco.
+ */
+describe("os smokes têm entrada barata", () => {
+  const PKG = JSON.parse(readFileSync(join(RAIZ, "package.json"), "utf8"))
+  /** Todo smoke que existe, do FILESYSTEM — lista fixa não acha o terceiro. */
+  const SMOKES = readdirSync(join(RAIZ, "scripts")).filter((f) => /^smoke-.*\.mjs$/.test(f))
+
+  it("existe `npm run smoke`", () => {
+    expect(SMOKES.length, "não há smoke nenhum em scripts/").toBeGreaterThan(0)
+    expect(PKG.scripts?.smoke, "sem `npm run smoke`, verificar exige digitar caminho de arquivo").toBeDefined()
+  })
+
+  it("🔴 é UM comando, não uma cadeia com `&&`", () => {
+    // `"smoke": "node a.mjs && node b.mjs"` quebra o encaminhamento de argumento do jeito caro:
+    // o npm anexa o que vem depois de `--` ao FIM da string, então
+    // `npm run smoke -- --base=http://localhost:3001` faria o PRIMEIRO bater em produção e o
+    // segundo em localhost — dois alvos num comando só, com os resultados impressos como se
+    // fossem do mesmo.
+    expect(
+      PKG.scripts.smoke,
+      `\`${PKG.scripts.smoke}\` encadeia comandos: o \`--base\` só chegaria no último`,
+    ).not.toMatch(/&&|;/)
+  })
+
+  it("🔴 o wrapper DERIVA a lista do disco — testado com um smoke que não existe", async () => {
+    // ⚠️ A 1ª versão deste caso só fazia `grep` por `readdirSync` no source, e PASSOU VERDE
+    // numa sonda que trocava a derivação por lista fixa e deixava a palavra sobrando noutra
+    // linha. Casar a grafia prova que alguém escreveu a palavra; o que interessa é o FATO.
+    const { listarSmokes } = await import("../../../scripts/smoke.mjs")
+
+    const dir = mkdtempSync(join(tmpdir(), "smokes-"))
+    for (const f of ["smoke-browser.mjs", "smoke-producao.mjs", "smoke-zz-inventado.mjs", "outro.mjs"]) {
+      writeFileSync(join(dir, f), "")
+    }
+
+    const achados = listarSmokes(dir)
+    expect(achados, "smoke novo em scripts/ tem de entrar sozinho").toContain("smoke-zz-inventado.mjs")
+    expect(achados, "arquivo que não é smoke não pode entrar").not.toContain("outro.mjs")
+    // O barato primeiro: com `set -e`, gastar ~26s de browser antes da checagem de conteúdo
+    // seria pagar para redescobrir uma rota vazia que o outro já acusou.
+    expect(achados[0]).toBe("smoke-producao.mjs")
+  })
+
+  it("🔴 todo smoke do disco é invocado pelo deploy", () => {
+    // Esta é a guarda contra as duas listas divergirem: o wrapper acha os smokes sozinho, o
+    // `deploy.sh` os nomeia. Smoke novo que entrasse só no wrapper rodaria à mão e nunca no
+    // deploy — que é justamente quando ele importa.
+    for (const s of SMOKES) {
+      expect(
+        CODIGO,
+        `\`scripts/${s}\` existe mas o deploy.sh não o chama — ele só rodaria em \`npm run smoke\``,
+      ).toContain(s)
+    }
   })
 })

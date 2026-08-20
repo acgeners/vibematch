@@ -841,7 +841,7 @@ toda rota e, só nesses prefixos, decide:
 | Lista | Prefixos | Exigência |
 |---|---|---|
 | `CONSOLE_PREFIXES` | **`/curation`** (um só) | sem sessão → `/login`; logado não-curador → `/` |
-| `SIGNED_IN_PREFIXES` | `/account`, `/dashboard`, `/discover` | sem sessão → `/login`. **Papel não importa** |
+| `SIGNED_IN_PREFIXES` | `/account`, `/dashboard`, `/discover`, `/my-list` | sem sessão → `/login`. **Papel não importa** |
 
 🔴 **A primeira lista tinha CINCO prefixos até 2026-08-16, e virar um só foi o ponto da
 renomeação — não o inglês.** `/curadoria`, `/ai-evaluation`, `/settings`, `/ai-usage` e `/admin`
@@ -850,8 +850,13 @@ eram rotas IRMÃS na raiz do `app/`: cada uma precisava ser lembrada aqui **e** 
 dois lados nascia sem gate ou sem sidebar, renderizando normalmente — nada acusa. Hoje o
 aninhamento `app/curation/*` faz os dois trabalhos, e os 5 layouts idênticos viraram 1.
 
-⚠️ Esta tabela já dizia `/account`, `/dashboard` quando o código tinha três — `/discover`
-entrou sem passar aqui.
+🔴 **Esta tabela envelheceu DUAS vezes, do mesmo jeito, com este aviso já escrito.** Ela dizia
+`/account`, `/dashboard` quando o código tinha três (`/discover` entrou sem passar aqui), foi
+remedida, e voltou a errar quando `/my-list` entrou em 16/08 — corrigida só em 20/08. **O aviso
+em prosa não impediu a repetição, e não tinha como: número em prosa não sabe que está
+defasado.** Hoje quem confere é `tests/unit/orchestration/rotas-de-sessao.test.ts`, que lê a
+tabela daqui e a compara com o array do `middleware.ts` — o mesmo movimento que a tabela de
+alvos dos scripts já fazia.
 
 **Todo o resto segue sem gate de rota** — visitante anônimo carrega `/catalog`, `/reading`,
 `/favorites`, `/ranking`, `/import` e `/recommendations`, que é o desenho: o catálogo é
@@ -3243,12 +3248,33 @@ abre a `/ranking`**, e a instrução impressa pelo script mandava conferir exata
 instrução foi seguida, passou, e o defeito ficou no ar até alguém abrir a página num browser.
 
 Hoje o `deploy.sh` termina rodando `scripts/smoke-producao.mjs`, que bate em **11 rotas** e
-conta o CONTEÚDO de cada uma:
+conta o CONTEÚDO de cada uma, e depois o `smoke-browser.mjs` (seção própria abaixo):
 
 ```bash
-node scripts/smoke-producao.mjs                        # contra satoria.fly.dev
-node scripts/smoke-producao.mjs --base=http://localhost:3001
+npm run smoke                                    # TODOS, contra satoria.fly.dev
+npm run smoke -- --base=http://localhost:3001    # TODOS, contra um servidor local
 ```
+
+🔴 **`flyctl deploy` direto pula o `deploy.sh` inteiro — as três guardas E os dois smokes.**
+Aconteceu em 2026-08-20, e o quase-acidente foi concreto: uma hora antes, o working tree
+continha um componente escrito **de propósito para estourar na hidratação** (a sonda que provou
+o smoke novo). `flyctl deploy` empacota o **diretório**, não o `origin/main` — teria publicado
+toda página de obra quebrada, que é o incidente que aquele smoke existe para pegar.
+
+⚠️ **Não há como impedir isso pelo repo** (é um comando externo). O que existe é o `npm run
+smoke`, que torna o estrago recuperável em ~30s: ele roda os DOIS depois do fato. Antes dele os
+smokes só eram alcançáveis pelo `deploy.sh` ou digitando dois caminhos de arquivo — verificação
+sem entrada barata é verificação que não acontece.
+
+🔴 **O wrapper existe porque `"smoke": "node a.mjs && node b.mjs"` quebraria o encaminhamento
+de argumento, e do jeito caro:** o npm anexa o que vem depois de `--` ao FIM da string, então
+`npm run smoke -- --base=http://localhost:3001` faria o primeiro bater em PRODUÇÃO e o segundo
+em localhost — dois alvos num comando só, com os dois resultados impressos como se fossem do
+mesmo. Daqui os argumentos vão verbatim para todos.
+
+⚠️ A lista de smokes sai do **filesystem** (`listarSmokes`, exportada para ser testável de
+verdade); o `deploy.sh` os nomeia um a um, e um teste derivado do disco exige que todo
+`scripts/smoke-*.mjs` apareça nos dois — senão um smoke novo rodaria só à mão.
 
 ⚠️ **O piso de cada rota é baixo de propósito** — ele separa "renderizou" de "veio vazia", que
 é o defeito real. Cravar o número de hoje (a `/ranking` traz 42 linhas) faria qualquer mudança
@@ -5822,11 +5848,11 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.432 passando (+24 pulados) em 329 arquivos** (324 passando + 5 pulados);
-medido em 2026-08-20 com o smoke de browser: **+6 casos e ZERO arquivo novo** — os casos entraram
-no `deploy-verifica-o-que-publica`, que já era o dono da invariante "o deploy verifica o que
-publica". Disco (`find`) = índice (`git ls-files`) = **329**, conferido DEPOIS do `git add -N`,
-sobre `origin/main` (`01be4bd`) + só os arquivos deste trabalho.
+`npm run test` → **3.438 passando (+24 pulados) em 329 arquivos** (324 passando + 5 pulados);
+medido em 2026-08-20 com a tabela de gates derivada + o `npm run smoke`: **+6 casos e ZERO
+arquivo novo** — entraram em `rotas-de-sessao` e `deploy-verifica-o-que-publica`, que já eram os
+donos das duas invariantes. Disco (`find`) = índice (`git ls-files`) = **329**, conferido DEPOIS
+do `git add -N`, sobre `origin/main` (`c6b9e77`) + só os arquivos deste trabalho.
 
 ⚠️ **Este número foi REMEDIDO depois do rebase, não somado ao que estava escrito.** A medição
 inicial (3.382 em 325) valia sobre uma `main` que andou 4 commits no meio da sessão — os PRs
@@ -5868,7 +5894,8 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.426 em 329** (a nota do pedido de curadoria, +19 casos e +1 arquivo),
+Antes: **3.432 em 329** (o smoke de browser, +6 casos),
+**3.426 em 329** (a nota do pedido de curadoria, +19 casos e +1 arquivo),
 **3.407 em 328** (a auditoria contando as fichas que afirmam regra vencida),
 **3.398 em 327** (o dono do par nota/texto de `adult_content`, +10 casos e +1 arquivo),
 **3.388 em 326** (o conserto do `redirect()` na página da obra, +7 casos e +2 arquivos),
