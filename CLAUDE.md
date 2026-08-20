@@ -288,13 +288,13 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**102 arquivos, remedidos em 2026-08-19**):
+banco declara um dos dois (**103 arquivos, remedidos em 2026-08-20**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **44** | só LÊ ⇒ vai pro local, de graça |
 | `ALVO: NUVEM` no cabeçalho | **49** | GRAVA ⇒ tem que ir pra nuvem |
-| (não tocam o banco) | 8 | fora da régua |
+| (não tocam o banco) | 9 | fora da régua — entrou o `smoke-browser.mjs`, que só abre rota |
 
 🔴 **ESTES TRÊS NÚMEROS SÃO CONFERIDOS PELA SUÍTE**, e não por quem editar esta seção —
 `scripts-apontam-pro-local.test.ts` lê a tabela daqui e a compara com a varredura real. É a
@@ -3258,26 +3258,88 @@ se perde é a detecção de "veio pela metade", que ele não promete.
 ⚠️ **As rotas gateadas entram esperando 307**, não 200: sem sessão elas TÊM que mandar pro
 `/login`, e é isso que prova que o gate está de pé. Trocar por 200 esconderia o gate caindo.
 
-🔴 **Sem browser — e o PREÇO DISSO FOI COBRADO em 2026-08-20: toda página de obra ficou um dia
-quebrada para visitante com este smoke VERDE.** O erro era React #310 na hidratação; o HTML
-servido vinha completo. A frase que estava aqui — *"o HTML SERVIDO já denuncia esta família"* —
-é falsa para a família inteira "quebra depois da hidratação", e era exatamente ela que estava
-declarada como preço aceito.
-
-🔴 **E a justificativa do custo CAIU.** Ela dizia que um browser faria o smoke depender de "um
-download de ~150 MB no meio do deploy". Medido em 20/08: `playwright-core` já vem em
-`services/comix-render/node_modules` (o sidecar da Comix) e o Chromium está em
-`~/Library/Caches/ms-playwright/` (356 MB, já baixado). **Não há download nenhum a fazer nesta
-máquina.** A premissa envelheceu quando o sidecar entrou, e ninguém voltou aqui — a mesma forma
-do cutover que inverteu o sentido de `--env-file=.env.local` em 58 scripts.
-
-⚠️ O que falta é a implementação, não a decisão: ver a seção **"Os canais mudos"**.
+✅ **O browser entrou em 2026-08-20** — `scripts/smoke-browser.mjs`, rodado logo depois. Ver a
+seção própria abaixo. O preço de não tê-lo já tinha sido cobrado no mesmo dia: toda página de
+obra ficou um dia quebrada para visitante com este smoke VERDE, porque o erro era React #310 na
+hidratação e o HTML servido vinha completo. A frase que morava aqui — *"o HTML SERVIDO já
+denuncia esta família"* — é falsa para a família inteira "quebra depois da hidratação".
 
 ⚠️ **Ele roda DEPOIS de publicar e NÃO desfaz nada.** Não há como verificar o que está no ar
 antes de pôr no ar; reprovar aqui quer dizer "está no ar e quebrado", que é justamente quando
 alguém precisa saber. Conferido com sonda: revertendo a correção da `/ranking` num dev server,
 o smoke acusa `só 0 linhas de obra (mínimo 5) — a rota respondeu 200 e subiu VAZIA` e sai com
 código 1.
+
+### O segundo smoke ABRE num browser — e `pageerror` NÃO é o sinal
+
+`scripts/smoke-browser.mjs`, no fim do `deploy.sh`, depois do de HTTP. Carrega 5 rotas num
+Chromium headless e reprova se alguma quebrar **depois da hidratação** — a família que o smoke
+de cima declara não ver, e que deixou toda página de obra quebrada por um dia em 20/08.
+
+```bash
+node scripts/smoke-browser.mjs                        # contra satoria.fly.dev
+node scripts/smoke-browser.mjs --base=http://localhost:3100
+```
+
+🔴 **A primeira versão dele mediu as coisas erradas e PASSOU VERDE com um componente que
+literalmente lançava na hidratação.** Os três enganos, e cada um é a escolha óbvia de quem
+escreve isto pela primeira vez:
+
+| o que eu olhei | por que não funciona |
+|---|---|
+| `pageerror` | o **React 19 ENGOLE** a exceção: cai para render no cliente, a Suspense mais próxima fica no fallback e nada chega ao `window.onerror`. Medido: página visivelmente quebrada, `pageerror` = **0** |
+| ignorar console error que começa com `Failed to load resource` | o sintoma real era um **500** num chunk, e essa frase é o prefixo dele também — o filtro que existe para calar as capas mortas calava o defeito |
+| piso "tem `<h1>`" | a página quebrada tem `<h1>Carregando…</h1>`: um elemento, piso satisfeito, defeito invisível |
+
+**O que de fato separa os dois estados** (medido em 20/08, build local com uma sonda que lança na
+hidratação × produção sã):
+
+| sinal | quebrado | são |
+|---|---|---|
+| respostas **5xx** | **1** | **0** em 9 rotas |
+| **esqueletos** (`[data-slot="skeleton"]`) após hidratar | **28** | **0** em 9 rotas |
+| `[role="tab"]` na página de obra | 0 | 6 |
+| `pageerror` | 0 | 0 — **não separa** |
+| 403 `/api/image-proxy` + `net::ERR_ABORTED` | 10 | 10 — **piso de ruído** |
+
+🔴 **O esqueleto sobrando é o sinal GERAL, e é o único que não precisa de número por rota.**
+Quando o cliente estoura, a Suspense nunca sai do fallback: a página fica eternamente
+"carregando" com o HTML completo por baixo. Conferido com sonda que os DOIS sinais disparam
+sozinhos — desligando o de 5xx, o esqueleto ainda reprova.
+
+⚠️ **4xx e `net::ERR_*` são o piso de ruído desta aplicação, não saúde** — `/api/image-proxy`
+devolve 403 em toda página de obra e o Next aborta prefetch o tempo todo, nos dois estados.
+Reprovar por eles seria o alarme que sempre toca. Eles são **contados e impressos**, nunca
+descartados em silêncio.
+
+🔴 **Sempre `goto`, nunca clique.** Medido em 20/08: abertura DIRETA por UUID quebrava **9 de
+10**; clicar num link, **0 de 10**. Um smoke que navegasse clicando passaria verde pelo mesmo
+motivo que o defeito era invisível para quem desenvolve — navegando pelo app, ele não existe.
+
+⚠️ **A página de obra entra por DESCOBERTA, nas duas formas da URL.** O slug sai do primeiro
+link da `/catalog`; o UUID é derivado (é o id que mais se repete no HTML da própria obra) e
+**conferido** — só entra se `/catalog/<uuid>` devolver a canonical do mesmo slug. Heurística sem
+conferência mandaria o smoke bater numa obra qualquer e chamar de sucesso. Id cravado aqui
+reprovaria um deploy são no dia em que a obra fosse arquivada.
+
+🔴 **O SCRIPT sai do `$WT` e o BROWSER sai do `$REPO_ROOT`, e isso NÃO é a armadilha dos "dois
+critérios".** `git worktree add` cria checkout limpo, **sem `node_modules`** — nem o da raiz nem
+o do sidecar, que é quem tem o `playwright-core`. Então o código publicado vem do worktree (a
+regra de sempre) e a ferramenta da máquina vem do checkout, via `--modules="$REPO_ROOT"`. Sem
+esse argumento o smoke cai no fail-soft em TODO deploy e nunca verifica nada.
+
+⚠️ **Fail-SOFT, e ALTO.** Sem Playwright ele imprime um bloco dizendo onde procurou e o que
+ficou sem verificação, e sai **0** — com `set -e`, um exit 1 derrubaria o comando DEPOIS de já
+ter publicado, trocando um defeito raro por um comum. Mas fail-soft calado é como se constrói
+capacidade DESLIGADA (o `CoverImage` prometia fallback e estava ligado em 2 de 36 telas), daí o
+aviso ser um bloco e não uma linha. Conferido rodando o script de um diretório sem
+`node_modules`.
+
+⚠️ **Custo medido: ~26s** para as 5 rotas contra produção, do worktree, como no deploy real.
+
+Guardado por `tests/unit/orchestration/deploy-verifica-o-que-publica.test.ts` (7 casos novos, as
+7 sondas conferidas), inclusive a que congela o achado caro: **o detector não pode voltar a se
+apoiar só em `pageerror`**.
 
 Corolário do file tracing: ele erra pro lado de **incluir demais**. Já puxou `.cache/comix-chrome/`
 (o Chrome de 90 MB do sidecar, que o Next nunca executa) pra dentro do artefato —
@@ -3387,11 +3449,12 @@ testes), é **canal de sinal**. Mais um teste unitário não teria achado nenhum
 
 ### Os quatro canais que faltam, em ordem de retorno
 
-**1. Browser no smoke de deploy.** A família "quebra depois da hidratação" é 100% invisível hoje
-— e cobrou um dia de produção. O `deploy.sh` abriria 3–4 rotas num Chromium headless e reprovaria
-em qualquer erro de console. ⚠️ **A justificativa de custo caiu**: o `playwright-core` do sidecar
-e o Chromium do cache já estão na máquina (ver a seção do `deploy.sh`). Fail-SOFT quando o
-browser não existir — travar deploy por falta de binário troca um defeito raro por um comum.
+✅ **1. Browser no smoke de deploy — FEITO em 2026-08-20** (`scripts/smoke-browser.mjs`, ver a
+seção própria). ⚠️ E o desenho que estava escrito aqui — *"reprovaria em qualquer erro de
+console"* — **teria falhado nos dois sentidos**: o React 19 engole a exceção da hidratação
+(`pageerror` = 0 numa página visivelmente quebrada), e "qualquer erro de console" reprovaria todo
+deploy por causa das capas mortas. Os sinais que funcionam foram medidos, não deduzidos: resposta
+**5xx** e **esqueleto sobrando** depois de hidratar.
 
 **2. Script de correção declara o que esperava achar.** *"Nada a fazer"* é indistinguível de
 *"está tudo certo"*, e foi o que manteve o `--heal` inerte. A régua: **"nada a fazer" precisa
@@ -5759,11 +5822,11 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.426 passando (+24 pulados) em 329 arquivos** (324 passando + 5 pulados);
-medido em 2026-08-20 com a nota do pedido de curadoria: **+19 casos e +1 arquivo**
-(`orchestration/nota-do-pedido-tem-um-teto-so`). Disco (`find`) = índice (`git ls-files`) =
-**329**, conferido DEPOIS do `git add -N`, sobre `origin/main` (`01be4bd`) + só os arquivos deste
-trabalho.
+`npm run test` → **3.432 passando (+24 pulados) em 329 arquivos** (324 passando + 5 pulados);
+medido em 2026-08-20 com o smoke de browser: **+6 casos e ZERO arquivo novo** — os casos entraram
+no `deploy-verifica-o-que-publica`, que já era o dono da invariante "o deploy verifica o que
+publica". Disco (`find`) = índice (`git ls-files`) = **329**, conferido DEPOIS do `git add -N`,
+sobre `origin/main` (`01be4bd`) + só os arquivos deste trabalho.
 
 ⚠️ **Este número foi REMEDIDO depois do rebase, não somado ao que estava escrito.** A medição
 inicial (3.382 em 325) valia sobre uma `main` que andou 4 commits no meio da sessão — os PRs
@@ -5805,7 +5868,8 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.407 em 328** (a auditoria contando as fichas que afirmam regra vencida),
+Antes: **3.426 em 329** (a nota do pedido de curadoria, +19 casos e +1 arquivo),
+**3.407 em 328** (a auditoria contando as fichas que afirmam regra vencida),
 **3.398 em 327** (o dono do par nota/texto de `adult_content`, +10 casos e +1 arquivo),
 **3.388 em 326** (o conserto do `redirect()` na página da obra, +7 casos e +2 arquivos),
 **3.381 em 324** (o cabeçalho fixo das tabelas), **3.377 em 323** (as larguras de coluna do

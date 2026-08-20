@@ -101,3 +101,19 @@ echo
 # diferentes, e só a primeira estava sob controle. Verificar o que subiu com o script de
 # outra versão é verificar outra coisa.
 node "$WT/scripts/smoke-producao.mjs" --base="https://$APP.fly.dev"
+
+# ── smoke de BROWSER: HTML completo também não basta ──────────────────────────
+#
+# 🔴 O smoke acima conta conteúdo no HTML SERVIDO e declara o próprio limite: não vê o que
+# quebra depois da hidratação. Em 20/08/2026 esse limite foi cobrado — toda página de obra
+# ficou um dia quebrada para visitante (React #310), com o HTML completo e o smoke VERDE.
+#
+# 🔴 O SCRIPT sai do "$WT" (mesma regra do de cima: verificar o que subiu com o script de
+# outra versão é verificar outra coisa), mas o BROWSER vem do "$REPO_ROOT" — worktree recém
+# criado não tem `node_modules`, nem o da raiz nem o do sidecar. São naturezas diferentes:
+# um é código publicado, o outro é ferramenta da máquina.
+#
+# ⚠️ Ele é fail-SOFT: sem Playwright instalado, avisa alto e sai 0. Travar o deploy por falta
+# de binário trocaria um defeito raro por um comum — e com `set -e` derrubaria o comando
+# DEPOIS de já ter publicado.
+node "$WT/scripts/smoke-browser.mjs" --base="https://$APP.fly.dev" --modules="$REPO_ROOT"
