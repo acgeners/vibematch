@@ -585,6 +585,28 @@ projeto inteiro**.
 19/08/2026: **adiar**, em vez de ligar um Gmail pessoal em produção para 2 contas — e deixar o
 caminho pronto.
 
+🔴 **O "Gmail agora" foi TENTADO em 19/08 e está BLOQUEADO — não é mais o caminho barato.** A
+decisão chegou a ser revista a favor dele, e o cadastro da conta nova parou na verificação do
+Google: *"Este número de telefone foi usado muitas vezes"*. O bloqueio é do **telefone**, não do
+nome, então **nenhum nome de usuário passa com esse número** — e a conta de produto
+(`satoria.app@gmail.com` e vizinhos) não existe. Quem retomar precisa de OUTRO número, e não de
+outra ideia de nome.
+
+⚠️ **O Gmail ignora PONTO no usuário**: `satoria`, `sator.ia` e `satori.a` são o MESMO cadastro.
+Três tentativas que parecem três são uma. Variação real exige mudar caracteres.
+
+🔴 **E apareceu um custo que a comparação anterior não tinha: o RAIO DE DANO da App Password.**
+Ela não é limitada a "enviar SMTP" — dá acesso ao Mail da conta, envio e leitura por IMAP. Com
+um Gmail NOVO isso é irrelevante (caixa vazia, criada pra isso). Usando a conta PESSOAL, essa
+credencial fica guardada na config do projeto Supabase e o raio de dano vira a caixa pessoal da
+dona. É argumento diferente — e mais sério — que o "parece phishing" registrado abaixo.
+
+✅ **Logo a ordem mudou: `domínio próprio + Resend` deixou de ser a opção cara.** Sem conta de
+produto disponível, as alternativas ao domínio são expor a conta pessoal ou arrumar um segundo
+número. O domínio custa ~R$40/ano (.com.br) ou ~US$12 (.app), dá 3.000 e-mails/mês no free tier
+do Resend, resolve o `From` de vez e ainda tira o app de `satoria.fly.dev`. **Decidido em
+19/08/2026: adiar de novo e retomar pelo domínio**, não pelo Gmail.
+
 ```bash
 node scripts/configurar-smtp.mjs                    # ENSAIO: estado atual + plano (não escreve)
 node scripts/configurar-smtp.mjs --executar         # aplica (pede a App Password sem ecoar)
