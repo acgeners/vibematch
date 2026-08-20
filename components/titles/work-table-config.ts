@@ -328,7 +328,10 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   // o RankingTable achar a largura padrão via este mapa compartilhado.
   rank: 48,
   select: 40,
-  fav: 44,
+  // 53 e não 44: o coração vem com o contorno do botão, e medido em 19/08/2026 na tela real
+  // ele pede 52px. É o mesmo valor que `TIER_MODE_COLUMN_WIDTHS` já declara — os dois mapas
+  // descrevem a MESMA célula, e divergiam em 9px.
+  fav: 53,
   title: 360,
   publication_status: 130,
   personal_status: 110,
@@ -350,7 +353,13 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   // ~1. Em qualquer tabela densa — inclusive no modo Agrupar, fator 0,85 — ele virava "33,…",
   // e esta é uma das duas forças que o separador compara.
   total_votes: 80,
-  alignment_score: 70,
+  // 🔴 100 e não 70, e o que decide NÃO é a pílula (que pede 83) — é o botão **"Rankear"**,
+  // que aparece nas obras SEM Veredito, ou seja a maioria da lista. Medido em 19/08/2026,
+  // logada, na tela real: a célula pede **99,9px**. Com 70 o Veredito saía cortado em
+  // **40/40 linhas do /ranking e 50/50 do /catalog** — a coluna da decisão, ilegível em toda
+  // linha, sem corte visível, sem rolagem e sem erro. É o valor que `TIER_MODE_COLUMN_WIDTHS`
+  // já declarava; o mapa global tinha ficado para trás.
+  alignment_score: 100,
   synopsis_pred: 110,
   // Arte é um percentil de 2 dígitos: 70 é a largura das outras colunas numéricas. Estava sem
   // entrada e herdava o fallback de 100 — 30px a mais que nunca foram escolhidos, e que no
@@ -370,6 +379,20 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   updated_at: 110,
   last_read_at: 110,
   actions: 60,
+  // 🔴 Os 9 critérios herdavam o `?? 100` — e aqui ele não deixava a coluna ESTREITA, deixava
+  // as outras. Medido em 19/08/2026 no /ranking com as colunas padrão: cada um pede **24,4px**
+  // (32,8 no 🔥, que carrega o 18+) e recebia 69,5 — servidos a **285%**. Somados, os nove
+  // reivindicavam **900px de um orçamento de 2.076px (43%)**, e como a tabela é proporcional
+  // sem piso, quem pagava eram Ano, Votos, Veredito e o Título.
+  //
+  // 48 é o valor que `work-table.tsx` já usava no PRÓPRIO fallback dele
+  // (`?? (key.startsWith("crit_") ? 48 : 100)`) — os dois fallbacks descreviam a mesma célula
+  // e discordavam, e o `/ranking` era o lado sem a exceção. Declarar aqui faz nenhum dos dois
+  // importar.
+  //
+  // Derivado de `CRITERION_SLUGS` pelo mesmo motivo que `WORK_TABLE_COLUMNS` deriva: critério
+  // novo no Supabase nasce com largura, não no fallback invisível.
+  ...Object.fromEntries(CRITERION_SLUGS.map((slug) => [`crit_${slug}`, 48])),
 }
 
 /**

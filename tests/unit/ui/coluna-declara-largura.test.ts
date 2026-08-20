@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest"
-import { WORK_TABLE_COLUMNS, DEFAULT_COLUMN_WIDTHS } from "@/components/titles/work-table-config"
+import {
+  WORK_TABLE_COLUMNS,
+  DEFAULT_COLUMN_WIDTHS,
+  TIER_MODE_COLUMN_WIDTHS,
+} from "@/components/titles/work-table-config"
 import { CRITERION_SLUGS } from "@/types/domain"
 
 /**
@@ -17,15 +21,17 @@ import { CRITERION_SLUGS } from "@/types/domain"
  * As exceções são DECLARADAS, com o motivo — e não uma allowlist que absorve o próximo
  * esquecimento em silêncio.
  *
- * ⚠️ Os 9 `crit_*` herdam o fallback de 100 e isso NÃO foi conferido: são colunas de um
- * dígito, onde 100 é plausível. Ficam listadas para que a próxima coluna adicionada sem
- * largura REPROVE em vez de entrar de carona. (`art` saiu daqui em 17/08 — ganhou 70px, a
- * largura das outras colunas numéricas, porque no modo Agrupar os 30px de fallback saíam da
- * conta do separador.)
+ * 🔴 **Hoje a lista está VAZIA, e os 9 `crit_*` saíram dela em 19/08/2026.** A ressalva que
+ * estava escrita aqui — *"herdam o fallback de 100 e isso NÃO foi conferido: são colunas de um
+ * dígito, onde 100 é plausível"* — era a hipótese certa de duvidar e a conclusão errada.
+ * Conferido na tela: cada um pede **24,4px** e recebia **69,5**. O dano do `?? 100` não é só
+ * deixar UMA coluna estreita; quando ele cai em NOVE colunas de uma tabela proporcional sem
+ * piso, ele deixa todas as OUTRAS estreitas — 900px de um orçamento de 2.076px (43%).
+ *
+ * (`art` saiu daqui em 17/08 — ganhou 70px, a largura das outras colunas numéricas, porque no
+ * modo Agrupar os 30px de fallback saíam da conta do separador.)
  */
-const SEM_LARGURA_DECLARADA = new Set<string>([
-  ...CRITERION_SLUGS.map((slug) => `crit_${slug}`),
-])
+const SEM_LARGURA_DECLARADA = new Set<string>([])
 
 describe("toda coluna da tabela declara a própria largura", () => {
   it("nenhuma coluna nova entra caindo no fallback de 100", () => {
@@ -44,6 +50,26 @@ describe("toda coluna da tabela declara a própria largura", () => {
     // coluna sem que ninguém perceba.
     const orfas = [...SEM_LARGURA_DECLARADA].filter((key) => DEFAULT_COLUMN_WIDTHS[key] != null)
     expect(orfas, `já têm largura e podem sair da lista: ${orfas.join(", ")}`).toEqual([])
+  })
+
+  it("nota de critério não pede mais largura que uma coluna numérica de 2 dígitos", () => {
+    // O `?? 100` não é pego pelo caso acima se alguém DECLARAR 100. O que o impede de voltar
+    // é a conta: a nota de critério é o menor conteúdo da tabela (um dígito, 24,4px medidos —
+    // 32,8 no 🔥), então ela não pode pedir mais que `art`, que é um percentil de 2 dígitos.
+    // Com os nove a 100, eles sozinhos reivindicavam 43% do orçamento do /ranking.
+    const criterio = CRITERION_SLUGS.map((slug) => DEFAULT_COLUMN_WIDTHS[`crit_${slug}`])
+    for (const largura of criterio) {
+      expect(largura).toBeGreaterThan(0)
+      expect(largura).toBeLessThanOrEqual(DEFAULT_COLUMN_WIDTHS.art)
+    }
+  })
+
+  it("o Veredito cabe no botão Rankear, não só na pílula", () => {
+    // Medido em 19/08/2026, logada: a célula pede 99,9px — quem manda é o botão "Rankear" das
+    // obras SEM Veredito (a maioria da lista), não a pílula (83). Com 70 ela saía cortada em
+    // 40/40 linhas do /ranking e 50/50 do /catalog. `TIER_MODE_COLUMN_WIDTHS` já declarava 100.
+    expect(DEFAULT_COLUMN_WIDTHS.alignment_score).toBeGreaterThanOrEqual(100)
+    expect(TIER_MODE_COLUMN_WIDTHS.alignment_score).toBeGreaterThanOrEqual(100)
   })
 
   it("a coluna do separador é a mais larga depois do título — é a que tem mais conteúdo", () => {
