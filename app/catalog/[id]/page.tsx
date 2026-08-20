@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import { notFound, redirect } from "next/navigation"
+import { notFound } from "next/navigation"
 import { Archive, BarChart3, Ban, ChevronDown, Compass, Heart, LayoutDashboard, Lightbulb, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash, ExternalLink } from "lucide-react"
 import { ArchivedBanner } from "@/components/titles/archived-banner"
 import {
@@ -23,7 +23,7 @@ import type { CascadeStatus } from "@/lib/generate-all/types"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
 import { getTasteCriteria, getTasteScoresForWork } from "@/server/queries/pilot-taste"
 import { TagsExpandAll } from "@/components/titles/tags-expand-all"
-import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug, getWorkTitleByIdOrSlug, getWorkExternalIds, getArchivedCovers } from "@/server/queries/works"
+import { getWorkWithAiEvaluations, getWorkBySlug, getWorkTitleByIdOrSlug, getWorkExternalIds, getArchivedCovers } from "@/server/queries/works"
 import { comixWorkUrl } from "@/lib/external/comix"
 import { getAllTags } from "@/server/queries/tags"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
@@ -342,31 +342,63 @@ export async function generateMetadata({ params }: TitleDetailPageProps): Promis
   const title = await getWorkTitleByIdOrSlug(id)
   // Sem título resolvido, devolver `{}` deixa o `title.default` do layout raiz valer ("SatorIA").
   // Escrever "SatorIA" aqui passaria pelo template e sairia "SatorIA · SatorIA".
-  return title ? { title } : {}
+  if (!title) return {}
+  /**
+   * 🔴 O `canonical` é o que SUBSTITUI o `redirect()` que morava no corpo da página — não é
+   * enfeite de SEO. Ver o comentário do componente abaixo: aquele redirect derrubava a
+   * página em 9 de cada 10 aberturas por UUID. A obra passa a ser SERVIDA nas duas URLs, e
+   * quem diz qual é a de verdade é esta linha, que não custa navegação nenhuma.
+   *
+   * ⚠️ Deriva do TÍTULO pelo mesmo `titleToSlug` que gera os links — uma segunda régua aqui
+   * apontaria o canonical para uma URL que não existe.
+   */
+  const slug = titleToSlug(title)
+  return slug ? { title, alternates: { canonical: `/catalog/${slug}` } } : { title }
 }
 
 export default async function TitleDetailPage({ params }: TitleDetailPageProps) {
   const { id } = await params
 
+  /**
+   * 🔴 AQUI NÃO SE REDIRECIONA — a obra é servida na URL em que foi pedida (UUID, slug
+   * canônico ou slug antigo), e quem declara a URL de verdade é o `alternates.canonical` do
+   * `generateMetadata` acima.
+   *
+   * `redirect()` num server component NÃO devolve 3xx: o layout já começou a streamar, o
+   * Next responde **200** e manda o cliente navegar — e o Router estoura com "Rendered more
+   * hooks than during the previous render" (React #310 minificado). Conhecido desde
+   * 2026-08-08; era um erro de console e a página funcionava, então virou resíduo aceito
+   * ("sobra bookmark e link colado por UUID"). Em 19/08 a grade compacta dos 9 critérios
+   * aumentou a árvore hidratada e o erro deixou de ser recuperável.
+   *
+   * Medido em produção em 2026-08-20, 10 aberturas por UUID e 5 por slug:
+   *
+   * | abertura DIRETA | quebrou | erro no console |
+   * |---|---|---|
+   * | por UUID (com o redirect) | **9 de 10** | 10 de 10 |
+   * | por slug (sem redirect)   | 0 de 5 | 0 de 5 |
+   *
+   * ⚠️ Navegação por CLIQUE nunca quebrou (0 erros) — o gatilho é load direto: bookmark,
+   * link colado, aba nova, refresh. Foi isso que manteve o defeito invisível.
+   *
+   * ⚠️ O que se PERDE: a barra de endereço não troca mais o UUID pelo slug sozinha, e a obra
+   * responde em mais de uma URL. É o preço declarado, e o canonical é quem o paga junto aos
+   * buscadores. Trocar por um `router.replace` no cliente devolveria a troca de URL — e o
+   * risco de dessincronizar o Router de novo, pela mesma porta.
+   *
+   * ⚠️ A checagem `slugMatches.length === 1` que existia aqui protegia contra slug
+   * DUPLICADO levar à obra errada. Ela sai porque deixa de ser necessária, não por descuido:
+   * sem redirect, o UUID renderiza a obra dele. O `db:health` segue vigiando duplicata pelo
+   * caminho inverso (link por slug).
+   */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let work: any = null
   if (UUID_RE.test(id)) {
     work = await getWorkWithAiEvaluations(id)
-    if (work) {
-      const slug = titleToSlug(work.title)
-      const slugMatches = await getWorkIdsBySlug(slug)
-      if (slugMatches.length === 1 && slugMatches[0] === work.id) {
-        redirect(`/catalog/${slug}`)
-      }
-    }
   } else {
+    // Resolve slug canônico E antigo (`previous_slugs`, migration 162) — URL velha continua
+    // abrindo a obra em vez de 404, agora sem passar por navegação.
     work = await getWorkBySlug(id)
-    // Resolvido por um slug ANTIGO (previous_slugs, migration 162)? Redireciona pro slug
-    // canônico — evita 404 em URLs velhas (Voltar/bookmark/aba) sem servir a obra sob dois slugs.
-    if (work) {
-      const canonical = titleToSlug(work.title)
-      if (canonical && canonical !== id) redirect(`/catalog/${canonical}`)
-    }
   }
 
   if (!work) notFound()
@@ -474,6 +506,16 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     scoreMap[cs.criterion_slug] = cs.score
     if (cs.source) scoreSourceMap[cs.criterion_slug] = cs.source
   }
+  /**
+   * Tem NOTA de critério? Dono único da pergunta — o botão de avaliar e o card de
+   * "Notas por critério" a fazem, e duas cópias divergiriam no primeiro critério novo.
+   *
+   * 🔴 A régua é "existe nota", NUNCA "existe avaliação de IA": nota pode vir de import
+   * ou de edição manual, e um card que sumisse por falta de `ai_evaluations` esconderia
+   * número que a obra tem. Pelo mesmo motivo não é `CRITERION_SLUGS.length` — avaliação
+   * parcial mostra o que tem.
+   */
+  const hasCriteriaScores = Object.keys(scoreMap).length > 0
   // Só busca a procedência da calibração se ALGUMA nota veio dela — na esmagadora maioria
   // das obras (37 notas em 8.811, medido) isto não chega a virar consulta.
   const calibrationProvenance = Object.values(scoreSourceMap).includes("ai_calibrated")
@@ -1242,13 +1284,23 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       <AiEvaluationButton
         workId={work.id}
         workTitle={work.title}
-        hasCriteriaScores={Object.keys(scoreMap).length > 0}
+        hasCriteriaScores={hasCriteriaScores}
         coverUrl={primaryCover}
         latestEvaluation={latestAiEval ?? null}
         externalEditorEnabled={externalEditorEnabled}
         externalReviews={externalManualReviews}
       />
-      {/* Notas por critério */}
+      {/* Notas por critério.
+          🔴 SEM nota nenhuma o bloco não some por estética — ele MENTE: a grade desenha as 9
+          linhas com "–", cada uma com a barra de faixa vazia, e o painel lateral abre no
+          primeiro critério mostrando só o ícone e o nome. Uma tela inteira afirmando que a
+          obra foi analisada e não pontuou, quando o que houve é que ninguém avaliou ainda —
+          e é o estado por onde TODA obra nova passa.
+          ⚠️ O preço, medido em 20/08/2026 na nuvem: 3 obras ativas estão sem nota (as três
+          `skipped`) e em 2 delas existe um `summary` de avaliação que deixa de aparecer.
+          Aceito — avaliação que não virou nota não é o estado da obra, e um card chamado
+          "Notas por critério" sem uma única nota erra no próprio título. */}
+      {hasCriteriaScores && (
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
@@ -1392,6 +1444,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           })()}
         </CardContent>
       </Card>
+      )}
       {/* Reviews externas — apoiam visualmente os scores da IA. "Buscar reviews" vive no header do card. */}
       {/* A síntese estruturada e o resumo em prosa são gerações SEPARADAS, com
           modelos e datas próprios — por isso as duas descem no mesmo objeto. */}

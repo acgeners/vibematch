@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import { notFound, redirect } from "next/navigation"
+import { notFound } from "next/navigation"
 import {
   getWorkWithAiEvaluations,
   getWorkBySlug,
@@ -122,24 +122,24 @@ export default async function EditTitlePage({ params, searchParams }: EditPagePr
   const { id } = await params
   // Deep-link do "Editar capas" na página da obra: abre o modo avançado direto.
   const openCoversAdvanced = (await searchParams).covers === "advanced"
-  const querySuffix = openCoversAdvanced ? "?covers=advanced" : ""
 
+  /**
+   * 🔴 NÃO redireciona — mesma razão da página da obra (ver o comentário longo em
+   * `app/catalog/[id]/page.tsx`): `redirect()` num server component responde 200 e manda o
+   * cliente navegar, e o Router estoura com React #310 em load direto. Medido em produção
+   * na rota irmã: 9 quebras em 10 aberturas por UUID.
+   *
+   * ⚠️ Aqui não entra `canonical`: a rota é gateada por curador e não é indexável, então a
+   * URL duplicada não custa nada — o que se perde é só a barra de endereço trocar sozinha.
+   */
   let work: WorkWithRelations | null = null
   if (UUID_RE.test(id)) {
     const fetched = await getWorkWithAiEvaluations(id)
     work = (fetched as WorkWithRelations | null) ?? null
-    if (work) {
-      const slug = titleToSlug(work.title)
-      if (slug && slug !== id) redirect(`/catalog/${slug}/edit${querySuffix}`)
-    }
   } else {
+    // Resolve slug canônico E antigo (`previous_slugs`, migration 162).
     const fetched = await getWorkBySlug(id)
     work = (fetched as WorkWithRelations | null) ?? null
-    // Slug ANTIGO (previous_slugs, migration 162) → redireciona pro slug canônico de edição.
-    if (work) {
-      const canonical = titleToSlug(work.title)
-      if (canonical && canonical !== id) redirect(`/catalog/${canonical}/edit${querySuffix}`)
-    }
   }
 
   if (!work) notFound()
