@@ -3258,10 +3258,20 @@ se perde é a detecção de "veio pela metade", que ele não promete.
 ⚠️ **As rotas gateadas entram esperando 307**, não 200: sem sessão elas TÊM que mandar pro
 `/login`, e é isso que prova que o gate está de pé. Trocar por 200 esconderia o gate caindo.
 
-⚠️ **Sem browser, e isso é escolha medida:** o Playwright pegaria também erro client-side, mas
-não está na raiz do repo e o smoke passaria a depender de um download de ~150 MB no meio do
-deploy. O HTML SERVIDO já denuncia esta família — a `/ranking` quebrada trazia 0 `<tr>` e a sã
-traz 42. O preço declarado é não ver o que só quebra depois da hidratação.
+🔴 **Sem browser — e o PREÇO DISSO FOI COBRADO em 2026-08-20: toda página de obra ficou um dia
+quebrada para visitante com este smoke VERDE.** O erro era React #310 na hidratação; o HTML
+servido vinha completo. A frase que estava aqui — *"o HTML SERVIDO já denuncia esta família"* —
+é falsa para a família inteira "quebra depois da hidratação", e era exatamente ela que estava
+declarada como preço aceito.
+
+🔴 **E a justificativa do custo CAIU.** Ela dizia que um browser faria o smoke depender de "um
+download de ~150 MB no meio do deploy". Medido em 20/08: `playwright-core` já vem em
+`services/comix-render/node_modules` (o sidecar da Comix) e o Chromium está em
+`~/Library/Caches/ms-playwright/` (356 MB, já baixado). **Não há download nenhum a fazer nesta
+máquina.** A premissa envelheceu quando o sidecar entrou, e ninguém voltou aqui — a mesma forma
+do cutover que inverteu o sentido de `--env-file=.env.local` em 58 scripts.
+
+⚠️ O que falta é a implementação, não a decisão: ver a seção **"Os canais mudos"**.
 
 ⚠️ **Ele roda DEPOIS de publicar e NÃO desfaz nada.** Não há como verificar o que está no ar
 antes de pôr no ar; reprovar aqui quer dizer "está no ar e quebrado", que é justamente quando
@@ -3354,6 +3364,57 @@ uma rota principal num browser e olhe o CONSOLE**, não só o status.
 ⚠️ **E o gatilho é load direto: bookmark, link colado, aba nova, refresh.** Clicar num link
 nunca reproduziu. Foi isso que manteve o defeito invisível para quem desenvolve — navegando pelo
 app, ele não existe.
+
+## Os canais mudos: o que este projeto NÃO consegue ver
+
+🔴 **A classe dominante de defeito aqui não é lógica errada — é resultado plausível sem sinal.**
+Medido no próprio arquivo em 2026-08-20: **~69 ocorrências** de "sem nada acusar", "em silêncio",
+"sem erro", "sem log", "passa verde" espalhadas pelos 286 blocos 🔴. Não é impressão; é o
+histórico de defeitos já pagos.
+
+**Os quatro defeitos de 2026-08-20, e o que de fato os pegou:**
+
+| defeito | quem pegou |
+|---|---|
+| página da obra quebrada em produção (React #310) | **olho** — abri no browser para conferir outra coisa |
+| `--heal` inerte (embed to-one virou objeto) | **expectativa quantitativa** — um contador deu 0 onde eu esperava 89 |
+| a razão do limite 18+ narrada errada pelo modelo | **olho** — a curadora olhou a ficha |
+| nota congelada no piso de uma versão antiga | **acaso** — caí no caso de fronteira investigando outra coisa |
+
+🔴 **Nenhum dos quatro foi pego por instrumento automático, e todos passavam com a suíte
+verde.** Isso é o que decide onde investir: o gargalo não é cobertura de lógica (são 3.400+
+testes), é **canal de sinal**. Mais um teste unitário não teria achado nenhum deles.
+
+### Os quatro canais que faltam, em ordem de retorno
+
+**1. Browser no smoke de deploy.** A família "quebra depois da hidratação" é 100% invisível hoje
+— e cobrou um dia de produção. O `deploy.sh` abriria 3–4 rotas num Chromium headless e reprovaria
+em qualquer erro de console. ⚠️ **A justificativa de custo caiu**: o `playwright-core` do sidecar
+e o Chromium do cache já estão na máquina (ver a seção do `deploy.sh`). Fail-SOFT quando o
+browser não existir — travar deploy por falta de binário troca um defeito raro por um comum.
+
+**2. Script de correção declara o que esperava achar.** *"Nada a fazer"* é indistinguível de
+*"está tudo certo"*, e foi o que manteve o `--heal` inerte. A régua: **"nada a fazer" precisa
+provar que OLHOU** — cada estágio do funil imprime quantos candidatos passaram
+(`392 com limite → 373 com avaliação → 0 movidas`), e um estágio que zera tudo salta aos olhos.
+O padrão já existe no `backup-db.mjs` (ele FALHA em vez de gravar backup truncado); falta
+espalhar.
+
+**3. Canário do contrato do PostgREST.** `ai_evaluations` mudou de array para objeto e nada
+acusou: o tipo era escrito à mão, então o `tsc` não tinha o que verificar. Um teste que bate no
+banco LOCAL e afirma a FORMA do retorno pega isso na primeira execução. Vale igual para os
+`as X[]` sobre RPC — mesma família do contrato de `similares` que ficou um mês vazio.
+
+**4. O grande: inventário dos PARES.** Este arquivo já nomeia a doença — "dois critérios pro
+mesmo fato" — e a trata caso a caso, **sempre depois de doer**. A virada é inverter: levantar
+onde dois lugares afirmam o mesmo fato e, para cada par, derivar um do outro ou criar a
+comparação. A metade barata dá para começar hoje: **prosa gravada que cita número**
+(justificativas, `ui_labels`, tooltips) comparada com a fonte daquele número. A primeira
+varredura dessas — a de `adult_content`, em 20/08 — achou 7 casos em 8.797, e 2 deles eram nota
+errada, não só texto.
+
+⚠️ **O que NÃO fazer: mais teste unitário.** Os quatro defeitos passavam com a suíte verde, e
+três deles não têm função pura para testar — moram na fronteira (browser, banco, prosa gravada).
 
 ## Preferência de UI que o servidor renderiza vai em COOKIE, nunca em localStorage
 
