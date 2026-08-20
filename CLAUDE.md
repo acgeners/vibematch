@@ -4548,22 +4548,45 @@ mas significa que **se as artes originais de 1254² se perderem, o que resta sã
 no servidor do Fly, e estas artes são imutáveis: pagar CPU por elas a cada request seria trocar
 400 KB de disco por latência permanente. Por isso `<img>` cru, não `next/image`.
 
-⚠️ **ABERTO, medido e adiado (2026-08-16): no celular o índice ainda come a primeira tela.**
-Abaixo de 660px ele vira 5 linhas de 2 colunas:
+✅ **RESOLVIDO em 2026-08-19: abaixo de 660px o índice é uma TIRA que rola na horizontal.**
+Ele virava 5 linhas de 2 colunas e comia a primeira tela. Medido no browser, antes e depois, no
+MESMO build:
 
-| aparelho | índice | % da tela |
+| aparelho | antes | depois |
 |---|---|---|
-| iPhone SE (375×667) | 561px | **84%** |
-| iPhone 14 (390×844) | 561px | 66% |
-| Pixel (412×915) | 561px | 61% |
-| tablet (768×1024) | 308px | 30% |
+| iPhone SE (375×667) | **536px — 80%** | **133px — 20%** |
+| iPhone 14 (390×844) | 536px — 64% | 133px — 16% |
+| tablet (768×1024) | 283px | 283px (inalterado) |
+| desktop (1500) | 251px | 251px (inalterado) |
 
-Nada está quebrado — **zero overflow horizontal** nas quatro larguras, a tabela rola sozinha, a
-arte do verbete fica em 200px —, e o custo CAIU quando o índice deixou de grudar: hoje se passa
-por ele uma vez, em vez de conviver. O que sobra é a primeira impressão: quem abre o dicionário
-no celular vê uma parede de ícones antes de "Como ler a escala". A saída desenhada é uma **tira
-horizontal rolável** (uma linha, artes ~56px, ~110px de altura) só abaixo de 660px, sem tocar no
-desktop. ⚠️ É uma media query, não um redesenho — o número a bater é 561px.
+🔴 **Os números que esta seção trazia eram do arranjo STICKY e envelheceram sem nada acusar** —
+ela dizia 561px no celular e 288px no desktop; o real, remedido em 19/08, era **536** e **251**.
+A retirada do `sticky` já os tinha mudado, e a prosa ficou. Ao citar medida de tela daqui,
+**remeça**: o custo de acreditar é desenhar para um problema que já mudou de tamanho.
+
+⚠️ **O ganho concentra-se no aparelho MENOR, e é ele que decide.** "Como ler a escala" não
+aparecia na primeira tela do iPhone SE (a única das quatro em que isso acontecia) e agora
+aparece. No iPhone 14 já aparecia antes — ou seja, medir só no aparelho médio teria concluído
+que não havia problema.
+
+🔴 **A BARRA precisou virar ponto de quebra.** "Fantasia/Nobreza" é UMA palavra para o
+navegador (107px a 12,5px) e não quebra sozinha: na tira ela vazava **35px** do card, sem
+corte, sem rolagem e sem erro — os três canais mudos de sempre, e só o screenshot denunciou.
+Hoje o componente injeta `\u200B` depois da "/", o que quebra no lugar certo ("Fantasia/" +
+"Nobreza"); `break-words` sozinho quebraria no meio da palavra. Sai do DADO, não de uma lista
+de nomes. O card foi de 88 para **96px** porque "Protagonistas" sozinho pede 84px.
+
+⚠️ **O preço, escolhido:** só 3 dos 9 cabem inteiros no iPhone SE, e os demais exigem rolar de
+lado. Num índice isso é aceitável — ele serve a quem PROCURA um atributo. O item cortado na
+borda é a afordância, e é o que o sangramento (`-mx-4 px-4`, casado com o `px-4` do `AppShell`)
+existe para produzir: com margem, a tira pareceria uma fileira cortada.
+
+⚠️ **Acima de 660px nada mudou** — grade de 10 colunas, arte de 76px, linha de baixo centrada,
+251px no desktop. É media query, não redesenho.
+
+⚠️ **Isto NÃO é testável no vitest** (jsdom não tem layout, e casar a string `min-[660px]`
+protegeria a grafia, o que esta base proíbe): a verificação é no browser, nas quatro larguras,
+com `scrollWidth − clientWidth` da PÁGINA em zero e nenhum rótulo excedendo o card.
 
 ⚠️ **Também aberto: a página tem UMA porta de entrada só** (o card do `/guide` + a busca ⌘K).
 O lugar que falta é o cabeçalho do bloco "Notas por critério" da aba Análise da IA — quem está
