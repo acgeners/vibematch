@@ -1192,7 +1192,11 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
               <col key={col.key} style={{ width: widthPercentOf(col.key) }} />
             ))}
           </colgroup>
-          <thead className="sticky -top-5 z-30 md:-top-7 [&_th]:bg-muted [&_tr:first-child_th:first-child]:rounded-tl-lg [&_tr:first-child_th:last-child]:rounded-tr-lg [&>tr>th]:border-b [&>tr>th]:border-border/70">
+          {/* 🔴 Gruda ABAIXO da barra, e o valor tem dono (`--top-nav-h`). Era `-top-5 md:-top-7`:
+              o cabeçalho parava em y=-28 e a barra cobre 0..57, então ele ficava INTEIRO atrás
+              dela — medido, ~30 das 40 linhas eram lidas sem cabeçalho, nos dois modos. O
+              `-top-5` era código morto: a tabela só existe a partir de `md:`/`lg:`. */}
+          <thead className="sticky top-[var(--top-nav-h)] z-30 [&_th]:bg-muted [&_tr:first-child_th:first-child]:rounded-tl-lg [&_tr:first-child_th:last-child]:rounded-tr-lg [&>tr>th]:border-b [&>tr>th]:border-border/70">
             <tr>
               {columns.map((col) => {
                 const sortField = getSortFieldForColumn(col.key)

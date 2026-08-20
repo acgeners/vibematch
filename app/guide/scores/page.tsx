@@ -87,7 +87,7 @@ export default async function DicionarioDosNumerosPage() {
         ))}
       </nav>
 
-      <section id="caminho" className="scroll-mt-[72px] space-y-4">
+      <section id="caminho" className="scroll-mt-[calc(var(--top-nav-h)+15px)] space-y-4">
         <div className="space-y-1">
           <h2 className="text-xl font-semibold tracking-tight">O caminho de uma nota</h2>
           <p className="text-sm text-muted-foreground">
@@ -133,7 +133,7 @@ export default async function DicionarioDosNumerosPage() {
       </section>
 
       {secoes.map((secao) => (
-        <section key={secao.id} id={secao.id} className="scroll-mt-[72px] space-y-2">
+        <section key={secao.id} id={secao.id} className="scroll-mt-[calc(var(--top-nav-h)+15px)] space-y-2">
           <div className="space-y-1">
             <h2 className="text-xl font-semibold tracking-tight">{secao.titulo}</h2>
             <p className="max-w-[80ch] text-sm text-muted-foreground">{secao.sub}</p>
@@ -176,7 +176,7 @@ export default async function DicionarioDosNumerosPage() {
         </section>
       ))}
 
-      <section id="recalculo" className="scroll-mt-[72px] space-y-4">
+      <section id="recalculo" className="scroll-mt-[calc(var(--top-nav-h)+15px)] space-y-4">
         <div className="space-y-1">
           <h2 className="text-xl font-semibold tracking-tight">O que faz as notas serem refeitas</h2>
           <p className="max-w-[80ch] text-sm text-muted-foreground">
@@ -190,7 +190,7 @@ export default async function DicionarioDosNumerosPage() {
         </div>
       </section>
 
-      <section id="fora" className="scroll-mt-[72px] space-y-4">
+      <section id="fora" className="scroll-mt-[calc(var(--top-nav-h)+15px)] space-y-4">
         <div className="space-y-1">
           <h2 className="text-xl font-semibold tracking-tight">O que não entra em nota nenhuma</h2>
           <p className="max-w-[80ch] text-sm text-muted-foreground">

@@ -316,13 +316,13 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
          * padrão continua valendo e o diálogo sobe metade da própria altura — que volta a
          * depender do resultado, só que pra cima.
          *
-         * ⚠️ 68px NÃO é número escolhido: é a altura da barra (`h-14` = 56) + 1px da borda de
-         * baixo + 11px de respiro. Se a barra mudar de altura, o respiro muda junto e nada
-         * avisa. Era `10vh`/`sm:14vh`, e o vh trabalhava contra no pior caso: quanto mais
+         * ⚠️ Os 11px são RESPIRO — a altura da barra vem de `--top-nav-h`, que é o dono único
+         * dela. Isto já foi `top-[68px]` com a conta (56 + 1 + 11) feita à mão e a ressalva
+         * "se a barra mudar de altura nada avisa"; hoje avisa, porque muda junto. Era `10vh`/`sm:14vh`, e o vh trabalhava contra no pior caso: quanto mais
          * baixa a janela, mais a lista quer espaço e mais o topo descia junto dela (medido a
          * 650px de altura: 91px de topo e só 81px de folga no rodapé, contra 104px hoje).
          */
-        className="top-[68px] translate-y-0"
+        className="top-[calc(var(--top-nav-h)+11px)] translate-y-0"
         // `shouldFilter={false}`: quem filtra somos nós (o casamento inclui descrição e
         // migalha, e as obras vêm já filtradas do servidor). Com o filtro do cmdk ligado,
         // ele re-filtraria por cima e sumiria com acertos legítimos de descrição.

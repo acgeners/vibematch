@@ -101,7 +101,7 @@ export function TopNav({ searchIndex }: { searchIndex: SearchEntry[] }) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-border/80 bg-background/92 backdrop-blur">
-      <div className="mx-auto flex h-14 w-full max-w-[1560px] items-center gap-2 px-4 md:gap-3 md:px-7">
+      <div className="mx-auto flex h-[calc(var(--top-nav-h)-1px)] w-full max-w-[1560px] items-center gap-2 px-4 md:gap-3 md:px-7">
         {/* O logo É o Início: `aria-current` e estado ativo, senão a home vira um destino
             que só quem já sabe alcança. */}
         <Link

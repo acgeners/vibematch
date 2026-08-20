@@ -976,8 +976,9 @@ quebra nada e só atrapalha quem usa:
   156 a 548px; só a borda de baixo acompanha. ⚠️ O `translate-y-0` é obrigatório junto do
   `top-*`: sem ele o −50% do padrão sobrevive e o topo volta a depender da altura.
 
-  ⚠️ **68px é DERIVADO da barra**: `h-14` (56) + 1px de borda + 11px de respiro. Se a barra
-  mudar de altura, o respiro muda junto e nada avisa. A 1ª versão usava `10vh`/`sm:14vh`, e o vh
+  ⚠️ **Os 11px são RESPIRO; a altura vem de `--top-nav-h`.** Isto já foi `top-[68px]` com a
+  conta (56 + 1 + 11) à mão e a ressalva "se a barra mudar de altura nada avisa" — hoje avisa,
+  porque muda junto. A 1ª versão usava `10vh`/`sm:14vh`, e o vh
   trabalhava contra no pior caso — quanto mais baixa a janela, mais a lista quer espaço e mais o
   topo descia junto: a 650px de altura dava 91px de topo e **81px** de folga no rodapé, contra
   **104px** com o topo fixo.
@@ -2102,31 +2103,47 @@ os 24,4 do `/ranking`. Subir `crit_*` para 56 consertaria o `/favorites` e reabr
 `/ranking`. **É um mapa global servindo dois renderizadores diferentes** — mesma família do
 `TIER_MODE_COLUMN_WIDTHS`, e a saída provável é um mapa por namespace. Não medido.
 
-#### 🔴 ABERTO 1: o cabeçalho fixo do `/ranking` NÃO funciona — nos DOIS modos
+#### ✅ RESOLVIDO: o cabeçalho fixo das tabelas grudava ATRÁS da barra
 
 **A premissa que esta seção usava para descartar a rolagem lateral era falsa.** Ela dizia que o
 `<thead>` "gruda na PÁGINA, o que só funciona porque não há contêiner de rolagem no meio". Há:
 quem rola é um `div` do AppShell (`overflow-y-auto`, medido 4133/963); o `body` é
 `h-dvh overflow-hidden` e **a página não rola** — o mesmo scroller que já tinha quebrado o índice
-do dicionário. O `thead` é `sticky -top-7`, para em **y=9..53**, e a barra superior cobre
-**y=0..94**: ele fica inteiro atrás dela.
+do dicionário. A barra é `sticky top-0 z-40` DENTRO dele, e o `thead` era `-top-5 md:-top-7`
+(**−28px**, `z-30`): parava em y=−28..16, **inteiro atrás da barra**, que cobre 0..57.
 
-| medido (logada, 1500×1000) | |
-|---|---|
-| cabeçalho visível até | scroll **763px** |
-| some a partir de | scroll **837px** |
-| linhas lidas COM cabeçalho | **10,3 de 40** |
-| linhas lidas às cegas | **~30 (74%)** |
-| no modo Agrupar | some em **857px** — igual |
+| medido em 19/08/2026 (logada, 1500×1000) | antes | depois |
+|---|---|---|
+| cabeçalho visível até | scroll **763px** | **sempre** |
+| linhas lidas às cegas | **~30 de 40 (74%)** | **0** |
+| `/ranking` Agrupar ON · OFF · `/catalog` | atrás da barra nos três | visível em 4/4 posições de rolagem |
 
-Conferido por `elementsFromPoint` (a 70px do topo há um `TD`, não o `thead`) e por screenshot.
+⚠️ **O `sticky` "funcionava" no sentido CSS — só não era visível**, e por isso ninguém reportou
+em meses. Quem denuncia é `elementsFromPoint` (a 70px do topo havia um `TD`, não o `thead`), não
+a leitura do CSS.
 
-⚠️ **Isso reprecifica as três saídas, e inverte qual é a defensável.** A rolagem lateral (b)
-"perderia" um cabeçalho que já está perdido da linha ~10 em diante — o custo real dela é só as
-10 primeiras linhas. E o data grid (a) deixa de ser empate: ele devolveria ~30 linhas com
-cabeçalho. ⚠️ Mas os dois são exclusivos na prática — **consertar o cabeçalho encarece (b) de
-novo**, e aí (a) vira a única que preserva os dois. A saída aparente para o conserto isolado é um
-`top` derivado da barra, como o `top-[68px]` do ⌘K; **não medida**.
+🔴 **O valor tem dono: `--top-nav-h`** (`app/globals.css`), e a própria barra DERIVA dele
+(`h-[calc(var(--top-nav-h)-1px)]`, onde o −1px é o `border-b`). Sem isso a variável seria só mais
+uma cópia: a barra mudaria de altura e ela seguiria afirmando a antiga. Quem precisa de respiro
+soma em cima — `calc(var(--top-nav-h) + 11px)` no ⌘K, `+15px` nas âncoras dos dicionários.
+
+⚠️ **Eram DEZ cópias manuais do número, não quatro.** O grep por `top-[Npx]` achou 4 (⌘K 68,
+dicionário 72 e 57, e a conta implícita nas tabelas); **as outras 6 eram `scroll-mt-[72px]`** em
+`/guide/scores`, `/guide/attributes` e `score-entry-card` — e quem as achou foi o teste, que
+varre a FORMA (`top-` e `scroll-mt-` na faixa 40–120px) em vez de uma lista de nomes. Contar pela
+forma conhecida confirma o alcance que já se tem.
+
+⚠️ **`-top-5` era código morto**: a tabela só existe a partir de `lg:` (`/ranking`) e `md:`
+(`/catalog`), onde o `md:-top-7` já vencia.
+
+Guardado por `tests/unit/ui/altura-da-barra-tem-dono.test.ts` (5 sondas conferidas: offset
+negativo volta, número à mão no thead, `68px` de volta no ⌘K, a barra voltando a `h-14`, e a
+variável sumindo do CSS).
+
+⚠️ **Isso reprecifica as três saídas de novo, agora no outro sentido.** Enquanto o cabeçalho
+estava quebrado, a rolagem lateral (b) era barata — não havia o que perder. **Com ele
+funcionando, (b) volta a custar um cabeçalho que funciona**, e (a) passa a ser a única das três
+que preserva os dois eixos. Se o ABERTO 2 abaixo um dia for pago, é por (a) que se começa.
 
 #### ⚠️ ABERTO 2: o caso extremo continua sem piso
 
@@ -4635,7 +4652,7 @@ O que substituiu são duas peças mais baratas, e juntas elas fazem o mesmo trab
 
 | peça | custo | o que responde |
 |---|---|---|
-| **o título do verbete gruda** (`sticky top-[57px]` no cabeçalho de cada `<article>`) | ~44px | "que atributo eu estou lendo?" |
+| **o título do verbete gruda** (`sticky top-[var(--top-nav-h)]` no cabeçalho de cada `<article>`) | ~44px | "que atributo eu estou lendo?" |
 | **botão "Ver os atributos"** (`components/guide/back-to-top.tsx`) | 42px, e só depois de uma tela rolada | "como volto para escolher outro?" |
 
 ⚠️ O sticky do título para sozinho no fim do próprio verbete, porque é preso ao pai — não
@@ -4648,7 +4665,7 @@ verbete está sendo lido. Isso devolveu o `AttributeIndex` ao servidor, sem `"us
 | o que | por quê |
 |---|---|
 | o índice marcava o ÚLTIMO verbete em qualquer posição | o `AppShell` põe `overflow: hidden` no body e quem rola é um **div interno** — `window.scrollY` fica preso em 0 e a condição de fim-de-página é sempre verdadeira. **Vale para qualquer scroll novo neste app**: o `BackToTop` precisa da mesma descoberta de scroller |
-| o índice nascia **cortado pela metade** | o `<header>` gruda em `top: 0` com `z-40`; quem grudar em `top-0` fica embaixo dele. O valor é `top-[57px]` = `h-14` + 1px de borda — é ele que o título do verbete usa hoje |
+| o índice nascia **cortado pela metade** | o `<header>` gruda em `top: 0` com `z-40`; quem grudar em `top-0` fica embaixo dele. O valor tem dono desde 19/08: `--top-nav-h` (= `h-14` + 1px de borda), e o título do verbete usa `top-[var(--top-nav-h)]` |
 | o índice marcava o verbete ANTERIOR ao clicado | a linha de leitura do spy era 30% da janela (300px) e a barra media 288px: o alvo parava a 304px e ainda não tinha cruzado |
 | o "voltar ao topo" **parava no meio do caminho** | esconder o elemento FOCADO durante rolagem suave devolve o foco ao body e o navegador **CANCELA a animação**. Medido: parava em 869px de 3.000, com o botão já sumido. `blur()` antes do `scrollTo` resolve |
 
@@ -5382,13 +5399,12 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.377 passando (+24 pulados) em 323 arquivos** (318 passando + 5 pulados);
-medido em 2026-08-19 com as larguras de coluna do `/ranking`: **+2 casos, sem arquivo novo**
-(dois guardas de CONTA em `ui/coluna-declara-largura`). Com `git ls-files` = **323** conferido
-contra os 323 executados, num worktree limpo de `origin/main` (`8c6b0b9`) + só os arquivos deste
-trabalho.
+`npm run test` → **3.381 passando (+24 pulados) em 324 arquivos** (319 passando + 5 pulados);
+medido em 2026-08-19 com o cabeçalho fixo das tabelas: **+4 casos e +1 arquivo**
+(`ui/altura-da-barra-tem-dono`). Com `git ls-files` = **324** conferido contra os 324 executados,
+num worktree limpo de `origin/main` (`7050e2f`) + só os arquivos deste trabalho.
 
-⚠️ **O antes E o depois foram medidos no MESMO worktree, na mesma sessão** (3.375 → 3.377), em
+⚠️ **O antes E o depois foram medidos no MESMO worktree, na mesma sessão** (3.377 → 3.381), em
 vez de subtrair do número escrito aqui. É a única forma que sobrevive ao `main` ter andado
 entre a medição e o merge — o modo como esta linha envelheceu todas as vezes anteriores.
 
@@ -5423,7 +5439,8 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.375 em 323** (a grade compacta dos 9 critérios, +8 casos e +1 arquivo),
+Antes: **3.377 em 323** (as larguras de coluna do `/ranking`, +2 casos),
+**3.375 em 323** (a grade compacta dos 9 critérios, +8 casos e +1 arquivo),
 **3.367 em 322** (as portas de entrada dos dicionários, +7 casos e +1 arquivo),
 **3.360 em 321** (a varredura de `works_owner` cobrindo FILTRO/ORDER, +9 casos),
 **3.351 em 321** (a varredura de `works_owner` cobrindo os 32 pontos de LEITURA,
