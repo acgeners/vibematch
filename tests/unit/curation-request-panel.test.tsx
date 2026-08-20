@@ -27,7 +27,7 @@ vi.mock("@/server/actions/curation-requests", () => ({
 vi.mock("@/lib/use-refresh", () => ({ useRefresh: () => () => {} }))
 vi.mock("sonner", () => ({ toast: { success: () => {}, error: () => {} } }))
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import { CurationRequestActions } from "@/components/titles/curation-request-panel"
 
 beforeEach(() => {
@@ -38,10 +38,11 @@ const montar = (props: Partial<Parameters<typeof CurationRequestActions>[0]> = {
   render(<CurationRequestActions workId="w1" pedidosAbertos={[]} {...props} />)
 
 describe("CurationRequestActions — quem vê o quê", () => {
-  it("leitor logado vê os dois pedidos", () => {
+  it("leitor logado vê os três pedidos", () => {
     montar()
     expect(screen.getByText("Pedir atualização dos dados")).toBeTruthy()
     expect(screen.getByText("Pedir revisão da avaliação")).toBeTruthy()
+    expect(screen.getByText("Reportar erro na ficha")).toBeTruthy()
   })
 
   it("anônimo não vê nada — falta identidade, não permissão", () => {
@@ -79,5 +80,102 @@ describe("CurationRequestActions — quem vê o quê", () => {
     expect(screen.getByText("Cancelar pedido")).toBeTruthy()
     expect(screen.queryByText("Pedir atualização dos dados")).toBeNull()
     expect(screen.getByText("Pedir revisão da avaliação")).toBeTruthy()
+  })
+})
+
+const botao = (nome: RegExp) => screen.getByRole("button", { name: nome })
+
+/**
+ * O CAMPO de texto (migration 195). Teste de RENDER de propósito: a action pode estar perfeita
+ * e o campo simplesmente não existir na tela, ou existir e não ser exigido — e a suíte de
+ * `curation-requests.test.ts`, que só exercita o servidor, passaria verde nos dois casos.
+ */
+describe("o campo “o que está errado”", () => {
+  it("clicar num pedido ABRE o formulário — não envia direto", () => {
+    montar()
+    fireEvent.click(botao(/Reportar erro na ficha/))
+
+    expect(screen.getByRole("textbox"), "sem campo, o pedido volta a não dizer o quê").toBeTruthy()
+    expect(screen.getByText("O que está errado?")).toBeTruthy()
+    // Os outros botões saem de cena enquanto o formulário está aberto: dois pedidos meio
+    // preenchidos ao mesmo tempo é estado que a tela não sabe representar.
+    expect(screen.queryByRole("button", { name: /Pedir atualização/ })).toBeNull()
+  })
+
+  it("🔴 report_error não envia sem texto; os outros dois enviam", () => {
+    const { unmount } = montar()
+    fireEvent.click(botao(/Reportar erro na ficha/))
+    expect(
+      (botao(/Enviar pedido/) as HTMLButtonElement).disabled,
+      "sem texto o pedido é ininteligível — o botão não pode estar clicável",
+    ).toBe(true)
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "a capa é do spin-off" } })
+    expect((botao(/Enviar pedido/) as HTMLButtonElement).disabled).toBe(false)
+
+    unmount()
+    montar()
+    fireEvent.click(botao(/Pedir atualização dos dados/))
+    expect(
+      (botao(/Enviar pedido/) as HTMLButtonElement).disabled,
+      "aqui a nota é OPCIONAL — exigi-la travaria o pedido que já existia antes da 195",
+    ).toBe(false)
+  })
+
+  it("o campo NÃO corta o que a pessoa cola", () => {
+    montar()
+    fireEvent.click(botao(/Reportar erro na ficha/))
+    // `maxLength` trunca em silêncio, e cortar por unidade UTF-16 parte emoji ao meio — que é
+    // como se fabrica o surrogate solto que derruba a escrita inteira. O excesso tem de ficar
+    // visível na tela, com o botão desabilitado.
+    expect(screen.getByRole("textbox").getAttribute("maxlength")).toBe(null)
+  })
+
+  it("excesso desabilita o envio e diz quanto sobra", async () => {
+    const { CURATION_NOTE_MAX } = await import("@/server/queries/curation-requests")
+    montar()
+    fireEvent.click(botao(/Reportar erro na ficha/))
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "a".repeat(CURATION_NOTE_MAX + 7) },
+    })
+
+    expect((botao(/Enviar pedido/) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText(/7 caracteres a mais/)).toBeTruthy()
+  })
+})
+
+describe("pedido já em aberto", () => {
+  const aberto = (kind: string, note: string | null = null) => ({
+    id: `p-${kind}`,
+    kind: kind as never,
+    quando: "hoje",
+    note,
+  })
+
+  it("o texto volta pra quem escreveu", () => {
+    montar({ pedidosAbertos: [aberto("report_error", "A capa é do spin-off.")] })
+    // Sem isto, "você reportou um erro" não diz QUAL — e a pessoa não tem como saber se o que
+    // ela viu já foi contado.
+    expect(screen.getByText(/A capa é do spin-off\./)).toBeTruthy()
+  })
+
+  it("🔴 report_error segue disponível com um em aberto; update_data some", () => {
+    montar({ pedidosAbertos: [aberto("report_error"), aberto("update_data")] })
+
+    // "Rebusque esta obra" é UM pedido: o 2º clique não acrescenta nada e o botão sai.
+    expect(screen.queryByRole("button", { name: /Pedir atualização dos dados/ })).toBeNull()
+    // Erro relatado é TEXTO, e a mesma obra pode ter dois erros diferentes. Esconder o botão
+    // deixaria a pessoa sem como contar o segundo — e a unicidade da 195 já permite os dois.
+    expect(
+      screen.queryByRole("button", { name: /Reportar erro na ficha/ }),
+      "a régua daqui tem de casar com a chave única da 195, que inclui a NOTA",
+    ).toBeTruthy()
+  })
+
+  it("ficha incompleta não oferece nem o report_error", () => {
+    montar({ fichaIncompleta: true })
+    // Ficha que ainda não foi preenchida não tem dado ERRADO — tem dado ausente, que é o que a
+    // `IncompleteWorkBanner` já diz.
+    expect(screen.queryByRole("button", { name: /Reportar erro/ })).toBeNull()
   })
 })

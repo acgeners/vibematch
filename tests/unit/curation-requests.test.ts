@@ -117,6 +117,151 @@ describe("pedidos de curadoria", () => {
   })
 })
 
+/**
+ * ⚠️ Este bloco vem ANTES do `getMyOpenRequestsByWork` de propósito. Aquele chama
+ * `vi.resetModules()` + `vi.doMock("@/server/queries/current-user", …)` com um mock PARCIAL
+ * (só `getSessionUserId`), e o registro resetado faz esse mock valer para tudo que importar
+ * depois — `ensureSignedIn` viraria `undefined` e as actions morreriam com "não é função".
+ * Ordem de `describe` é dependência real aqui, não estilo.
+ */
+
+/**
+ * A NOTA — o que o leitor escreveu (migration 195).
+ *
+ * Três propriedades aqui não dão erro quando somem, e é por isso que elas têm caso próprio:
+ * o excesso truncado grava uma linha PLAUSÍVEL com texto comido, o surrogate solto derruba o
+ * corpo INTEIRO com um caractere invisível, e a string vazia vira uma citação sem citação.
+ */
+describe("a nota do pedido", () => {
+  it("report_error sem texto é recusado, e NADA é inserido", async () => {
+    const { createCurationRequest } = await import("@/server/actions/curation-requests")
+
+    const r = await createCurationRequest({ kind: "report_error", workId: "w1", note: "   " })
+
+    expect(r.ok).toBe(false)
+    expect(r.error).toMatch(/errado/i)
+    expect(linhaInserida(), "sem o texto o pedido é ininteligível — não pode virar linha").toBe(
+      null,
+    )
+  })
+
+  it("report_error com texto grava a nota", async () => {
+    const { createCurationRequest } = await import("@/server/actions/curation-requests")
+
+    const r = await createCurationRequest({
+      kind: "report_error",
+      workId: "w1",
+      note: "  A capa é do spin-off.  ",
+    })
+
+    expect(r.ok).toBe(true)
+    expect(linhaInserida()).toMatchObject({
+      kind: "report_error",
+      work_id: "w1",
+      note: "A capa é do spin-off.",
+    })
+  })
+
+  it("🔴 texto acima do teto é RECUSADO, nunca truncado", async () => {
+    const { createCurationRequest } = await import("@/server/actions/curation-requests")
+    const { CURATION_NOTE_MAX } = await import("@/server/queries/curation-requests")
+
+    const r = await createCurationRequest({
+      kind: "report_error",
+      workId: "w1",
+      note: "a".repeat(CURATION_NOTE_MAX + 1),
+    })
+
+    expect(r.ok).toBe(false)
+    // Cortar por unidade UTF-16 parte emoji ao meio e FABRICA o surrogate solto que derrubou
+    // duas escritas em 18/08/2026. Uma linha gravada aqui é a prova de que alguém truncou.
+    expect(linhaInserida(), "truncar reintroduz o bug de 18/08 — o certo é recusar").toBe(null)
+  })
+
+  it("exatamente no teto passa (o corte é `>`, não `>=`)", async () => {
+    const { createCurationRequest } = await import("@/server/actions/curation-requests")
+    const { CURATION_NOTE_MAX } = await import("@/server/queries/curation-requests")
+
+    const r = await createCurationRequest({
+      kind: "report_error",
+      workId: "w1",
+      note: "a".repeat(CURATION_NOTE_MAX),
+    })
+
+    expect(r.ok).toBe(true)
+    expect((linhaInserida()?.note as string).length).toBe(CURATION_NOTE_MAX)
+  })
+
+  it("surrogate desemparelhado sai; emoji INTEIRO fica", async () => {
+    const { createCurationRequest } = await import("@/server/actions/curation-requests")
+
+    await createCurationRequest({
+      kind: "report_error",
+      workId: "w1",
+      // \uD83D sozinho é metade de um par — o PostgREST recusa o corpo inteiro com 400.
+      note: "capa errada \uD83D e o ano \u{1F600}",
+    })
+
+    const note = linhaInserida()?.note as string
+    expect(note).not.toContain("\uD83D\uD83D")
+    expect(note, "emoji válido não é censura — só o que o Postgres não guarda é que sai").toContain(
+      "\u{1F600}",
+    )
+    // O que sobra tem de ser um texto que o `JSON.stringify` do PostgREST aceita: nenhum
+    // code unit solto na faixa de surrogate.
+    for (let i = 0; i < note.length; i++) {
+      const c = note.charCodeAt(i)
+      if (c >= 0xd800 && c <= 0xdbff) {
+        const next = note.charCodeAt(i + 1)
+        expect(next >= 0xdc00 && next <= 0xdfff, `high surrogate solto em ${i}`).toBe(true)
+        i++
+      } else {
+        expect(c >= 0xdc00 && c <= 0xdfff, `low surrogate solto em ${i}`).toBe(false)
+      }
+    }
+  })
+
+  it("nota em branco vira null, nunca string vazia", async () => {
+    const { createCurationRequest } = await import("@/server/actions/curation-requests")
+
+    await createCurationRequest({ kind: "update_data", workId: "w1", note: "   \n  " })
+
+    // A UI decide "tem nota?" por `is not null`; um '' desenharia balão de citação vazio, e o
+    // check `curation_requests_note_tamanho` da 195 recusaria a linha.
+    expect(linhaInserida()?.note).toBe(null)
+  })
+
+  it("a nota é OPCIONAL nos dois pedidos antigos", async () => {
+    const { createCurationRequest } = await import("@/server/actions/curation-requests")
+
+    const semNota = await createCurationRequest({ kind: "update_data", workId: "w1" })
+    expect(semNota.ok).toBe(true)
+    expect(linhaInserida()?.note).toBe(null)
+
+    inserido = null
+    const comNota = await createCurationRequest({
+      kind: "review_eval",
+      workId: "w1",
+      note: "o humor não é 8",
+    })
+    expect(comNota.ok).toBe(true)
+    expect(linhaInserida()?.note).toBe("o humor não é 8")
+  })
+
+  it("kind desconhecido é recusado antes de tocar o banco", async () => {
+    const { createCurationRequest } = await import("@/server/actions/curation-requests")
+
+    // O tipo some em runtime: isto é o que um POST à mão manda para um endpoint `"use server"`.
+    const r = await createCurationRequest({
+      kind: "drop_table" as never,
+      workId: "w1",
+    })
+
+    expect(r.ok).toBe(false)
+    expect(linhaInserida()).toBe(null)
+  })
+})
+
 describe("getMyOpenRequestsByWork — dois pedidos na mesma obra", () => {
   /**
    * REGRESSÃO. A constraint da 177 é `(user_id, work_id, kind)`: a mesma pessoa pode ter
