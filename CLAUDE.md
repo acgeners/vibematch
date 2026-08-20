@@ -4496,6 +4496,56 @@ arquitetura). 🔴 **Uma das sondas me desmentiu**: eu tinha escrito no código 
 literal `Faixa X-Y` que o realinhamento procura. O comentário foi corrigido em vez de o teste
 ser inventado para defendê-lo.
 
+### O terceiro autor da nota, e o instrumento que não o via
+
+🔴 **A régua "nota trocada diz QUEM trocou" tinha um buraco.** A página creditava `ai_edited`
+("Ajustada por você · a IA sugeria X") e `ai_calibrated` ("Ajustada pela auditoria"), mas a nota
+movida pelo LIMITE fica com `source: ai_accepted` e **não dizia nada**. Medido em 2026-08-20:
+**85 obras** com a nota movida e o limite explicando exatamente o valor — **83** sem nenhum
+outro autor possível. Hoje a ficha imprime **"Definida pelo limite obrigatório · a IA sugeria
+7,0"**, no mesmo vocabulário do realinhamento que a prosa usa.
+
+⚠️ **O crédito é calculado AO VIVO, não lido do texto.** A justificativa carrega a razão
+histórica; o crédito reflete as tags de agora. Quando uma tag muda de tier, é ele que
+acompanha — e é por isso que não deriva da prosa.
+
+⚠️ **Sem `contentRatings`** (vivem nas fontes externas e a página não os carrega): obra cujo
+limite venha SÓ da classificação externa não ganha crédito. Falso negativo é o lado seguro —
+não creditar é o estado de antes; creditar errado seria afirmar procedência.
+
+🔴 **A régua tem dono único: `autorDaNota`** (`lib/criteria/nota-autor.ts`), consumido pela
+página **e** por `scripts/coherence-audit.ts --tela`. Com ela escrita nos dois lados, a
+auditoria aprovaria exatamente as fichas que a tela deixa órfãs — o instrumento confirmando o
+defeito que existe para pegar.
+
+⚠️ **A precedência é humano → auditoria → limite**, e não é arbitrária: em 2 obras a curadora
+escolheu o MESMO número que o limite imporia, e nenhum dado distingue quem decidiu. Creditar a
+máquina por uma decisão dela é o mais caro dos dois erros.
+
+⚠️ **`"orfa"` é um valor próprio do tipo, não `"modelo"`.** Na tela os dois se parecem (nenhum
+crédito aparece), mas só um é defeito; colapsá-los faria a auditoria contar ficha órfã como
+saudável.
+
+**`npm run consistency` ganhou um irmão:**
+
+```bash
+npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/coherence-audit.ts --tela
+```
+
+🔴 **As checagens A–D comparam a prosa com a nota PROPOSTA** — a pergunta certa para "o modelo
+se contradiz", e por isso elas acusam 0. Mas a tela mostra a **PERSISTIDA**, e essa diferença
+escondia as 85 fichas: nenhuma régua deste script via nada. O modo `--tela` responde outra
+pergunta — *dá para saber QUEM decidiu?* Retrato de 2026-08-20: **8.788 atributos com faixa
+citada · 8.769 coerentes · 19 creditados à curadoria · 0 órfãos**.
+
+⚠️ **Ele mede a TELA, não o banco.** Se um dos três créditos sair de
+`app/catalog/[id]/page.tsx`, esta auditoria passa a aprovar ficha órfã.
+
+⚠️ **O ramo `"limite"` conta 0 hoje, e isso é esperado**: depois do backfill as 83 fichas
+voltaram a ser COERENTES (a prosa passou a citar a faixa da nota), então nem chegam à
+classificação por autor. Ramo que nunca roda é capacidade construída e desligada — quem o
+exercita é `tests/unit/criteria/nota-autor.test.ts` (9 casos, 5 sondas conferidas).
+
 ## A auditoria de critérios IA foi APOSENTADA (2026-08-16) — e o motivo não é qualidade
 
 Ela existia em `/curation/settings?g=notas`: um LLM relia as obras e sugeria ajustes nos
@@ -5548,11 +5598,10 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.398 passando (+24 pulados) em 327 arquivos** (322 passando + 5 pulados);
-medido em 2026-08-20 com o dono único do par (nota, texto) de `adult_content`: **+10 casos e +1
-arquivo** (`ai-evaluation/limite-adulto-nota-e-texto`). Disco (`find`) = índice
-(`git ls-files`) = **327**, conferido DEPOIS do `git add -N`, sobre `origin/main` (`b98c86e`) +
-só os arquivos deste trabalho.
+`npm run test` → **3.407 passando (+24 pulados) em 328 arquivos** (323 passando + 5 pulados);
+medido em 2026-08-20 com o crédito do terceiro autor da nota: **+9 casos e +1 arquivo**
+(`criteria/nota-autor`). Disco (`find`) = índice (`git ls-files`) = **328**, conferido DEPOIS do
+`git add -N`, sobre `origin/main` (`70053c0`) + só os arquivos deste trabalho.
 
 ⚠️ **Este número foi REMEDIDO depois do rebase, não somado ao que estava escrito.** A medição
 inicial (3.382 em 325) valia sobre uma `main` que andou 4 commits no meio da sessão — os PRs
@@ -5594,7 +5643,8 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.388 em 326** (o conserto do `redirect()` na página da obra, +7 casos e +2 arquivos),
+Antes: **3.398 em 327** (o dono do par nota/texto de `adult_content`, +10 casos e +1 arquivo),
+**3.388 em 326** (o conserto do `redirect()` na página da obra, +7 casos e +2 arquivos),
 **3.381 em 324** (o cabeçalho fixo das tabelas), **3.377 em 323** (as larguras de coluna do
 `/ranking`, +2 casos),
 **3.375 em 323** (a grade compacta dos 9 critérios, +8 casos e +1 arquivo),
