@@ -78,7 +78,7 @@ export function ScoreEntryCard({ entry, coverage, coverageNeedsSession, first }:
     <article
       id={entry.key}
       className={cn(
-        "grid scroll-mt-[72px] gap-4 py-7 md:grid-cols-[190px_minmax(0,1fr)] md:gap-8",
+        "grid scroll-mt-[calc(var(--top-nav-h)+15px)] gap-4 py-7 md:grid-cols-[190px_minmax(0,1fr)] md:gap-8",
         first ? "pt-2" : "border-t border-border"
       )}
     >

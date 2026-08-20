@@ -45,7 +45,7 @@ export default function DicionarioDeAtributosPage() {
 
       <section
         id="escala"
-        className="space-y-4 scroll-mt-[72px]"
+        className="space-y-4 scroll-mt-[calc(var(--top-nav-h)+15px)]"
       >
         <div className="space-y-1">
           <h2 className="text-xl font-semibold tracking-tight">Como ler a escala</h2>
@@ -170,11 +170,11 @@ export default function DicionarioDeAtributosPage() {
           <article
             key={entry.slug}
             id={entry.slug}
-            className={`grid scroll-mt-[72px] gap-6 py-8 md:grid-cols-[200px_minmax(0,1fr)] md:gap-8 ${
+            className={`grid scroll-mt-[calc(var(--top-nav-h)+15px)] gap-6 py-8 md:grid-cols-[200px_minmax(0,1fr)] md:gap-8 ${
               i === 0 ? "pt-2" : "border-t border-border"
             }`}
           >
-            <div className="w-full max-w-[200px] self-start md:sticky md:top-[72px]">
+            <div className="w-full max-w-[200px] self-start md:sticky md:top-[calc(var(--top-nav-h)+15px)]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={attributeArtSrc(entry.slug, 480)}
@@ -189,7 +189,7 @@ export default function DicionarioDeAtributosPage() {
               {/* O título é o que substitui o índice grudado: ~44px em vez de 288px, e diz
                   onde você está sem espremer o verbete contra a borda de baixo. Ele para
                   sozinho no fim do próprio verbete, porque o sticky é preso ao pai. */}
-              <div className="sticky top-[57px] z-10 -mx-1 bg-background/95 px-1 py-1.5 backdrop-blur-sm">
+              <div className="sticky top-[var(--top-nav-h)] z-10 -mx-1 bg-background/95 px-1 py-1.5 backdrop-blur-sm">
                 <h3 className="text-2xl font-semibold tracking-tight">{entry.name}</h3>
                 <span className="font-mono text-[11.5px] text-muted-foreground">{entry.slug}</span>
               </div>

@@ -4,6 +4,13 @@
 
 :root {
   --radius: 0.5rem;
+  /* Altura TOTAL da barra superior (`components/layout/top-nav.tsx`), borda inclusa.
+     Ela é `sticky top-0 z-40` DENTRO do mesmo scroller que todo o resto da página, então
+     quem grudar acima deste valor fica ATRÁS dela — sem erro, sem corte e sem rolagem.
+     Foi assim que o `<thead>` das tabelas ficou invisível ao rolar: ele grudava em -28px.
+     Quem precisa de respiro soma em cima (`calc(var(--top-nav-h) + 11px)`), nunca escreve
+     o total à mão — eram 4 cópias deste número espalhadas quando isto foi criado. */
+  --top-nav-h: 57px;
   --background: 42 30% 96%;
   --foreground: 224 28% 10%;
   --card: 0 0% 100%;
