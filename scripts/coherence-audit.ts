@@ -164,7 +164,16 @@ interface ItemTela {
   source: string
   just: string
   limiteExplica: boolean
+  /** A prosa afirma um limite obrigatório que NÃO é o vigente? */
+  afirmaLimiteErrado: number[] | null
 }
+
+/**
+ * As formas em que um texto AFIRMA um limite obrigatório. Só isto — não "a nota é 7", que é
+ * conclusão, e não "faixa 7-8", que é rótulo. O que se procura é a afirmação de REGRA.
+ */
+const AFIRMA_LIMITE =
+  /(?:não pode ficar abaixo de|adult_content ≥|piso (?:em|de|obrigatório de|mínimo de)|teto obrigatório de)\s*(\d+(?:[.,]\d)?)/gi
 
 async function doTela(): Promise<ItemTela[]> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -216,13 +225,30 @@ async function doTela(): Promise<ItemTela[]> {
     if (!aes?.justification || aes.suggested_score == null) continue
     const proposta = Number(aes.suggested_score)
     let limiteExplica = false
+    let afirmaLimiteErrado: number[] | null = null
     if (r.criterion_slug === "adult_content") {
       const b = computeAdultContentBounds({ tags: tagsBy.get(r.work_id) ?? [], genres: genBy.get(r.work_id) ?? [] })
       limiteExplica = clampAdultContentScore(proposta, b) === Number(r.score)
+      /**
+       * 🔴 A ficha AFIRMA uma regra que não é a vigente? É outra pergunta que a coerência de
+       * faixa não alcança: o número pode estar certo e o texto ainda dizer *"aplica piso
+       * obrigatório de 7.0"* numa obra cujo limite é TETO 6,0 — o contrário da precedência.
+       *
+       * ⚠️ A razão VIGENTE sai do texto antes da busca. Cortar por padrão genérico tem falso
+       * NEGATIVO medido: *"Fonte externa classifica o conteúdo como X"* também é frase que o
+       * MODELO escreve, e cortá-la escondeu 2 dos 7 casos na primeira varredura.
+       */
+      const limite = b.floor ?? b.ceiling
+      if (limite != null) {
+        const prosa = aes.justification.replace(b.reasons.join(" "), "")
+        const citados = [...prosa.matchAll(AFIRMA_LIMITE)].map((m) => Number(m[1].replace(",", ".")))
+        if (citados.length && !citados.some((x) => Math.abs(x - limite) <= 0.01)) afirmaLimiteErrado = citados
+      }
     }
     out.push({
       workId: r.work_id, titulo: r.works?.title ?? r.work_id, slug: r.criterion_slug,
-      exibida: Number(r.score), proposta, source: r.source ?? "?", just: aes.justification, limiteExplica,
+      exibida: Number(r.score), proposta, source: r.source ?? "?", just: aes.justification,
+      limiteExplica, afirmaLimiteErrado,
     })
   }
   return out
@@ -258,6 +284,26 @@ ${"=".repeat(96)}`)
   for (const it of semAutor.slice(0, 25))
     console.log(`     [${it.slug}] ${it.titulo} — exibe ${it.exibida}, IA propôs ${it.proposta} (${it.source})`)
   if (semAutor.length > 25) console.log(`     … e mais ${semAutor.length - 25}`)
+
+  /**
+   * Segunda pergunta, independente da primeira: a ficha AFIRMA uma regra que não vale mais?
+   *
+   * 🔴 Estas NÃO se consertam por backfill. Anexar a razão certa não apaga a frase errada, e
+   * reescrever o argumento do modelo é proibido por régua (ver `adult-content-apply.ts`). A
+   * saída limpa é REAVALIAR — o que precisa de sessão de curador, então acontece pela UI
+   * (`/curation/works` ou o botão "Avaliar com IA" na obra), não por script:
+   * `triggerAiEvaluation` é `"use server"` e passa por `ensureAdmin`.
+   *
+   * ⚠️ Uma delas é do SISTEMA, não do modelo: *"Fonte externa classifica como 'pornographic';
+   * …não pode ficar abaixo de 8.0"* é razão de uma versão anterior — hoje `pornographic`
+   * implica 9,0. Essa camada é a ÚNICA que o `adult-content-retroactive-bounds` não reaplica,
+   * porque `contentRating` não é persistido em coluna nenhuma: só a avaliação o busca.
+   */
+  const afirmam = itens.filter((i) => i.afirmaLimiteErrado)
+  console.log(`\n  🔴 fichas que AFIRMAM um limite que não é o vigente: ${afirmam.length}`)
+  console.log(`     (não têm conserto por backfill — a saída é reavaliar pela UI)`)
+  for (const i of afirmam)
+    console.log(`     · ${i.titulo} — nota ${i.exibida}, a prosa afirma ${i.afirmaLimiteErrado!.join("/")}\n       /catalog/${i.workId}`)
 }
 
 async function main() {
