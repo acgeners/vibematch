@@ -22,7 +22,7 @@ const WORK_WITH_RELATIONS_SELECT = `
   category_scores(*),
   platform_ratings(*),
   calculated_scores(*),
-  work_tags(tag_id, source, confidence, tags(id, slug, name, tag_group_id)),
+  work_tags(tag_id, source, confidence, tags(id, slug, name, tag_group_id, adult_score_tier)),
   work_genres(genre_id, genres(id, name, slug)),
   work_covers(id, url, source, is_primary, position),
   work_synopses(id, source, text, is_primary, position)

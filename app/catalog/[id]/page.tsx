@@ -117,6 +117,9 @@ import type { WorkStatusValues } from "@/lib/validations/work.schema"
 import type { PersonalStatus, SynopsisQuality } from "@/types/domain"
 import { pickPrimarySynopsis, pickPrimaryCover } from "@/lib/work-derived"
 import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
+import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
+import { computeAdultContentBounds, clampAdultContentScore } from "@/lib/ai-evaluation/adult-content-rules"
+import { autorDaNota } from "@/lib/criteria/nota-autor"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { isFollowingPersonalStatus, personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 import {
@@ -150,6 +153,8 @@ type WorkTagForDisplay = {
   slug?: string
   name?: string
   tag_group_id?: string | null
+  /** `tags.adult_score_tier` (migration 174) — é ele que decide o piso/teto de `adult_content`. */
+  adult_score_tier?: "label" | "explicit" | null
   source?: string | null
   confidence?: number | null
 }
@@ -619,6 +624,38 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       confidence: typeof tag === "string" ? null : tag.confidence ?? null,
     })
   }
+
+  /**
+   * Piso/teto de `adult_content` pelas tags de HOJE — é o que permite creditar a nota que o
+   * LIMITE definiu, em vez de deixá-la sem autor.
+   *
+   * 🔴 A régua desta base é "nota trocada diz QUEM trocou", e ela tinha um buraco: a página
+   * creditava `ai_edited` ("Ajustada por você") e `ai_calibrated` ("Ajustada pela auditoria"),
+   * mas a nota movida pelo limite fica com `source: ai_accepted` e não dizia nada. Medido na
+   * nuvem em 2026-08-20: **85 obras** com a nota movida e o limite explicando exatamente o
+   * valor — 83 delas sem nenhum outro crédito possível.
+   *
+   * ⚠️ Calculado AO VIVO, não lido do texto. A justificativa carrega a razão histórica (o
+   * backfill de 20/08 a escreveu em 83 fichas); esta linha reflete as tags de agora. Quando
+   * uma tag muda de tier, é este crédito que acompanha — e é por isso que ele não deriva da
+   * prosa.
+   *
+   * ⚠️ Sem `contentRatings` (eles vivem nas fontes externas e a página não os carrega), então
+   * obra cujo limite venha SÓ da classificação externa não ganha crédito. Falso negativo é o
+   * lado seguro: não creditar é o estado de antes; creditar errado seria afirmar procedência.
+   */
+  const adultContentBounds = computeAdultContentBounds({
+    tags: (tags as Array<WorkTagForDisplay | string>).map((t) =>
+      typeof t === "string"
+        ? { name: t, group: null, scoreTier: null }
+        : {
+            name: t.name ?? "",
+            group: TAG_GROUP_ID_TO_NORMALIZED_SLUG[t.tag_group_id ?? ""] ?? null,
+            scoreTier: t.adult_score_tier ?? null,
+          },
+    ),
+    genres: (work.genres ?? []) as string[],
+  })
 
   // Cobertura de proveniência (rodapé do card de tags): quantas vieram de IA.
   const aiTagCount = normalizedTags.filter((t) => t.source === "ai_inferred").length
@@ -1350,16 +1387,47 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               // calibradas, a 1,79 ponto de distância) — então quem explica é a sugestão que de
               // fato moveu o número, e o rótulo diz de onde ela veio.
               const calibrated = calibrationProvenance?.get(slug) ?? null
-              const isCalibrated = scoreSourceMap[slug] === "ai_calibrated" && !!calibrated
+              // ⚠️ `!!calibrated` continua exigido: o crédito imprime a nota ANTERIOR e a data,
+              // que vêm da proveniência. Sem ela, o rótulo prometeria um "antes" que não tem.
+              const isCalibratedSource = scoreSourceMap[slug] === "ai_calibrated" && !!calibrated
               // 🔴 Nota que VOCÊ editou também precisa dizer isso: medido em 2026-08-17, das 20
               // justificativas que contradizem a nota exibida, 19 são exatamente isto e só 1 é o
               // modelo se contradizendo. Não é erro, é troca de autor sem crédito.
               const iaSuggested = aiScore?.suggested_score ?? null
-              const isUserEdited =
-                scoreSourceMap[slug] === "ai_edited" &&
-                score != null &&
-                iaSuggested != null &&
-                Math.abs(iaSuggested - score) >= 0.05
+              /**
+               * 🔴 QUEM decidiu a nota sai de um dono único (`autorDaNota`), compartilhado com
+               * `scripts/coherence-audit.ts --tela`. Com a régua escrita nos dois lados, a
+               * auditoria aprovaria exatamente as fichas que a tela deixa sem crédito — o
+               * instrumento confirmando o defeito que ele existe para pegar.
+               */
+              const autor = autorDaNota({
+                source: scoreSourceMap[slug],
+                exibida: score,
+                proposta: iaSuggested,
+                // Só `adult_content` tem clamp; nos outros oito o limite não existe.
+                limiteExplica:
+                  slug === "adult_content" &&
+                  score != null &&
+                  iaSuggested != null &&
+                  clampAdultContentScore(iaSuggested, adultContentBounds) === score,
+              })
+              const isUserEdited = autor === "curadoria"
+              /**
+               * 🔴 Terceiro autor possível: o LIMITE de `adult_content`. Ele move a nota e
+               * deixa `source: ai_accepted`, então até 2026-08-20 essa nota era a única sem
+               * crédito nenhum — medido: 85 obras, 83 delas sem outro autor possível.
+               *
+               * ⚠️ A precedência é HUMANO → auditoria → limite, e não é arbitrária: quando a
+               * curadora escolhe o mesmo número que o limite imporia (aconteceu em 2 obras),
+               * nenhum dado distingue quem decidiu, e creditar a máquina por uma decisão dela
+               * é o erro mais caro dos dois.
+               *
+               * ⚠️ A régua é `clamp(sugerida) === exibida` — o limite tem que explicar
+               * EXATAMENTE o valor. "A nota subiu e existe um piso" não basta: outras 4 notas
+               * do catálogo estão movidas por caminhos que este crédito não deve reivindicar.
+               */
+              const isBoundLimited = autor === "limite"
+              const isCalibrated = isCalibratedSource
               const sourceText = isCalibrated ? calibrated.justification : aiScore?.justification
               const parsed = sourceText ? parseJustification(sourceText) : null
               const band = score != null ? bandForScore(score) : null
@@ -1408,6 +1476,14 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   {isUserEdited && (
                     <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">
                       Ajustada por você · a IA sugeria {iaSuggested!.toFixed(1)}
+                    </p>
+                  )}
+                  {isBoundLimited && (
+                    /* Mesmo vocabulário do realinhamento que a prosa usa ("definida pelo limite
+                       obrigatório"): duas superfícies falando do mesmo fato precisam falar
+                       igual, senão viram dois nomes pra mesma coisa a dois centímetros. */
+                    <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                      Definida pelo limite obrigatório · a IA sugeria {iaSuggested!.toFixed(1)}
                     </p>
                   )}
                   {isCalibrated && (
