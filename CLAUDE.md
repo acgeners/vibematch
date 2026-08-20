@@ -2052,36 +2052,94 @@ Guardado por `tests/unit/ranking/modo-agrupar-colunas.test.ts`, que testa a **co
 lista: o separador ≥ 292px e o título ≥ 260px, ambos sobre a soma real do conjunto. Coluna nova
 no modo sem olhar a largura reprova (conferido com sonda).
 
-### 🔴 ABERTO: com o Agrupar DESLIGADO, as 26 colunas continuam espremidas
+### O aperto fora do Agrupar era o `?? 100` em NOVE colunas — medido em 19/08/2026
 
-**O modo Agrupar conserta o caso dele, e só ele.** Fora do modo o fator segue **0,49** e a tela
-é a do print de 17/08: Ano em "2…", Publicação em "✅ Cl", Título cortado no meio do nome. Não é
-esquecimento — é que consertar isso é mexer na TABELA, não numa coluna, e por isso ficou de
-fora. Registrado em 17/08/2026 a pedido da Ana ("deixa registrado só"), sem prazo.
+Esta seção registrava três saídas estruturais (data grid, rolagem lateral, teto de colunas) e
+mandava medir antes de escolher. **Medido: nenhuma das três era necessária para o caso real**, e
+duas das premissas escritas aqui estavam erradas. O que sobrou aberto está no fim.
 
-O mecanismo, para não ser re-derivado: a tabela é `table-layout: fixed` num contêiner
-`width: 100%` **sem `overflow-x`**, então ela sempre cabe na tela e cada coluna recebe
-`natural ÷ soma × largura`. **Não existe piso** — ligar uma coluna encolhe todas as outras, e
-quando a fatia fica menor que o conteúdo o `overflow` do `td` corta, sem barra de rolagem e sem
-erro.
+🔴 **O estado quebrado NÃO é o padrão.** `ranking_tiers_enabled_v1` nasce `"on"` — o `/ranking`
+abre no modo Agrupar, que já tinha orçamento próprio. Chegar na tabela espremida exige desligar
+o Agrupar à mão.
 
-🔴 **A saída óbvia (largura MÍNIMA por coluna + rolagem horizontal) custa o cabeçalho fixo, e
-não dá para escapar.** Hoje o `<thead>` é `sticky -top-5` e gruda na PÁGINA, o que só funciona
-porque não há contêiner de rolagem no meio. Com `overflow-x: auto` no wrapper, ele vira o
-contexto de rolagem e o `sticky` passa a grudar NELE — como quem rola na vertical continua
-sendo a página, o cabeçalho sai de cena junto com as linhas. E pedir "só na horizontal" não
-existe em CSS: `overflow-x: auto` com `overflow-y: visible` é promovido a `auto` nos dois eixos
-pela própria spec.
+🔴 **A causa era uma divergência de FALLBACK, não a arquitetura da tabela.** `crit_*` não tinha
+entrada em `DEFAULT_COLUMN_WIDTHS`, e os dois mapas discordavam sobre a mesma célula:
+`work-table.tsx` caía em `?? (key.startsWith("crit_") ? 48 : 100)` e `ranking-table.tsx` em
+`?? 100`. Medido no browser, logada, 1500px: cada critério **pede 24,4px** (32,8 no 🔥) e
+**recebia 69,5** — servido a **285%**. Somados, os nove reivindicavam **900px de um orçamento de
+2.076px (43%)**, e quem pagava eram Ano, Votos, Veredito e o Título.
 
-As três saídas, nenhuma medida ainda:
+⚠️ **Aqui o `?? 100` não deixou UMA coluna estreita — deixou todas as OUTRAS.** É a mesma
+armadilha da seção seguinte, com o sinal invertido, e por isso ela não foi reconhecida: o teste
+que guarda larguras trazia os 9 `crit_*` como exceção declarada, com o motivo dizendo *"são
+colunas de um dígito, onde 100 é plausível"*. Era a dúvida certa e a conclusão errada.
 
-| | o que é | o que custa |
-|---|---|---|
-| **a** | data grid de verdade: a área da tabela vira o scroller dos DOIS eixos (altura fixa) | muda como a página inteira rola |
-| **b** | rolagem lateral simples | perde o cabeçalho fixo |
-| **c** | teto de colunas no seletor | avisa em vez de espremer calado, mas não devolve as colunas |
+**A correção foi declarar largura, não mexer em rolagem** (`crit_*` derivado de
+`CRITERION_SLUGS` a 48, `fav` 44→53, `alignment_score` 70→**100**). Os dois últimos são o valor
+que `TIER_MODE_COLUMN_WIDTHS` já media — o mapa global tinha ficado para trás. Medido antes e
+depois no MESMO build, logada, colunas padrão:
 
-⚠️ **Antes de escolher, meça** — nenhum número acima é sobre as opções, só sobre o problema.
+| | colunas com célula cortada | Veredito cortado | TÍTULO |
+|---|---|---|---|
+| `/ranking` Agrupar OFF, antes | **9 de 22** | **40/40 linhas** | 250px |
+| `/ranking` Agrupar OFF, depois | **3 de 22** | **1/40** | **315px** |
+| `/catalog`, antes | 1 de 14 | **50/50** | 360px |
+| `/catalog`, depois | 1 de 14 | **1/50** | 353px |
+| `/favorites/<grupo>`, antes | 13 de 24 | **53/53** | 277px |
+| `/favorites/<grupo>`, depois | 13 de 24 | **7/53** | 273px |
+| `/ranking` Agrupar ON | 1 de 16 | — | inalterado |
+
+⚠️ **O modo Agrupar não muda**, de propósito: ele lê `TIER_MODE_COLUMN_WIDTHS`, que já estava
+orçado. Foi a conferência de que o mapa do modo continua vencendo o global.
+
+⚠️ **Medir como VISITANTE subestima.** As mesmas 22 colunas dão **6** cortadas sem sessão e
+**9** logada — os cinco campos pessoais vêm vazios e célula vazia não transborda. O `VER.` é o
+caso didático: pede **82px** anônimo (o botão "Rankear") e **99,9** logada.
+
+⚠️ **`/favorites` segue com 13 colunas cortadas, e NÃO é regressão** — é pré-existente e de
+outra causa: ali o renderizador do critério é o do `work-table`, e a célula pede **56px** contra
+os 24,4 do `/ranking`. Subir `crit_*` para 56 consertaria o `/favorites` e reabriria o
+`/ranking`. **É um mapa global servindo dois renderizadores diferentes** — mesma família do
+`TIER_MODE_COLUMN_WIDTHS`, e a saída provável é um mapa por namespace. Não medido.
+
+#### 🔴 ABERTO 1: o cabeçalho fixo do `/ranking` NÃO funciona — nos DOIS modos
+
+**A premissa que esta seção usava para descartar a rolagem lateral era falsa.** Ela dizia que o
+`<thead>` "gruda na PÁGINA, o que só funciona porque não há contêiner de rolagem no meio". Há:
+quem rola é um `div` do AppShell (`overflow-y-auto`, medido 4133/963); o `body` é
+`h-dvh overflow-hidden` e **a página não rola** — o mesmo scroller que já tinha quebrado o índice
+do dicionário. O `thead` é `sticky -top-7`, para em **y=9..53**, e a barra superior cobre
+**y=0..94**: ele fica inteiro atrás dela.
+
+| medido (logada, 1500×1000) | |
+|---|---|
+| cabeçalho visível até | scroll **763px** |
+| some a partir de | scroll **837px** |
+| linhas lidas COM cabeçalho | **10,3 de 40** |
+| linhas lidas às cegas | **~30 (74%)** |
+| no modo Agrupar | some em **857px** — igual |
+
+Conferido por `elementsFromPoint` (a 70px do topo há um `TD`, não o `thead`) e por screenshot.
+
+⚠️ **Isso reprecifica as três saídas, e inverte qual é a defensável.** A rolagem lateral (b)
+"perderia" um cabeçalho que já está perdido da linha ~10 em diante — o custo real dela é só as
+10 primeiras linhas. E o data grid (a) deixa de ser empate: ele devolveria ~30 linhas com
+cabeçalho. ⚠️ Mas os dois são exclusivos na prática — **consertar o cabeçalho encarece (b) de
+novo**, e aí (a) vira a única que preserva os dois. A saída aparente para o conserto isolado é um
+`top` derivado da barra, como o `top-[68px]` do ⌘K; **não medida**.
+
+#### ⚠️ ABERTO 2: o caso extremo continua sem piso
+
+Com **tudo** ligado (33 colunas renderizadas, soma 3.122px, fator **0,462**) a declaração de
+largura não salva: **21 colunas cortadas antes, 17 depois**. O mecanismo segue o mesmo — tabela
+proporcional sem piso, `overflow` do `td` cortando calado. As três saídas continuam sendo as
+candidatas para ele; o que mudou é que ele deixou de ser o caso comum.
+
+⚠️ **O "26 colunas / 3.066px / fator 0,49" desta seção envelheceu**: o seletor tem **31**
+colunas hoje e o padrão do `/ranking` liga **20 delas** (22 renderizadas, soma 2.076px, fator
+**0,695**). Varredura por contagem, com as colunas na ordem canônica: 0 cortadas até 13, **1** em
+16, **3** em 19, **7** em 22, 11 em 25, 16 em 33 — ou seja um teto por CONTAGEM (a saída "c")
+seria proxy grosseiro, porque o que decide é QUAIS colunas.
 
 ## Coluna sem largura declarada cai em 100px — e o conteúdo dela some sem nada acusar
 
@@ -2100,7 +2158,16 @@ lugar nenhum** e fica só como rede para o dia em que a coluna for usada fora do
 sem ela a coluna cairia no `?? 100` invisível que é o assunto desta seção. Guardado por
 `tests/unit/ui/coluna-declara-largura.test.ts`, que
 **deriva o universo de `WORK_TABLE_COLUMNS`** e exige que toda exceção esteja declarada com
-motivo (conferido com sonda). ⚠️ Na mesma varredura, `art` deixou o fallback e ganhou **70px** (é
+motivo (conferido com sonda).
+
+🔴 **O outro lado do mesmo `?? 100` é pior, e ficou 2 dias sem ser visto: quando ele cai em
+NOVE colunas, quem nasce estreita são as OUTRAS.** Os 9 `crit_*` eram a única exceção declarada
+naquele teste, com o motivo dizendo *"são colunas de um dígito, onde 100 é plausível"* — e
+`isso NÃO foi conferido` estava escrito ali. Conferido em 19/08/2026: cada um pede **24,4px** e
+recebia **69,5**; juntos reivindicavam **43% do orçamento do `/ranking`**. **A lista de exceções
+está vazia hoje.** Declarar largura por si só não bastava como rede — o teste ganhou a CONTA
+(nota de critério ≤ `art`, que é a coluna numérica de 2 dígitos), porque declarar `100`
+explicitamente passaria pelo caso do fallback. Conferido com 3 sondas. ⚠️ Na mesma varredura, `art` deixou o fallback e ganhou **70px** (é
 um percentil de 2 dígitos, a largura das outras colunas numéricas) e `total_votes` foi de 70
 para **80** — números do mapa GLOBAL, que segue valendo em `/catalog` e fora do modo Agrupar.
 
@@ -5315,12 +5382,13 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.375 passando (+24 pulados) em 323 arquivos** (318 passando + 5 pulados);
-medido em 2026-08-19 com a grade compacta dos 9 critérios: **+8 casos e +1 arquivo**
-(`titles/grade-compacta-dos-criterios`). Com `git ls-files` = **321** conferido contra os 321 executados, num worktree limpo de
-`origin/main` (`05aa87a`) + só os arquivos deste trabalho.
+`npm run test` → **3.377 passando (+24 pulados) em 323 arquivos** (318 passando + 5 pulados);
+medido em 2026-08-19 com as larguras de coluna do `/ranking`: **+2 casos, sem arquivo novo**
+(dois guardas de CONTA em `ui/coluna-declara-largura`). Com `git ls-files` = **323** conferido
+contra os 323 executados, num worktree limpo de `origin/main` (`8c6b0b9`) + só os arquivos deste
+trabalho.
 
-⚠️ **O antes E o depois foram medidos no MESMO worktree, na mesma sessão** (3.367 → 3.375), em
+⚠️ **O antes E o depois foram medidos no MESMO worktree, na mesma sessão** (3.375 → 3.377), em
 vez de subtrair do número escrito aqui. É a única forma que sobrevive ao `main` ter andado
 entre a medição e o merge — o modo como esta linha envelheceu todas as vezes anteriores.
 
@@ -5355,7 +5423,8 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.367 em 322** (as portas de entrada dos dicionários, +7 casos e +1 arquivo),
+Antes: **3.375 em 323** (a grade compacta dos 9 critérios, +8 casos e +1 arquivo),
+**3.367 em 322** (as portas de entrada dos dicionários, +7 casos e +1 arquivo),
 **3.360 em 321** (a varredura de `works_owner` cobrindo FILTRO/ORDER, +9 casos),
 **3.351 em 321** (a varredura de `works_owner` cobrindo os 32 pontos de LEITURA,
 +24 casos), **3.327 em 321** (o teste do deploy, +6 casos e +1 arquivo,
