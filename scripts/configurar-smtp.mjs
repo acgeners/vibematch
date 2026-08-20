@@ -25,16 +25,28 @@
  * de verdade. Por isso a decisão de 19/08/2026 foi ADIAR e deixar o caminho pronto, em vez de
  * ligar um Gmail pessoal em produção agora.
  *
+ * ✅ **A decisão foi REVISTA e reafirmada no mesmo dia**, com um fato novo: tentou-se o Gmail,
+ * e o cadastro da conta de produto está bloqueado pelo telefone (ver (a) abaixo). Com isso o
+ * DOMÍNIO deixou de ser a opção cara — é retomar por ele, não pelo Gmail.
+ *
  * ── a escolha que este script NÃO faz por você ────────────────────────────────────────────
  *
  * Sem domínio próprio, Resend/SendGrid/Mailgun **não servem**: os três exigem domínio
  * verificado (SPF/DKIM) para enviar a terceiros; sem isso só deixam mandar para você mesmo.
  * O app é `satoria.fly.dev`, sem domínio. Então a escolha real é:
  *
- *   (a) **Gmail + App Password agora** — funciona hoje, e tem dois preços conhecidos: o Gmail
- *       REESCREVE o `From` para o endereço autenticado, ou seja o e-mail de redefinição sai de
- *       um Gmail pessoal (o formato que as pessoas aprenderam a tratar como phishing); e é uso
- *       fora do previsto para conta pessoal. Para o volume atual o teto de envio não pesa.
+ *   (a) **Gmail + App Password agora** — funciona hoje, e tem TRÊS preços. Dois já conhecidos:
+ *       o Gmail REESCREVE o `From` para o endereço autenticado, ou seja o e-mail de redefinição
+ *       sai de um Gmail pessoal (o formato que as pessoas aprenderam a tratar como phishing); e
+ *       é uso fora do previsto para conta pessoal. O terceiro é o RAIO DE DANO: a App Password
+ *       não é limitada a enviar — dá acesso ao Mail da conta (envio e leitura por IMAP) —, e ela
+ *       fica guardada na config do projeto Supabase.
+ *
+ *       🔴 **E criar uma conta de PRODUTO para escapar disso está bloqueado (medido 19/08/2026):**
+ *       o cadastro para na verificação do Google com "Este número de telefone foi usado muitas
+ *       vezes". O bloqueio é do TELEFONE, não do nome — nenhum nome de usuário passa com esse
+ *       número. Retomar por aqui exige outro número, não outra ideia de nome.
+ *       ⚠️ E o Gmail ignora PONTO: `satoria`, `sator.ia` e `satori.a` são o mesmo cadastro.
  *
  *   (b) **domínio próprio primeiro** — compra + DNS, e aí um provedor de verdade passa a ser
  *       possível. Sem o problema do `From`.
