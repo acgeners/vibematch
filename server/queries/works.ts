@@ -648,11 +648,21 @@ export async function getWorkTitleByIdOrSlug(idOrSlug: string): Promise<string |
   }
   // Pagina (`.select()` corta em 1000): sem isto o título de uma obra na cauda
   // viria null e a aba do navegador cairia no fallback genérico.
-  const rows = await fetchAllRows<{ title: string | null }>(
-    (from, to) => supabase.from("works").select("title").range(from, to),
+  const rows = await fetchAllRows<{ title: string | null; previous_slugs: string[] | null }>(
+    (from, to) => supabase.from("works").select("title, previous_slugs").range(from, to),
     "getWorkTitleByIdOrSlug",
   )
-  return rows.find((row) => titleToSlug(row.title ?? "") === idOrSlug)?.title ?? null
+  const canonico = rows.find((row) => titleToSlug(row.title ?? "") === idOrSlug)
+  if (canonico) return canonico.title ?? null
+  /**
+   * 🔴 Slug ANTIGO (`previous_slugs`, migration 162) também tem que resolver. Antes de
+   * 2026-08-20 a página REDIRECIONAVA a URL velha pro slug canônico, então o metadata era
+   * resolvido lá e esta função nunca via um alias. Sem o redirect (ele derrubava a página —
+   * ver o comentário em `app/catalog/[id]/page.tsx`), a URL velha é servida como está: sem
+   * isto, as 14 obras renomeadas abrem com a aba dizendo "SatorIA" e sem canonical, que é
+   * justamente quem passou a apontar a URL de verdade.
+   */
+  return rows.find((row) => (row.previous_slugs ?? []).includes(idOrSlug))?.title ?? null
 }
 
 export async function getWorkIdsBySlug(slug: string): Promise<string[]> {

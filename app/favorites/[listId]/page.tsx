@@ -66,6 +66,11 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
   const isMulti = listId === "multi"
   const isPseudo = isAll || isUngrouped || isMulti
 
+  // redirect-em-render: grupo/visão inexistente volta ao índice. Os três abaixo dependem de
+  // DADO (o grupo existe? tem itens?), então não cabem no `redirects()` do next.config nem no
+  // proxy, que hoje só usa o cliente de sessão. Custo aceito e conhecido: em load direto o
+  // Router estoura React #310 (ver `app/catalog/[id]/page.tsx`) — aqui o alvo é uma URL de
+  // grupo apagado, que é raro e não é link público.
   // Grupo real: carrega metadados + escopo. Grupo inexistente volta ao índice.
   const listDetail = isPseudo ? null : await getListDetail(listId)
   if (!isPseudo && !listDetail) redirect("/favorites")

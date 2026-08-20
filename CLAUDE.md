@@ -2327,6 +2327,21 @@ faixa, não a nomeia. Preço da densidade, escolhido com o trade-off medido à v
 do detalhe (ícone + nome + nota) é `hidden @2xl:flex`: no card estreito a linha tocada já diz as
 duas coisas a 40px dali.
 
+🔴 **Sem NOTA nenhuma o bloco inteiro some (2026-08-20), e não é estética: ele mentia.** A
+grade desenhava as 9 linhas com "–" e a barra de faixa vazia, e o painel abria no primeiro
+critério com só o ícone e o nome — uma tela afirmando que a obra foi analisada e não pontuou,
+quando o que houve é que ninguém avaliou. É o estado por onde TODA obra nova passa. A régua é
+**"tem nota"**, nunca "tem avaliação de IA": nota também vem de import e de edição manual, e um
+card que sumisse por falta de `ai_evaluations` esconderia número que a obra tem.
+
+⚠️ O preço, medido na nuvem: **3 obras ativas** estão sem nota (as três `skipped`) e em **2**
+delas existe um `summary` de avaliação que deixa de aparecer. Aceito — avaliação que não virou
+nota não é o estado da obra, e um card chamado "Notas por critério" sem uma única nota erra no
+próprio título. Dono único (`hasCriteriaScores`), compartilhado com o botão de avaliar. Guardado
+por `tests/unit/titles/notas-por-criterio-sem-nota.test.ts`, que casa o FATO ("a guarda deriva
+de `scoreMap`") e **não** o nome da variável — renomear é mudança inocente e não pode pintar a
+suíte de vermelho. As 4 sondas conferidas, inclusive essa.
+
 🔴 **O mockup que aprovou isto tinha o lado "Hoje" ERRADO** — ele era uma pilha de coluna única,
 e o app já era `sm:grid-cols-2 lg:grid-cols-3`. O erro foi a favor do status quo (1.336px no
 mockup contra 1.687 reais), então a decisão se sustenta com folga; mas ao desenhar comparação,
@@ -3278,6 +3293,67 @@ um sidecar que este Dockerfile nem deploya) passava batido. Precisa de `**/node_
 
 ⚠️ Regra de leitura: se a saída mostra camadas sendo exportadas/enviadas, o problema **não** é
 credencial. Leia o `WARN Build context is …` no topo antes de mexer em auth.
+
+## `redirect()` num `page.tsx` DERRUBA a página — e a severidade cresce sozinha
+
+🔴 `redirect()` num server component **não devolve 3xx**. O layout já começou a streamar, o
+Next responde **200** e manda o cliente navegar — e o Router estoura com *"Rendered more hooks
+than during the previous render"* (**React #310** minificado). Conhecido desde 2026-08-08.
+
+⚠️ **Por 12 dias isso pareceu cosmético, e é essa a lição.** O erro ia pro console e a página
+funcionava, então virou "resíduo aceito: sobra bookmark e link colado por UUID". Em 19/08 a
+grade compacta dos 9 critérios aumentou a árvore hidratada da página da obra e o mesmo erro
+deixou de ser recuperável. Medido em PRODUÇÃO em 2026-08-20:
+
+| abertura DIRETA de `/catalog/<obra>` | quebrou | erro no console |
+|---|---|---|
+| por **UUID** (a URL que redirecionava) | **9 de 10** | 10 de 10 |
+| por **slug** (sem redirect) | 0 de 5 | 0 de 5 |
+| clique num link (navegação client-side) | 0 | 0 |
+
+🔴 **A severidade dessa família NÃO é estável — ela depende do tamanho da árvore hidratada, que
+cresce sozinha a cada card novo.** Não existe "erro de console tolerável" aqui: existe erro que
+ainda não passou do limiar. Bisseccionado: com o redirect no lugar, trocar o card por um client
+component de 5 linhas derruba igual, e remover qualquer uma das três `Quick*Cell` conserta.
+
+**O conserto foi TIRAR o redirect, não achar o componente culpado.** `/catalog/[id]` e
+`/catalog/[id]/edit` passam a SERVIR a obra na URL pedida (UUID, slug canônico ou slug antigo),
+e quem diz qual é a URL de verdade é `alternates.canonical` no `generateMetadata` — que não
+custa navegação nenhuma. Medido depois: **0 de 6** por UUID, 0 erros.
+
+⚠️ **O preço, declarado:** a barra de endereço não troca mais o UUID pelo slug sozinha, e a
+obra responde em mais de uma URL. Trocar por um `router.replace` no cliente devolveria a troca
+de URL e o risco de dessincronizar o Router pela mesma porta.
+
+🔴 **Tirar o redirect quebrou o metadata do slug ANTIGO, e isso só aparece na tela.**
+`getWorkTitleByIdOrSlug` casava só o slug derivado do título; enquanto havia redirect, o alias
+nunca chegava nela (o metadata era resolvido no destino). Sem redirect, as **14** obras
+renomeadas abriam com a aba dizendo "SatorIA" e sem canonical — justo quem passou a apontar a
+URL certa. Hoje ela também casa `previous_slugs`. **Ao tirar um redirect, confira o que era
+resolvido no DESTINO.**
+
+**A régua:** alias de rota nasce no `redirects()` do `next.config.ts` (308 de verdade). Quando a
+decisão precisa de DADO, ou vai pro proxy, ou os links param de passar pela rota que
+redireciona, ou o `redirect()` fica — e aí **declara o motivo encostado nele**:
+
+```ts
+// redirect-em-render: <por que não dá pra tirar, e qual o custo aceito>
+```
+
+Guardado por `tests/unit/orchestration/redirect-em-page-tem-motivo.test.ts`, que **deriva as
+páginas do git** (lista fixa não acha a rota de amanhã), exige motivo com frase de verdade — não
+carimbo — e testa que a página da obra tem o canonical, porque é ele que substitui o redirect.
+Hoje **2 declarados**: `/favorites/[listId]` (grupo inexistente) e `/welcome` (sem sessão). As 4
+sondas conferidas.
+
+🔴 **Quem NÃO pega isto: o smoke de deploy.** Ele conta conteúdo no HTML SERVIDO e este erro só
+existe depois da HIDRATAÇÃO — o limite que a própria seção do `deploy.sh` declara. O deploy de
+19/08 passou verde com toda página de obra quebrada para visitante. **Depois de publicar, abra
+uma rota principal num browser e olhe o CONSOLE**, não só o status.
+
+⚠️ **E o gatilho é load direto: bookmark, link colado, aba nova, refresh.** Clicar num link
+nunca reproduziu. Foi isso que manteve o defeito invisível para quem desenvolve — navegando pelo
+app, ele não existe.
 
 ## Preferência de UI que o servidor renderiza vai em COOKIE, nunca em localStorage
 
@@ -5399,10 +5475,17 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.381 passando (+24 pulados) em 324 arquivos** (319 passando + 5 pulados);
-medido em 2026-08-19 com o cabeçalho fixo das tabelas: **+4 casos e +1 arquivo**
-(`ui/altura-da-barra-tem-dono`). Com `git ls-files` = **324** conferido contra os 324 executados,
-num worktree limpo de `origin/main` (`7050e2f`) + só os arquivos deste trabalho.
+`npm run test` → **3.388 passando (+24 pulados) em 326 arquivos** (321 passando + 5 pulados);
+medido em 2026-08-20 com o conserto do `redirect()` na página da obra e a ocultação do card sem
+notas: **+7 casos e +2 arquivos** (`orchestration/redirect-em-page-tem-motivo`,
+`titles/notas-por-criterio-sem-nota`). Disco (`find`) = índice (`git ls-files`) = **326**,
+conferido DEPOIS do `git add -N`, sobre `origin/main` (`6d06205`) + só os arquivos deste
+trabalho.
+
+⚠️ **Este número foi REMEDIDO depois do rebase, não somado ao que estava escrito.** A medição
+inicial (3.382 em 325) valia sobre uma `main` que andou 4 commits no meio da sessão — os PRs
+#488/#489. Somar o próprio delta ao número da prosa teria propagado o erro; o que sobrevive é
+re-rodar na base que vai virar o merge.
 
 ⚠️ **O antes E o depois foram medidos no MESMO worktree, na mesma sessão** (3.377 → 3.381), em
 vez de subtrair do número escrito aqui. É a única forma que sobrevive ao `main` ter andado

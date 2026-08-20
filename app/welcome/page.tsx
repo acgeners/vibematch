@@ -13,6 +13,10 @@ export const metadata = { title: "Boas-vindas" }
  */
 export default async function BemVindoPage() {
   const userId = await getSessionUserId()
+  // redirect-em-render: sem sessão não há o que gravar. Depende de SESSÃO, então o lugar certo
+  // é o proxy — `/welcome` não está em `SIGNED_IN_PREFIXES` porque a rota é o destino do
+  // signup e o cookie pode não ter propagado no primeiro request. Custo aceito: React #310 em
+  // load direto (ver `app/catalog/[id]/page.tsx`), num caminho que ninguém abre por bookmark.
   if (!userId) redirect("/login")
 
   const profile = await getCurrentUserProfile()
