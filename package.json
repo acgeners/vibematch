@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "node scripts/start-standalone.mjs",
     "deploy": "bash scripts/deploy.sh",
+    "smoke": "node scripts/smoke.mjs",
     "clean": "rm -rf .next .turbo",
     "clean:all": "rm -rf .next .turbo node_modules",
     "lint": "eslint",

@@ -41,6 +41,14 @@ function signedInPrefixes(): string[] {
   return [...block.matchAll(/"([^"]+)"/g)].map((m) => m[1]!)
 }
 
+/** Prefixos do array `CONSOLE_PREFIXES` do proxy. */
+function consolePrefixes(): string[] {
+  const i = MIDDLEWARE.indexOf("const CONSOLE_PREFIXES")
+  if (i < 0) return []
+  const block = MIDDLEWARE.slice(i, MIDDLEWARE.indexOf("]", i))
+  return [...block.matchAll(/"([^"]+)"/g)].map((m) => m[1]!)
+}
+
 /** Toda rota (page.tsx) sob um prefixo, como pathname. */
 function routesUnder(prefix: string): string[] {
   const root = join("app", prefix.replace(/^\//, ""))
@@ -104,4 +112,51 @@ describe("arquitetura: rotas pessoais exigem sessão", () => {
     expect(painel).toMatch(/getTasteProfileStatusAction/)
     for (const rota of ["/account", "/dashboard"]) expect(prefixes).toContain(rota)
   })
+})
+
+/**
+ * 🔴 A tabela do CLAUDE.md que descreve estes dois arrays envelheceu DUAS vezes, do mesmo
+ * jeito — e na segunda o aviso "esta tabela já dizia X quando o código tinha três" **já estava
+ * escrito logo abaixo dela**.
+ *
+ *   - dizia `/account`, `/dashboard` com o código em três: `/discover` entrou sem passar lá
+ *   - remedida; voltou a errar quando `/my-list` entrou (16/08), corrigida só em **20/08**
+ *
+ * Prosa não sabe que está defasada, e aviso em prosa não impede a repetição — o que impede é
+ * um lado DERIVAR do outro. É a mesma família "dois critérios pro mesmo fato" com um dos lados
+ * em markdown, e a mesma correção que a tabela de alvos dos scripts já tinha
+ * (`scripts-apontam-pro-local.test.ts`).
+ *
+ * ⚠️ O teste casa a linha pelo RÓTULO no começo (`| \`NOME\` |`), não pela posição: reordenar a
+ * tabela ou reescrever o texto ao redor não pode reprovar. O que reprova é a LISTA divergir.
+ */
+describe("a tabela do CLAUDE.md descreve o proxy que existe", () => {
+  const DOC = readFileSync("CLAUDE.md", "utf8")
+
+  /** Os prefixos citados na 2ª célula da linha daquele rótulo. */
+  const prefixosNaTabela = (rotulo: string): string[] | null => {
+    const linha = DOC.split("\n").find((l) => l.startsWith(`| \`${rotulo}\` |`))
+    if (!linha) return null
+    const celula = linha.split("|")[2] ?? ""
+    return [...celula.matchAll(/`(\/[a-z0-9-]*)`/g)].map((m) => m[1]!)
+  }
+
+  for (const [rotulo, doCodigo] of [
+    ["SIGNED_IN_PREFIXES", signedInPrefixes()],
+    ["CONSOLE_PREFIXES", consolePrefixes()],
+  ] as const) {
+    it(`\`${rotulo}\`: a tabela cita os mesmos prefixos do middleware`, () => {
+      // Sanidade: sem isto, um rename do array faria os dois lados virarem [] e o caso passaria
+      // por vacuidade — que é o jeito silencioso de esta rede deixar de existir.
+      expect(doCodigo.length, `não achei o array ${rotulo} no middleware.ts`).toBeGreaterThan(0)
+
+      const naDoc = prefixosNaTabela(rotulo)
+      expect(naDoc, `a linha \`| \\\`${rotulo}\\\` |\` sumiu da tabela do CLAUDE.md`).not.toBeNull()
+      expect(
+        [...naDoc!].sort(),
+        `a tabela do CLAUDE.md diz [${naDoc}] e o middleware.ts tem [${doCodigo}]. ` +
+          `Quem manda é o código — atualize a tabela.`,
+      ).toEqual([...doCodigo].sort())
+    })
+  }
 })
