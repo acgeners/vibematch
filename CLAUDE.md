@@ -4423,6 +4423,79 @@ verdade conferida. Ao anotar pendência aqui, escreva a **data** e a **forma de 
 - ~~`enforceNeutralCoupleDynamicsWhenNoRomance`~~: **removido na v23** (2026-08-09). Forçava `couple_dynamics = 5.0` quando `romance ≤ 3`, partindo de "sem romance, não há dinâmica" — premissa que morreu com a ampliação do critério pra vínculos centrais. Travava **17 das 18** obras sem romance. Quem decide "não aplicável" agora é o prompt, por ausência de VÍNCULO — não de romance. ⚠️ As ~31 justificativas que ele reescreveu seguem no banco (ver `lib/criteria/justification.ts`)
 - `enforceAuditableReviewUsage`: **non-fatal since v20 (2026-06-27)** — generic review citation is accepted ("algumas reviews apontam…"), so it no longer requires/validates specific review IDs (`R1`, `R2`…) nor throws. It only records an informational `reviewAudit` (`required` = "havia reviews no prompt"; `usedReviewIds` = whatever IDs the model happened to cite, often empty with generic citation). `review_usage` is now an OPTIONAL tool/schema field. (Earlier behavior: threw + retried when IDs weren't cited — removed because a citation slip discarded otherwise-valid evals.)
 
+## A RAZÃO do limite 18+ tem dono — e quem a estava escrevendo era o modelo
+
+🔴 Duas coisas escreviam a nota de `adult_content` e só uma escrevia a explicação. O fluxo de
+avaliação (`enforceAdultContentBounds`) anexava a razão do limite e realinhava a faixa citada;
+o `scripts/adult-content-retroactive-bounds.ts` fazia `update({ score })` e ia embora. Como ele
+roda toda vez que uma tag ganha `adult_score_tier` — e há ~119 no backlog de revisão —, ele
+**reabastecia o defeito sozinho**.
+
+Medido na nuvem em 2026-08-20, sobre as 987 notas de `adult_content` com texto:
+
+| | |
+|---|---|
+| notas FORA do piso/teto vigente | **0** — os NÚMEROS estavam certos |
+| nota movida e o texto sem razão nenhuma | **89** |
+| o texto cita um limite DIFERENTE do que vale hoje | **7** |
+| o MODELO narra a regra determinística na prosa | **81** |
+
+🔴 **As três últimas linhas têm a mesma raiz: a razão da regra estava sendo escrita pelo
+MODELO**, que não tem como saber qual camada venceu. Ele narrou errado em **5 casos conferidos
+um a um**, sempre no sentido caro — obra com TETO 6,0 pela tag "R15 but Based on a R19 Novel"
+com a prosa afirmando *"aplica piso obrigatório de 7.0"*, exatamente o contrário da precedência
+que o módulo define.
+
+**Dono único: `aplicarLimiteAdulto`** (`lib/ai-evaluation/adult-content-apply.ts`), que devolve
+o par `(nota, texto)`. Os dois caminhos o chamam.
+
+⚠️ **Ele NÃO reescreve o argumento do modelo** — mesma régua do `backfill-faixa-citada`. A
+análise fica inteira, inclusive quando contradiz o limite: é ela a evidência de que a regra e a
+leitura da obra discordam. O que se acrescenta é **quem decidiu o número**.
+
+⚠️ **O baseline é a nota da AVALIAÇÃO, nunca a persistida.** `clampAdultContentScore` só empurra
+PARA DENTRO da faixa: reaplicá-lo sobre a nota já ajustada é idempotente para piso que sobe e
+**inerte para piso que desce** — o script diria "nada a fazer" e um limite obsoleto ficaria
+congelado.
+
+⚠️ **Nota `ai_edited` fica de fora do texto.** O realinhamento afirma *"definida pelo limite
+obrigatório"*, e quando a curadora escolheu o número essa frase credita a máquina por uma
+decisão dela — a página já imprime "Ajustada por você · a IA sugeria X". Apareceu no primeiro
+dry-run: *For the Fallen of the Virgin Love* tem IA 6,0, piso 7,0 e persistida 7,0 `ai_edited`;
+as duas causas dão o mesmo número e nenhum dado distingue quem decidiu.
+
+🔴 **O `--heal` do script estava INERTE, e nada acusava.** O PostgREST devolve embed to-one como
+**OBJETO**; o tipo dizia `Array<…>` e o código fazia `?.[0]`, que em objeto é `undefined`.
+Medido: o baseline da avaliação não era encontrado em **373 de 392** obras com limite. Pior, o
+comentário ao lado afirmava *"o client tipa embed to-one como ARRAY; manter o tipo fiel ao que
+volta"* — a leitura do código CONFIRMAVA o defeito. Hoje há um `umEmbed()` que aceita as duas
+formas, porque o client já mudou isso entre versões e o custo de errar é mudo.
+
+**Passivo fechado em 2026-08-20, US$0:** `--execute` gravou **83** justificativas (0 notas
+tocadas). O estado anterior vai para `.backups/adult-content-razao-<stamp>/plano.json` — família
+declarada em `backups-retencao.mjs` —, porque o texto original é **irreconstruível**: ele é a
+saída de um modelo que já não roda com aquele prompt, e reavaliar produz outra prosa, não a
+mesma.
+
+⚠️ **O que isto NÃO conserta, e é escolha:** onde o modelo narrou a regra errada, a narração
+continua no texto e a razão correta entra logo depois, contradizendo-a. Em *Behind Her
+Highness's Smile* a ficha diz *"não pode ficar abaixo de 5.0"* e, na frase seguinte, *"exige
+adult_content ≥ 9.0"*. Apagar a primeira seria reescrever o argumento do modelo; a saída limpa é
+**reavaliar** (3,84¢/obra, ~5 obras). Fica em aberto, com o número à vista.
+
+⚠️ **Fora do passivo, de propósito:** 81 fichas trazem o modelo narrando a regra com a nota na
+faixa por escolha DELE (o limite não moveu nada) — anexar "o limite exige ≥7" ali afirmaria uma
+procedência que não houve. E **11** têm o detalhe começando no meio da frase, porque o modelo
+escreveu `Faixa 7-8 (Mature), com piso…` e o parser corta no separador. Os dois se resolveriam
+no PROMPT (proibir narrar a regra), que muda `PROMPT_VERSION` e a chave de cache — decisão com
+custo próprio, não parte disto.
+
+Guardado por `tests/unit/ai-evaluation/limite-adulto-nota-e-texto.test.ts` (10 casos + 3 de
+arquitetura). 🔴 **Uma das sondas me desmentiu**: eu tinha escrito no código que a ORDEM
+(anexar → realinhar) importava, e inverter mantém tudo verde — nenhuma razão usa o formato
+literal `Faixa X-Y` que o realinhamento procura. O comentário foi corrigido em vez de o teste
+ser inventado para defendê-lo.
+
 ## A auditoria de critérios IA foi APOSENTADA (2026-08-16) — e o motivo não é qualidade
 
 Ela existia em `/curation/settings?g=notas`: um LLM relia as obras e sugeria ajustes nos
@@ -5475,12 +5548,11 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.388 passando (+24 pulados) em 326 arquivos** (321 passando + 5 pulados);
-medido em 2026-08-20 com o conserto do `redirect()` na página da obra e a ocultação do card sem
-notas: **+7 casos e +2 arquivos** (`orchestration/redirect-em-page-tem-motivo`,
-`titles/notas-por-criterio-sem-nota`). Disco (`find`) = índice (`git ls-files`) = **326**,
-conferido DEPOIS do `git add -N`, sobre `origin/main` (`6d06205`) + só os arquivos deste
-trabalho.
+`npm run test` → **3.398 passando (+24 pulados) em 327 arquivos** (322 passando + 5 pulados);
+medido em 2026-08-20 com o dono único do par (nota, texto) de `adult_content`: **+10 casos e +1
+arquivo** (`ai-evaluation/limite-adulto-nota-e-texto`). Disco (`find`) = índice
+(`git ls-files`) = **327**, conferido DEPOIS do `git add -N`, sobre `origin/main` (`b98c86e`) +
+só os arquivos deste trabalho.
 
 ⚠️ **Este número foi REMEDIDO depois do rebase, não somado ao que estava escrito.** A medição
 inicial (3.382 em 325) valia sobre uma `main` que andou 4 commits no meio da sessão — os PRs
@@ -5522,7 +5594,9 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.377 em 323** (as larguras de coluna do `/ranking`, +2 casos),
+Antes: **3.388 em 326** (o conserto do `redirect()` na página da obra, +7 casos e +2 arquivos),
+**3.381 em 324** (o cabeçalho fixo das tabelas), **3.377 em 323** (as larguras de coluna do
+`/ranking`, +2 casos),
 **3.375 em 323** (a grade compacta dos 9 critérios, +8 casos e +1 arquivo),
 **3.367 em 322** (as portas de entrada dos dicionários, +7 casos e +1 arquivo),
 **3.360 em 321** (a varredura de `works_owner` cobrindo FILTRO/ORDER, +9 casos),
