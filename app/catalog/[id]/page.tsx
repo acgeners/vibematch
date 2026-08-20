@@ -100,10 +100,12 @@ import { TagRowAction } from "@/components/ai-evaluation/tag-actions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { GlossaryLink } from "@/components/guide/glossary-link"
+import { CriteriaGrid } from "@/components/titles/criteria-grid"
+import type { CriterioItem } from "@/components/titles/criteria-grid"
 import { CriterionIcon } from "@/components/titles/criterion-icon"
 import { CriterionBandChip } from "@/components/titles/criterion-band-chip"
 import { CriterionFitBar } from "@/components/titles/criterion-fit-bar"
-import { parseJustification, bandForScore, bandBarBounds, rubricForBand, rubricTitle } from "@/lib/criteria/justification"
+import { parseJustification, bandForScore, bandBarBounds, rubricForBand, rubricTitle, RUBRIC_BANDS } from "@/lib/criteria/justification"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CRITERIA_INFO, PLATFORM_LABELS } from "@/lib/constants/criteria"
 import {
@@ -1272,8 +1274,15 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               {latestAiEval.summary}
             </p>
           )}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {CRITERION_SLUGS.map((slug) => {
+          {/* 🔴 GRADE COMPACTA (2026-08-19): a lista mostra nome, nota e faixa; a
+              justificativa de UM critério abre por vez. Antes eram 9 cards com a prosa toda
+              aberta, e a altura do bloco era refém do quanto o modelo escreveu — medido:
+              1.687px no desktop (63% da aba) e 4.244px no iPhone SE (70%, 6,4 telas).
+              O cálculo por critério continua AQUI, no servidor; o cliente só arruma e abre. */}
+          {(() => {
+            const itens: CriterioItem[] = []
+            const detalhes: React.ReactNode[] = []
+            for (const slug of CRITERION_SLUGS) {
               const info = CRITERIA_INFO[slug]
               const score = scoreMap[slug]
               const aiScore = latestAiScoreMap.get(slug)
@@ -1282,21 +1291,17 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               // Cor/tier pela faixa ideal do perfil; sem pref → neutro (não pinta como se fosse fit).
               const tier: CriterionTier =
                 score == null ? "neutral" : pref ? pickCriterionTierByRange(score, pref) : "neutral"
-              // Legenda (faixa + rótulo) separada da justificativa específica da obra. A faixa é
-              // DERIVADA da nota vigente, nunca da prosa da IA — ver `bandForScore` para os três
-              // jeitos silenciosos de a faixa citada apodrecer.
-              // 🔴 A prosa tem que seguir o NÚMERO. Quando a auditoria reescreveu a nota,
-              // a justificativa da avaliação fala de outro valor (medido: 28 das 37 notas
-              // calibradas, a 1,79 ponto de distância) — então quem explica é a sugestão
-              // que de fato moveu o número, e o rótulo diz de onde ela veio.
+              // A faixa é DERIVADA da nota vigente, nunca da prosa da IA — ver `bandForScore`
+              // para os três jeitos silenciosos de a faixa citada apodrecer.
+              // 🔴 A prosa tem que seguir o NÚMERO. Quando a auditoria reescreveu a nota, a
+              // justificativa da avaliação fala de outro valor (medido: 28 das 37 notas
+              // calibradas, a 1,79 ponto de distância) — então quem explica é a sugestão que de
+              // fato moveu o número, e o rótulo diz de onde ela veio.
               const calibrated = calibrationProvenance?.get(slug) ?? null
               const isCalibrated = scoreSourceMap[slug] === "ai_calibrated" && !!calibrated
-              // 🔴 Nota que VOCÊ editou também precisa dizer isso. A prosa abaixo é sempre da
-              // IA, e quando a nota foi trocada ela passa a argumentar por outro número —
-              // medido em 2026-08-17: das 20 justificativas que contradizem a nota exibida,
-              // **19 são exatamente isto** e só 1 é o modelo se contradizendo. Não é erro, é
-              // troca de autor sem crédito. Rótulo em vez de reescrever o texto: reescrever
-              // faria o registro da IA dizer o que ela não disse.
+              // 🔴 Nota que VOCÊ editou também precisa dizer isso: medido em 2026-08-17, das 20
+              // justificativas que contradizem a nota exibida, 19 são exatamente isto e só 1 é o
+              // modelo se contradizendo. Não é erro, é troca de autor sem crédito.
               const iaSuggested = aiScore?.suggested_score ?? null
               const isUserEdited =
                 scoreSourceMap[slug] === "ai_edited" &&
@@ -1307,19 +1312,30 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               const parsed = sourceText ? parseJustification(sourceText) : null
               const band = score != null ? bandForScore(score) : null
               const [bandLo, bandHi] = band ? bandBarBounds(band) : [null, null]
-              return (
-                <div
-                  key={slug}
-                  className="flex flex-col gap-2.5 rounded-lg border bg-muted/20 p-3.5"
-                >
-                  <div className="flex items-center gap-2.5">
+
+              itens.push({
+                slug,
+                nome: info.name,
+                notaTexto: score != null ? score.toFixed(1) : null,
+                // A ORDEM das faixas sai da rubrica, não de uma lista escrita aqui.
+                faixaIndex: band ? RUBRIC_BANDS.indexOf(band as (typeof RUBRIC_BANDS)[number]) : -1,
+                faixaLabel: band,
+                pillClass: criterionTierPillClass(tier),
+              })
+
+              detalhes.push(
+                <div key={slug} className="flex flex-col gap-2.5">
+                  {/* No card ESTREITO este cabeçalho é redundante: a linha que acabou de ser
+                      tocada já diz o nome e a nota, a 40px daqui. Ele existe para o painel
+                      LATERAL, que não tem linha vizinha. */}
+                  <div className="hidden items-center gap-2.5 @2xl:flex">
                     <span className="grid h-[52px] w-[52px] shrink-0 place-items-center">
                       <CriterionIcon slug={slug} />
                     </span>
                     <div className="min-w-0 flex-1">
                       <CriterionTitleTooltip name={info.name} description={info.description} multiline />
                     </div>
-                    {score != null ? (
+                    {score != null && (
                       <div
                         className={cn(
                           "grid h-9 min-w-[52px] shrink-0 place-items-center rounded-md px-2 font-mono text-lg font-bold leading-none",
@@ -1327,10 +1343,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                         )}
                       >
                         {score.toFixed(1)}
-                      </div>
-                    ) : (
-                      <div className="grid h-9 min-w-[52px] shrink-0 place-items-center rounded-md border border-dashed text-base text-muted-foreground">
-                        —
                       </div>
                     )}
                   </div>
@@ -1347,11 +1359,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     </p>
                   )}
                   {isCalibrated && (
-                    /* Procedência, não estado: o selo ✨ do card credita a avaliação, e esta
-                       nota não veio dela. Sem cor de estado — âmbar aqui significaria
-                       "desatualizado", que é outra coisa (ver STATUS_TONE). */
-                    /* Sem alfa no texto: a 10,5px o `/80` derruba o contraste abaixo do AA,
-                       e alfa não se lê na cor computada (ver o ⚠️ do painel da Prioridade). */
+                    /* Procedência, não estado: o selo ✨ do card credita a avaliação, e esta nota
+                       não veio dela. Sem cor de estado — âmbar aqui significaria "desatualizado",
+                       que é outra coisa (ver STATUS_TONE). */
                     <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">
                       Ajustada pela auditoria
                       {calibrated.appliedAt ? ` · ${formatProvenanceWhen(calibrated.appliedAt)}` : ""}
@@ -1362,7 +1372,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     <p className="text-xs leading-relaxed text-muted-foreground">{parsed.detail}</p>
                   )}
                   {score != null && (
-                    <div className="mt-auto pt-1">
+                    <div className="pt-1">
                       <CriterionFitBar
                         score={score}
                         tier={tier}
@@ -1375,10 +1385,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       />
                     </div>
                   )}
-                </div>
+                </div>,
               )
-            })}
-          </div>
+            }
+            return <CriteriaGrid items={itens} detalhes={detalhes} />
+          })()}
         </CardContent>
       </Card>
       {/* Reviews externas — apoiam visualmente os scores da IA. "Buscar reviews" vive no header do card. */}

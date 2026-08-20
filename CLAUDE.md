@@ -2213,9 +2213,40 @@ nenhum resultado, porque cria todos.
 
 ⚠️ **Resultado medido depois:** Notas **3.496 → 650px**, Visão Geral 906 → 982px (o painel de
 estado entrou, o card do Resumo saiu), e a **aba nova nasceu com 2.949px**. Mover é metade do
-trabalho: o scroll mudou de endereço. A outra metade é a **grade compacta dos 9 critérios**
-(nota + faixa + barra, justificativa abrindo ao lado, ~1.735 → ~520px) — decidida, ainda não
-implementada, e vale PR próprio.
+trabalho: o scroll mudou de endereço.
+
+✅ **A outra metade — a grade compacta dos 9 critérios — foi feita em 2026-08-19.** A lista
+mostra nome, nota e faixa; a justificativa de UM critério abre por vez, ao lado (card largo) ou
+abaixo da linha (card estreito). Medido no app, antes e depois:
+
+| | antes | depois |
+|---|---|---|
+| bloco no desktop (1500) | 1.687px — 63% da aba | **685px** |
+| bloco no tablet (768) | 3.480px | **1.050px** |
+| bloco no iPhone SE (375) | **4.244px — 6,4 telas** | **1.248px** |
+| a aba inteira | 2.689 / 6.085px | 1.688 / 3.089px |
+
+🔴 **O que importa não é o corte médio, é o TETO.** Antes a altura era refém de quanto o modelo
+escreveu; agora ela para de crescer com o texto. Medido no mockup sobre as obras real de p10,
+mediana e p90 (justificativa: mediana **274** caracteres, p90 551, máx 1.072; soma por obra
+mediana 2.394): a compacta vai de 507 para 516px entre a mediana e a p90 — **9px** — enquanto a
+de hoje ia de 1.336 para 1.841.
+
+⚠️ **A régua de largura é `@container`, não breakpoint de viewport** — quem decide se cabe
+painel é o CARD (868px na página da obra, ~343px no celular), e `lg:` daria painel lateral num
+card estreito dentro de coluna. O detalhe é renderizado nos DOIS lugares e escondido por CSS:
+escolher por JS exigiria ler a largura no primeiro render, que é a quebra de hidratação do
+`localStorage` de novo.
+
+⚠️ **O rótulo da faixa ("Saudável") saiu da LISTA** e vive só no painel aberto; a barra diz qual
+faixa, não a nomeia. Preço da densidade, escolhido com o trade-off medido à vista. E o cabeçalho
+do detalhe (ícone + nome + nota) é `hidden @2xl:flex`: no card estreito a linha tocada já diz as
+duas coisas a 40px dali.
+
+🔴 **O mockup que aprovou isto tinha o lado "Hoje" ERRADO** — ele era uma pilha de coluna única,
+e o app já era `sm:grid-cols-2 lg:grid-cols-3`. O erro foi a favor do status quo (1.336px no
+mockup contra 1.687 reais), então a decisão se sustenta com folga; mas ao desenhar comparação,
+o lado "antes" tem que ser a tela, não a lembrança dela.
 
 Guardado por `tests/unit/orchestration/abas-da-obra.test.ts`, que **recorta cada
 `<TabsContent>` do source** e falha quando um bloco muda de aba. ⚠️ Ele lê o arquivo **sem os
@@ -5284,12 +5315,12 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.367 passando (+24 pulados) em 322 arquivos** (317 passando + 5 pulados);
-medido em 2026-08-19 com as portas de entrada dos dicionários: **+7 casos e +1 arquivo**
-(`guide/portas-de-entrada`). Com `git ls-files` = **321** conferido contra os 321 executados, num worktree limpo de
+`npm run test` → **3.375 passando (+24 pulados) em 323 arquivos** (318 passando + 5 pulados);
+medido em 2026-08-19 com a grade compacta dos 9 critérios: **+8 casos e +1 arquivo**
+(`titles/grade-compacta-dos-criterios`). Com `git ls-files` = **321** conferido contra os 321 executados, num worktree limpo de
 `origin/main` (`05aa87a`) + só os arquivos deste trabalho.
 
-⚠️ **O antes E o depois foram medidos no MESMO worktree, na mesma sessão** (3.360 → 3.367), em
+⚠️ **O antes E o depois foram medidos no MESMO worktree, na mesma sessão** (3.367 → 3.375), em
 vez de subtrair do número escrito aqui. É a única forma que sobrevive ao `main` ter andado
 entre a medição e o merge — o modo como esta linha envelheceu todas as vezes anteriores.
 
@@ -5324,7 +5355,8 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.360 em 321** (a varredura de `works_owner` cobrindo FILTRO/ORDER, +9 casos),
+Antes: **3.367 em 322** (as portas de entrada dos dicionários, +7 casos e +1 arquivo),
+**3.360 em 321** (a varredura de `works_owner` cobrindo FILTRO/ORDER, +9 casos),
 **3.351 em 321** (a varredura de `works_owner` cobrindo os 32 pontos de LEITURA,
 +24 casos), **3.327 em 321** (o teste do deploy, +6 casos e +1 arquivo,
 `orchestration/deploy-verifica-o-que-publica`), **3.303 em 318** (o limiar manual de nota, +14 casos e +1 arquivo,
