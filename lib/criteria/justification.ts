@@ -64,7 +64,7 @@ export function bandBarBounds(band: string): [number, number] {
 }
 
 /** As 4 faixas da rubrica, em ordem — idênticas nos 9 critérios (conferido em `CRITERIA_RUBRICS`). */
-const RUBRIC_BANDS = ["0-3", "4-6", "7-8", "9-10"] as const
+export const RUBRIC_BANDS = ["0-3", "4-6", "7-8", "9-10"] as const
 
 /**
  * Faixa da rubrica a que uma nota pertence — a FONTE DA VERDADE para exibir faixa.

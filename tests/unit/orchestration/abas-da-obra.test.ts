@@ -49,7 +49,9 @@ describe("abas da página da obra", () => {
 
   it("a leitura da obra pela IA mora na aba da IA", () => {
     const ia = aba("ai")
-    expect(ia).toContain("CRITERION_SLUGS.map")
+    // ⚠️ Casa o COMPONENTE, não a forma do laço: a versão anterior exigia
+    // `CRITERION_SLUGS.map` e reprovou quando ele virou `for`, com a grade no mesmo lugar.
+    expect(ia).toContain("<CriteriaGrid")
     expect(ia).toContain("<WorkReviewsCard")
     // A estimativa de arte é PILOTO e ainda não está no repositório — quando entrar, é
     // aqui que ela mora (é leitura da IA sobre as reviews, não ficha da obra). Condicional
@@ -66,7 +68,7 @@ describe("abas da página da obra", () => {
     expect(notas).toContain("Notas calculadas")
     expect(notas).toContain("Avaliações externas")
     // O que saiu — cada um destes valia centenas de px na aba mais longa da página.
-    expect(notas).not.toContain("CRITERION_SLUGS.map")
+    expect(notas).not.toContain("<CriteriaGrid")
     expect(notas).not.toContain("<WorkReviewsCard")
     expect(notas).not.toContain("<DeepDiveButton")
     expect(notas).not.toContain("<AiEvaluationButton")
@@ -95,7 +97,7 @@ describe("abas da página da obra", () => {
     expect(criterios).toContain("latestAiEval.summary")
     // Antes da grade dos 9, não depois: ele existe pra dar contexto à leitura dos números.
     expect(criterios.indexOf("latestAiEval.summary")).toBeLessThan(
-      criterios.indexOf("CRITERION_SLUGS.map"),
+      criterios.indexOf("<CriteriaGrid"),
     )
   })
 
