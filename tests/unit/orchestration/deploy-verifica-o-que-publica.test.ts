@@ -81,3 +81,74 @@ describe("o deploy verifica o que publica", () => {
     expect(smoke).toContain("process.exit(1)")
   })
 })
+
+/**
+ * O SEGUNDO smoke: o que abre num browser.
+ *
+ * 🔴 O que ele existe para pegar, e que o de HTTP declara não ver: em 2026-08-20 toda página
+ * de obra ficou um dia quebrada para visitante (React #310 na hidratação) com o HTML SERVIDO
+ * completo, o smoke verde e a suíte verde.
+ */
+describe("o smoke de browser", () => {
+  const LINHA = CODIGO.split("\n").find((l) => l.includes("smoke-browser.mjs"))
+  const SMOKE = readFileSync(join(RAIZ, "scripts/smoke-browser.mjs"), "utf8")
+
+  it("o deploy o invoca, a partir do worktree PUBLICADO", () => {
+    expect(LINHA, "o deploy não abre mais nada num browser").toBeDefined()
+    // Mesma regra do smoke de HTTP: verificar o que subiu com o script de outra versão é
+    // verificar outra coisa.
+    expect(LINHA).toContain("$WT/scripts/smoke-browser.mjs")
+    expect(LINHA).toMatch(/--base=[^\n]*\$APP/)
+  })
+
+  it("🔴 o BROWSER vem do checkout, porque worktree novo não tem node_modules", () => {
+    // A única coisa que legitimamente sai do `$REPO_ROOT`, e é por necessidade física:
+    // `git worktree add` cria um checkout limpo, sem `node_modules` — nem o da raiz nem o do
+    // sidecar da Comix, que é quem tem o `playwright-core`. Sem isto o smoke cai no fail-soft
+    // em TODO deploy e nunca verifica nada.
+    expect(
+      LINHA,
+      "sem --modules apontando pro checkout, o smoke de browser nunca acha o Playwright " +
+        "e pula em silêncio a cada deploy",
+    ).toContain('--modules="$REPO_ROOT"')
+  })
+
+  it("roda DEPOIS do smoke de HTTP", () => {
+    // O de HTTP é mais barato e pega a família mais grave (rota que subiu vazia). Com
+    // `set -e`, ele falhando aborta antes de gastar ~25s de browser.
+    const linhas = CODIGO.split("\n")
+    const http = linhas.findIndex((l) => l.includes("smoke-producao.mjs"))
+    const browser = linhas.findIndex((l) => l.includes("smoke-browser.mjs"))
+    expect(http).toBeGreaterThan(-1)
+    expect(browser).toBeGreaterThan(http)
+  })
+
+  it("🔴 é fail-SOFT: sem Playwright ele avisa e sai 0", () => {
+    // Com `set -e` no deploy.sh, um exit 1 aqui derrubaria o comando DEPOIS de já ter
+    // publicado — trocaria um defeito raro (regressão de hidratação) por um comum.
+    expect(SMOKE).toMatch(/process\.exit\(0\)/)
+    // ⚠️ E o aviso tem de ser ALTO: fail-soft calado é como se constrói capacidade desligada
+    // (o `CoverImage` prometia fallback e estava ligado em 2 de 36 telas).
+    expect(SMOKE).toMatch(/NÃO RODOU/)
+  })
+
+  it("🔴 o detector NÃO se apoia só em `pageerror` — isso foi medido e não pega", () => {
+    // A 1ª versão deste script olhava `pageerror` e passou VERDE com um componente que
+    // literalmente lançava na hidratação: o React 19 engole a exceção, cai para render no
+    // cliente e nada chega ao `window.onerror`. O que separou os dois estados, medido:
+    // resposta 5xx (1 × 0) e esqueleto sobrando depois de hidratar (28 × 0 em 9 rotas sãs).
+    expect(SMOKE, "sumiu a checagem de 5xx, que é o sinal que de fato separou").toMatch(/>= 500/)
+    expect(
+      SMOKE,
+      "sumiu a checagem de esqueleto — é o sinal GERAL, o único que não precisa de número por rota",
+    ).toContain('data-slot="skeleton"')
+  })
+
+  it("carrega as rotas a FRIO, nunca clicando", () => {
+    // Medido em 20/08: abertura direta por UUID quebrava 9 de 10; clicar num link, 0 de 10.
+    // Um smoke que navegasse clicando passaria verde pelo mesmo motivo que o defeito era
+    // invisível para quem desenvolve.
+    expect(SMOKE).toMatch(/page\.goto\(/)
+    expect(SMOKE, "smoke que clica não reproduz a família").not.toMatch(/\.click\(/)
+  })
+})
