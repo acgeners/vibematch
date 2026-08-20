@@ -5,6 +5,10 @@ import { z } from "zod"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { CRITERIA_INFO, CRITERIA_RUBRICS } from "@/lib/constants/criteria"
 import { bandForScore } from "@/lib/criteria/justification"
+// Reexportado: `realinharFaixaCitada` mudou de casa (mora com `bandForScore`, de quem depende),
+// e `scripts/backfill-faixa-citada.ts` a importa daqui.
+export { realinharFaixaCitada } from "@/lib/criteria/justification"
+import { aplicarLimiteAdulto } from "@/lib/ai-evaluation/adult-content-apply"
 import { normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { SONNET_MODEL } from "@/lib/ai/models"
@@ -13,7 +17,6 @@ import { fetchCoverForModelWithStatus, isImageRelatedModelError } from "@/lib/se
 import { recordCacheEventAsync } from "@/server/queries/ai-cache"
 import { buildCacheKey } from "@/lib/ai-cache"
 import {
-  clampAdultContentScore,
   computeAdultContentBounds,
 } from "@/lib/ai-evaluation/adult-content-rules"
 import { runSingleFlight } from "@/lib/ai-cache/single-flight"
@@ -902,45 +905,6 @@ function adultBoundsForContext(req: AiEvaluationRequest) {
   }
 }
 
-/**
- * Realinha a faixa citada na prosa com a nota que o clamp deixou.
- *
- * 🔴 O piso/teto de adult_content muda o NÚMERO e não reescrevia o TEXTO, então a
- * justificativa seguia abrindo com "Faixa 4-6 (Suggestive)" enquanto a nota já era 7,0.
- * Quem lê a ficha vê texto e número discordando — foi o caso que abriu a auditoria de
- * 2026-08-09. Medido no catálogo: **103 das 149** incoerências "faixa citada ≠ faixa da
- * nota" estão em adult_content, praticamente todas com essa origem.
- *
- * ⚠️ NÃO reescreve o argumento do modelo, só o rótulo da faixa — e deixa explícito que o
- * número veio do limite obrigatório, não da análise. Apagar a conclusão original seria
- * pior: ela é a evidência de que o piso e a evidência textual discordam, e é isso que faz
- * a curadora olhar o caso.
- */
-export function realinharFaixaCitada(
-  justificativa: string,
-  nota: number,
-  /** Causa do desalinhamento. Só passe `"limite"` quando estiver PROVADO que o piso/teto
-   *  moveu a nota — no backfill isso é a impressão digital "nota exata num piso, prosa
-   *  abaixo". Quando a causa é desconhecida (o modelo se contradisse sozinho), o rótulo
-   *  neutro é o honesto: afirmar um motivo não verificado é o defeito que estamos tirando
-   *  da tela, com outra roupa. */
-  causa: "limite" | "desconhecida" = "limite",
-): string {
-  // ⚠️ Consome também o RÓTULO da faixa antiga — "Faixa 4-6 (Suggestive)". Trocar só o
-  // número deixaria "Faixa 7-8 (…) (Suggestive)", e "Suggestive" é o rótulo de 4-6: a
-  // correção criaria uma incoerência nova. Pego no dry-run do backfill.
-  const m = justificativa.match(/Faixa\s+(\d+-\d+)(\s*\([^)]*\))?/i)
-  if (!m) return justificativa
-  const nova = bandForScore(nota)
-  if (m[1] === nova) return justificativa
-  const prefixo = causa === "limite" ? "definida pelo limite obrigatório; " : ""
-  const rotuloAntigo = m[2] ? ` ${m[2].trim()}` : ""
-  return justificativa.replace(
-    m[0],
-    `Faixa ${nova} (${prefixo}a análise abaixo conclui faixa ${m[1]}${rotuloAntigo})`,
-  )
-}
-
 function enforceAdultContentBounds(
   response: AiEvaluationResponse,
   req: AiEvaluationRequest
@@ -964,18 +928,12 @@ function enforceAdultContentBounds(
   let applied = false
   const scores = response.scores.map((score) => {
     if (score.criterionSlug !== "adult_content") return score
-    const clamped = clampAdultContentScore(score.suggestedScore, bounds)
-    if (clamped === score.suggestedScore) return score
+    // 🔴 Dono único do par (nota, texto) — ver `adult-content-apply.ts`. Este bloco já fazia a
+    // coisa certa; quem não fazia era o script retroativo, e era por eles serem DOIS.
+    const r = aplicarLimiteAdulto(score.suggestedScore, score.justification, bounds)
+    if (!r.aplicou) return score
     applied = true
-    const reason = bounds.reasons.join(" ")
-    const comRazao = score.justification.includes(reason)
-      ? score.justification
-      : `${score.justification} ${reason}`
-    return {
-      ...score,
-      suggestedScore: clamped,
-      justification: realinharFaixaCitada(comRazao, clamped),
-    }
+    return { ...score, suggestedScore: r.score, justification: r.justification }
   })
 
   return {

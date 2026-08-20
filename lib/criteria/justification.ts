@@ -172,3 +172,42 @@ export function bandCoherence(score: number, justification: string | null | unde
   const dentro = s >= lo && (s < teto || (teto === 10 && s === 10))
   return dentro ? "coerente" : "divergente"
 }
+
+/**
+ * Realinha a faixa citada na prosa com a nota que o clamp deixou.
+ *
+ * 🔴 O piso/teto de adult_content muda o NÚMERO e não reescrevia o TEXTO, então a
+ * justificativa seguia abrindo com "Faixa 4-6 (Suggestive)" enquanto a nota já era 7,0.
+ * Quem lê a ficha vê texto e número discordando — foi o caso que abriu a auditoria de
+ * 2026-08-09. Medido no catálogo: **103 das 149** incoerências "faixa citada ≠ faixa da
+ * nota" estão em adult_content, praticamente todas com essa origem.
+ *
+ * ⚠️ NÃO reescreve o argumento do modelo, só o rótulo da faixa — e deixa explícito que o
+ * número veio do limite obrigatório, não da análise. Apagar a conclusão original seria
+ * pior: ela é a evidência de que o piso e a evidência textual discordam, e é isso que faz
+ * a curadora olhar o caso.
+ */
+export function realinharFaixaCitada(
+  justificativa: string,
+  nota: number,
+  /** Causa do desalinhamento. Só passe `"limite"` quando estiver PROVADO que o piso/teto
+   *  moveu a nota — no backfill isso é a impressão digital "nota exata num piso, prosa
+   *  abaixo". Quando a causa é desconhecida (o modelo se contradisse sozinho), o rótulo
+   *  neutro é o honesto: afirmar um motivo não verificado é o defeito que estamos tirando
+   *  da tela, com outra roupa. */
+  causa: "limite" | "desconhecida" = "limite",
+): string {
+  // ⚠️ Consome também o RÓTULO da faixa antiga — "Faixa 4-6 (Suggestive)". Trocar só o
+  // número deixaria "Faixa 7-8 (…) (Suggestive)", e "Suggestive" é o rótulo de 4-6: a
+  // correção criaria uma incoerência nova. Pego no dry-run do backfill.
+  const m = justificativa.match(/Faixa\s+(\d+-\d+)(\s*\([^)]*\))?/i)
+  if (!m) return justificativa
+  const nova = bandForScore(nota)
+  if (m[1] === nova) return justificativa
+  const prefixo = causa === "limite" ? "definida pelo limite obrigatório; " : ""
+  const rotuloAntigo = m[2] ? ` ${m[2].trim()}` : ""
+  return justificativa.replace(
+    m[0],
+    `Faixa ${nova} (${prefixo}a análise abaixo conclui faixa ${m[1]}${rotuloAntigo})`,
+  )
+}

@@ -123,6 +123,19 @@ export const FAMILIAS = [
     env: "REPICK_COVER_KEEP",
   },
   {
+    id: "adult-content-razao",
+    dono: "adult-content-retroactive-bounds.ts",
+    // Datado, um diretório por execução com o par (antes, depois) de cada JUSTIFICATIVA
+    // tocada. Alguns KB. É a única forma de desfazer — o banco não tem PITR —, e aqui o
+    // texto original é irreconstruível: ele é a saída de um modelo que já não roda com
+    // aquele prompt, e reavaliar produziria outra prosa, não a mesma.
+    oQueE: "justificativa anterior das notas de adult_content que ganharam a razão do limite",
+    casa: (n) => /^adult-content-razao-\d{4}/.test(n),
+    exemplo: "adult-content-razao-2026-08-20T05-42-10-123Z",
+    keepPadrao: 10,
+    env: "ADULT_CONTENT_RAZAO_KEEP",
+  },
+  {
     id: "normalizar-titulos",
     dono: "normalizar-titulos.ts",
     // Datado, um diretório por execução com o par (antes, depois) de cada obra tocada.

@@ -23,7 +23,11 @@
  * (local por padrão neste projeto). Rode `node scripts/backup-db.mjs` antes de
  * `--execute` contra a nuvem (o banco não tem backup automático).
  */
+import fs from "node:fs"
+import path from "node:path"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { podar } from "./lib/backups-retencao.mjs"
+import { aplicarLimiteAdulto } from "@/lib/ai-evaluation/adult-content-apply"
 import {
   computeAdultContentBounds,
   clampAdultContentScore,
@@ -41,6 +45,14 @@ const FLOOR_VALUES = new Set([EXPLICIT_FLOOR, ADULT_LABEL_FLOOR, 5])
 const CHUNK = 200
 
 type Admin = ReturnType<typeof createAdminClient>
+
+/** Embed to-one do PostgREST: hoje volta OBJETO; o client já tipou ARRAY. Aceita os dois. */
+type EmbedToOne<T> = T | T[]
+
+function umEmbed<T>(v: EmbedToOne<T> | null | undefined): T | null {
+  if (!v) return null
+  return Array.isArray(v) ? (v[0] ?? null) : v
+}
 
 async function fetchAllPaged<T>(
   fn: (from: number, to: number) => Promise<{ data: T[] | null; error: { message: string } | null }>,
@@ -78,17 +90,33 @@ async function main() {
     work_id: string
     score: string
     id: string
+    source: string | null
     ai_evaluation_id: string | null
-    // O client tipa embed to-one como ARRAY. Manter o tipo fiel ao que volta evita
-    // um `as` que esconderia mudança de forma na próxima alteração do select.
-    ai_evaluations: Array<{
-      ai_evaluation_scores: Array<{ criterion_slug: string; suggested_score: string | null; accepted_score: string | null }>
+    /**
+     * 🔴 O PostgREST devolve embed to-one como OBJETO — medido na nuvem em 2026-08-20. Este
+     * tipo dizia `Array<…>` e o código fazia `?.[0]`, que em objeto é `undefined`: o baseline
+     * da avaliação NUNCA era encontrado, em 373 de 392 obras com limite. O `--heal` depende
+     * exatamente disso, então ele estava **inerte, reportando "nada a fazer"** — a família de
+     * erro que este projeto mais paga: falha que produz resultado.
+     *
+     * ⚠️ O comentário que estava aqui afirmava o oposto ("manter o tipo fiel ao que volta"), o
+     * que fazia a leitura do código CONFIRMAR o defeito. Aceitar as duas formas é defensivo de
+     * propósito: o client já mudou essa forma entre versões, e o custo de errar é silencioso.
+     */
+    ai_evaluations: EmbedToOne<{
+      ai_evaluation_scores: Array<{
+        id: string
+        criterion_slug: string
+        suggested_score: string | null
+        accepted_score: string | null
+        justification: string | null
+      }>
     }> | null
   }>(async (from, to) =>
     supabase
       .from("category_scores")
       .select(
-        "id, work_id, score, ai_evaluation_id, ai_evaluations(ai_evaluation_scores(criterion_slug, suggested_score, accepted_score))",
+        "id, work_id, score, source, ai_evaluation_id, ai_evaluations(ai_evaluation_scores(id, criterion_slug, suggested_score, accepted_score, justification))",
       )
       .eq("criterion_slug", "adult_content")
       // 🔴 O embed traz os NOVE critérios da avaliação. Sem este filtro, `[0]` é um
@@ -170,7 +198,23 @@ async function main() {
     newScore: number
     reasons: string
   }
+  /**
+   * 🔴 Texto que precisa ganhar a RAZÃO do limite. É uma lista SEPARADA da de notas de
+   * propósito: medido em 2026-08-20, **0 das 1.010 notas estavam fora do piso/teto** e ainda
+   * assim **89 fichas** exibiam uma nota movida sem dizer por quem, **7** citavam um limite
+   * diferente do vigente e **81** traziam o MODELO narrando a regra — errado em 5 casos
+   * conferidos. Um script que só olha número reporta "nada a fazer" sobre isso, que foi
+   * exatamente o que ele fez por 10 dias.
+   */
+  interface DiffTexto {
+    evalScoreId: string
+    title: string
+    nota: number
+    antes: string
+    depois: string
+  }
   const diffs: Diff[] = []
+  const diffsTexto: DiffTexto[] = []
   for (const row of scoreRows) {
     const bounds = computeAdultContentBounds({
       tags: (tagsByWork.get(row.work_id) ?? []).map((t) => ({
@@ -197,7 +241,7 @@ async function main() {
     // manual posterior que nunca voltou pra avaliação. Ampliar isto é como apagar
     // curadoria em silêncio.
     if (HEAL && newScore === oldScore) {
-      const evalScore = row.ai_evaluations?.[0]?.ai_evaluation_scores?.find(
+      const evalScore = umEmbed(row.ai_evaluations)?.ai_evaluation_scores?.find(
         (x) => x.criterion_slug === "adult_content",
       )
       const committed = evalScore?.accepted_score ?? evalScore?.suggested_score
@@ -211,6 +255,45 @@ async function main() {
         healed < oldScore                   // e o piso de hoje já não a sustenta
       ) {
         newScore = healed
+      }
+    }
+
+    /**
+     * ── TEXTO ────────────────────────────────────────────────────────────────
+     * O baseline aqui é a nota que a AVALIAÇÃO entregou, nunca a persistida: é ela que diz se
+     * o limite chegou a agir. `aplicarLimiteAdulto` é o mesmo dono que o fluxo de avaliação
+     * usa — uma segunda montagem de texto aqui seria a família "dois critérios pro mesmo
+     * fato" reaparecendo pelo lado que já a produziu uma vez.
+     *
+     * ⚠️ Roda mesmo quando a NOTA não muda (`continue` abaixo), porque é justamente esse o
+     * passivo: nota certa, explicação órfã.
+     */
+    const evalRow = umEmbed(row.ai_evaluations)?.ai_evaluation_scores?.find(
+      (x) => x.criterion_slug === "adult_content",
+    )
+    const baselineTexto = evalRow?.suggested_score != null ? Number(evalRow.suggested_score) : null
+    /**
+     * 🔴 Nota EDITADA por humano fica de fora do texto — mesmo precedente do
+     * `backfill-faixa-citada`: o realinhamento afirma *"definida pelo limite obrigatório"*, e
+     * quando a curadora escolheu o número essa frase credita a máquina por uma decisão dela.
+     * A ficha já diz o certo por outro caminho: a página imprime "Ajustada por você · a IA
+     * sugeria X" (`app/catalog/[id]/page.tsx`).
+     *
+     * ⚠️ O caso não é hipotético — apareceu no primeiro dry-run: *For the Fallen of the Virgin
+     * Love* tem a IA em 6,0, o piso em 7,0 e a persistida em 7,0 com `source: ai_edited`. As
+     * duas causas dão o mesmo número, e por isso nenhum dado distingue quem decidiu.
+     */
+    const editadaPorHumano = row.source === "ai_edited"
+    if (!editadaPorHumano && evalRow?.id && evalRow.justification && baselineTexto != null) {
+      const r = aplicarLimiteAdulto(baselineTexto, evalRow.justification, bounds)
+      if (r.justification !== evalRow.justification) {
+        diffsTexto.push({
+          evalScoreId: evalRow.id,
+          title: titleById.get(row.work_id) ?? row.work_id,
+          nota: oldScore,
+          antes: evalRow.justification,
+          depois: r.justification,
+        })
       }
     }
 
@@ -232,21 +315,73 @@ async function main() {
     console.log(`      ${d.reasons}`)
   }
 
+  console.log(`\n${diffsTexto.length} justificativa(s) sem a razão do limite:\n`)
+  for (const d of diffsTexto.slice(0, 12)) {
+    // ⚠️ Imprime o que MUDOU, não os primeiros N caracteres: a razão entra no FIM, então um
+    // corte pelo começo mostra dois textos idênticos e dá a impressão de que o script é inerte.
+    const faixaAntes = d.antes.match(/^\s*Faixa\s+[^:,]{0,40}/)?.[0]?.trim() ?? "(sem faixa)"
+    const faixaDepois = d.depois.match(/^\s*Faixa\s+[^:,]{0,40}/)?.[0]?.trim() ?? "(sem faixa)"
+    const acrescimo = d.depois.startsWith(d.antes.trimEnd())
+      ? d.depois.slice(d.antes.trimEnd().length).trim()
+      : (d.depois.match(/(Obra rotulada como adulta|Há cena de sexo explícito|"R15 but Based|Fonte externa classifica)[\s\S]*$/)?.[0] ?? "(prefixo realinhado)")
+    console.log(`  · ${d.title} (nota ${d.nota.toFixed(1)})`)
+    if (faixaAntes !== faixaDepois) console.log(`      prefixo: ${faixaAntes}  →  ${faixaDepois}`)
+    console.log(`      + razão: ${acrescimo.replace(/\s+/g, " ").slice(0, 190)}`)
+  }
+  if (diffsTexto.length > 12) {
+    // ⚠️ A lista COMPLETA de títulos sai sempre, mesmo com o detalhe cortado em 12: sem ela não
+    // dá pra conferir se um caso específico entrou, e "… e mais 71" é indistinguível de
+    // "o caso que me incomoda ficou de fora".
+    console.log(`  … e mais ${diffsTexto.length - 12}. Lista completa:`)
+    console.log(`    ${diffsTexto.map((d) => d.title).join(" · ")}`)
+  }
+
   if (!EXECUTE) {
     console.log(`\n[dry-run] nada foi gravado. Rode com --execute pra aplicar.`)
     return
   }
-  if (diffs.length === 0) {
+  if (diffs.length === 0 && diffsTexto.length === 0) {
     console.log(`\nnada a gravar.`)
     return
+  }
+
+  /**
+   * Snapshot ANTES de escrever — o banco não tem PITR, e aqui o texto original é
+   * IRRECONSTRUÍVEL: ele é a saída de um modelo que já não roda com aquele prompt, então
+   * reavaliar produz outra prosa, não a mesma. A poda vem antes de gravar, como nas outras
+   * famílias: execução interrompida deixa lixo igual ao de uma completa.
+   */
+  if (diffsTexto.length > 0) {
+    podar("adult-content-razao")
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-")
+    const dir = path.resolve(process.cwd(), ".backups", `adult-content-razao-${stamp}`)
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, "plano.json"), JSON.stringify(diffsTexto, null, 2))
+    console.log(`estado anterior salvo em ${path.relative(process.cwd(), dir)}/plano.json`)
   }
 
   for (const d of diffs) {
     const { error } = await supabase.from("category_scores").update({ score: d.newScore }).eq("id", d.csId)
     if (error) console.error(`  falhou em ${d.title}: ${error.message}`)
   }
-  await markRecalcPending("adult-content-retroactive-bounds")
-  console.log(`\n✅ ${diffs.length} nota(s) ajustada(s). Recalc marcado como pendente (fila debounced).`)
+  // ⚠️ A justificativa mora em `ai_evaluation_scores`, tabela DIFERENTE da nota. Gravar as
+  // duas no mesmo laço esconderia qual das duas falhou — daí os erros serem reportados com o
+  // rótulo da tabela.
+  for (const d of diffsTexto) {
+    const { error } = await supabase
+      .from("ai_evaluation_scores")
+      .update({ justification: d.depois })
+      .eq("id", d.evalScoreId)
+    if (error) console.error(`  falhou no texto de ${d.title}: ${error.message}`)
+  }
+  // 🔴 Só a NOTA move o recalc. Texto não é input de cálculo nenhum (ver `recalc-inputs.ts`),
+  // e marcar por causa dele acenderia o badge "Recalcular notas" para uma mudança de prosa —
+  // o gate de materialidade existe exatamente contra isso.
+  if (diffs.length > 0) await markRecalcPending("adult-content-retroactive-bounds")
+  console.log(
+    `\n✅ ${diffs.length} nota(s) ajustada(s)${diffs.length > 0 ? " (recalc pendente)" : ""} · ` +
+      `${diffsTexto.length} justificativa(s) com a razão do limite.`,
+  )
 }
 
 main().catch((err) => {
