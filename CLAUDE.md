@@ -3489,10 +3489,10 @@ provar que OLHOU** — cada estágio do funil imprime quantos candidatos passara
 O padrão já existe no `backup-db.mjs` (ele FALHA em vez de gravar backup truncado); falta
 espalhar.
 
-**3. Canário do contrato do PostgREST.** `ai_evaluations` mudou de array para objeto e nada
-acusou: o tipo era escrito à mão, então o `tsc` não tinha o que verificar. Um teste que bate no
-banco LOCAL e afirma a FORMA do retorno pega isso na primeira execução. Vale igual para os
-`as X[]` sobre RPC — mesma família do contrato de `similares` que ficou um mês vazio.
+✅ **3. Canário do contrato do PostgREST — FEITO em 2026-08-20** (`npm run contracts`, seção
+própria abaixo). ⚠️ Ele cobre a metade **RPC** (as 8 que o código chama, conferidas contra o
+banco); a metade **embed** — o `ai_evaluations` que virou objeto — segue sem canário, e o
+inventário dela é magro (2 arquivos candidatos, não medidos um a um).
 
 **4. O grande: inventário dos PARES.** Este arquivo já nomeia a doença — "dois critérios pro
 mesmo fato" — e a trata caso a caso, **sempre depois de doer**. A virada é inverter: levantar
@@ -3640,6 +3640,66 @@ outro lado o Cloudflare devolve 403 com `text/html` — então o status também 
 ⚠️ **Sobram 7 obras sem NENHUMA capa viva.** Aí o fallback não tem o que escolher: precisam de
 capa nova de alguma fonte. E 33 telas seguem passando URL única — cobertas pelo conserto no dado,
 mas não se curam sozinhas na próxima fonte que cair.
+
+## `npm run contracts`: o contrato das RPCs, conferido contra o BANCO
+
+`scripts/contratos-postgrest.mjs` (ALVO: LOCAL, US$0). Descobre as RPCs que o código chama,
+lê os argumentos no OpenAPI do PostgREST, **executa** as que só leem e compara o que volta.
+
+```bash
+npm run contracts
+```
+
+🔴 **Por que executar, e não ler a migration.** Já existe um teste estático
+(`rpc-similares-contrato.test.ts`) que compara o código com as **migrations do repo** — e ele
+cobre UMA função. O canário compara com o **banco de verdade**, e cobre as 8. A diferença não é
+acadêmica: as 173 migrations foram aplicadas via Management API, têm colisões de número e nunca
+rodaram do zero, então "a definição mais recente no repo" é heurística — o que atende o app é o
+banco.
+
+**As quatro conferências**, por RPC: existe no PostgREST · o código não passa argumento que a
+função não aceita · as colunas vivas batem com o `RETURNS TABLE` da migration vigente (**deriva
+repo↔banco**) · a interface TS do consumidor não declara campo que a função não devolve.
+
+⚠️ **A última é o incidente de 13/07 generalizado**: quando a migration 151 tirou `user_score`
+de `find_similar_works`, o `as SimilarRow[]` seguiu prometendo o campo, `loved`/`avoided` saíram
+sempre vazios e o Deep Dive imprimiu "(nenhuma obra similar…)" **por um mês**. Conferido com
+sonda: devolvendo `user_score` ao `SimilarRow`, o canário acusa na hora.
+
+🔴 **ZERO linha é FALHA, não sucesso.** Se a amostra não produzir linha, não houve coluna para
+olhar — e tratar isso como "passou" é exatamente o defeito que o canário existe para pegar,
+aplicado a ele mesmo. Por isso a amostra sai de obras COM embedding, e não de ids quaisquer.
+
+⚠️ **As duas RPCs que ESCREVEM** (`touch_recalc_pending`,
+`refresh_calculated_scores_confidence`) são conferidas quanto a existência e argumentos, e
+**não são executadas**. E o script recusa alvo que não seja o local: ele dispara RPC, então
+apontar pra nuvem por acidente queimaria quota e leria produção.
+
+🔴 **É script e não teste, de propósito.** Ele precisa do stack local no ar; como teste do
+vitest a saída óbvia seria "pula quando não alcança o banco" — o fail-soft calado que some da
+suíte sem ninguém notar. Aqui banco ausente é **exit 1**, com a linha de comando para subir.
+
+⚠️ **O que fica FORA é impresso a cada execução**, nunca calado: quantas chamadas não declaram
+tipo (fato do código) e quantas o parser não conseguiu ligar a um tipo (limite dele). Hoje: 4 e
+3. Somar os dois num número só faria o relatório culpar o código por uma limitação minha.
+
+🔴 **O parser errou DUAS vezes na primeira hora, e as duas de forma plausível** — é a mesma
+família que ele persegue:
+
+| erro | o que ele afirmou | causa |
+|---|---|---|
+| ligar o tipo por PROXIMIDADE | `seed_pair_similarity` declara 5 campos fantasmas | o cast vizinho era da OUTRA RPC do mesmo `Promise.all`; o que liga é a VARIÁVEL, não a distância |
+| procurar `create function public.x` | "nenhuma migration declara `work_card_counts`" | o repo usa três formas, e a 122 é `CREATE OR REPLACE FUNCTION work_card_counts` (sem schema, maiúsculas) |
+
+⚠️ **O teste `rpc-similares-contrato.test.ts` tem a MESMA limitação do segundo caso** — lá não
+morde porque a função que ele cobre usa a primeira forma. Morderia na próxima.
+
+Hoje o parser só liga o tipo na forma inequívoca (`const { data } = await x.rpc(…)`, com o cast
+sobre `data` antes de qualquer outra `.rpc(`) e **declara como não resolvida** a chamada dentro
+de `Promise.all`, em vez de adivinhar. Guardado por
+`tests/unit/orchestration/canario-de-contrato-parser.test.ts` (8 casos), que testa o parser com
+o arranjo que produziu o falso positivo — e trava as decisões que fariam o canário passar sem
+olhar (zero linha, banco fora, alvo não-local). As 10 sondas conferidas.
 
 ## Supabase: o `select` corta em 1000 linhas, sem avisar
 
@@ -5848,11 +5908,12 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.438 passando (+24 pulados) em 329 arquivos** (324 passando + 5 pulados);
-medido em 2026-08-20 com a tabela de gates derivada + o `npm run smoke`: **+6 casos e ZERO
-arquivo novo** — entraram em `rotas-de-sessao` e `deploy-verifica-o-que-publica`, que já eram os
-donos das duas invariantes. Disco (`find`) = índice (`git ls-files`) = **329**, conferido DEPOIS
-do `git add -N`, sobre `origin/main` (`c6b9e77`) + só os arquivos deste trabalho.
+`npm run test` → **3.446 passando (+24 pulados) em 330 arquivos** (325 passando + 5 pulados);
+medido em 2026-08-20 com o canário de contrato: **+8 casos e +1 arquivo**
+(`orchestration/canario-de-contrato-parser`). Disco (`find`) = índice (`git ls-files`) = **330**,
+conferido DEPOIS do `git add -N`, sobre `origin/main` (`a479ff7`) + só os arquivos deste
+trabalho, em DUAS rodadas limpas — a primeira acusou "2 arquivos falharam" sem nenhum teste
+falhar, que é a flakiness de carga descrita no fim desta seção.
 
 ⚠️ **Este número foi REMEDIDO depois do rebase, não somado ao que estava escrito.** A medição
 inicial (3.382 em 325) valia sobre uma `main` que andou 4 commits no meio da sessão — os PRs
@@ -5894,7 +5955,8 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.432 em 329** (o smoke de browser, +6 casos),
+Antes: **3.438 em 329** (a tabela de gates derivada + o `npm run smoke`, +6 casos),
+**3.432 em 329** (o smoke de browser, +6 casos),
 **3.426 em 329** (a nota do pedido de curadoria, +19 casos e +1 arquivo),
 **3.407 em 328** (a auditoria contando as fichas que afirmam regra vencida),
 **3.398 em 327** (o dono do par nota/texto de `adult_content`, +10 casos e +1 arquivo),
