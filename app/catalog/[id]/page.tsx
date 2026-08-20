@@ -478,6 +478,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     id: p.id,
     kind: p.kind,
     quando: formatTimeAgo(p.createdAt),
+    // O texto volta pra quem escreveu: sem ele, "você reportou um erro" não diz QUAL, e a
+    // pessoa não tem como saber se o que ela viu já foi contado.
+    note: p.note,
   }))
   const fichaIncompleta = work.ai_eval_status === "pending"
   // ⚠️ `!== false` e não `=== true`: obra gravada antes da migration 178, ou por um caminho que

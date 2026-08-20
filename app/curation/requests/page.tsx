@@ -3,6 +3,7 @@ import { Inbox } from "lucide-react"
 import { getCurationQueue } from "@/server/queries/curation-requests"
 import type { CurationRequestKind } from "@/server/queries/curation-requests"
 import { ResolveRequestButtons } from "@/components/curation/resolve-request-buttons"
+import { formatTimeAgo } from "@/lib/date-utils"
 
 /**
  * A fila de pedidos do leitor.
@@ -39,14 +40,26 @@ const ROTULO: Record<CurationRequestKind, { texto: string; cor: string; oQueFaze
     cor: "border-emerald-500/55 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
     oQueFazer: "A busca de produção não achou. Procure no dev do Mac, onde as 9 fontes respondem.",
   },
+  /**
+   * 🔴 A instrução aqui é o motivo de este tipo existir. "A capa é de outra obra" pendurado num
+   * `update_data` cairia sob "Rode 'Atualizar dados'" — que não conserta, porque a fonte externa
+   * costuma trazer o mesmo dado errado, e porque parte da ficha é curadoria (título normalizado,
+   * tags, piso 18+, vínculo de fonte). Ver migration 195.
+   */
+  report_error: {
+    texto: "erro na ficha",
+    cor: "border-rose-500/55 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+    oQueFazer: "Corrija na ficha, à mão. Rebuscar não resolve se a fonte também estiver errada.",
+  },
 }
 
-function quando(iso: string): string {
-  const dias = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
-  if (dias <= 0) return "hoje"
-  if (dias === 1) return "ontem"
-  return `${dias} dias`
-}
+/**
+ * ⚠️ A data sai de `formatTimeAgo`, e não de uma conta local — esta página TINHA a sua, e as
+ * duas discordavam sobre o mesmo pedido: a daqui media 24h corridas
+ * (`floor(ms / 86_400_000)`) e a do leitor mede dia de CALENDÁRIO. Pedido feito ontem às 23h e
+ * aberto hoje às 8h saía como "ontem" na obra e "hoje" na fila. Acima de 30 dias a divergência
+ * ficava maior ainda: lá vira data, aqui virava "45 dias".
+ */
 
 export const metadata = { title: "Pedidos" }
 
@@ -102,9 +115,23 @@ export default async function PedidosPage() {
                       <span className="truncate font-semibold italic">“{p.query}”</span>
                     )}
                   </div>
+                  {/* O que a pessoa escreveu vem ANTES da instrução: num `report_error` ele é o
+                      pedido inteiro, e a instrução é genérica. Citação, não parágrafo solto —
+                      é texto de outra pessoa dentro de uma tela de trabalho. */}
+                  {p.note && (
+                    <blockquote className="relative mt-2 overflow-hidden rounded-md bg-muted/50 py-2 pr-3 pl-3.5 text-sm whitespace-pre-wrap">
+                      {/* Trilho por `<span>`, não `border-l-*`: a regra `* { border-color }` fora
+                          de @layer no globals.css mata toda utility de cor de borda (TW v4). */}
+                      <span
+                        aria-hidden
+                        className="absolute inset-y-0 left-0 w-[3px] bg-muted-foreground/35"
+                      />
+                      “{p.note}”
+                    </blockquote>
+                  )}
                   <p className="mt-1.5 text-sm text-muted-foreground">{r.oQueFazer}</p>
                   <p className="mt-1 text-xs text-muted-foreground/80">
-                    {p.requesterName ?? "alguém"} · {quando(p.createdAt)}
+                    {p.requesterName ?? "alguém"} · {formatTimeAgo(p.createdAt)}
                   </p>
                 </div>
                 <ResolveRequestButtons id={p.id} />

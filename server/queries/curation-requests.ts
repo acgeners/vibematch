@@ -1,15 +1,21 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getSessionUserId } from "@/server/queries/current-user"
+import type { CurationRequestKind } from "@/lib/curation/request-note"
 
-/** Os três pedidos que o estado da obra NÃO expressa sozinho. Ver migration 177. */
-export type CurationRequestKind = "update_data" | "review_eval" | "create_by_name"
+// O tipo e o teto moram em `lib/curation/request-note.ts` porque o painel do leitor é
+// `"use client"` e este módulo é `server-only`: um VALOR importado daqui arrastaria o
+// server-only para o bundle do browser (o `next build` reprova; `tsc` e a suíte não veem).
+export type { CurationRequestKind } from "@/lib/curation/request-note"
+export { CURATION_NOTE_MAX } from "@/lib/curation/request-note"
 
 export interface CurationRequestRow {
   id: string
   kind: CurationRequestKind
   workId: string | null
   query: string | null
+  /** O que o leitor escreveu. `null` quando ele não disse nada — nunca string vazia. */
+  note: string | null
   createdAt: string
 }
 
@@ -43,7 +49,7 @@ export async function getMyOpenRequestsByWork(): Promise<Map<string, CurationReq
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("curation_requests")
-    .select("id, kind, work_id, query, created_at")
+    .select("id, kind, work_id, query, note, created_at")
     .eq("user_id", userId)
     .eq("status", "open")
     .not("work_id", "is", null)
@@ -62,6 +68,7 @@ export async function getMyOpenRequestsByWork(): Promise<Map<string, CurationReq
       kind: r.kind as CurationRequestKind,
       workId,
       query: r.query as string | null,
+      note: (r.note as string | null) ?? null,
       createdAt: r.created_at as string,
     }
     if (lista) lista.push(pedido)
@@ -81,7 +88,7 @@ export async function getMyOpenRequestsForWork(workId: string): Promise<Curation
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("curation_requests")
-    .select("id, kind, work_id, query, created_at")
+    .select("id, kind, work_id, query, note, created_at")
     .eq("user_id", userId)
     .eq("work_id", workId)
     .eq("status", "open")
@@ -96,6 +103,7 @@ export async function getMyOpenRequestsForWork(workId: string): Promise<Curation
     kind: r.kind as CurationRequestKind,
     workId: r.work_id as string,
     query: r.query as string | null,
+    note: (r.note as string | null) ?? null,
     createdAt: r.created_at as string,
   }))
 }
@@ -112,7 +120,7 @@ export async function getCurationQueue(limit = 200): Promise<CurationQueueItem[]
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("curation_requests")
-    .select("id, kind, work_id, query, created_at, user_id, works(title)")
+    .select("id, kind, work_id, query, note, created_at, user_id, works(title)")
     .eq("status", "open")
     .order("created_at", { ascending: true })
     .limit(limit)
@@ -127,6 +135,7 @@ export async function getCurationQueue(limit = 200): Promise<CurationQueueItem[]
     kind: CurationRequestKind
     work_id: string | null
     query: string | null
+    note: string | null
     created_at: string
     user_id: string
     works?: { title?: string | null } | null
@@ -152,6 +161,7 @@ export async function getCurationQueue(limit = 200): Promise<CurationQueueItem[]
     kind: r.kind,
     workId: r.work_id,
     query: r.query,
+    note: r.note ?? null,
     createdAt: r.created_at,
     workTitle: r.works?.title ?? null,
     requesterName: nomes.get(r.user_id) ?? null,

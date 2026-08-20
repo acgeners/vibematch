@@ -1,13 +1,15 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { Clock, Loader2, RefreshCw, Sparkles } from "lucide-react"
+import { AlertTriangle, Clock, Loader2, RefreshCw, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 import { useRefresh } from "@/lib/use-refresh"
 import { useCan, useIsSignedIn } from "@/components/layout/admin-context"
 import { createCurationRequest, cancelCurationRequest } from "@/server/actions/curation-requests"
-import type { CurationRequestKind } from "@/server/queries/curation-requests"
+import { CURATION_NOTE_MAX } from "@/lib/curation/request-note"
+import type { CurationRequestKind } from "@/lib/curation/request-note"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 /**
@@ -152,11 +154,23 @@ export function RequestByNameBanner({ query }: { query: string }) {
 
 const ROTULO: Record<
   Exclude<CurationRequestKind, "create_by_name">,
-  { botao: string; feito: string; ajuda: React.ReactNode }
+  {
+    botao: string
+    feito: string
+    ajuda: React.ReactNode
+    /** Rótulo do campo de texto. O `?` é o que diz se ele é obrigatório. */
+    campo: string
+    /** `true` ⇒ sem texto o pedido não existe (`report_error`). Espelha a 195. */
+    exigeNota: boolean
+    Icone: typeof RefreshCw
+  }
 > = {
   update_data: {
     botao: "Pedir atualização dos dados",
     feito: "Você pediu uma atualização desta obra",
+    campo: "Quer dizer algo ao curador? (opcional)",
+    exigeNota: false,
+    Icone: RefreshCw,
     ajuda: (
       <>
         O curador rebusca nas <strong>9 fontes</strong> e atualiza capa, sinopse, capítulos e
@@ -167,6 +181,9 @@ const ROTULO: Record<
   review_eval: {
     botao: "Pedir revisão da avaliação",
     feito: "Você pediu uma revisão da avaliação desta obra",
+    campo: "Quer dizer algo ao curador? (opcional)",
+    exigeNota: false,
+    Icone: Sparkles,
     ajuda: (
       <>
         Para quando você <strong>discorda das notas</strong> dos 9 critérios. O curador reexecuta
@@ -174,17 +191,124 @@ const ROTULO: Record<
       </>
     ),
   },
+  /**
+   * 🔴 O terceiro tipo existe porque os outros dois pedem a REEXECUÇÃO de um pipeline, e as
+   * correções que doem são justamente as que rebuscar NÃO conserta: ou a fonte externa
+   * também está errada, ou o dado é de curadoria (título normalizado, tags, piso 18+).
+   * Pendurar "a capa é de outra obra" num `update_data` faria a fila do curador imprimir
+   * "Rode 'Atualizar dados'" — a instrução que não resolve. Ver migration 195.
+   */
+  report_error: {
+    botao: "Reportar erro na ficha",
+    feito: "Você reportou um erro nesta obra",
+    campo: "O que está errado?",
+    exigeNota: true,
+    Icone: AlertTriangle,
+    ajuda: (
+      <>
+        Para <strong>dado errado</strong> na ficha — capa de outra obra, ano, número de
+        capítulos, título. O curador corrige à mão: rebuscar nas fontes não resolve quando a
+        fonte também está errada.
+      </>
+    ),
+  },
 }
+
+/** Os três, na ordem em que aparecem. Enumerar à mão aqui é como um tipo novo nasce sem botão. */
+const KINDS_COM_OBRA = Object.keys(ROTULO) as Array<keyof typeof ROTULO>
 
 export interface PedidoAberto {
   id: string
   kind: CurationRequestKind
   /** Rótulo relativo ("hoje", "ontem", "há 3 dias") — formatado NO SERVIDOR, ver abaixo. */
   quando: string
+  /** O que a pessoa escreveu, devolvido pra ela. `null` quando não escreveu nada. */
+  note?: string | null
 }
 
 /**
- * Os dois pedidos sobre obra já enriquecida, e o aviso de que um deles está em aberto.
+ * O formulário de um pedido. Um só para os três tipos: o que muda é o rótulo do campo e se
+ * ele é obrigatório.
+ *
+ * ⚠️ O teto vem de `CURATION_NOTE_MAX`, nunca de um número escrito aqui — ele espelha o check
+ * `curation_requests_note_tamanho` da 195, e duas cópias divergiriam na primeira mudança, com
+ * o contador da tela prometendo um limite que o banco recusa.
+ *
+ * 🔴 E o campo NÃO tem `maxLength`: o atributo CORTA o que a pessoa cola, em silêncio. Além de
+ * comer texto sem avisar, cortar por unidade UTF-16 parte emoji ao meio e fabrica o surrogate
+ * solto que derrubou duas escritas em 18/08 (`lib/text/pg-safe-text.ts`). Aqui o excesso é
+ * mostrado em vermelho e o botão desabilita — a pessoa vê o que sobrou e escolhe o que tirar.
+ */
+function FormularioPedido({
+  kind,
+  enviando,
+  onCancelar,
+  onEnviar,
+}: {
+  kind: keyof typeof ROTULO
+  enviando: boolean
+  onCancelar: () => void
+  onEnviar: (note: string) => void
+}) {
+  const r = ROTULO[kind]
+  const [texto, setTexto] = useState("")
+  const sobrando = texto.trim().length - CURATION_NOTE_MAX
+  const faltaObrigatorio = r.exigeNota && !texto.trim()
+
+  return (
+    <div className="w-full space-y-2 rounded-lg border bg-card/60 p-3.5">
+      <div className="flex items-start gap-2">
+        <r.Icone className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">{r.botao}</p>
+          <p className="mt-0.5 text-sm text-muted-foreground">{r.ajuda}</p>
+        </div>
+      </div>
+
+      <label className="block space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">{r.campo}</span>
+        <Textarea
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          rows={3}
+          autoFocus
+          placeholder={
+            r.exigeNota
+              ? "Ex.: a capa é do spin-off, não desta obra. O ano também está como 2020 e é 2019."
+              : "Ex.: o site já está no capítulo 120 e aqui aparece 45."
+          }
+        />
+      </label>
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span
+          className={
+            sobrando > 0 ? "text-xs font-semibold text-rose-600 dark:text-rose-400" : "text-xs text-muted-foreground"
+          }
+        >
+          {sobrando > 0 ? `${sobrando} caracteres a mais do que cabe` : `${texto.trim().length}/${CURATION_NOTE_MAX}`}
+        </span>
+        <div className="flex gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={onCancelar} disabled={enviando}>
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            disabled={enviando || sobrando > 0 || faltaObrigatorio}
+            onClick={() => onEnviar(texto)}
+          >
+            {enviando && <Loader2 className="h-4 w-4 animate-spin" />}
+            Enviar pedido
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Os pedidos sobre obra já enriquecida, e o aviso dos que estão em aberto.
  *
  * `quando` chega pronto do servidor em vez de ser calculado aqui: formatar data relativa no
  * render depende de "agora", que difere entre o HTML do SSR e o primeiro render do cliente —
@@ -201,11 +325,14 @@ export function CurationRequestActions({
   /**
    * A obra ainda está `ai_eval_status = 'pending'`.
    *
-   * ⚠️ Nesse estado os dois pedidos SOMEM, e isto não é detalhe estético: `pending` já é a fila
+   * ⚠️ Nesse estado os pedidos SOMEM, e isto não é detalhe estético: `pending` já é a fila
    * do curador — é o que alimenta o badge. Pedir "atualizar os dados" de uma obra que ainda nem
    * foi enriquecida cria uma segunda linha para o MESMO trabalho, que é precisamente a dupla
    * fonte de verdade que a migration 177 recusa no comentário de cabeçalho. Quem explica a
    * espera aqui é a `IncompleteWorkBanner`, sem pedir nada.
+   *
+   * ⚠️ `report_error` some junto, e é o caso menos óbvio dos três: ficha que ainda não foi
+   * preenchida não tem dado errado — tem dado ausente, que é o que a faixa já diz.
    */
   fichaIncompleta?: boolean
 }) {
@@ -214,8 +341,9 @@ export function CurationRequestActions({
   const canRefresh = useCan("refresh_work")
   const refresh = useRefresh()
   const [isPending, startTransition] = useTransition()
+  const [aberto, setAberto] = useState<keyof typeof ROTULO | null>(null)
   // Otimista: `refresh()` re-renderiza o server component, mas o clique tem que responder na hora.
-  const [enviados, setEnviados] = useState<Set<string>>(new Set())
+  const [enviados, setEnviados] = useState<string[]>([])
   const [cancelados, setCancelados] = useState<Set<string>>(new Set())
 
   // Anônimo não pede — o que lhe falta não é permissão, é identidade (`ensureSignedIn` recusaria).
@@ -224,17 +352,17 @@ export function CurationRequestActions({
   if (!signedIn || canRefresh) return null
 
   const abertos = pedidosAbertos.filter((p) => !cancelados.has(p.id))
-  const kindsAbertos = new Set([...abertos.map((p) => p.kind), ...enviados])
+  const kindsAbertos = new Set<string>([...abertos.map((p) => p.kind), ...enviados])
 
-  const pedir = (kind: CurationRequestKind) => {
-    setEnviados((s) => new Set(s).add(kind))
+  const enviar = (kind: keyof typeof ROTULO, note: string) => {
+    setAberto(null)
+    setEnviados((s) => [...s, kind])
     startTransition(async () => {
-      const r = await createCurationRequest({ kind, workId })
+      const r = await createCurationRequest({ kind, workId, note })
       if (!r.ok) {
         setEnviados((s) => {
-          const next = new Set(s)
-          next.delete(kind)
-          return next
+          const i = s.lastIndexOf(kind)
+          return i < 0 ? s : [...s.slice(0, i), ...s.slice(i + 1)]
         })
         toast.error(r.error ?? "Não consegui registrar o pedido.")
         return
@@ -262,9 +390,17 @@ export function CurationRequestActions({
     })
   }
 
-  const kindsPendentes = fichaIncompleta
+  /**
+   * 🔴 `report_error` NÃO some depois de enviado, e os outros dois somem.
+   *
+   * A régua é a mesma da unicidade no banco (195): "rebusque esta obra" é um pedido só — o
+   * segundo clique não acrescenta nada, e por isso o botão sai. Já um erro relatado é TEXTO,
+   * e a mesma obra pode ter dois erros diferentes; esconder o botão depois do primeiro
+   * deixaria a pessoa sem como contar o segundo.
+   */
+  const disponiveis = fichaIncompleta
     ? []
-    : (["update_data", "review_eval"] as const).filter((k) => !kindsAbertos.has(k))
+    : KINDS_COM_OBRA.filter((k) => k === "report_error" || !kindsAbertos.has(k))
 
   return (
     <div className="w-full space-y-3">
@@ -293,31 +429,46 @@ export function CurationRequestActions({
             {/* Sem prazo: "em breve" é promessa que o app não controla. "Processa em lote" é o
                 que de fato acontece — o curador roda local, quando roda. */}
             Enviado {p.quando}. O curador processa em lote — a ficha muda sozinha quando chegar.
+            {/* O texto volta pra quem escreveu: sem isto, "você reportou um erro" não diz QUAL,
+                e a pessoa não tem como saber se vale a pena relatar outro. */}
+            {p.note && (
+              <span className="mt-1.5 block border-l-2 border-amber-400/70 pl-2.5 text-[13px] italic dark:border-amber-500/60">
+                “{p.note}”
+              </span>
+            )}
           </Faixa>
         )
       })}
 
-      {kindsPendentes.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          {kindsPendentes.map((k) => (
-            <ComTooltip key={k} texto={ROTULO[k].ajuda}>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={isPending}
-                onClick={() => pedir(k)}
-              >
-                {k === "update_data" ? (
-                  <RefreshCw className="h-4 w-4" />
-                ) : (
-                  <Sparkles className="h-4 w-4" />
-                )}
-                {ROTULO[k].botao}
-              </Button>
-            </ComTooltip>
-          ))}
-        </div>
+      {aberto ? (
+        <FormularioPedido
+          kind={aberto}
+          enviando={isPending}
+          onCancelar={() => setAberto(null)}
+          onEnviar={(note) => enviar(aberto, note)}
+        />
+      ) : (
+        disponiveis.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {disponiveis.map((k) => {
+              const r = ROTULO[k]
+              return (
+                <ComTooltip key={k} texto={r.ajuda}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isPending}
+                    onClick={() => setAberto(k)}
+                  >
+                    <r.Icone className="h-4 w-4" />
+                    {r.botao}
+                  </Button>
+                </ComTooltip>
+              )
+            })}
+          </div>
+        )
       )}
     </div>
   )

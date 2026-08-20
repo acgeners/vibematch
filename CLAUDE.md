@@ -4484,6 +4484,86 @@ verdade conferida. Ao anotar pendência aqui, escreva a **data** e a **forma de 
 - ~~`enforceNeutralCoupleDynamicsWhenNoRomance`~~: **removido na v23** (2026-08-09). Forçava `couple_dynamics = 5.0` quando `romance ≤ 3`, partindo de "sem romance, não há dinâmica" — premissa que morreu com a ampliação do critério pra vínculos centrais. Travava **17 das 18** obras sem romance. Quem decide "não aplicável" agora é o prompt, por ausência de VÍNCULO — não de romance. ⚠️ As ~31 justificativas que ele reescreveu seguem no banco (ver `lib/criteria/justification.ts`)
 - `enforceAuditableReviewUsage`: **non-fatal since v20 (2026-06-27)** — generic review citation is accepted ("algumas reviews apontam…"), so it no longer requires/validates specific review IDs (`R1`, `R2`…) nor throws. It only records an informational `reviewAudit` (`required` = "havia reviews no prompt"; `usedReviewIds` = whatever IDs the model happened to cite, often empty with generic citation). `review_usage` is now an OPTIONAL tool/schema field. (Earlier behavior: threw + retried when IDs weren't cited — removed because a citation slip discarded otherwise-valid evals.)
 
+## O leitor PEDE, e desde 2026-08-20 ele diz O QUE está errado
+
+`curation_requests` (migration 177) é o canal do leitor: produção não tem bypass de Cloudflare,
+então tudo que raspa fonte externa é do curador rodando no Mac
+([[project-curadoria-centralizada-solicitacoes]]). Ele nasceu com três tipos, e todos pedem a
+**REEXECUÇÃO de um pipeline** — "rebusque nas 9 fontes", "reavalie com IA", "cadastre pelo nome".
+
+🔴 **A coluna `note` estava no schema desde a 177 e NUNCA foi escrita nem lida.** Medido em
+20/08: o leitor não tinha como dizer "o ano está errado, é 2019", "a capa é de outra obra",
+"faltam 40 capítulos". Capacidade reservada e desligada — a mesma família do `CoverImage` com o
+fallback prometido na docstring e ligado em 2 de 36 telas.
+
+**E o que faltava não era só o campo: era o TIPO.** As correções que doem são justamente as que
+rebuscar **não** conserta — ou a fonte externa traz o mesmo dado errado, ou o dado é de curadoria
+(título normalizado, tags, piso 18+, vínculo de fonte). Pendurar a nota num `update_data` faria a
+fila imprimir *"Rode 'Atualizar dados'"*, que é a instrução errada. Daí o 4º tipo (migration 195):
+
+| kind | o que o curador faz | nota |
+|---|---|---|
+| `update_data` | rebusca nas 9 fontes | opcional (qualifica) |
+| `review_eval` | reavalia com IA | opcional |
+| `create_by_name` | procura no dev do Mac | — (o pedido é a `query`) |
+| **`report_error`** | **corrige na ficha, à mão** | **obrigatória — é o pedido inteiro** |
+
+Ele passa no mesmo teste dos outros três, que é o critério do cabeçalho da 177: **nada em `works`
+expressa "um leitor acha que este campo está errado"**.
+
+🔴 **A dedup teve de mudar de chave, e é a parte que se paga caro se for esquecida.** A unicidade
+da 177 é `(user_id, work_id, kind)` e a action trata **23505 como SUCESSO** — corretamente, porque
+para "rebusque esta obra" o estado desejado já vale e dizer "erro" faria a pessoa clicar de novo.
+Para `report_error` esse mesmo tratamento **PERDE DADO**: o segundo relato traz TEXTO DIFERENTE, e
+quem achasse dois erros na mesma obra veria "pedido enviado" com o segundo texto não existindo em
+lugar nenhum. Hoje `report_error` sai da chave antiga e ganha
+`(user_id, work_id, md5(lower(btrim(note))))` — duplo clique segue idempotente, texto diferente
+entra. Conferido contra a NUVEM depois de aplicar: idêntica ⇒ 23505, diferente ⇒ ok.
+
+⚠️ **Corolário na UI, e ele não é intuitivo:** os dois botões antigos SOMEM depois de enviados e
+o de reportar **não**. Esconder o de erro depois do primeiro deixaria a pessoa sem como contar o
+segundo — a régua da tela tem de casar com a chave do banco.
+
+🔴 **O teto da nota é RECUSA, nunca `.slice()`.** Cortar por unidade UTF-16 parte emoji ao meio e
+**fabrica** o surrogate desemparelhado que derrubou duas escritas em 18/08 (§"Texto vindo de
+FORA"). Vale nos três lugares: o check do banco recusa a linha, a action devolve mensagem, e o
+`<textarea>` **não tem `maxLength`** — o atributo corta o que a pessoa cola, em silêncio. O
+excesso aparece em vermelho e o botão desabilita.
+
+⚠️ **`pgSafeText` na nota, porque a action é endpoint HTTP público**
+([[project_use_server_public_endpoints]]): um surrogate solto forjado à mão faz o PostgREST
+recusar o corpo INTEIRO com 400, e o caractere culpado é invisível em log e em tela.
+
+🔴 **O teto vive em DOIS lugares, e o teste deriva um do outro.** `CURATION_NOTE_MAX` (contador da
+tela + recusa da action) contra o check `curation_requests_note_tamanho`. Se o número da tela ficar
+MAIOR, a pessoa escreve o parágrafo inteiro, clica em enviar e recebe "não consegui registrar o
+pedido" — o texto se perde e nada explica por quê. `nota-do-pedido-tem-um-teto-so.test.ts` **lê a
+migration mais recente que declara o check**, nunca uma lista de nomes.
+
+🔴 **A constante mora em `lib/curation/request-note.ts`, e não na query, por uma razão que só o
+`next build` pega.** `server/queries/curation-requests.ts` abre com `import "server-only"` e o
+painel é `"use client"`: um TIPO atravessa de graça (`import type` some na compilação), um VALOR
+arrasta o módulo inteiro pro bundle do browser. **`tsc` e a suíte passaram verdes** — os testes
+mockam `server-only`.
+
+⚠️ **Duas réguas de data para o mesmo pedido, agora uma só.** A fila do curador tinha um `quando()`
+próprio (`floor(ms / 86_400_000)`, dias de 24h) e o leitor usa `formatTimeAgo` (dias de
+CALENDÁRIO): pedido feito ontem às 23h e aberto hoje às 8h saía **"ontem" na obra e "hoje" na
+fila**. Hoje as duas telas chamam `formatTimeAgo`.
+
+⚠️ **`resolved_by` continua coluna morta** — `resolveCurationRequest` grava só `status` e
+`resolved_at`. Não custa nada com 1 curador; entra na conta no dia em que houver dois.
+
+**Pendências conhecidas, não escondidas** (as três dependem do gatilho registrado na memória —
+*o 2º pedido, vindo de conta que não seja a dona*; medido em 20/08: **1 pedido em toda a história,
+2 contas, ambas da dona**):
+
+1. **`create_by_name` não persiste a faixa** — o "Pedido enviado" é `useState` do
+   `RequestByNameBanner`. Recarregou a busca, o botão volta.
+2. **Não existe "meus pedidos"** — o leitor só vê um pedido reabrindo a obra que pediu, e o
+   `create_by_name`, que não tem obra, fica invisível depois do reload.
+3. **"Atendi" e "Descartar" são indistinguíveis pro leitor** — os dois só fazem a faixa sumir.
+
 ## A RAZÃO do limite 18+ tem dono — e quem a estava escrevendo era o modelo
 
 🔴 Duas coisas escreviam a nota de `adult_content` e só uma escrevia a explicação. O fluxo de
@@ -5679,10 +5759,11 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.407 passando (+24 pulados) em 328 arquivos** (323 passando + 5 pulados);
-medido em 2026-08-20 com o crédito do terceiro autor da nota: **+9 casos e +1 arquivo**
-(`criteria/nota-autor`). Disco (`find`) = índice (`git ls-files`) = **328**, conferido DEPOIS do
-`git add -N`, sobre `origin/main` (`70053c0`) + só os arquivos deste trabalho.
+`npm run test` → **3.426 passando (+24 pulados) em 329 arquivos** (324 passando + 5 pulados);
+medido em 2026-08-20 com a nota do pedido de curadoria: **+19 casos e +1 arquivo**
+(`orchestration/nota-do-pedido-tem-um-teto-so`). Disco (`find`) = índice (`git ls-files`) =
+**329**, conferido DEPOIS do `git add -N`, sobre `origin/main` (`01be4bd`) + só os arquivos deste
+trabalho.
 
 ⚠️ **Este número foi REMEDIDO depois do rebase, não somado ao que estava escrito.** A medição
 inicial (3.382 em 325) valia sobre uma `main` que andou 4 commits no meio da sessão — os PRs
@@ -5724,7 +5805,8 @@ trabalho de outra frente não commitado, e é exatamente assim que este número 
 Quando `git status` não estiver limpo, `git worktree add --detach <commit>` + `cp -Rc node_modules`
 custa ~40s e devolve o número que vai ser verdade DEPOIS do merge — nenhum outro método devolve.
 
-Antes: **3.398 em 327** (o dono do par nota/texto de `adult_content`, +10 casos e +1 arquivo),
+Antes: **3.407 em 328** (a auditoria contando as fichas que afirmam regra vencida),
+**3.398 em 327** (o dono do par nota/texto de `adult_content`, +10 casos e +1 arquivo),
 **3.388 em 326** (o conserto do `redirect()` na página da obra, +7 casos e +2 arquivos),
 **3.381 em 324** (o cabeçalho fixo das tabelas), **3.377 em 323** (as larguras de coluna do
 `/ranking`, +2 casos),
