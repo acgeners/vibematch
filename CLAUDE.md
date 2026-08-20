@@ -4546,6 +4546,26 @@ voltaram a ser COERENTES (a prosa passou a citar a faixa da nota), então nem ch
 classificação por autor. Ramo que nunca roda é capacidade construída e desligada — quem o
 exercita é `tests/unit/criteria/nota-autor.test.ts` (9 casos, 5 sondas conferidas).
 
+🔴 **`--tela` também conta as fichas que AFIRMAM uma regra que não vale mais — e essas não têm
+conserto por backfill.** Anexar a razão certa não apaga a frase errada, e reescrever o argumento
+do modelo é proibido por régua. São **7** hoje, e a saída é REAVALIAR.
+
+⚠️ **Reavaliar não sai por script**, e a tentativa está registrada para ninguém repetir:
+`triggerAiEvaluation` é `"use server"` e passa por `ensureAdmin`, então um script morre em
+*"Só o Curador do catálogo pode fazer isso"* — antes de qualquer chamada paga, felizmente.
+Contornar exigiria mover o corpo da avaliação para um módulo server-only: exportar uma versão
+sem gate do próprio `server/actions/ai.ts` **criaria um endpoint HTTP público sem autenticação**
+(ver [[project_use_server_public_endpoints]]). Para 7 obras não paga; o caminho é a UI (botão
+"Avaliar com IA" na obra, ~3,84¢ cada).
+
+⚠️ **Duas das 7 são do SISTEMA, não do modelo:** *"Fonte externa classifica como 'pornographic';
+…não pode ficar abaixo de 8.0"* é razão de uma versão anterior — hoje `pornographic` implica
+**9,0**. 🔴 Essa camada é a **única que o `adult-content-retroactive-bounds` não consegue
+reaplicar**: `contentRating` não é persistido em coluna nenhuma, só a avaliação o busca em
+runtime (`lib/external/index.ts`). Ou seja, mudança no `CONTENT_RATING_BOUNDS` **não tem
+backfill possível** — a nota fica no piso da versão antiga até alguém reavaliar, e nada acusa.
+Quem acusa, agora, é este contador.
+
 ## A auditoria de critérios IA foi APOSENTADA (2026-08-16) — e o motivo não é qualidade
 
 Ela existia em `/curation/settings?g=notas`: um LLM relia as obras e sugeria ajustes nos
