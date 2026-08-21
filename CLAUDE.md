@@ -3524,6 +3524,11 @@ própria abaixo). ⚠️ Ele cobre a metade **RPC** (as 8 que o código chama, c
 banco); a metade **embed** — o `ai_evaluations` que virou objeto — segue sem canário, e o
 inventário dela é magro (2 arquivos candidatos, não medidos um a um).
 
+🟡 **4. O grande: inventário dos PARES — LEVANTADO em 2026-08-21** (seção própria acima). Os
+três eixos foram medidos: o eixo A rendeu 1 achado real, o eixo B se mostrou NÃO automatizável,
+e o eixo C (quase todas as contagens deste arquivo, que ninguém confere) é o filão que sobrou. Nada foi
+corrigido ainda. O texto abaixo era o plano:
+
 **4. O grande: inventário dos PARES.** Este arquivo já nomeia a doença — "dois critérios pro
 mesmo fato" — e a trata caso a caso, **sempre depois de doer**. A virada é inverter: levantar
 onde dois lugares afirmam o mesmo fato e, para cada par, derivar um do outro ou criar a
@@ -3871,6 +3876,102 @@ forma conhecida confirma o alcance que já se tem.
 Guardado por `tests/unit/orchestration/script-de-correcao-declara-o-funil.test.ts` (9 casos),
 com 3 sondas conferidas: `console.log` solto de volta, funil montado e nunca impresso, e
 dispensa sem motivo.
+
+## Inventário dos PARES: o levantamento de 2026-08-21 (só o mapa, sem correção)
+
+Item 4 dos canais mudos. Este arquivo nomeia a doença — "dois critérios pro mesmo fato" — e a
+trata **sempre depois de doer**. A virada seria inverter: levantar os pares antes. Isto é o
+levantamento, em três eixos, com o resultado de cada um medido.
+
+### Eixo A — prosa GRAVADA que cita número (o "barato" que valia começar)
+
+| fonte | linhas | citam decimal | divergências REAIS |
+|---|---|---|---|
+| `ui_labels.tooltip_full` | 20 | 6 | **1** |
+| `ai_evaluation_scores.justification` | 21.702 | 1.837 | **2** |
+| `ai_evaluations.summary` · `review_digest` · `review_summary` · `canonical_synopsis` | 5.231 | **17** | — (universo pequeno demais para varrer) |
+
+🔴 **O achado: `ui_labels.alignment_score` afirma o OPOSTO do fato.** O tooltip diz *"a maioria
+das obras fica sem valor até passar pelo Rankear"* e, medido na NUVEM em 21/08, **697 de 1.010
+obras ativas (69,0%) TÊM veredito**. É a família em forma pura: prosa gravada contra a fonte do
+número, com o lado que a pessoa LÊ sendo o errado. ⚠️ O texto é idêntico no local e na nuvem
+(conferido por hash), então é uma linha só a corrigir — e ela alimenta o seletor de colunas, o
+heatmap e o painel de filtros, não só o tooltip.
+
+✅ **O que estava CERTO na mesma varredura, conferido no código:** `personal_fit` (o `1,5×` das
+evitadas bate com `netNameOverlap`; o "Top 25% = ≥75" bate com `score-tooltip-content.tsx`),
+`decision`, `expected_score`, `platform_avg`, `total_votes`.
+
+### 🔴 As justificativas NÃO se contradizem sobre a própria nota — e o caminho até esse número é a lição
+
+O funil da varredura, cada degrau derrubado por AMOSTRAGEM, nunca por leitura de código:
+
+| filtro acrescentado | sobra | o que a amostra mostrou |
+|---|---|---|
+| prosa cita "nota N,N" | 1.396 | — |
+| comparar com `suggested_score` (não a persistida) | 275 | 6 de 8 pareciam reais |
+| tirar `R9 (nota 9.2)` e `de 8.0 para 7.5` | 76 | **8 de 8 FALSOS** — todos "nota mínima 7.0" |
+| tirar limite/piso/teto — **case-insensitive** | 19 | **10 de 10 FALSOS** ("Nota mínima" com maiúscula) |
+| tirar nota de review em `/10` e a transição invertida | **2** | os 2 são reais |
+
+⚠️ **Duas das quatro reduções foram culpa do meu próprio regex**, não do dado: o `~` do Postgres
+é case-sensitive, e o filtro de "nota mínima" não pegava "Nota mínima". Um relatório publicado
+em qualquer degrau desses teria sido plausível e falso — 275, 76 e 19 são todos números
+apresentáveis.
+
+🔴 **É a terceira vez que esta base mede a mesma coisa e chega ao mesmo lugar** (o
+`coherence-audit` foi de 483 acusações para 71 e depois para 0). **Regex sobre prosa de modelo
+não mede semântica**, e o número só significa alguma coisa depois de amostrado.
+
+### Eixo B — constante duplicada em código: NÃO é automatizável com sinal aceitável
+
+Medido: **92 constantes numéricas exportadas**. Procurar o mesmo literal em comparação (`>= n`,
+`< n`) noutro arquivo devolve dezenas de candidatos, e a amostra é quase toda coincidência
+numérica — `SD_STEP = 0.25` "aparecendo" em `title-match.ts` não é par, é o número 0,25.
+
+Exigir **vocabulário compartilhado** entre o nome da constante e o arquivo candidato reduz
+pouco: **72 dos 92** ainda passam, porque `min`, `max`, `limit`, `from` e `label` estão em toda
+parte.
+
+⚠️ **Conclusão registrada para não ser refeita: não persiga automação aqui.** Os pares de
+constante desta base foram todos achados por outro caminho — duas telas discordando, um teste
+contradizendo uma ferramenta. O que funciona é o que já se faz: quando o valor tem dono
+(`LOW_BALANCE_USD`, `STRONG_TAG_WEIGHT`, `CRITERIA_SCALE_LEGEND`), a terceira cópia não nasce.
+
+### Eixo C — prosa DESTE arquivo que cita contagem: 103 afirmações, 2 conferidas
+
+O CLAUDE.md faz **103 afirmações de contagem** (63 distintas) sobre artefatos do próprio
+repositório — a maior parte sobre "arquivos", "colunas", "tabelas", "scripts", "rotas" e
+"critérios".
+
+🔴 **Este número já envelheceu uma vez, no intervalo de uma tarde.** A varredura deu **95** e,
+ao resolver o conflito de merge três PRs depois, deu **103** — as seções do smoke logado e do
+funil trouxeram oito afirmações novas. É o próprio defeito que esta seção descreve, medido
+sobre ela mesma.
+
+⚠️ **E a contagem dos testes por pouco não virou o mesmo erro.** Na remedição, um regex mais
+frouxo (`readFileSync` no arquivo E a string `CLAUDE.md` em qualquer lugar) devolveu **3** em
+vez de 2: `campo-de-busca-um-x-so.test.ts` apenas CITA o arquivo num comentário. Casar a grafia
+em vez do fato, dentro da seção que existe para nomear esse defeito.
+
+🔴 **Treze testes MENCIONAM o CLAUDE.md, e só DOIS o leem de verdade** —
+`rotas-de-sessao.test.ts` (os prefixos do middleware) e `scripts-apontam-pro-local.test.ts` (a
+tabela de alvos e o total de arquivos). Os outros onze o citam em comentário, que não confere
+nada.
+
+⚠️ Ou seja: **quase todas as 103 envelhecem sem nada acusar** — os dois testes cobrem cinco
+números entre eles. É o modo de
+falha que esta seção inteira documenta, e que já produziu "29 / 29" sobre 58 arquivos, "12
+réguas" sobre 13, "7 famílias" sobre 11 e a tabela de `SIGNED_IN_PREFIXES` errada duas vezes.
+É o maior filão que sobrou, e é barato: cada número desses é derivável do disco.
+
+### O que vale atacar, em ordem
+
+1. **A linha do `alignment_score`** — uma migration, um fato medido, e ela mente hoje.
+2. **Eixo C**, escolhendo as contagens por RISCO (as que governam decisão, não as
+   descritivas). O padrão já existe e é o mesmo dos dois testes que funcionam: ler a tabela
+   daqui e compará-la com a varredura.
+3. **Eixo B, caso a caso** — sem varredura, porque ela não separa sinal de ruído.
 
 ## `npm run contracts`: o contrato das RPCs, conferido contra o BANCO
 
