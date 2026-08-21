@@ -45,7 +45,7 @@ type PositionMode = "percentile" | "absolute"
 export interface BussolaDatum {
   workId: string
   title: string
-  coverUrl: string | null
+  coverUrls: string[]
   year: number | null
   /**
    * Classificação da obra (`works.is_adult`). OBRIGATÓRIO de propósito: opcional,
@@ -908,7 +908,7 @@ function DotTooltip({
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, opacity: pos ? 1 : 0 }}
     >
       <div className="flex gap-3 p-3">
-        <CoverImage url={d.e.coverUrl} alt="" className="h-[74px] w-[52px] flex-none rounded-md object-cover shadow" />
+        <CoverImage urls={d.e.coverUrls} alt="" className="h-[74px] w-[52px] flex-none rounded-md object-cover shadow" />
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           {/* `overflow-hidden` = contém o float (senão ele vaza por cima da linha
               de ano/status quando o título tem uma linha só). */}

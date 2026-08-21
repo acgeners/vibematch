@@ -22,6 +22,7 @@ import {
 import {
   dedupeSynopsisEntries,
   pickPrimarySynopsis,
+  coverCandidates,
   pickPrimaryCover,
   splitSynopsesFromText,
 } from "@/lib/work-derived"
@@ -817,7 +818,8 @@ function dbWorkToFormValues(work: any): WorkFormValues {
 export interface WorkPreview {
   workId: string
   title: string
-  coverUrl: string | null
+  /** Candidatas de capa (ver MAX_COVER_CANDIDATES): a prévia cai pra próxima se a 1ª morrer. */
+  coverUrls: string[]
   synopsis: string | null
   synopsisQuality: string | null
   /** True quando o Interesse manual foi APLICADO da previsão da IA (synopsis_quality_source = prediction_applied), não definido à mão. */
@@ -871,7 +873,7 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
       | null
   }).calculated_scores
   const calc = scoresReader.overlay(data.id as string, calcRaw)
-  const covers = (data as { work_covers?: Parameters<typeof pickPrimaryCover>[0] }).work_covers
+  const covers = (data as { work_covers?: Parameters<typeof coverCandidates>[0] }).work_covers
   const synopses = (data as { work_synopses?: Parameters<typeof pickPrimarySynopsis>[0] }).work_synopses
   // Hover mostra a sinopse CANÔNICA (consolidada via IA) quando existe; cai na
   // primária das fontes enquanto a obra não passou pela consolidação.
@@ -885,7 +887,7 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
   return {
     workId: data.id as string,
     title: data.title as string,
-    coverUrl: pickPrimaryCover(covers),
+    coverUrls: coverCandidates(covers),
     synopsis: canonicalSynopsis || pickPrimarySynopsis(synopses),
     synopsisQuality: state.synopsisQuality,
     synopsisFromPrediction: state.synopsisQualitySource === "prediction_applied",

@@ -1,6 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { pickPrimaryCover } from "@/lib/covers"
+import { coverCandidates } from "@/lib/work-derived"
 import { roundToDisplayScore } from "@/lib/score-rounding"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
@@ -50,16 +50,16 @@ const VAZIA: MyList = {
 
 type CoverRow = { url: string; is_primary: boolean; position: number }
 
+/**
+ * As candidatas de capa desta lista. Delega a `coverCandidates` — 2,9% das capas do
+ * catálogo estavam mortas e em 21 obras havia alternativa viva que a tela não usava.
+ *
+ * 🔴 Isto era uma reimplementação da mesma ordenação (is_primary, depois position), a
+ * QUARTA no repo. Nenhuma estava errada; o problema é que a ordem das capas passava a
+ * depender de qual cópia a tela chamasse, e nada acusaria a divergência.
+ */
 function coversOf(rows: CoverRow[] | null | undefined): string[] {
-  const ordenadas = [...(rows ?? [])].sort(
-    (a, b) => Number(b.is_primary) - Number(a.is_primary) || a.position - b.position,
-  )
-  const urls = ordenadas.map((c) => c.url).filter(Boolean)
-  const primaria = pickPrimaryCover(rows)
-  // `pickPrimaryCover` é o dono de QUAL é a capa; as demais entram como alternativas para o
-  // fallback do `CoverImage` — 2,9% das capas do catálogo estão mortas e em 21 obras havia
-  // alternativa viva que a tela não usava.
-  return primaria ? [primaria, ...urls.filter((u) => u !== primaria)] : urls
+  return coverCandidates(rows)
 }
 
 /**

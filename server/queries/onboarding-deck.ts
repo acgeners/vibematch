@@ -3,7 +3,7 @@ import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { pickDeckWorks } from "@/lib/onboarding/deck-sampler"
 import type { DeckCandidate } from "@/lib/onboarding/deck-sampler"
-import { pickCoverUrls } from "@/lib/work-derived"
+import { coverCandidates } from "@/lib/work-derived"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabaseClient = any
@@ -120,7 +120,7 @@ export async function getOnboardingDeck(opts: {
         title: w.title as string,
         totalChapters: (w.total_chapters as number | null) ?? null,
         synopsis: ((w.canonical_synopsis as string | null) ?? "").trim(),
-        coverUrls: pickCoverUrls(w.work_covers as never),
+        coverUrls: coverCandidates(w.work_covers as never),
         genres: genresByWork.get(id) ?? [],
       }
     })

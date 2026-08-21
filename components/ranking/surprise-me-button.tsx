@@ -142,9 +142,9 @@ function SurprisePickCard({ entry, onNavigate }: { entry: RankingEntry; onNaviga
       className="group flex gap-3 rounded-lg border bg-card/60 p-3 transition-colors hover:border-primary/40 hover:bg-card"
     >
       <div className="relative h-28 w-20 shrink-0 overflow-hidden rounded border bg-muted">
-        {entry.coverUrl ? (
+        {entry.coverUrls.length > 0 ? (
           <CoverImage
-            url={entry.coverUrl}
+            urls={entry.coverUrls}
             alt={entry.title}
             className="h-full w-full object-cover"
           />

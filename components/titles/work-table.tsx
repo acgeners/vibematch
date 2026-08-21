@@ -44,7 +44,7 @@ import { toast } from "sonner"
 import type { CategoryScore, CriterionSlug, WorkWithRelations } from "@/types/domain"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
-import { pickPrimaryCover } from "@/lib/covers"
+import { coverCandidates } from "@/lib/work-derived"
 import { CoverImage } from "@/components/ui/cover-image"
 import { ScoreBadge, criterionCellClass, type ColumnThresholds, type ScoreColorThresholds, type CriterionRange, type AttrColorMode } from "@/components/ui/score-badge"
 import { readAttrColorMode, subscribeAttrColorMode } from "@/lib/ui/attr-color-mode"
@@ -879,7 +879,9 @@ function WorkCardsView({
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
       {works.map((work) => {
         const slug = titleToSlug(work.title)
-        const coverUrl = pickPrimaryCover(work.work_covers)
+        // Candidatas, não a primária: `work_covers` já vem inteiro para o cliente
+        // nesta tabela, então o fallback custa ZERO payload aqui.
+        const coverUrls = coverCandidates(work.work_covers)
         const expectedScore = work.calculated_scores?.expected_score ?? null
         const isSelected = selectedIds.has(work.id)
 
@@ -947,9 +949,9 @@ function WorkCardsView({
                     : "border-border/65 shadow-black/10 group-hover:border-primary/40 group-hover:shadow-md group-hover:shadow-primary/15"
                 )}
               >
-                {coverUrl ? (
+                {coverUrls.length > 0 ? (
                   <CoverImage
-                    url={coverUrl}
+                    urls={coverUrls}
                     className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                   />
                 ) : (

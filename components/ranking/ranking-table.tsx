@@ -382,7 +382,7 @@ function entryToPreview(entry: RankingEntry): WorkPreview {
   return {
     workId: entry.workId,
     title: entry.title,
-    coverUrl: entry.coverUrl,
+    coverUrls: entry.coverUrls,
     synopsis: entry.synopsis,
     synopsisQuality: entry.synopsisQuality,
     synopsisFromPrediction: entry.synopsisFromPrediction,
@@ -405,8 +405,8 @@ function TitleCell({ entry }: { entry: RankingEntry }) {
   return (
     <div className="flex items-center gap-2.5 min-w-0">
       <div className="relative h-14 w-10 shrink-0 overflow-hidden rounded border bg-muted/40">
-        {entry.coverUrl ? (
-          <CoverImage url={entry.coverUrl} className="h-full w-full object-cover" />
+        {entry.coverUrls.length > 0 ? (
+          <CoverImage urls={entry.coverUrls} className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-muted-foreground">
             <ImageOff className="h-4 w-4 opacity-40" />
@@ -1403,9 +1403,9 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
               <span className="font-mono text-xs text-muted-foreground w-6 shrink-0 mt-1">
                 {entry.rank}
               </span>
-              {entry.coverUrl && (
+              {entry.coverUrls.length > 0 && (
                 <CoverImage
-                  url={entry.coverUrl}
+                  urls={entry.coverUrls}
                   className="h-16 w-12 shrink-0 rounded object-cover"
                 />
               )}
@@ -1991,9 +1991,9 @@ function RankingCard({
 
       {/* Capa: rank (canto sup-esq) + Nota Prevista (canto sup-dir) */}
       <div className="relative w-[150px] shrink-0 self-stretch overflow-hidden bg-muted/40">
-        {entry.coverUrl ? (
+        {entry.coverUrls.length > 0 ? (
           <CoverImage
-            url={entry.coverUrl}
+            urls={entry.coverUrls}
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
           />
         ) : (

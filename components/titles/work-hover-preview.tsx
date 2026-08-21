@@ -276,9 +276,9 @@ export function WorkHoverPreview({ preview, anchorRect, onMouseEnter, onMouseLea
             a capa tem 160px, então sobra ar por construção. Centrado ele vira respiro dos
             dois lados em vez de um buraco embaixo do último chip. */}
         <div className="flex items-center gap-3.5">
-          {preview.coverUrl ? (
+          {preview.coverUrls.length > 0 ? (
             <div className="relative h-40 w-28 shrink-0 rounded-md overflow-hidden bg-muted">
-              <CoverImage url={preview.coverUrl} className="h-full w-full object-cover" />
+              <CoverImage urls={preview.coverUrls} className="h-full w-full object-cover" />
             </div>
           ) : (
             <div className="h-40 w-28 shrink-0 rounded-md bg-muted flex items-center justify-center text-xs text-muted-foreground">

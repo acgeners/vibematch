@@ -2,7 +2,7 @@ import "server-only"
 
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getOwnerUserId, getSessionUserId } from "@/server/queries/current-user"
-import { pickCoverUrls, pickPrimarySynopsis } from "@/lib/work-derived"
+import { coverCandidates, pickPrimarySynopsis } from "@/lib/work-derived"
 
 /**
  * Os 8 eixos de gosto, NA ORDEM DA TELA (esta lista é a fonte da ordem — `getTasteCriteria`
@@ -262,7 +262,7 @@ export async function getPilotWorks(): Promise<PilotWork[]> {
       id: w.id as string,
       title: w.title as string,
       userScore: Number(w.user_score),
-      coverUrls: pickCoverUrls(w.work_covers as never),
+      coverUrls: coverCandidates(w.work_covers as never),
       synopsis:
         (w.canonical_synopsis as string | null)?.trim() ||
         pickPrimarySynopsis(w.work_synopses as never),

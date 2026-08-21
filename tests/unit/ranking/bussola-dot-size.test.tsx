@@ -28,7 +28,7 @@ const VOTES = [
 const entries: BussolaDatum[] = VOTES.map((votes, i) => ({
   workId: `w${i}`,
   title: `Obra ${i}`,
-  coverUrl: null, isAdult: false,
+  coverUrls: [], isAdult: false,
   year: 2020,
   chanceScore: 40 + ((i * 7) % 55),
   platformAvg: 7 + ((i * 3) % 25) / 10,

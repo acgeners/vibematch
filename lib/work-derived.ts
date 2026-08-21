@@ -136,8 +136,12 @@ export function pickPrimaryCover(rows: WorkCoverRow[] | null | undefined): strin
 
 /**
  * Todas as capas em ordem de preferência (is_primary primeiro, depois position),
- * deduplicadas. Serve como lista de candidatas pro `<CoverImage urls>`: se a
- * primária for link morto/hotlink bloqueado, ele cai pra próxima.
+ * deduplicadas. É a dona da ORDEM — o teto de exibição é de `coverCandidates`.
+ *
+ * 🔴 NÃO acrescente teto aqui. `scripts/repick-dead-covers.ts` consome esta função
+ * para PROCURAR uma capa viva, e precisa da lista inteira: com um corte em 3, uma
+ * obra cuja 4ª capa está viva seria reportada como "sem saída" e o script diria isso
+ * com sucesso. É o modo de falha caro desta base — erro que produz resultado.
  */
 export function pickCoverUrls(rows: WorkCoverRow[] | null | undefined): string[] {
   if (!rows?.length) return []
@@ -154,4 +158,29 @@ export function pickCoverUrls(rows: WorkCoverRow[] | null | undefined): string[]
     }
   }
   return out
+}
+
+/**
+ * Quantas candidatas de capa viajam do servidor para o browser.
+ *
+ * ⚠️ O número sai da distribuição, não do olho. Medido no clone local (988 obras
+ * com capa): média **4,19** por obra, mediana **3**, p90 **9**, máximo **27** — e
+ * **906 obras (91,7%) têm 2 ou mais**, que é o que dá material ao fallback. Mandar
+ * a cauda inteira seria pagar payload por uma reserva que quase nunca passa da
+ * segunda tentativa; mandar só a primária é o estado que deixou 23 capas da Comix
+ * mortas na tela por 4 dias, com o app tendo a capa boa na mão.
+ */
+export const MAX_COVER_CANDIDATES = 3
+
+/**
+ * As candidatas que a UI recebe: `pickCoverUrls` recortada em
+ * `MAX_COVER_CANDIDATES`. É esta que alimenta `<CoverImage urls>`.
+ *
+ * 🔴 O recorte vive AQUI e não dentro de `pickCoverUrls` porque quem procura capa
+ * viva (o `repick-dead-covers`) precisa da lista inteira — ver o aviso lá em cima.
+ * E vive no SERVIDOR, não dentro do `CoverImage`: o custo que o teto existe para
+ * cortar é o payload, e capar no cliente não corta byte nenhum.
+ */
+export function coverCandidates(rows: WorkCoverRow[] | null | undefined): string[] {
+  return pickCoverUrls(rows).slice(0, MAX_COVER_CANDIDATES)
 }

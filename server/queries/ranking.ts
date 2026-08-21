@@ -6,7 +6,7 @@ import {
   getPublicationStatusNameById,
   getPersonalStatusNameById,
 } from "@/lib/constants/status-lookups"
-import { pickPrimaryCover } from "@/lib/work-derived"
+import { coverCandidates } from "@/lib/work-derived"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 import { getVerdictScale } from "@/server/queries/verdict-scale"
@@ -115,7 +115,13 @@ export interface RankingEntry {
   aiEvalStatus: string
   totalChapters: number | null
   chaptersRead: number | null
-  coverUrl: string | null
+  /**
+   * Candidatas de capa em ordem de preferência, recortadas em MAX_COVER_CANDIDATES.
+   * Lista e não uma URL só: capa morta é silenciosa no browser (nao emite erro, nao
+   * corta layout, nao gera rolagem), e o host inteiro da Comix caiu em 08/2026 sem
+   * nada acusar. Com as candidatas, o <CoverImage> cai pra proxima sozinho.
+   */
+  coverUrls: string[]
   synopsis: string | null
   synopsisQuality: string | null
   /** True quando o Interesse manual foi APLICADO da previsão da IA (synopsis_quality_source = prediction_applied), não definido à mão. */
@@ -774,7 +780,7 @@ export async function getRanking(
       aiEvalStatus: w.ai_eval_status,
       totalChapters: w.total_chapters,
       chaptersRead: state.chaptersRead,
-      coverUrl: pickPrimaryCover(w.work_covers),
+      coverUrls: coverCandidates(w.work_covers),
       // Prefere a sinopse CANÔNICA (consolidada via IA) quando existe; cai na
       // primária das fontes enquanto a obra não passou pela consolidação.
       // Mesma regra do getWorkPreview (hover fora do ranking).

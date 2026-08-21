@@ -3673,8 +3673,63 @@ a barra) num JPEG válido, e um `startsWith("image/")` reprovou 2 capas boas na 
 outro lado o Cloudflare devolve 403 com `text/html` — então o status também não basta sozinho.
 
 ⚠️ **Sobram 7 obras sem NENHUMA capa viva.** Aí o fallback não tem o que escolher: precisam de
-capa nova de alguma fonte. E 33 telas seguem passando URL única — cobertas pelo conserto no dado,
-mas não se curam sozinhas na próxima fonte que cair.
+capa nova de alguma fonte — é curadoria, não código.
+
+### O fallback foi LIGADO nas telas de maior tráfego (2026-08-21)
+
+A frente que faltava. **Dono do teto: `coverCandidates`** (`lib/work-derived.ts`), que é
+`pickCoverUrls` recortada em **`MAX_COVER_CANDIDATES = 3`**.
+
+🔴 **O teto NÃO pode morar dentro de `pickCoverUrls`, e essa é a armadilha do PR.**
+`scripts/repick-dead-covers.ts` consome aquela função para **procurar** uma capa viva e precisa
+da lista inteira: com um corte em 3, uma obra cuja 4ª capa está viva seria reportada como "sem
+saída" — e o script sairia com código 0 dizendo isso. Erro que produz resultado, na ferramenta
+que existe para consertar exatamente este problema. Guardado com sonda.
+
+⚠️ **O 3 sai da distribuição.** Medido no clone local (988 obras com capa): média **4,19**,
+mediana **3**, p90 **9**, máximo **27** — e **906 obras (91,7%) têm 2 ou mais**, que é o que dá
+material ao fallback. Mandar a cauda inteira paga payload por uma reserva que quase nunca passa
+da segunda tentativa.
+
+⚠️ **E o recorte é no SERVIDOR, nunca dentro do `CoverImage`**: o custo que o teto existe para
+cortar é o payload, e capar no cliente não corta byte nenhum.
+
+**Custo medido no app, não estimado:**
+
+| | |
+|---|---|
+| `/catalog` | **zero** — ali `work_covers` já ia inteiro pro cliente, o achatamento era no componente |
+| `/ranking` | **+136 B/obra** · +5.426 B na página · **+0,32%** de 1,7 MB (40 obras: 35 com 3 candidatas, 5 com 2) |
+| egress do Supabase | **zero** — as queries já pediam `work_covers(url, is_primary, position)` sem filtro |
+
+⚠️ A estimativa que autorizou o PR era ~190 B/obra; o real veio **136**. Erro pro lado seguro,
+mas é o lembrete de sempre: número previsto não substitui número medido.
+
+🔴 **Havia QUATRO reimplementações da mesma ordenação** (is_primary, depois position), e nenhuma
+estava errada — o problema é que a ordem das capas passava a depender de qual cópia a tela
+chamasse. `lib/covers.pickPrimaryCover` tinha régua PRÓPRIA (`find(is_primary) ?? covers[0]`,
+sem olhar `position`) e `coversOf` do `my-list` era uma terceira. Hoje as duas DERIVAM do dono.
+
+⚠️ **Elas não divergiam na prática, e isso é medição — não sorte.** As duas só discordam quando
+a obra não tem exatamente uma capa marcada, e o índice parcial `work_covers_one_primary` impede
+a segunda. Medido em 2026-08-20: 988 obras com capa, **0** na condição de divergir (1 sem
+primária, e essa tem uma capa só). Era dívida, e foi fechada enquanto ainda era dívida.
+
+**Migradas:** o grid do `/catalog` · as três views do `/ranking` (Lista, Cards, Faixas) · a
+prévia de hover (todas as listas) · a Bússola · o "Surpreenda-me". Os produtores UI que ainda
+chamavam `pickCoverUrls` direto passaram a `coverCandidates`, senão o teto não significaria
+nada — metade das telas mandaria 3 e a outra metade a cauda inteira.
+
+⚠️ **Faltam 29 chamadas passando uma candidata só**, e o número é o TETO de
+`tests/unit/covers/candidatas-de-capa.test.ts`, impresso no TÍTULO do caso: ele desce a cada
+leva e **nunca sobe**. `<CoverImage url=>` novo reprova com arquivo e linha, em vez de nascer
+com o fallback desligado como os 36 que já existiam. A válvula é
+`// cover-url-unica: <motivo>` encostado na chamada — legítima quando não HÁ candidatas (capa
+que a fonte externa devolveu, demo hardcoded). As 6 sondas conferidas, inclusive a válvula nos
+dois sentidos e o teto dentro do `pickCoverUrls`.
+
+⚠️ **O comparador (`WorkCompareDrawer`) ficou de fora** — o `CompareWork` guarda uma URL só, e
+migrá-lo é mexer num tipo grande. Ele segue no estado de hoje (sem fallback), não regrediu.
 
 ## `npm run smoke:logado`: a metade LOGADA, verificada ANTES de publicar
 
@@ -6272,15 +6327,21 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.471 passando (+24 pulados) em 332 arquivos** (327 passando + 5 pulados);
-remedido em 2026-08-20 depois da correção do tooltip do Veredito — **+1 caso e ZERO arquivo
-novo**, porque o guard entrou no `dicionario-dos-numeros.test.ts` que já existia. Antes:
-**3.470 em 332**, medido **depois** de o smoke logado e o funil dos scripts de correção entrarem
-juntos: **+24 casos e +2 arquivos** sobre o canário
+`npm run test` → **3.479 passando (+24 pulados) em 333 arquivos** (328 passando + 5 pulados);
+remedido em 2026-08-21 NA RESOLUÇÃO DO CONFLITO entre o #502 (tooltip do Veredito) e o #503
+(fallback de capa), escritos em paralelo. Disco (`find`) = índice (`git ls-files`) = **333**,
+conferido DEPOIS do `git add`, em DUAS rodadas limpas com resultado idêntico.
+
+⚠️ **A soma dos dois deltas teria acertado o número desta vez, e isso é sorte de aritmética —
+não método.** Ela só funciona enquanto os dois PRs não tocam o mesmo arquivo de teste, e nada
+avisa no dia em que tocarem. É a terceira vez que esta linha é resolvida num merge; nas três, o
+que sobreviveu foi RE-MEDIR na base que vira o merge.
+
+Antes: **3.471 em 332** (o #502 sozinho — +1 caso e zero arquivo, porque o guard entrou num
+arquivo que já existia) e **3.470 em 332**, medido **depois** de o smoke logado e o funil dos
+scripts de correção entrarem juntos: **+24 casos e +2 arquivos** sobre o canário
 (`orchestration/smoke-logado-verifica-a-sessao`, 12 casos · `deploy-verifica-o-que-publica`, +3
-· `orchestration/script-de-correcao-declara-o-funil`, 9). Disco (`find`) = índice
-(`git ls-files`) = **332**, conferido DEPOIS do `git add`, em DUAS rodadas limpas com resultado
-idêntico.
+· `orchestration/script-de-correcao-declara-o-funil`, 9).
 
 🔴 **Este número saiu de RE-MEDIR na resolução do conflito, não de somar os dois PRs.** Os dois
 foram escritos em paralelo, cada um com o seu número (3.461 e 3.455), e nenhum dos dois valia
