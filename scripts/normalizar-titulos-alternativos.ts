@@ -32,6 +32,7 @@ import { createClient } from "@supabase/supabase-js"
 import { alternativeTitlesFixOrNull } from "@/lib/titles/alternative-titles"
 // O dono da retenção de `.backups` é ÚNICO — ver scripts/lib/backups-retencao.mjs.
 import { podar } from "./lib/backups-retencao.mjs"
+import { criarFunil } from "./lib/funil.mjs"
 
 const EXECUTAR = process.argv.includes("--execute")
 
@@ -76,8 +77,10 @@ async function main() {
   const ehLocal = /127\.0\.0\.1|localhost/.test(alvo)
   console.log(`alvo: ${alvo}${ehLocal ? "  ⚠️  LOCAL — este script quer a NUVEM" : ""}`)
 
+  const funil = criarFunil("normalizar títulos alternativos")
+
   const obras = await lerTodasAsObras()
-  console.log(`${obras.length} obras lidas\n`)
+  funil.passo("obras lidas", obras.length)
 
   const plano = obras
     .map((o) => ({
@@ -88,10 +91,13 @@ async function main() {
     }))
     .filter((p): p is typeof p & { depois: string[] } => p.depois !== null)
 
+  funil.passo("com alias fora da régua", plano.length)
   if (plano.length === 0) {
-    console.log("nada a corrigir.")
+    funil.nadaAFazer("nada a corrigir.")
     return
   }
+  funil.relatar()
+  console.log("")
 
   // Imprime só o que MUDA: lista inteira lado a lado esconde a diferença no meio de 40 chips.
   console.log(`${plano.length} obra(s) a corrigir:\n`)

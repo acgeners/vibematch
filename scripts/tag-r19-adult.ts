@@ -15,6 +15,7 @@
  */
 import { createAdminClient } from "@/lib/supabase/admin"
 import fs from "node:fs"
+import { criarFunil } from "./lib/funil.mjs"
 
 const R19_TAG_ID = "b4df1fa0-52c0-4cbe-8ae5-381da77c0a36"
 const THRESHOLD = 7
@@ -41,10 +42,11 @@ async function main() {
     .gte("score", THRESHOLD)
   if (scoreErr) throw scoreErr
   const qualifyingIds = [...new Set((scores ?? []).map((s) => s.work_id as string))]
-  console.log(`Obras com adult_content >= ${THRESHOLD}: ${qualifyingIds.length}`)
+  const funil = criarFunil("tag R19 por adult_content")
+  funil.passo(`com adult_content >= ${THRESHOLD}`, qualifyingIds.length)
 
   if (qualifyingIds.length === 0) {
-    console.log("Nada a fazer.")
+    funil.nadaAFazer("Nada a fazer.")
     return
   }
 
@@ -75,6 +77,8 @@ async function main() {
   const archivedCount = qualifyingIds.filter((id) => worksById.get(id)?.is_archived).length
 
   console.log(`  já com R19:        ${alreadyTagged.size}`)
+  funil.passo("a inserir (ainda sem a tag)", toInsert.length)
+  funil.relatar()
   console.log(`  a inserir:         ${toInsert.length}`)
   console.log(`  (destas, arquivadas: ${qualifyingIds.filter((id) => worksById.get(id)?.is_archived).length}; a inserir arquivadas: ${toInsert.filter((id) => worksById.get(id)?.is_archived).length})`)
   console.log(`  total obras arquivadas no conjunto: ${archivedCount}`)

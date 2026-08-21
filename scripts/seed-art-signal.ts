@@ -26,6 +26,7 @@
  */
 import { createAdminClient } from "@/lib/supabase/admin"
 import { exigeAlvoNuvem } from "./lib/exige-alvo-nuvem"
+import { criarFunil } from "./lib/funil.mjs"
 import { getOwnerUserId } from "@/server/queries/current-user"
 import { computeArtForCatalog } from "@/lib/art/model"
 import {
@@ -97,7 +98,10 @@ async function main() {
   // Só reescreve o que está ausente ou de régua antiga — reextrair o que já está na versão
   // corrente gastaria leitura e escrita para gravar exatamente o mesmo valor.
   const pendentes = ativas.filter((w) => isArtSignalStale(parseArtSignal(w.art_signal)))
-  console.log(`\n   ${ativas.length} obras ativas · ${pendentes.length} com sinal ausente ou de versão < ${ART_SIGNAL_VERSION}`)
+  const funil = criarFunil("semear art_signal")
+  funil.passo("obras ativas", ativas.length)
+  funil.passo(`com sinal ausente ou de versão < ${ART_SIGNAL_VERSION}`, pendentes.length)
+  console.log("")
 
   const atualizacoes: Array<{ id: string; art_signal: unknown }> = []
   let comEvidencia = 0
@@ -111,6 +115,15 @@ async function main() {
   }
 
   const semEvidencia = atualizacoes.length - comEvidencia
+  funil.passo("com sinal a gravar", atualizacoes.length)
+  // ⚠️ "com evidência" NÃO é um estágio do funil: as sem evidência TAMBÉM são gravadas (com
+  // art_estimate NULL, que é um terceiro estado). Pô-las na cadeia faria parecer que o script
+  // as descarta.
+  if (atualizacoes.length === 0) {
+    funil.nadaAFazer("nada a semear — todo sinal já está na versão corrente.")
+    return
+  }
+  funil.relatar()
   console.log(`   com evidência de arte: ${comEvidencia} · SEM nenhuma: ${semEvidencia} (${((100 * semEvidencia) / Math.max(1, atualizacoes.length)).toFixed(1)}%)`)
   console.log(`   ⚠️ as sem evidência ficam com art_estimate NULL no recalc — é um terceiro estado, não a média`)
   console.log(`   tags de arte consideradas: ${ART_TAG_SLUGS.join(", ")}`)
