@@ -6,6 +6,8 @@
  *   node scripts/smoke-browser.mjs --base=http://localhost:3001
  *   node scripts/smoke-browser.mjs --modules=/caminho/do/checkout   # onde achar o playwright
  *
+ * SMOKE-ALVO: producao
+ *
  * Roda no fim do `npm run deploy`, depois do `smoke-producao.mjs`. Sai com 1 se qualquer
  * rota quebrar DEPOIS da hidratação.
  *
