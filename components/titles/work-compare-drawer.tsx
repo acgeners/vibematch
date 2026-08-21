@@ -339,7 +339,9 @@ export function WorkCompareDrawer({
         return {
           workId: w.id,
           title: w.title,
-          coverUrl: w.coverUrl,
+          // O CompareWork ainda guarda uma URL só, então a Bússola aberta a partir
+          // do comparador fica sem fallback — mesmo estado de hoje, migra no PR seguinte.
+          coverUrls: w.coverUrl ? [w.coverUrl] : [],
           year: w.year,
           isAdult: w.isAdult,
           publicationStatus: st?.status ?? null,

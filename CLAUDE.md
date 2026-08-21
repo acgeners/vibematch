@@ -3673,8 +3673,63 @@ a barra) num JPEG válido, e um `startsWith("image/")` reprovou 2 capas boas na 
 outro lado o Cloudflare devolve 403 com `text/html` — então o status também não basta sozinho.
 
 ⚠️ **Sobram 7 obras sem NENHUMA capa viva.** Aí o fallback não tem o que escolher: precisam de
-capa nova de alguma fonte. E 33 telas seguem passando URL única — cobertas pelo conserto no dado,
-mas não se curam sozinhas na próxima fonte que cair.
+capa nova de alguma fonte — é curadoria, não código.
+
+### O fallback foi LIGADO nas telas de maior tráfego (2026-08-21)
+
+A frente que faltava. **Dono do teto: `coverCandidates`** (`lib/work-derived.ts`), que é
+`pickCoverUrls` recortada em **`MAX_COVER_CANDIDATES = 3`**.
+
+🔴 **O teto NÃO pode morar dentro de `pickCoverUrls`, e essa é a armadilha do PR.**
+`scripts/repick-dead-covers.ts` consome aquela função para **procurar** uma capa viva e precisa
+da lista inteira: com um corte em 3, uma obra cuja 4ª capa está viva seria reportada como "sem
+saída" — e o script sairia com código 0 dizendo isso. Erro que produz resultado, na ferramenta
+que existe para consertar exatamente este problema. Guardado com sonda.
+
+⚠️ **O 3 sai da distribuição.** Medido no clone local (988 obras com capa): média **4,19**,
+mediana **3**, p90 **9**, máximo **27** — e **906 obras (91,7%) têm 2 ou mais**, que é o que dá
+material ao fallback. Mandar a cauda inteira paga payload por uma reserva que quase nunca passa
+da segunda tentativa.
+
+⚠️ **E o recorte é no SERVIDOR, nunca dentro do `CoverImage`**: o custo que o teto existe para
+cortar é o payload, e capar no cliente não corta byte nenhum.
+
+**Custo medido no app, não estimado:**
+
+| | |
+|---|---|
+| `/catalog` | **zero** — ali `work_covers` já ia inteiro pro cliente, o achatamento era no componente |
+| `/ranking` | **+136 B/obra** · +5.426 B na página · **+0,32%** de 1,7 MB (40 obras: 35 com 3 candidatas, 5 com 2) |
+| egress do Supabase | **zero** — as queries já pediam `work_covers(url, is_primary, position)` sem filtro |
+
+⚠️ A estimativa que autorizou o PR era ~190 B/obra; o real veio **136**. Erro pro lado seguro,
+mas é o lembrete de sempre: número previsto não substitui número medido.
+
+🔴 **Havia QUATRO reimplementações da mesma ordenação** (is_primary, depois position), e nenhuma
+estava errada — o problema é que a ordem das capas passava a depender de qual cópia a tela
+chamasse. `lib/covers.pickPrimaryCover` tinha régua PRÓPRIA (`find(is_primary) ?? covers[0]`,
+sem olhar `position`) e `coversOf` do `my-list` era uma terceira. Hoje as duas DERIVAM do dono.
+
+⚠️ **Elas não divergiam na prática, e isso é medição — não sorte.** As duas só discordam quando
+a obra não tem exatamente uma capa marcada, e o índice parcial `work_covers_one_primary` impede
+a segunda. Medido em 2026-08-20: 988 obras com capa, **0** na condição de divergir (1 sem
+primária, e essa tem uma capa só). Era dívida, e foi fechada enquanto ainda era dívida.
+
+**Migradas:** o grid do `/catalog` · as três views do `/ranking` (Lista, Cards, Faixas) · a
+prévia de hover (todas as listas) · a Bússola · o "Surpreenda-me". Os produtores UI que ainda
+chamavam `pickCoverUrls` direto passaram a `coverCandidates`, senão o teto não significaria
+nada — metade das telas mandaria 3 e a outra metade a cauda inteira.
+
+⚠️ **Faltam 29 chamadas passando uma candidata só**, e o número é o TETO de
+`tests/unit/covers/candidatas-de-capa.test.ts`, impresso no TÍTULO do caso: ele desce a cada
+leva e **nunca sobe**. `<CoverImage url=>` novo reprova com arquivo e linha, em vez de nascer
+com o fallback desligado como os 36 que já existiam. A válvula é
+`// cover-url-unica: <motivo>` encostado na chamada — legítima quando não HÁ candidatas (capa
+que a fonte externa devolveu, demo hardcoded). As 6 sondas conferidas, inclusive a válvula nos
+dois sentidos e o teto dentro do `pickCoverUrls`.
+
+⚠️ **O comparador (`WorkCompareDrawer`) ficou de fora** — o `CompareWork` guarda uma URL só, e
+migrá-lo é mexer num tipo grande. Ele segue no estado de hoje (sem fallback), não regrediu.
 
 ## `npm run smoke:logado`: a metade LOGADA, verificada ANTES de publicar
 
@@ -6240,7 +6295,9 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.470 passando (+24 pulados) em 332 arquivos** (327 passando + 5 pulados);
+`npm run test` → **3.478 passando (+24 pulados) em 333 arquivos** (328 passando + 5 pulados);
+medido em 2026-08-21 depois de o fallback de capa ser ligado nas listas (+8 casos e +1 arquivo,
+`covers/candidatas-de-capa`). Antes: **3.470 em 332**;
 medido em 2026-08-21 **depois** de o smoke logado e o funil dos scripts de correção entrarem
 juntos: **+24 casos e +2 arquivos** sobre o canário
 (`orchestration/smoke-logado-verifica-a-sessao`, 12 casos · `deploy-verifica-o-que-publica`, +3

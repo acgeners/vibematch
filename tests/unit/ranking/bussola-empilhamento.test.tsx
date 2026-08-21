@@ -28,9 +28,9 @@ const posOf = (el: HTMLElement) => ({ left: parseFloat(el.style.left), bottom: p
 
 /** Duas obras que caem no MESMO ponto: 68,0/68,4 → 68 e 8,50/8,54 → 85. */
 const EMPATE: BussolaDatum[] = [
-  { workId: "grande", title: "Empatada com muitos votos", coverUrl: null, isAdult: false, year: 2021, chanceScore: 68.0, platformAvg: 8.5, totalVotes: 30000, expectedScore: 8.5 },
-  { workId: "pequena", title: "Empatada com poucos votos", coverUrl: null, isAdult: false, year: 2022, chanceScore: 68.4, platformAvg: 8.54, totalVotes: 900, expectedScore: 8.4 },
-  { workId: "outra", title: "Sozinha", coverUrl: null, isAdult: false, year: 2020, chanceScore: 30, platformAvg: 7.2, totalVotes: 5000, expectedScore: 7.0 },
+  { workId: "grande", title: "Empatada com muitos votos", coverUrls: [], isAdult: false, year: 2021, chanceScore: 68.0, platformAvg: 8.5, totalVotes: 30000, expectedScore: 8.5 },
+  { workId: "pequena", title: "Empatada com poucos votos", coverUrls: [], isAdult: false, year: 2022, chanceScore: 68.4, platformAvg: 8.54, totalVotes: 900, expectedScore: 8.4 },
+  { workId: "outra", title: "Sozinha", coverUrls: [], isAdult: false, year: 2020, chanceScore: 30, platformAvg: 7.2, totalVotes: 5000, expectedScore: 7.0 },
 ]
 
 describe("BussolaPlane — obras empilhadas", () => {
@@ -65,10 +65,10 @@ describe("BussolaPlane — obras empilhadas", () => {
     // cruz. É o único caso em que o afastamento poderia jogar um ponto pro
     // quadrante errado — com a cor do quadrante certo.
     const naMediana: BussolaDatum[] = [
-      { workId: "1", title: "Baixa", coverUrl: null, isAdult: false, year: 2020, chanceScore: 20, platformAvg: 6.0, totalVotes: 100, expectedScore: 6 },
-      { workId: "2", title: "Empate A", coverUrl: null, isAdult: false, year: 2021, chanceScore: 55, platformAvg: 8.0, totalVotes: 9000, expectedScore: 8 },
-      { workId: "3", title: "Empate B", coverUrl: null, isAdult: false, year: 2022, chanceScore: 55, platformAvg: 8.0, totalVotes: 300, expectedScore: 8 },
-      { workId: "4", title: "Alta", coverUrl: null, isAdult: false, year: 2023, chanceScore: 90, platformAvg: 9.2, totalVotes: 40000, expectedScore: 9 },
+      { workId: "1", title: "Baixa", coverUrls: [], isAdult: false, year: 2020, chanceScore: 20, platformAvg: 6.0, totalVotes: 100, expectedScore: 6 },
+      { workId: "2", title: "Empate A", coverUrls: [], isAdult: false, year: 2021, chanceScore: 55, platformAvg: 8.0, totalVotes: 9000, expectedScore: 8 },
+      { workId: "3", title: "Empate B", coverUrls: [], isAdult: false, year: 2022, chanceScore: 55, platformAvg: 8.0, totalVotes: 300, expectedScore: 8 },
+      { workId: "4", title: "Alta", coverUrls: [], isAdult: false, year: 2023, chanceScore: 90, platformAvg: 9.2, totalVotes: 40000, expectedScore: 9 },
     ]
     const { container, unmount } = render(<BussolaPlane entries={naMediana} />)
     const empatados = dotsOf(container).filter((el) => (el.getAttribute("aria-label") ?? "").startsWith("Empate"))
@@ -92,9 +92,9 @@ describe("BussolaPlane — obras empilhadas", () => {
 
   it("não mexe em nada quando não há empate", () => {
     const semEmpate: BussolaDatum[] = [
-      { workId: "a", title: "A", coverUrl: null, isAdult: false, year: 2020, chanceScore: 20, platformAvg: 7.0, totalVotes: 100, expectedScore: 7 },
-      { workId: "b", title: "B", coverUrl: null, isAdult: false, year: 2021, chanceScore: 50, platformAvg: 8.0, totalVotes: 200, expectedScore: 8 },
-      { workId: "c", title: "C", coverUrl: null, isAdult: false, year: 2022, chanceScore: 80, platformAvg: 9.0, totalVotes: 300, expectedScore: 9 },
+      { workId: "a", title: "A", coverUrls: [], isAdult: false, year: 2020, chanceScore: 20, platformAvg: 7.0, totalVotes: 100, expectedScore: 7 },
+      { workId: "b", title: "B", coverUrls: [], isAdult: false, year: 2021, chanceScore: 50, platformAvg: 8.0, totalVotes: 200, expectedScore: 8 },
+      { workId: "c", title: "C", coverUrls: [], isAdult: false, year: 2022, chanceScore: 80, platformAvg: 9.0, totalVotes: 300, expectedScore: 9 },
     ]
     const { container, unmount } = render(<BussolaPlane entries={semEmpate} />)
     // percentis de 3 obras distintas: 16,67 / 50 / 83,33 — redondos, sem sobra

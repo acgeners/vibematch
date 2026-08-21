@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getSynopsisPredictionsByWorkIds } from "@/server/queries/synopsis-quality"
-import { pickCoverUrls, pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
+import { coverCandidates, pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 
@@ -67,7 +67,7 @@ interface WorkMetaRow {
   canonical_synopsis: string | null
 }
 
-/** Linha de `work_covers` no formato que o `pickCoverUrls` consome. */
+/** Linha de `work_covers` no formato que o `coverCandidates` consome. */
 interface WorkCoverPickRow {
   work_id: string
   url: string | null
@@ -164,7 +164,7 @@ export async function getSimilarWorks(
   }
 
   /**
-   * Candidatas por obra, na ordem de `pickCoverUrls` (is_primary, depois position).
+   * Candidatas por obra, na ordem de `coverCandidates` (is_primary, depois position).
    *
    * ⚠️ Essa é a MESMA ordem do `cover_url` que a RPC devolve
    * (`order by wc.is_primary desc nulls last, wc.position asc nulls last limit 1`),
@@ -180,7 +180,7 @@ export async function getSimilarWorks(
     else coverRowsByWorkId.set(row.work_id, [row])
   }
   const coverUrlsByWorkId = new Map<string, string[]>(
-    [...coverRowsByWorkId].map(([workId, rows]) => [workId, pickCoverUrls(rows)]),
+    [...coverRowsByWorkId].map(([workId, rows]) => [workId, coverCandidates(rows)]),
   )
 
   const metaById = new Map<string, WorkMetaRow>(

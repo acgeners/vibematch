@@ -25,11 +25,11 @@ if (typeof CSS === "undefined") {
 }
 
 const OBRAS: BussolaDatum[] = [
-  { workId: "a", title: "Chance média", coverUrl: null, isAdult: false, year: 2021, chanceScore: 55, platformAvg: 8.2, totalVotes: 1200, expectedScore: 8.1 },
-  { workId: "b", title: "Chance alta", coverUrl: null, isAdult: false, year: 2022, chanceScore: 78, platformAvg: 8.8, totalVotes: 23879, expectedScore: 8.4 },
-  { workId: "c", title: "Chance baixa", coverUrl: null, isAdult: false, year: 2023, chanceScore: 21, platformAvg: 7.1, totalVotes: 90, expectedScore: 6.9 },
-  { workId: "d", title: "Sem chance", coverUrl: null, isAdult: false, year: 2024, chanceScore: null, platformAvg: 7.6, totalVotes: 400, expectedScore: 7.2 },
-  { workId: "e", title: "Chance quase alta", coverUrl: null, isAdult: false, year: 2020, chanceScore: 70, platformAvg: 7.9, totalVotes: 5000, expectedScore: 8.0 },
+  { workId: "a", title: "Chance média", coverUrls: [], isAdult: false, year: 2021, chanceScore: 55, platformAvg: 8.2, totalVotes: 1200, expectedScore: 8.1 },
+  { workId: "b", title: "Chance alta", coverUrls: [], isAdult: false, year: 2022, chanceScore: 78, platformAvg: 8.8, totalVotes: 23879, expectedScore: 8.4 },
+  { workId: "c", title: "Chance baixa", coverUrls: [], isAdult: false, year: 2023, chanceScore: 21, platformAvg: 7.1, totalVotes: 90, expectedScore: 6.9 },
+  { workId: "d", title: "Sem chance", coverUrls: [], isAdult: false, year: 2024, chanceScore: null, platformAvg: 7.6, totalVotes: 400, expectedScore: 7.2 },
+  { workId: "e", title: "Chance quase alta", coverUrls: [], isAdult: false, year: 2020, chanceScore: 70, platformAvg: 7.9, totalVotes: 5000, expectedScore: 8.0 },
 ]
 
 const linhas = (container: HTMLElement) =>
