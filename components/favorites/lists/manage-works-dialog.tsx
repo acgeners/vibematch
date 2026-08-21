@@ -155,7 +155,7 @@ export function ManageWorksDialog({
                         {checked && <Check className="size-3" />}
                       </span>
                       <CoverImage
-                        url={w.coverUrl}
+                        urls={w.coverUrls}
                         alt={w.title}
                         className="h-11 w-8 shrink-0 rounded object-cover"
                       />

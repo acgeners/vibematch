@@ -1199,7 +1199,7 @@ function ResultCard({
  */
 function Cover({ work, className }: { work: DiscoveryWork; className: string }) {
   const [quebrou, setQuebrou] = useState(false)
-  if (!work.coverUrl || quebrou) {
+  if (!work.coverUrls || quebrou) {
     return <span className={`block shrink-0 rounded border bg-muted ${className}`} />
   }
   return (
@@ -1212,7 +1212,7 @@ function Cover({ work, className }: { work: DiscoveryWork; className: string }) 
       // Aqui é `getCoverImageSrc` avulso, e não o `<CoverImage>`: o placeholder desta lista
       // é escolha registrada (quadrado neutro, sem o traço "—"), e o CoverImage traria o
       // dele junto. O que faltava era o proxy, não o tratamento de erro.
-      src={getCoverImageSrc(work.coverUrl)}
+      src={getCoverImageSrc(work.coverUrls[0] ?? null)}
       alt=""
       width={44}
       height={62}
@@ -1319,13 +1319,13 @@ function SeedChip({
           : "bg-amber-500/10 ring-amber-500/40"
       } ${isPrimary ? "ring-2 ring-foreground/45" : ""}`}
     >
-      {seed.coverUrl ? (
+      {seed.coverUrls.length > 0 ? (
         // `CoverImage` aqui, e não `getCoverImageSrc` avulso como no `Cover` acima: este
         // chip não tratava erro NENHUM, então a capa que não carregasse desenhava o ícone
         // de imagem partida do browser. Não há placeholder próprio a preservar — o dono já
         // traz proxy e queda para o traço.
         <CoverImage
-          url={seed.coverUrl}
+          urls={seed.coverUrls}
           className="h-10 w-7 shrink-0 rounded object-cover"
         />
       ) : (

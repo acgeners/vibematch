@@ -3,7 +3,7 @@ import { hiatusFieldsFromRow } from "@/lib/works/hiatus-display"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchAllRows, fetchAllRowsParallel } from "@/lib/supabase/paginate"
-import { pickPrimaryCover } from "@/lib/work-derived"
+import { coverCandidates } from "@/lib/work-derived"
 import { isUsefulReviewLength, isUsefulReviewText } from "@/lib/reviews/useful-review"
 import { PUBLICATION_STATUSES_BY_ID, PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { classifyWorksWithoutReviews, type NoReviewWork, type NoReviewFilters, type WorkMetaRow } from "@/lib/reviews/no-review-classify"
@@ -158,7 +158,7 @@ export async function getWorksWithoutReviews(
   const works: WorkMetaRow[] = activeNoReview.map((w) => ({
     id: w.id,
     title: w.title,
-    coverUrl: pickPrimaryCover(w.work_covers),
+    coverUrls: coverCandidates(w.work_covers),
     publicationStatus: w.publication_status_id != null ? (PUBLICATION_STATUSES_BY_ID[w.publication_status_id]?.status ?? "Unknown") : "Unknown",
     publicationStatusId: w.publication_status_id,
     ...hiatusFieldsFromRow(w),

@@ -55,7 +55,7 @@ export function ContinueReading({
               return (
                 <li key={item.id} className="flex items-center gap-3 rounded-lg px-1.5 py-2 transition-colors hover:bg-muted/40">
                   <CoverImage
-                    url={item.coverUrl}
+                    urls={item.coverUrls}
                     alt={item.title}
                     className="h-11 w-8 shrink-0 rounded-md object-cover"
                   />

@@ -399,8 +399,8 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
                           o CoverImage já aplica; montando a tag aqui, a busca era a única
                           superfície servindo a URL crua, e o resultado era o ícone de imagem
                           quebrada do browser em 1 de cada 5 resultados. */}
-                      {w.coverUrl ? (
-                        <CoverImage url={w.coverUrl} className="size-full object-cover" />
+                      {w.coverUrls.length > 0 ? (
+                        <CoverImage urls={w.coverUrls} className="size-full object-cover" />
                       ) : (
                         "—"
                       )}

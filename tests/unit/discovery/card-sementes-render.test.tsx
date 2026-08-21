@@ -26,7 +26,7 @@ vi.mock("@/server/actions/work-search", () => ({
 }))
 
 function semente(id: string, title: string): DiscoverySeedInfo {
-  return { id, title, year: 2021, coverUrl: null, hasEmbedding: true }
+  return { id, title, year: 2021, coverUrls: [], hasEmbedding: true }
 }
 
 function resultado(over: Partial<DiscoveryResult> = {}): DiscoveryResult {
@@ -182,7 +182,7 @@ function obra(over: Partial<DiscoveryWork> = {}): DiscoveryWork {
     publicationStatusId: null,
     personalStatusId: null,
     isAdult: false,
-    coverUrl: "https://exemplo/capa.jpg",
+    coverUrls: ["https://exemplo/capa.jpg"],
     synopsis: null,
     simPercentile: 100,
     simRaw: 0.4,

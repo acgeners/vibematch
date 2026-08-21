@@ -45,7 +45,7 @@ export function DeepDiveSimilarSection({ items }: DeepDiveSimilarSectionProps) {
     >
       {items.map((item) => {
         const title = item.title ?? "(obra removida)"
-        const cover = item.coverUrl
+        const cover = item.coverUrls ?? []
         return (
           <div
             key={item.work_id}
@@ -55,9 +55,9 @@ export function DeepDiveSimilarSection({ items }: DeepDiveSimilarSectionProps) {
             )}
           >
             <div className="relative h-24 w-16 shrink-0 overflow-hidden rounded border bg-muted">
-              {cover ? (
+              {cover.length > 0 ? (
                 <CoverImage
-                  url={cover}
+                  urls={cover}
                   alt={title}
                   className="h-full w-full object-cover"
                 />

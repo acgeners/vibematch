@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { createUserClient } from "@/lib/supabase/user"
 import { fetchAllRows, selectByIdsInChunks } from "@/lib/supabase/paginate"
 import { pickPrimaryCover } from "@/lib/covers"
+import { coverCandidates } from "@/lib/work-derived"
 import { CRITERION_SLUGS, type CriterionSlug } from "@/types/domain"
 import type { FavoritesSummary } from "@/server/queries/favorites"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
@@ -27,8 +28,8 @@ export interface WorkListSummary extends FavoritesSummary {
   coverWorkIds: string[]
   /** IDs das obras do grupo (pra alimentar o picker de capas na edição). */
   workIds: string[]
-  /** Até 3 URLs de capa pra o "cover stack" do card. */
-  coverUrls: string[]
+  /** Até 3 slots do "cover stack" do card, cada um com as candidatas de uma obra. */
+  mosaicCovers: string[][]
   /** Nº de comentários do grupo (badge 💬 do card). */
   commentCount: number
 }
@@ -50,7 +51,8 @@ export interface WorkListDetail {
 export interface WorkLiteForPicker {
   id: string
   title: string
-  coverUrl: string | null
+  /** Candidatas de capa DESTA obra (ver MAX_COVER_CANDIDATES). */
+  coverUrls: string[]
   expectedScore: number | null
   isFavorite: boolean
 }
@@ -153,13 +155,23 @@ function summarizeWorks(rows: WorkRow[], scores: ScoresReader): FavoritesSummary
   }
 }
 
-/** Escolhe até 3 capas: usa `coverWorkIds` na ordem escolhida; senão as obras
- *  de maior Nota Prevista (ordenação padrão). */
-function pickCoverUrls(
+/**
+ * Escolhe até 3 OBRAS pro mosaico do grupo: usa `coverWorkIds` na ordem escolhida;
+ * senão as de maior Nota Prevista (ordenação padrão). Devolve as CANDIDATAS de cada
+ * uma — `string[][]`, uma lista por slot —, então cada quadradinho do mosaico cai
+ * pra próxima capa se a primeira morrer.
+ *
+ * ⚠️ Chamava-se `pickCoverUrls` e colidia com o `pickCoverUrls` de `lib/work-derived`,
+ * que responde outra pergunta: aquele são as candidatas de UMA obra, este são obras
+ * DIFERENTES. Mesmo nome para coisas diferentes é a família cara desta base — aqui
+ * ainda por cima com assinaturas incompatíveis, o que só não quebrou porque a local
+ * sombreava a importada dentro deste arquivo.
+ */
+function pickMosaicCovers(
   coverWorkIds: string[],
   memberRows: WorkRow[],
   byId: Map<string, WorkRow>,
-): string[] {
+): string[][] {
   const source =
     coverWorkIds.length > 0
       ? coverWorkIds.map((id) => byId.get(id)).filter((r): r is WorkRow => Boolean(r))
@@ -168,13 +180,13 @@ function pickCoverUrls(
             (Number(b.calculated_scores?.expected_score ?? -Infinity)) -
             (Number(a.calculated_scores?.expected_score ?? -Infinity)),
         )
-  const urls: string[] = []
+  const slots: string[][] = []
   for (const row of source) {
-    const url = pickPrimaryCover(row.work_covers)
-    if (url) urls.push(url)
-    if (urls.length >= 3) break
+    const candidatas = coverCandidates(row.work_covers)
+    if (candidatas.length > 0) slots.push(candidatas)
+    if (slots.length >= 3) break
   }
-  return urls
+  return slots
 }
 
 const WORK_SUMMARY_SELECT =
@@ -269,7 +281,7 @@ export async function getListsWithSummary(): Promise<WorkListSummary[]> {
       color: list.color,
       coverWorkIds,
       workIds: memberIds,
-      coverUrls: pickCoverUrls(coverWorkIds, memberRows, byId),
+      mosaicCovers: pickMosaicCovers(coverWorkIds, memberRows, byId),
       commentCount: (list.comments ?? []).length,
       ...summarizeWorks(memberRows, scores),
     }
@@ -345,7 +357,7 @@ export interface UngroupedFavorites {
   /** IDs das favoritas que não estão em nenhum grupo (escopo do ranking). */
   workIds: string[]
   /** Até 3 URLs de capa pro "cover stack" do card. */
-  coverUrls: string[]
+  mosaicCovers: string[][]
   summary: FavoritesSummary
   /** Quantos grupos o usuário tem — 0 esconde o card (seria igual a "Todos os favoritos"). */
   groupCount: number
@@ -367,7 +379,7 @@ export async function getUngroupedFavorites(): Promise<UngroupedFavorites> {
   const viewerId = await getSessionUserId()
   const empty: UngroupedFavorites = {
     workIds: [],
-    coverUrls: [],
+    mosaicCovers: [],
     summary: { total: 0, withExpectedScore: 0, avgExpectedScore: null, topCriteria: [] },
     groupCount: 0,
   }
@@ -400,7 +412,7 @@ export async function getUngroupedFavorites(): Promise<UngroupedFavorites> {
 
   return {
     workIds,
-    coverUrls: pickCoverUrls([], rows, byId),
+    mosaicCovers: pickMosaicCovers([], rows, byId),
     summary: summarizeWorks(rows, await getScoresReader()),
     groupCount,
   }
@@ -558,7 +570,7 @@ export function groupCountsFrom(membership: GroupMembership): Record<string, num
 export interface MultiGroupFavorites {
   /** IDs das obras em 2+ grupos, já ordenadas por recorrência desc (escopo do ranking). */
   workIds: string[]
-  coverUrls: string[]
+  mosaicCovers: string[][]
   summary: FavoritesSummary
   /** Maior nº de grupos de uma obra — só para o card dizer até onde vai. */
   maxGroups: number
@@ -578,7 +590,7 @@ export interface MultiGroupFavorites {
 export async function getMultiGroupFavorites(): Promise<MultiGroupFavorites> {
   const empty: MultiGroupFavorites = {
     workIds: [],
-    coverUrls: [],
+    mosaicCovers: [],
     summary: { total: 0, withExpectedScore: 0, avgExpectedScore: null, topCriteria: [] },
     maxGroups: 0,
   }
@@ -604,8 +616,8 @@ export async function getMultiGroupFavorites(): Promise<MultiGroupFavorites> {
   return {
     workIds,
     // Capas das MAIS recorrentes (workIds já vem nessa ordem), não das de maior nota: o card
-    // é sobre recorrência, e `pickCoverUrls` sem ids explícitos reordenaria por Prevista.
-    coverUrls: pickCoverUrls(workIds.slice(0, 3), rows, byId),
+    // é sobre recorrência, e `pickMosaicCovers` sem ids explícitos reordenaria por Prevista.
+    mosaicCovers: pickMosaicCovers(workIds.slice(0, 3), rows, byId),
     summary: summarizeWorks(rows, await getScoresReader()),
     maxGroups: membership.byWork[workIds[0]]?.length ?? 0,
   }
@@ -798,7 +810,7 @@ export async function getWorksLiteForPicker(): Promise<WorkLiteForPicker[]> {
     .map((w) => ({
       id: w.id,
       title: w.title,
-      coverUrl: pickPrimaryCover(w.work_covers),
+      coverUrls: coverCandidates(w.work_covers),
       expectedScore: scoresReader.overlay(w.id, w.calculated_scores)?.expected_score ?? null,
       isFavorite: personal.get(w.id).isFavorite,
     }))

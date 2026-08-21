@@ -8,7 +8,7 @@ import {
 import { HIATUS_SELECT_COLUMNS, hiatusFieldsFromRow } from "@/lib/works/hiatus-display"
 import type { HiatusFields } from "@/lib/works/hiatus-display"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
-import { pickPrimaryCover } from "@/lib/covers"
+import { coverCandidates } from "@/lib/work-derived"
 import type { SynopsisQuality } from "@/types/domain"
 import { comixWorkUrl } from "@/lib/external/comix"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
@@ -65,7 +65,7 @@ export interface DashboardStats {
 export interface TopWorkItem extends HiatusFields {
   id: string
   title: string
-  coverUrl: string | null
+  coverUrls: string[]
   expectedScore: number | null
   publicationStatusId: number | null
   personalStatusId: number | null
@@ -80,7 +80,7 @@ export interface TopWorkItem extends HiatusFields {
 export interface ContinueReadingItem extends HiatusFields {
   id: string
   title: string
-  coverUrl: string | null
+  coverUrls: string[]
   personalStatusId: number | null
   /** Status de PUBLICAÇÃO — a home usa para o hiato oficial das bandas de ritmo. */
   publicationStatusId: number | null
@@ -283,7 +283,7 @@ export async function getTopPicksForToday(
       return {
         id: w.id,
         title: w.title,
-        coverUrl: pickPrimaryCover(w.work_covers),
+        coverUrls: coverCandidates(w.work_covers),
         expectedScore: calc?.expected_score ?? null,
         platformAvg: calc?.platform_avg ?? null,
         publicationStatusId: w.publication_status_id ?? null,
@@ -309,7 +309,7 @@ export async function getTopPicksForToday(
     items: ordenadas.slice(0, limit).map((w) => ({
       id: w.id,
       title: w.title,
-      coverUrl: w.coverUrl,
+      coverUrls: w.coverUrls,
       expectedScore: w.expectedScore,
       publicationStatusId: w.publicationStatusId,
       personalStatusId: w.personalStatusId,
@@ -391,7 +391,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
     return {
       id: w.id,
       title: w.title,
-      coverUrl: pickPrimaryCover(w.work_covers),
+      coverUrls: coverCandidates(w.work_covers),
       personalStatusId: state.personalStatusId,
       publicationStatusId: w.publication_status_id ?? null,
       ...hiatusFieldsFromRow(w),

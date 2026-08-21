@@ -24,7 +24,7 @@ function alignmentColor(score: number): string {
 }
 
 export function RankedWorkCard({ rank, ranked }: RankedWorkCardProps) {
-  const { work, coverUrl, alignment_score, justification, top_match_factors } = ranked
+  const { work, coverUrls, alignment_score, justification, top_match_factors } = ranked
   const risks = ranked.risks ?? []
 
   return (
@@ -32,9 +32,9 @@ export function RankedWorkCard({ rank, ranked }: RankedWorkCardProps) {
       <div className="flex flex-col items-center gap-1 pt-0.5">
         <span className="text-xs font-semibold text-muted-foreground tabular-nums">#{rank}</span>
         <div className="relative h-24 w-16 overflow-hidden rounded border bg-muted">
-          {coverUrl ? (
+          {coverUrls.length > 0 ? (
             <CoverImage
-              url={coverUrl}
+              urls={coverUrls}
               alt={work.title}
               className="h-full w-full object-cover"
             />

@@ -137,7 +137,8 @@ export interface RecommendationRunRow {
 export interface ChatRecommendationItem {
   work_id: string
   title: string
-  coverUrl: string | null
+  /** Candidatas de capa (ver MAX_COVER_CANDIDATES). */
+  coverUrls: string[]
   alignment_score: number
   justification: string
   top_match_factors: string[]
@@ -232,7 +233,8 @@ export interface CandidateWorkInput {
 
 export interface RankedCandidate extends RankedWork {
   work: CandidateWorkInput
-  coverUrl: string | null
+  /** Candidatas de capa (ver MAX_COVER_CANDIDATES) — a UI cai pra próxima se a 1ª morrer. */
+  coverUrls: string[]
 }
 
 // ============================================================
@@ -277,7 +279,8 @@ export interface DeepDiveSimilarItem {
   alignment_signal: DeepDiveAlignmentSignal
   /** Hidratado server-side pós-parse pra evitar roundtrip no render. */
   title?: string
-  coverUrl?: string | null
+  /** Candidatas de capa (ver MAX_COVER_CANDIDATES). */
+  coverUrls?: string[]
 }
 
 export interface DeepDiveReviewSynthesis {

@@ -21,7 +21,7 @@ export function CriteriaXray({ work }: { work: SpotlightWork }) {
       <div className="w-[112px] shrink-0 sm:w-[132px]">
         <Link href={`/catalog/${titleToSlug(work.title)}`}>
           <CoverImage
-            url={work.coverUrl}
+            urls={work.coverUrls}
             alt={work.title}
             className="aspect-[3/4] w-full rounded-lg object-cover shadow-sm"
           />

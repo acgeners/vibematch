@@ -1,6 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { pickPrimaryCover } from "@/lib/covers"
+import { coverCandidates } from "@/lib/work-derived"
 import { HIATUS_SELECT_COLUMNS, hiatusFieldsFromRow } from "@/lib/works/hiatus-display"
 import type { HiatusFields } from "@/lib/works/hiatus-display"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
@@ -22,7 +22,7 @@ import { CRITERION_SLUGS } from "@/types/domain"
 export interface PublicShowcaseWork extends HiatusFields {
   id: string
   title: string
-  coverUrl: string | null
+  coverUrls: string[]
   /** Média das plataformas externas (0–10) — fato da obra, igual para todo visitante. */
   platformAvg: number | null
   totalVotes: number
@@ -88,8 +88,8 @@ export async function getSpotlightWork(): Promise<SpotlightWork | null> {
 
   for (const row of rows) {
     if (row.works.is_adult) continue
-    const coverUrl = pickPrimaryCover(row.works.work_covers)
-    if (!coverUrl) continue
+    const coverUrls = coverCandidates(row.works.work_covers)
+    if (coverUrls.length === 0) continue
 
     const bySlug = new Map(
       (row.works.category_scores ?? [])
@@ -101,7 +101,7 @@ export async function getSpotlightWork(): Promise<SpotlightWork | null> {
     return {
       id: row.works.id,
       title: row.works.title,
-      coverUrl,
+      coverUrls,
       platformAvg: row.platform_avg,
       totalVotes: row.total_votes ?? 0,
       publicationStatusId: row.works.publication_status_id,
@@ -154,15 +154,15 @@ export async function getPublicShowcase(limit = 12): Promise<PublicShowcaseWork[
 
   const out: PublicShowcaseWork[] = []
   for (const row of rows) {
-    const coverUrl = pickPrimaryCover(row.works.work_covers)
-    if (!coverUrl) continue
+    const coverUrls = coverCandidates(row.works.work_covers)
+    if (coverUrls.length === 0) continue
     // 18+ fica fora da vitrine pública por padrão: sem sessão não há preferência de ninguém
     // para consultar, e `hide_adult_content` cairia na do dono (mesmo padrão do eixo).
     if (row.works.is_adult) continue
     out.push({
       id: row.works.id,
       title: row.works.title,
-      coverUrl,
+      coverUrls,
       platformAvg: row.platform_avg,
       totalVotes: row.total_votes ?? 0,
       publicationStatusId: row.works.publication_status_id,

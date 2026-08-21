@@ -12,7 +12,6 @@ import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
 export interface UntrackedWorkWithMeta {
   id: string
   title: string
-  coverUrl: string | null
   coverUrls: string[]
   publicationStatusId: number | null
   hiatusKind: HiatusKind | null

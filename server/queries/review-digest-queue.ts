@@ -2,7 +2,7 @@ import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchAllRows } from "@/lib/supabase/paginate"
 import { workCardCountsRpc, getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
-import { pickPrimaryCover } from "@/lib/work-derived"
+import { coverCandidates } from "@/lib/work-derived"
 import { REVIEW_DIGEST_VERSION } from "@/lib/ai-recommendation/review-summarizer"
 import { hasEnoughReviewsForDigest } from "@/lib/reviews/digest-gate"
 
@@ -29,7 +29,7 @@ import { hasEnoughReviewsForDigest } from "@/lib/reviews/digest-gate"
 export interface DigestQueueWork {
   id: string
   title: string
-  coverUrl: string | null
+  coverUrls: string[]
   publicationStatusId: number | null
   personalStatusId: number | null
   expectedScore: number | null
@@ -103,7 +103,7 @@ export async function getReviewDigestQueue(): Promise<DigestQueueResult> {
     return {
       id: w.id,
       title: w.title,
-      coverUrl: pickPrimaryCover(w.work_covers),
+      coverUrls: coverCandidates(w.work_covers),
       publicationStatusId: w.publication_status_id,
       personalStatusId: null,
       expectedScore: null,

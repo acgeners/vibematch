@@ -225,7 +225,7 @@ export default async function RunDetailPage({ params }: PageProps) {
                 risks: r.risks,
                 confidence: r.confidence,
                 work: r.work!,
-                coverUrl: r.coverUrl,
+                coverUrls: r.coverUrls,
               }),
             )}
             worksById={worksById}

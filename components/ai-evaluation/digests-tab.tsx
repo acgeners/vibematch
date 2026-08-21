@@ -111,7 +111,7 @@ export function DigestsTab({
               key={w.id}
               workId={w.id}
               title={w.title}
-              coverUrl={w.coverUrl}
+              coverUrl={w.coverUrls[0] ?? null}
               isAdult={w.isAdult}
               publicationStatusId={w.publicationStatusId}
               reviewCount={w.usefulReviews}

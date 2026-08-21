@@ -875,10 +875,10 @@ export default async function CuradoriaDaObraPage({
       getWorksWithoutTags({ pubStatusIds, personalStatusIds, minTags, maxTags }),
     ])
     const merged = new Map<string, TagsReviewsWork>()
-    const base = (w: { id: string; title: string; coverUrl: string | null; publicationStatusId?: number | null; personalStatusId?: number | null; interest: string | null; canonicalPresent: boolean; inGolden: boolean; expectedScore: number | null; hiatusKind?: HiatusKind | null; hiatusKindConfidence?: "high" | "low" | null; publicationStatusNote?: string | null }) => ({
+    const base = (w: { id: string; title: string; coverUrls: string[]; publicationStatusId?: number | null; personalStatusId?: number | null; interest: string | null; canonicalPresent: boolean; inGolden: boolean; expectedScore: number | null; hiatusKind?: HiatusKind | null; hiatusKindConfidence?: "high" | "low" | null; publicationStatusNote?: string | null }) => ({
       id: w.id,
       title: w.title,
-      coverUrl: w.coverUrl,
+      coverUrls: w.coverUrls,
       publicationStatusId: w.publicationStatusId ?? null,
       personalStatusId: w.personalStatusId ?? null,
       interest: w.interest,

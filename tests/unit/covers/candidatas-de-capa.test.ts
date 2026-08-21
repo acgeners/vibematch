@@ -115,8 +115,20 @@ describe("o passivo de <CoverImage url> (uma candidata só)", () => {
           const linha = fonte.slice(0, i).split("\n").length
           // Válvula: uma URL só é legítima quando não HÁ candidatas (capa que a fonte
           // externa devolveu, demo hardcoded). Declare o motivo encostado na chamada.
+          //
+          // 🔴 A janela olha ACIMA da tag E DENTRO dela. A 1ª versão só olhava acima — e o
+          // lugar natural de escrever o marcador é encostado no `url={...}`, que fica
+          // ABAIXO do `<CoverImage`. Conferido: com a janela só de cima, a exceção do
+          // `taste-preview` foi escrita, ficou dentro da tag, e o teste seguiu acusando
+          // como se ela não existisse — a válvula construída e desligada, que é o defeito
+          // que esta base documenta em `works-owner-colunas-existem`.
           const acima = fonte.split("\n").slice(Math.max(0, linha - 4), linha).join("\n")
-          achados.push({ arquivo, linha, declarado: /cover-url-unica:\s*\S+\s+\S+/.test(acima) })
+          // ⚠️ O motivo tem que estar na MESMA linha do marcador. Com `\s` (que casa \n)
+          // o regex atravessava a quebra e mordia o próprio código de baixo: um
+          // `// cover-url-unica:` PELADO passava, porque `return <CoverImage` virava as
+          // "duas palavras" do motivo. Pego por sonda — a leitura do regex não denunciava.
+          const declarado = /cover-url-unica:[ \t]*\S+[ \t]+\S+/.test(acima + "\n" + corpo)
+          achados.push({ arquivo, linha, declarado })
         }
         i = fim
       }
@@ -127,10 +139,10 @@ describe("o passivo de <CoverImage url> (uma candidata só)", () => {
   const naoDeclarados = semFallback.filter((x) => !x.declarado)
 
   it(`não cresce — hoje ${naoDeclarados.length} chamadas passam uma candidata só`, () => {
-    // 🔴 O número é o TETO, não uma meta: ele desce a cada leva migrada e nunca sobe.
-    // Um `<CoverImage url=>` novo reprova aqui, com arquivo e linha, em vez de nascer
-    // com o fallback desligado como os 36 que já existiam.
-    const TETO = 29
+    // 🔴 O teto é ZERO desde 2026-08-21: todas as chamadas ou passam candidatas, ou
+    // declaram por que não há nenhuma. Um `<CoverImage url=>` novo reprova aqui com
+    // arquivo e linha, em vez de nascer com o fallback desligado como os 36 que existiam.
+    const TETO = 0
     const onde = naoDeclarados.map((x) => `${x.arquivo}:${x.linha}`).join("\n  ")
     expect(
       naoDeclarados.length,
@@ -139,7 +151,7 @@ describe("o passivo de <CoverImage url> (uma candidata só)", () => {
     ).toBeLessThanOrEqual(TETO)
   })
 
-  it("as três telas de maior tráfego já passam candidatas", () => {
+  it("as telas migradas não regridem para uma candidata só", () => {
     // Guarda o que este PR entregou: sem isto, uma refatoração devolve `url=` a elas e o
     // teto acima continua satisfeito, porque ele só conta o total.
     const migradas = [

@@ -489,7 +489,7 @@ export async function runRecommendationAction(
         review_quotes: r.review_quotes ?? undefined,
         mood_fit: r.mood_fit ?? null,
         work,
-        coverUrl: work.coverUrl,
+        coverUrls: work.coverUrls,
       })
     }
 
@@ -1144,7 +1144,7 @@ export async function rankSpecificWorksForChat(args: {
         return {
           work_id: r.work_id,
           title: work?.title ?? "(sem título)",
-          coverUrl: work?.coverUrl ?? null,
+          coverUrls: work?.coverUrls ?? [],
           alignment_score: r.alignment_score,
           justification: r.justification,
           top_match_factors: r.top_match_factors,

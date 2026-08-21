@@ -41,22 +41,23 @@ const STACK_POS = [
   "left-[56px] rotate-6 z-[3]",
 ]
 
-function CoverStack({ urls }: { urls: string[] }) {
-  const slots = urls.slice(0, 3)
+/** Cada slot é uma OBRA, e leva as candidatas DELA — por isso `string[][]`. */
+function CoverStack({ slots }: { slots: string[][] }) {
+  const visiveis = slots.slice(0, 3)
   return (
     <div className="pointer-events-none relative h-[92px] w-[120px] shrink-0">
-      {slots.length === 0 ? (
+      {visiveis.length === 0 ? (
         <div className="absolute left-[30px] top-1 h-[84px] w-[60px] rounded-md border border-dashed border-border bg-muted/40" />
       ) : (
-        slots.map((url, i) => (
+        visiveis.map((urls, i) => (
           <div
             key={i}
             className={cn(
               "absolute top-1 h-[84px] w-[60px] overflow-hidden rounded-md border border-white/10 shadow-md",
-              slots.length === 1 ? "left-[30px]" : STACK_POS[i],
+              visiveis.length === 1 ? "left-[30px]" : STACK_POS[i],
             )}
           >
-            <CoverImage url={url} className="h-full w-full object-cover" />
+            <CoverImage urls={urls} className="h-full w-full object-cover" />
           </div>
         ))
       )}
@@ -143,10 +144,12 @@ export function GroupsIndex({
   const [deleting, setDeleting] = useState<WorkListSummary | null>(null)
   const [, startDelete] = useTransition()
 
-  const allCoverUrls = catalog
-    .filter((w) => w.isFavorite && w.coverUrl)
+  // Cada slot do mosaico é uma OBRA diferente, então cada um leva as candidatas DELA:
+  // é uma lista de listas, não uma lista de URLs.
+  const allCoverUrls: string[][] = catalog
+    .filter((w) => w.isFavorite && w.coverUrls.length > 0)
     .slice(0, 3)
-    .map((w) => w.coverUrl as string)
+    .map((w) => w.coverUrls)
 
   function confirmDelete() {
     const target = deleting
@@ -200,7 +203,7 @@ export function GroupsIndex({
             aria-label="Todos os favoritos"
             className="absolute inset-0 rounded-xl"
           />
-          <CoverStack urls={allCoverUrls} />
+          <CoverStack slots={allCoverUrls} />
           <div className="pointer-events-none min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <p className="truncate font-semibold">Todos os favoritos</p>
@@ -230,7 +233,7 @@ export function GroupsIndex({
               aria-label="Favoritas em vários grupos"
               className="absolute inset-0 rounded-xl"
             />
-            <CoverStack urls={multi.coverUrls} />
+            <CoverStack slots={multi.mosaicCovers} />
             <div className="pointer-events-none min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <Layers className="size-4 shrink-0 text-primary" />
@@ -258,7 +261,7 @@ export function GroupsIndex({
               aria-label="Favoritas sem grupo"
               className="absolute inset-0 rounded-xl"
             />
-            <CoverStack urls={ungrouped.coverUrls} />
+            <CoverStack slots={ungrouped.mosaicCovers} />
             <div className="pointer-events-none min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
@@ -286,7 +289,7 @@ export function GroupsIndex({
               aria-label={list.name}
               className="absolute inset-0 rounded-xl"
             />
-            <CoverStack urls={list.coverUrls} />
+            <CoverStack slots={list.mosaicCovers} />
             <div className="pointer-events-none min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 {list.color && (

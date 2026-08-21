@@ -20,7 +20,7 @@ export type MarkerKind = "released" | "predicted" | "overdue"
 export interface CalendarMarker {
   workId: string
   title: string
-  coverUrl: string | null
+  coverUrls: string[]
   kind: MarkerKind
   /** Dia do marcador (ISO). */
   dateIso: string
@@ -62,7 +62,7 @@ export function buildMarkers(
     const base = {
       workId: w.id,
       title: w.title,
-      coverUrl: w.coverUrl,
+      coverUrls: w.coverUrls,
       publicationStatusId: w.publicationStatusId,
       personalStatusId: w.personalStatusId,
       chaptersRead: w.chaptersRead,

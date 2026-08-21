@@ -106,6 +106,8 @@ function RecommendationCard() {
       <div className="flex items-start gap-3">
         <div className="relative shrink-0">
           <CoverImage
+            // cover-url-unica: ANCHOR é uma obra de DEMONSTRAÇÃO, com a URL escrita à mão
+            // neste arquivo — não há linha em work_covers, logo não existem candidatas.
             url={ANCHOR.coverUrl}
             alt={ANCHOR.title}
             loading="eager"

@@ -3,7 +3,7 @@ import { HIATUS_SELECT_COLUMNS, hiatusFieldsFromRow } from "@/lib/works/hiatus-d
 import type { HiatusFields } from "@/lib/works/hiatus-display"
 import { getInterestReader } from "@/server/queries/user-interest"
 import { fetchAllRows, fetchAllRowsParallel } from "@/lib/supabase/paginate"
-import { pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/lib/work-derived"
+import { coverCandidates, pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/lib/work-derived"
 import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { getCurrentUserId, getSessionUserId } from "@/server/queries/current-user"
@@ -286,7 +286,7 @@ export async function getRatedWorksForProfile(
 }
 
 export interface FavoriteCandidate extends CandidateWorkInput {
-  coverUrl: string | null
+  coverUrls: string[]
   isAlreadyRated: boolean
 }
 
@@ -306,7 +306,7 @@ function mapRowToCandidate(
       position: s.position ?? null,
     })),
   )
-  const coverUrl = pickPrimaryCover(
+  const coverUrls = coverCandidates(
     (work.work_covers as RawCoverRow[] | undefined)?.map((c) => ({
       url: c.url ?? null,
       is_primary: c.is_primary ?? null,
@@ -327,7 +327,7 @@ function mapRowToCandidate(
     totalVotes: calc?.total_votes != null ? Number(calc.total_votes) : null,
     reviewSummary: (work.review_summary as string | null) ?? null,
     reviewDigest,
-    coverUrl,
+    coverUrls,
     isAlreadyRated: state?.user_score != null,
   } satisfies FavoriteCandidate
 }
@@ -426,7 +426,7 @@ export async function getCandidateById(workId: string): Promise<FavoriteCandidat
 export interface StaleAlignmentWork {
   id: string
   title: string
-  coverUrl: string | null
+  coverUrls: string[]
   publicationStatusId: number | null
   personalStatusId: number | null
   alignmentScore: number | null
@@ -482,7 +482,7 @@ export async function getStaleAlignmentWorks(
         title: w.title as string,
         publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
         personalStatusId: personalReader.get(w.id as string).personalStatusId,
-        coverUrl: pickPrimaryCover(
+        coverUrls: coverCandidates(
           (w.work_covers as RawCoverRow[] | undefined)?.map((c) => ({
             url: c.url ?? null,
             is_primary: c.is_primary ?? null,
@@ -510,15 +510,14 @@ export async function getStaleAlignmentWorks(
     return at - bt
   })
   return candidates.slice(0, limit).map(
-    ({ id, title, publicationStatusId, personalStatusId, coverUrl, alignmentScore, alignmentAt }) =>
-      ({ id, title, publicationStatusId, personalStatusId, coverUrl, alignmentScore, alignmentAt }) satisfies StaleAlignmentWork,
+    ({ id, title, publicationStatusId, personalStatusId, coverUrls, alignmentScore, alignmentAt }) =>
+      ({ id, title, publicationStatusId, personalStatusId, coverUrls, alignmentScore, alignmentAt }) satisfies StaleAlignmentWork,
   )
 }
 
 export interface AlignmentQueueWork {
   id: string
   title: string
-  coverUrl: string | null
   /** Todas as capas (primária primeiro) — pro fallback quando uma falha. */
   coverUrls: string[]
   publicationStatusId: number | null
@@ -627,7 +626,6 @@ export async function getAlignmentQueueWorks(opts: {
     rows.push({
       id: w.id as string,
       title: w.title as string,
-      coverUrl: coverUrls[0] ?? null,
       coverUrls,
       publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
       personalStatusId,
@@ -644,7 +642,6 @@ export async function getAlignmentQueueWorks(opts: {
 export interface UntrackedWork extends HiatusFields {
   id: string
   title: string
-  coverUrl: string | null
   coverUrls: string[]
   publicationStatusId: number | null
   personalStatusId: number | null
@@ -702,7 +699,6 @@ export async function getUntrackedWorks(opts: {
     rows.push({
       id: w.id as string,
       title: w.title as string,
-      coverUrl: coverUrls[0] ?? null,
       coverUrls,
       publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
       personalStatusId,
@@ -809,7 +805,6 @@ export async function countStaleAlignmentWorks(): Promise<number> {
 export interface SynopsisQueueWork {
   id: string
   title: string
-  coverUrl: string | null
   /** Todas as capas (primária primeiro) — pro fallback quando uma falha. */
   coverUrls: string[]
   publicationStatusId: number | null
@@ -1009,7 +1004,6 @@ export async function getSynopsisQueueWorks(opts: {
     return {
       id: w.id as string,
       title: w.title as string,
-      coverUrl: coverUrls[0] ?? null,
       coverUrls,
       publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
       personalStatusId: personal.personalStatusId,
@@ -1423,7 +1417,7 @@ export interface RecommendationRunWithWorks {
     risks: string[]
     confidence: number | null
     work: FavoriteCandidate | null
-    coverUrl: string | null
+    coverUrls: string[]
     workMissing: boolean
   }>
 }
@@ -1517,7 +1511,7 @@ export async function getRecommendationRun(idOrSlug: string): Promise<Recommenda
         risks: Array.isArray(r.risks) ? r.risks : [],
         confidence: r.confidence != null ? Number(r.confidence) : null,
         work,
-        coverUrl: work?.coverUrl ?? null,
+        coverUrls: work?.coverUrls ?? [],
         workMissing: work === null,
       }
     })
@@ -1546,7 +1540,7 @@ export async function getRecommendationRun(idOrSlug: string): Promise<Recommenda
 export interface AlignedWork {
   id: string
   title: string
-  coverUrl: string | null
+  coverUrls: string[]
   /** personal_fit determinístico (0–1) — teto baixo (~0.55) por construção. */
   personalFit: number
   /** Percentil (0–100) dentro da biblioteca; comunica "Top X%" de forma mais honesta. */
@@ -1708,7 +1702,7 @@ export async function getAlignedWorkSplit(
       return {
         id,
         title: w.title as string,
-        coverUrl: pickPrimaryCover(
+        coverUrls: coverCandidates(
           (w.work_covers as RawCoverRow[] | undefined)?.map((c) => ({
             url: c.url ?? null,
             is_primary: c.is_primary ?? null,

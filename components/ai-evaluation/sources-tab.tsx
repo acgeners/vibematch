@@ -232,7 +232,7 @@ export function SourcesTab({
               key={w.id}
               workId={w.id}
               title={w.title}
-              coverUrl={w.coverUrl}
+              coverUrl={w.coverUrls[0] ?? null}
               isAdult={w.isAdult}
               userScore={w.userScore}
               expectedScore={w.expectedScore}

@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getPersonalStatusIdByName } from "@/lib/constants/status-lookups"
-import { pickPrimaryCover } from "@/lib/covers"
+import { coverCandidates } from "@/lib/work-derived"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
@@ -12,7 +12,7 @@ type ExternalIdRow = { source: string; external_id: string | null; is_rejected: 
 export interface ReadingWork {
   id: string
   title: string
-  coverUrl: string | null
+  coverUrls: string[]
   personalStatusId: number | null
   publicationStatusId: number | null
   /** Conteúdo adulto (18+) efetivo — works.is_adult. */
@@ -114,7 +114,7 @@ export async function getReadingWorks(
     return {
       id: w.id,
       title: w.title,
-      coverUrl: pickPrimaryCover(w.work_covers),
+      coverUrls: coverCandidates(w.work_covers),
       personalStatusId: state.personalStatusId,
       publicationStatusId: w.publication_status_id ?? null,
       isAdult: Boolean(w.is_adult),
