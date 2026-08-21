@@ -33,6 +33,7 @@
 import { createClient } from "@supabase/supabase-js"
 import { realinharFaixaCitada } from "@/lib/ai-evaluation/service"
 import { bandForScore } from "@/lib/criteria/justification"
+import { criarFunil } from "./lib/funil.mjs"
 
 const EXECUTE = process.argv.includes("--execute")
 const PISOS = new Set([5, 7, 9])
@@ -106,10 +107,16 @@ async function main() {
     }
   }
 
-  console.log(`atributos com justificativa: ${linhas.length}`)
+  const funil = criarFunil("backfill da faixa citada")
+  funil.passo("atributos com justificativa", linhas.length)
   for (const [k, v] of [...motivos].sort()) console.log(`  ${k}: ${v}`)
   const alvo = [...grupos.limite, ...grupos.desconhecida]
-  console.log(`\na reescrever: ${alvo.length}`)
+  funil.passo("a reescrever", alvo.length)
+  if (alvo.length === 0) {
+    funil.nadaAFazer("\nnada a reescrever.")
+    return
+  }
+  funil.relatar()
 
   for (const l of alvo.slice(0, 3)) {
     const causa = grupos.limite.includes(l) ? "limite" : "desconhecida"

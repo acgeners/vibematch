@@ -32,6 +32,7 @@ import { execFileSync } from "node:child_process"
 import { exigeAlvoNuvem } from "./lib/exige-alvo-nuvem"
 // O dono da retenção é ÚNICO de propósito — ver scripts/lib/backups-retencao.mjs
 import { podar } from "./lib/backups-retencao.mjs"
+import { criarFunil } from "./lib/funil.mjs"
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -99,8 +100,10 @@ async function main() {
      ) t`,
   )
   const doLocal = JSON.parse(bruto) as Array<Record<string, unknown>>
+  const funil = criarFunil("push da estrutura de abertura")
+  funil.passo("com opening_structure no local", doLocal.length)
   if (doLocal.length === 0) {
-    console.log("nada com opening_structure no local — nada a subir.")
+    funil.nadaAFazer("nada a subir.")
     return
   }
 
@@ -109,6 +112,11 @@ async function main() {
     `works?select=id,opening_structure&id=in.(${ids.join(",")})`,
   )
   const jaTem = new Map(naNuvem.map((r) => [r.id, r.opening_structure]))
+  // O estágio do meio: sem ele, "0 subidas" não distingue "a nuvem já tinha tudo" de
+  // "nenhuma das obras locais existe lá" — duas conclusões opostas com o mesmo número.
+  funil.passo("que existem na nuvem", naNuvem.length)
+  funil.passo("ainda sem estrutura na nuvem", [...jaTem.values()].filter((v) => v == null).length)
+  funil.relatar()
 
   const snapshot: Record<string, unknown> = { quando: new Date().toISOString(), url, antes: naNuvem }
   let subiu = 0

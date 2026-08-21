@@ -36,6 +36,8 @@ import { createClient } from "@supabase/supabase-js"
 import { titleFixOrNull } from "@/lib/titles/title-normalize"
 // O dono da retenção de `.backups` é ÚNICO — ver scripts/lib/backups-retencao.mjs.
 import { podar } from "./lib/backups-retencao.mjs"
+// "nada a corrigir" tem de sair junto do funil — ver scripts/lib/funil.mjs.
+import { criarFunil } from "./lib/funil.mjs"
 
 const EXECUTAR = process.argv.includes("--execute")
 
@@ -79,17 +81,24 @@ async function main() {
   const ehLocal = /127\.0\.0\.1|localhost/.test(alvo)
   console.log(`alvo: ${alvo}${ehLocal ? "  ⚠️  LOCAL — este script quer a NUVEM" : ""}`)
 
+  const funil = criarFunil("normalizar títulos")
+
   const obras = await lerTodosOsTitulos()
-  console.log(`${obras.length} obras lidas\n`)
+  funil.passo("obras lidas", obras.length)
 
   const plano = obras
     .map((o) => ({ id: o.id, antes: o.title, depois: titleFixOrNull(o.title) }))
     .filter((p): p is { id: string; antes: string; depois: string } => p.depois !== null)
+  funil.passo("com título fora da régua", plano.length)
 
   if (plano.length === 0) {
-    console.log("nada a corrigir.")
+    // A cadeia sai JUNTO da frase: "nada a corrigir" sozinho não distingue "o catálogo está
+    // limpo" de "a leitura veio vazia".
+    funil.nadaAFazer("nada a corrigir.")
     return
   }
+  funil.relatar()
+  console.log("")
 
   // Colchetes marcam as pontas: sem eles, espaço sobrando é invisível justamente no
   // ensaio que existe pra torná-lo visível.

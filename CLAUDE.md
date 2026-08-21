@@ -3508,6 +3508,10 @@ console"* — **teria falhado nos dois sentidos**: o React 19 engole a exceção
 deploy por causa das capas mortas. Os sinais que funcionam foram medidos, não deduzidos: resposta
 **5xx** e **esqueleto sobrando** depois de hidratar.
 
+✅ **2. Script de correção declara o que esperava achar — FEITO em 2026-08-21**
+(`scripts/lib/funil.mjs`, seção própria). Aplicado a 9 scripts; o teste derivado do git achou
+um que a varredura manual não tinha visto. O texto abaixo era o plano:
+
 **2. Script de correção declara o que esperava achar.** *"Nada a fazer"* é indistinguível de
 *"está tudo certo"*, e foi o que manteve o `--heal` inerte. A régua: **"nada a fazer" precisa
 provar que OLHOU** — cada estágio do funil imprime quantos candidatos passaram
@@ -3803,6 +3807,70 @@ muito mais barato do que se supunha — a estimativa que circulava era "~2min s�
 Guardado por `tests/unit/orchestration/smoke-logado-verifica-a-sessao.test.ts` (12 casos) e
 pelos 4 casos novos em `deploy-verifica-o-que-publica.test.ts`. **11 sondas conferidas**,
 inclusive a que congela o achado caro: voltar a comparar caminho sem `realpath` reprova.
+
+## "Nada a fazer" tem que PROVAR que olhou — o funil dos scripts de correção
+
+Dono único: **`scripts/lib/funil.mjs`** (`criarFunil`). Todo script que varre, filtra e corrige
+imprime a cadeia de estágios, e a conclusão nunca sai sem ela:
+
+```
+funil (adult-content --heal): 1011 com adult_content persistido → 392 com piso/teto em vigor
+  → 392 candidatas a heal → 373 com baseline da avaliação encontrado → 0 com nota a mover
+```
+
+🔴 **Ele existe porque "nada a fazer" é indistinguível de "está tudo certo".** Foi assim que o
+`--heal` do `adult-content-retroactive-bounds.ts` ficou INERTE: o PostgREST devolve embed
+to-one como objeto, o código fazia `?.[0]`, e o baseline não era achado em **373 de 392
+obras**. O script imprimia "nada a gravar" e saía com sucesso. Quem o pegou foi um contador dar
+0 onde eu esperava 89 — não um teste, não um log.
+
+✅ **Conferido com sonda em 21/08, contra a nuvem:** devolvendo o `?.[0]`, o funil imprime
+`392 → 0 com baseline da avaliação encontrado` e marca 🔴. Sem o funil, a mesma execução dizia
+só "nada a gravar".
+
+### A régua do que é DRENO custou duas versões erradas, e as duas caíram rodando
+
+| funil medido na nuvem (21/08) | marca? | por quê |
+|---|---|---|
+| `392 com limite → 19 com baseline → 0 a mover` | **sim** | o 19 não é o resultado: algo o engoliu no meio |
+| `1020 obras lidas → 0 fora da régua` | não | o zero É o resultado (passivo fechado em 18/08) |
+| `1010 ativas → 0 pendentes → 0 a gravar` | não | idem, com um passo redundante depois |
+
+🔴 **A régua final: a queda que produz o resultado final é o resultado, não um dreno.** A 1ª
+versão marcava todo passo (alarmou o caso 2 na primeira execução real) e a 2ª ignorava só o
+último passo (ainda alarmava o caso 3). **Nenhuma das duas foi pega lendo o código** — as duas
+caíram ao rodar contra o banco. É a régua desta base sobre alarme: o limiar sai da
+distribuição, não do olho.
+
+⚠️ **O preço, declarado:** um funil que cai para o valor final e para lá fica não é apontado,
+mesmo que a queda tenha sido defeito. Para esse caso existe **`reterAoMenos`** — a expectativa
+ESCRITA por quem conhece o filtro (`funil.passo("com baseline", n, { reterAoMenos: 0.5 })`), que
+faz `relatar()` devolver `false`. É o "declara o que esperava achar" do título.
+
+### Onde vale, e a válvula
+
+Aplicado a **9 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos`
+· `normalizar-titulos-alternativos` · `reverter-calibracao-auto-aplicada` ·
+`backfill-faixa-citada` · `repick-dead-covers` · `seed-art-signal` · `tag-r19-adult` ·
+`push-opening-structure`.
+
+⚠️ **`funil.nadaAFazer("…")` substitui o `console.log` da frase**, e não é estilo: separados,
+volta a ser possível imprimir a conclusão sem a evidência, que é o estado exato que custou o
+`--heal`.
+
+⚠️ **Há UM caso legítimo de dispensa, declarado em código** (`// funil-dispensado: <motivo>`):
+`fix-external-ids-compartilhados.ts` não varre nada — é uma lista FIXA de correções nomeadas, e
+o "nada a fazer" dele é sobre UM item, impresso logo abaixo do rótulo que o identifica. A
+válvula exige motivo com frase de verdade, e **a contagem vai no título do caso de teste**, que
+aparece em toda execução — é assim que ela não cresce calada.
+
+🔴 **Foi o TESTE que achou esse nono script**, não a minha varredura: eu procurava as frases que
+já conhecia e ele deriva do git todo script com modo de execução que toca o banco. Contar pela
+forma conhecida confirma o alcance que já se tem.
+
+Guardado por `tests/unit/orchestration/script-de-correcao-declara-o-funil.test.ts` (9 casos),
+com 3 sondas conferidas: `console.log` solto de volta, funil montado e nunca impresso, e
+dispensa sem motivo.
 
 ## `npm run contracts`: o contrato das RPCs, conferido contra o BANCO
 
@@ -6071,12 +6139,19 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.461 passando (+24 pulados) em 331 arquivos** (326 passando + 5 pulados);
-medido em 2026-08-21 com o smoke logado: **+15 casos e +1 arquivo**
-(`orchestration/smoke-logado-verifica-a-sessao`, 12 casos, mais 3 em
-`deploy-verifica-o-que-publica`). Disco (`find`) = índice (`git ls-files`) = **331**, conferido
-DEPOIS do `git add`, sobre `origin/main` (`dd2c9c5`) + só os arquivos deste trabalho, em DUAS
-rodadas limpas com resultado idêntico.
+`npm run test` → **3.470 passando (+24 pulados) em 332 arquivos** (327 passando + 5 pulados);
+medido em 2026-08-21 **depois** de o smoke logado e o funil dos scripts de correção entrarem
+juntos: **+24 casos e +2 arquivos** sobre o canário
+(`orchestration/smoke-logado-verifica-a-sessao`, 12 casos · `deploy-verifica-o-que-publica`, +3
+· `orchestration/script-de-correcao-declara-o-funil`, 9). Disco (`find`) = índice
+(`git ls-files`) = **332**, conferido DEPOIS do `git add`, em DUAS rodadas limpas com resultado
+idêntico.
+
+🔴 **Este número saiu de RE-MEDIR na resolução do conflito, não de somar os dois PRs.** Os dois
+foram escritos em paralelo, cada um com o seu número (3.461 e 3.455), e nenhum dos dois valia
+depois do merge — o CLAUDE.md de cada branch estava certo sobre uma base que deixou de existir.
+A soma prevista batia (3.470), e isso é sorte de aritmética, não método: quem soma acerta até o
+dia em que os dois PRs tocarem o mesmo arquivo de teste.
 
 ⚠️ **Este número foi REMEDIDO depois do rebase, não somado ao que estava escrito.** A medição
 inicial (3.382 em 325) valia sobre uma `main` que andou 4 commits no meio da sessão — os PRs

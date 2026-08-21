@@ -37,6 +37,7 @@ import { measureCover, scoreCover } from "@/lib/server/covers/measure-cover"
 import { pickCoverUrls } from "@/lib/work-derived"
 // O dono da retenção de `.backups` é ÚNICO — ver scripts/lib/backups-retencao.mjs.
 import { podar } from "./lib/backups-retencao.mjs"
+import { criarFunil } from "./lib/funil.mjs"
 
 const EXECUTAR = process.argv.includes("--execute")
 const CONCORRENCIA = 24
@@ -99,6 +100,9 @@ async function main() {
     if (lista) lista.push(c)
     else porObra.set(c.work_id, [c])
   }
+  const funil = criarFunil("repescar capas mortas")
+  funil.passo("capas conhecidas", capas.length)
+  funil.passo("obras com capa", porObra.size)
   console.log(`${capas.length} capas em ${porObra.size} obras`)
 
   // ⚠️ A ordem vem do `pickCoverUrls`, o MESMO dono que a UI usa (e que casa com o
@@ -197,6 +201,8 @@ async function main() {
   }
 
   plano.sort((a, b) => a.titulo.localeCompare(b.titulo))
+  funil.passo("com capa morta e alternativa viva", plano.length)
+  funil.relatar()
   console.log(`\n\n${plano.length} obra(s) com capa morta E alternativa viva:\n`)
   for (const p of plano) {
     console.log(`  ${p.titulo}`)
@@ -244,7 +250,7 @@ async function main() {
     return
   }
   if (plano.length === 0) {
-    console.log("\nnada a gravar.")
+    funil.nadaAFazer("\nnada a gravar.")
     return
   }
 
