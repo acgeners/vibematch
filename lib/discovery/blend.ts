@@ -27,9 +27,11 @@
  * dois é contar o mesmo eixo duas vezes e afogar a parecença, que é ortogonal aos dois
  * (corr ≈ −0,04 com ambos). Ele acompanha o resultado como COLUNA, para leitura.
  *
- * `alignment_score` (Veredito IA): existe em **510 das 988** obras. Entrar no score puniria
- * em silêncio metade do catálogo por ainda não ter passado pelo re-rank — o mesmo erro de
- * tratar ausência de medição como medição ruim. Também é só coluna.
+ * `alignment_score` (Veredito IA): existe só onde alguém pediu o re-rank, e a proporção SOBE
+ * a cada Rankear — 510 das 988 obras quando isto foi escrito, 695 de 978 no clone local em
+ * 2026-08-21. O argumento não depende do número: entrar no score puniria em silêncio quem
+ * ainda não passou, que é o mesmo erro de tratar ausência de medição como medição ruim.
+ * Também é só coluna.
  */
 
 /** Uma obra candidata, já com os dois eixos brutos resolvidos. */

@@ -143,6 +143,47 @@ describe("dicionário dos números", () => {
     )
   })
 
+  it("nenhuma superfície QUANTIFICA a cobertura do Veredito", () => {
+    // 🔴 A migration 196 corrigiu isto no banco e `sync-constants` trouxe. O texto antigo
+    // terminava com "a maioria das obras fica sem valor até passar pelo Rankear" — e,
+    // medido na NUVEM em 21/08/2026, 697 de 1.010 obras ativas (69,0%) TÊM veredito; no
+    // clone local, 695 de 978 (71,1%). Não era número velho: era a afirmação INVERTIDA,
+    // e ela alimentava quatro superfícies de uma vez por `LABELS.alignment_score` — o
+    // seletor de colunas, o heatmap, o painel de filtros e esta página.
+    //
+    // ⚠️ As superfícies são VARRIDAS, não uma só. A mesma frase vivia no tooltip (banco)
+    // E na nota escrita à mão do /guide/scores, então corrigir só o banco deixaria as
+    // duas metades da MESMA página discordando. É o que a 194 aprendeu com o
+    // `personal_fit`: o docstring certo não alcança o texto que a pessoa lê.
+    //
+    // 🔴 A régua que isto guarda é mais larga que a frase de ontem: prosa GRAVADA sobre o
+    // Veredito não quantifica cobertura, em nenhum sentido. Não é que "maioria" seja a
+    // palavra proibida — é que a cobertura SOBE a cada Rankear, e prosa não tem como
+    // acusar a própria defasagem. Escrever hoje "a maioria TEM veredito" reintroduziria
+    // o mesmo defeito com o sinal trocado. Quem conta é esta página, AO VIVO
+    // (`count: "exact", head: true`), e só para quem tem sessão — `veredito` está em
+    // COVERAGE_PESSOAL, então um texto que remetesse à contagem mentiria para o visitante.
+    const nota = SCORE_NOTES.alignment_score
+    const superficies: Array<[string, string]> = [
+      ["LABELS.alignment_score.tooltip_full", LABELS.alignment_score.tooltip_full ?? ""],
+      ["LABELS.alignment_score.tooltip_short", LABELS.alignment_score.tooltip_short ?? ""],
+      ["SCORE_NOTES.alignment_score", `${nota?.title ?? ""} ${nota?.body ?? ""}`],
+    ]
+    for (const [nome, texto] of superficies) {
+      expect(texto.length, `${nome} ficou vazio`).toBeGreaterThan(10)
+      expect(texto, `${nome} voltou a quantificar quantas obras têm Veredito`).not.toMatch(
+        /maioria|metade|\d+\s*%|\d+ das \d+/i
+      )
+    }
+
+    // E o tooltip diz positivamente o fato ÚTIL que a frase errada tentava dar: a
+    // ausência do Veredito não é uma penalidade — sem ele, a Prioridade é a Prevista.
+    expect(
+      LABELS.alignment_score.tooltip_full,
+      "o tooltip não diz mais o que acontece quando o Veredito falta"
+    ).toMatch(/não penaliza|intacta/i)
+  })
+
   it("toda entrada do recálculo tem rótulo humano", () => {
     // `RECALC_INPUT_LABELS` é `Record<RecalcInput, string>`, então o `tsc` reprova entrada
     // nova sem rótulo. O que ele não vê é o rótulo vazio.
