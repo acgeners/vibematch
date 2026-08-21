@@ -208,15 +208,80 @@ describe("os smokes têm entrada barata", () => {
     expect(achados[0]).toBe("smoke-producao.mjs")
   })
 
-  it("🔴 todo smoke do disco é invocado pelo deploy", () => {
-    // Esta é a guarda contra as duas listas divergirem: o wrapper acha os smokes sozinho, o
+  /**
+   * 🔴 Todo smoke DECLARA o próprio alvo, e a régua nasceu sem isso.
+   *
+   * Até 21/08/2026 este bloco exigia que TODO `scripts/smoke-*.mjs` fosse chamado pelo
+   * `deploy.sh`, porque só existia um tipo: verificar produção depois de publicar. O
+   * `smoke-logado.mjs` quebrou a premissa — ele roda ANTES, contra um build local, e recusa
+   * alvo remoto de propósito (define senha no banco do alvo). Arrastado para o `deploy.sh`,
+   * ele reprovaria todo deploy pela própria guarda.
+   *
+   * A saída não foi excetuá-lo numa lista aqui — é o alvo sair do PRÓPRIO arquivo. Assim o
+   * smoke que alguém escrever amanhã precisa dizer a que mundo pertence, e cai na exigência
+   * certa sozinho.
+   */
+  const ALVO = (f: string) =>
+    readFileSync(join(RAIZ, "scripts", f), "utf8").match(/SMOKE-ALVO:\s*([a-z-]+)/)?.[1] ?? null
+
+  it("🔴 todo smoke do disco DECLARA o alvo", () => {
+    for (const s of SMOKES) {
+      expect(
+        ALVO(s),
+        `\`scripts/${s}\` não declara alvo. Escreva "SMOKE-ALVO: producao" (verifica o que ` +
+          `está NO AR, depois de publicar) ou "SMOKE-ALVO: pre-deploy" (verifica o que VAI ` +
+          `subir, contra um build local) no cabeçalho — é dele que o wrapper e o deploy derivam.`,
+      ).toMatch(/^(producao|pre-deploy)$/)
+    }
+  })
+
+  it("🔴 todo smoke de PRODUÇÃO é invocado pelo deploy", () => {
+    // A guarda contra as duas listas divergirem: o wrapper acha os smokes sozinho, o
     // `deploy.sh` os nomeia. Smoke novo que entrasse só no wrapper rodaria à mão e nunca no
     // deploy — que é justamente quando ele importa.
-    for (const s of SMOKES) {
+    for (const s of SMOKES.filter((f) => ALVO(f) === "producao")) {
       expect(
         CODIGO,
         `\`scripts/${s}\` existe mas o deploy.sh não o chama — ele só rodaria em \`npm run smoke\``,
       ).toContain(s)
     }
+  })
+
+  it("🔴 todo smoke de PRÉ-DEPLOY tem comando próprio, e o deploy NÃO o chama", () => {
+    const preDeploy = SMOKES.filter((f) => ALVO(f) === "pre-deploy")
+    expect(preDeploy.length, "nenhum smoke de pré-deploy — a metade logada voltou a ficar sem rede").toBeGreaterThan(0)
+
+    for (const s of preDeploy) {
+      const comandos = Object.values(PKG.scripts ?? {}).join(" \n ")
+      expect(
+        comandos,
+        `\`scripts/${s}\` roda contra um build LOCAL e não entra no \`npm run smoke\` (que ` +
+          `aponta para produção). Sem entrada própria no package.json, verificá-lo exige ` +
+          `digitar caminho de arquivo — e verificação sem entrada barata não acontece.`,
+      ).toContain(s.replace(/\.mjs$/, ""))
+
+      // 🔴 E o inverso: chamado pelo deploy, ele receberia --base de produção e reprovaria o
+      // deploy inteiro pela própria guarda de alvo.
+      expect(
+        CODIGO,
+        `o deploy.sh chama \`${s}\`, que é de PRÉ-deploy: ele recusa alvo remoto e derrubaria ` +
+          `o comando DEPOIS de publicar.`,
+      ).not.toContain(s)
+    }
+  })
+
+  it("🔴 o wrapper roda os de produção e DECLARA os que ficaram de fora", async () => {
+    const { alvoDoSmoke } = await import("../../../scripts/smoke.mjs")
+    const dir = mkdtempSync(join(tmpdir(), "smoke-alvo-"))
+    writeFileSync(join(dir, "smoke-a.mjs"), "// SMOKE-ALVO: producao\n")
+    writeFileSync(join(dir, "smoke-b.mjs"), "// SMOKE-ALVO: pre-deploy\n")
+    expect(alvoDoSmoke(dir, "smoke-a.mjs")).toBe("producao")
+    expect(alvoDoSmoke(dir, "smoke-b.mjs")).toBe("pre-deploy")
+
+    // O wrapper não pode terminar com um "✅" que esconde metade do trabalho: um smoke de
+    // pré-deploy fora da rodada precisa aparecer na saída, com o comando que o roda.
+    const WRAPPER = readFileSync(join(RAIZ, "scripts/smoke.mjs"), "utf8")
+    expect(WRAPPER, "o wrapper não avisa que a metade logada ficou de fora").toMatch(/preDeploy/)
+    expect(WRAPPER).toContain("smoke:logado")
   })
 })

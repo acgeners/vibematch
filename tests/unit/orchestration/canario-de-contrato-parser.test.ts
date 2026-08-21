@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-// @ts-expect-error — script .mjs sem tipos, importado pelo que ele EXPORTA
+// O `.mjs` não tem tipos, mas o TS resolve o módulo — um `@ts-expect-error` aqui vira
+// TS2578 ("unused directive") e deixa o `npx tsc --noEmit` vermelho para todo mundo.
 import { chamadasNoTexto } from "../../../scripts/contratos-postgrest.mjs"
 
 /**

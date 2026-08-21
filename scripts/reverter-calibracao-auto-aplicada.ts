@@ -38,6 +38,7 @@
  */
 import { createClient } from "@supabase/supabase-js"
 import { exigeAlvoNuvem } from "@/scripts/lib/exige-alvo-nuvem"
+import { criarFunil } from "./lib/funil.mjs"
 
 const EXECUTE = process.argv.includes("--execute")
 const DESDE = process.argv.find((a) => a.startsWith("--desde="))?.slice("--desde=".length) ?? null
@@ -86,15 +87,26 @@ async function main() {
   // última — o `previous_score` dela é o valor imediatamente anterior ao que está no ar. Sem
   // isto o script listava a mesma nota duas vezes e só não revertia duas por acidente da
   // ordenação, porque a 2ª passada encontrava o source já trocado.
+  const funil = criarFunil("reverter calibração auto-aplicada")
+  funil.passo("aplicações no histórico", (sugs ?? []).length)
+
   const vistos = new Set<string>()
   const alvos: Alvo[] = []
+  // Os estágios do meio: sem eles, "nada a reverter" não distingue "já revertido" de
+  // "o filtro de status ou a janela --desde engoliram tudo".
+  let pares = 0
+  let autoAplicadas = 0
+  let naJanela = 0
   for (const s of sugs ?? []) {
     const chave = `${s.work_id}::${s.criterion_slug}`
     if (vistos.has(chave)) continue
     vistos.add(chave)
+    pares++
     // A última aplicação do par manda. Se foi sua, o par não é candidato.
     if (s.status !== "auto_applied") continue
+    autoAplicadas++
     if (DESDE && String(s.applied_at ?? "") < DESDE) continue
+    naJanela++
     const { data: cs } = await sb
       .from("category_scores")
       .select("score, source")
@@ -115,10 +127,17 @@ async function main() {
     })
   }
 
+  funil.passo("pares distintos (a última aplicação manda)", pares)
+  funil.passo("cuja última aplicação foi automática", autoAplicadas)
+  if (DESDE) funil.passo(`aplicadas desde ${DESDE}`, naJanela)
+  funil.passo("ainda sob controle da auditoria", alvos.length)
+
   if (alvos.length === 0) {
-    console.log("nada a reverter.")
+    funil.nadaAFazer("nada a reverter.")
     return
   }
+  funil.relatar()
+  console.log("")
   for (const a of alvos) {
     console.log(
       `  ${(a.applied_at ?? "").slice(0, 10)}  ${a.titulo.slice(0, 38).padEnd(38)} ` +

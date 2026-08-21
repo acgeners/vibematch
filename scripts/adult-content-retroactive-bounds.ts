@@ -27,6 +27,9 @@ import fs from "node:fs"
 import path from "node:path"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { podar } from "./lib/backups-retencao.mjs"
+// O funil imprime ONDE os candidatos se perderam — foi a ausência dele que deixou o
+// `--heal` inerte reportando "nada a gravar". Ver scripts/lib/funil.mjs.
+import { criarFunil } from "./lib/funil.mjs"
 import { aplicarLimiteAdulto } from "@/lib/ai-evaluation/adult-content-apply"
 import {
   computeAdultContentBounds,
@@ -125,7 +128,8 @@ async function main() {
       .eq("ai_evaluations.ai_evaluation_scores.criterion_slug", "adult_content")
       .range(from, to),
   )
-  console.log(`obras com adult_content persistido: ${scoreRows.length}`)
+  const funil = criarFunil(HEAL ? "adult-content --heal" : "adult-content")
+  funil.passo("com adult_content persistido", scoreRows.length)
   const workIds = scoreRows.map((r) => r.work_id)
 
   // 2) Títulos (só pro relatório).
@@ -215,6 +219,12 @@ async function main() {
   }
   const diffs: Diff[] = []
   const diffsTexto: DiffTexto[] = []
+  // 🔴 Os dois estágios do MEIO, que o relatório antigo não tinha. `comBaseline` é exatamente
+  // onde o `--heal` morria: o embed to-one lido como array devolvia `undefined` em 373 de 392
+  // obras, e o script terminava dizendo "nada a gravar".
+  let comLimite = 0
+  let elegiveisHeal = 0
+  let comBaseline = 0
   for (const row of scoreRows) {
     const bounds = computeAdultContentBounds({
       tags: (tagsByWork.get(row.work_id) ?? []).map((t) => ({
@@ -225,6 +235,7 @@ async function main() {
       genres: genresByWork.get(row.work_id) ?? [],
     })
     if (bounds.floor == null && bounds.ceiling == null) continue
+    comLimite++
     const oldScore = Number(row.score)
 
     // Caminho normal: empurra a nota persistida PRA DENTRO da faixa de hoje.
@@ -241,11 +252,13 @@ async function main() {
     // manual posterior que nunca voltou pra avaliação. Ampliar isto é como apagar
     // curadoria em silêncio.
     if (HEAL && newScore === oldScore) {
+      elegiveisHeal++
       const evalScore = umEmbed(row.ai_evaluations)?.ai_evaluation_scores?.find(
         (x) => x.criterion_slug === "adult_content",
       )
       const committed = evalScore?.accepted_score ?? evalScore?.suggested_score
       const baseline = committed != null ? Number(committed) : null
+      if (baseline != null) comBaseline++
       const healed = baseline != null ? clampAdultContentScore(baseline, bounds) : null
       if (
         baseline != null &&
@@ -308,6 +321,21 @@ async function main() {
     })
   }
 
+  funil.passo("com piso/teto em vigor", comLimite)
+  if (HEAL) {
+    funil.passo("que o clamp não move (candidatas a heal)", elegiveisHeal)
+    // 🔴 `reterAoMenos` é a EXPECTATIVA declarada: a avaliação de origem existe para quase toda
+    // obra com limite, então reter 5% é defeito de leitura, não do catálogo. Era o número real
+    // quando o `--heal` estava inerte (19 de 392).
+    funil.passo("com baseline da avaliação encontrado", comBaseline, { reterAoMenos: 0.5 })
+  }
+  funil.passo("com nota a mover", diffs.length)
+  const funilOk = funil.relatar()
+  if (!funilOk) {
+    console.log("       ↑ o script esperava achar mais que isso. Confira a leitura antes de")
+    console.log("         concluir que não há o que corrigir.")
+  }
+
   console.log(`\n${diffs.length} obra(s) fora do piso/teto atual:\n`)
   for (const d of diffs.sort((a, b) => Math.abs(b.newScore - b.oldScore) - Math.abs(a.newScore - a.oldScore))) {
     const seta = d.newScore < d.oldScore ? "↓" : "↑"
@@ -341,7 +369,7 @@ async function main() {
     return
   }
   if (diffs.length === 0 && diffsTexto.length === 0) {
-    console.log(`\nnada a gravar.`)
+    funil.nadaAFazer("\nnada a gravar.")
     return
   }
 
