@@ -3,7 +3,7 @@ import { unstable_cache } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchAllRows } from "@/lib/supabase/paginate"
 import { titleToSlug } from "@/lib/utils"
-import { pickPrimaryCover } from "@/lib/work-derived"
+import { coverCandidates } from "@/lib/work-derived"
 import { getPublicationStatusNameById } from "@/lib/constants/status-lookups"
 import { getHideAdultContent } from "@/server/queries/current-user"
 import { titleTokens, workMatchesQuery, matchedAliasFor, matchTier } from "@/lib/title-match"
@@ -13,7 +13,7 @@ export interface WorkSuggestion {
   id: string
   title: string
   slug: string
-  coverUrl: string | null
+  coverUrls: string[]
   totalChapters: number | null
   year: number | null
   publicationStatus: string | null
@@ -120,7 +120,7 @@ export async function getWorkSuggestions(
       id: row.id,
       title,
       slug: titleToSlug(title),
-      coverUrl: pickPrimaryCover(coversByWork.get(row.id)),
+      coverUrls: coverCandidates(coversByWork.get(row.id)),
       totalChapters: row.total_chapters,
       year: row.year,
       publicationStatus: row.publication_status_id

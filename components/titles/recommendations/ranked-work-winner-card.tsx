@@ -29,7 +29,7 @@ function quality(score: number): { label: string; scoreClass: string; badgeClass
 }
 
 export function RankedWorkWinnerCard({ ranked, totalCount }: RankedWorkWinnerCardProps) {
-  const { work, coverUrl, alignment_score, justification, top_match_factors } = ranked
+  const { work, coverUrls, alignment_score, justification, top_match_factors } = ranked
   const risks = ranked.risks ?? []
   const href = `/catalog/${titleToSlug(work.title)}`
   const q = quality(alignment_score)
@@ -44,9 +44,9 @@ export function RankedWorkWinnerCard({ ranked, totalCount }: RankedWorkWinnerCar
           rel="noopener noreferrer"
           className="group relative block w-48 lg:w-full h-full min-h-[280px] lg:min-h-0 overflow-hidden rounded-lg border bg-muted shadow transition-all duration-300 hover:border-amber-400/40"
         >
-          {coverUrl ? (
+          {coverUrls.length > 0 ? (
             <CoverImage
-              url={coverUrl}
+              urls={coverUrls}
               alt={work.title}
               className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
             />

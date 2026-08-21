@@ -100,7 +100,7 @@ export function PublicHome({
                 >
                   <div className="relative overflow-hidden rounded-md">
                     <CoverImage
-                      url={w.coverUrl}
+                      urls={w.coverUrls}
                       alt={w.title}
                       className="aspect-[3/4] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                     />

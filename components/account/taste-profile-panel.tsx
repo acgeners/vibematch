@@ -842,7 +842,7 @@ function ReadWorkCard({ work, rank }: { work: AlignedWork; rank: number }) {
     <li className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20">
       <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted">
         <CoverImage
-          url={work.coverUrl}
+          urls={work.coverUrls}
           alt={work.title}
           className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
         />
@@ -1522,7 +1522,7 @@ function UnreadWorkCard({ work, rank }: { work: AlignedWork; rank: number }) {
     <li className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20">
       <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted">
         <CoverImage
-          url={work.coverUrl}
+          urls={work.coverUrls}
           alt={work.title}
           className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
         />

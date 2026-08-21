@@ -37,7 +37,7 @@ const RANK_STYLE: Record<number, string> = {
 }
 
 export function RankedWorkFeaturedCard({ rank, ranked }: RankedWorkFeaturedCardProps) {
-  const { work, coverUrl, alignment_score, justification } = ranked
+  const { work, coverUrls, alignment_score, justification } = ranked
   const href = `/catalog/${titleToSlug(work.title)}`
   const q = quality(alignment_score)
 
@@ -54,9 +54,9 @@ export function RankedWorkFeaturedCard({ rank, ranked }: RankedWorkFeaturedCardP
         rel="noopener noreferrer"
         className="relative block w-28 shrink-0 overflow-hidden rounded-lg border bg-muted shadow-sm sm:w-32 aspect-[2/3]"
       >
-        {coverUrl ? (
+        {coverUrls.length > 0 ? (
           <CoverImage
-            url={coverUrl}
+            urls={coverUrls}
             alt={work.title}
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
           />

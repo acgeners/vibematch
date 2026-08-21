@@ -312,10 +312,10 @@ export async function runDeepDive(args: RunDeepDiveArgs): Promise<DeepDiveResult
 
     // Filtra IDs alucinados em vez de hard fail — o resto da análise
     // costuma ser útil mesmo quando um ID está errado. Enriquece com
-    // title+coverUrl direto do contexto pra evitar roundtrip no render.
-    const similarMetadata = new Map<string, { title: string; coverUrl: string | null }>()
-    for (const w of args.context.similars.loved) similarMetadata.set(w.id, { title: w.title, coverUrl: w.coverUrl })
-    for (const w of args.context.similars.avoided) similarMetadata.set(w.id, { title: w.title, coverUrl: w.coverUrl })
+    // title+candidatas direto do contexto pra evitar roundtrip no render.
+    const similarMetadata = new Map<string, { title: string; coverUrls: string[] }>()
+    for (const w of args.context.similars.loved) similarMetadata.set(w.id, { title: w.title, coverUrls: w.coverUrl ? [w.coverUrl] : [] })
+    for (const w of args.context.similars.avoided) similarMetadata.set(w.id, { title: w.title, coverUrls: w.coverUrl ? [w.coverUrl] : [] })
 
     const filteredSimilars = parsed.data.similar_in_library
       .filter((s) => validSimilarIds.has(s.work_id))
@@ -323,7 +323,7 @@ export async function runDeepDive(args: RunDeepDiveArgs): Promise<DeepDiveResult
         const meta = similarMetadata.get(s.work_id)
         return {
           ...s,
-          ...(meta ? { title: meta.title, coverUrl: meta.coverUrl } : {}),
+          ...(meta ? { title: meta.title, coverUrls: meta.coverUrls } : {}),
         }
       })
 

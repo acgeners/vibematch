@@ -154,7 +154,7 @@ export function DeepDiveHistoryList({
                   className="flex w-full items-center gap-3 rounded-lg border bg-card/40 p-2.5 text-left transition hover:bg-card/70"
                 >
                   <CoverImage
-                    url={dive.coverUrl}
+                    urls={dive.coverUrls}
                     alt={dive.workTitle}
                     className="h-14 w-10 shrink-0 rounded-md object-cover"
                   />

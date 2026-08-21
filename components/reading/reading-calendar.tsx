@@ -230,7 +230,7 @@ function DayCovers({
         >
           <WorkTitleLink workId={m.workId} title={m.title} className="block">
             <CoverImage
-              url={m.coverUrl}
+              urls={m.coverUrls}
               alt={m.title}
               className={cn(
                 "h-[88px] w-[59px] rounded-md object-cover shadow-sm ring-2 ring-offset-2 ring-offset-background",
@@ -283,7 +283,7 @@ function MoreTile({ markers, hiddenCount }: { markers: CalendarMarker[]; hiddenC
                 className="flex items-center gap-2.5 rounded-md px-1.5 py-1 transition-colors hover:bg-muted"
               >
                 <CoverImage
-                  url={m.coverUrl}
+                  urls={m.coverUrls}
                   alt=""
                   className={cn("h-9 w-6 shrink-0 rounded-sm object-cover ring-1", RING[m.kind])}
                 />

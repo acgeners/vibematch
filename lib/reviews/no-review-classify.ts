@@ -14,7 +14,7 @@ export interface NoReviewSort {
 export interface NoReviewWork {
   id: string
   title: string
-  coverUrl: string | null
+  coverUrls: string[]
   publicationStatus: string
   publicationStatusId?: number | null
   personalStatus: string
@@ -51,7 +51,7 @@ export interface NoReviewFilters {
 export interface WorkMetaRow {
   id: string
   title: string
-  coverUrl: string | null
+  coverUrls: string[]
   publicationStatus: string
   publicationStatusId?: number | null
   personalStatus: string
@@ -112,7 +112,7 @@ export function classifyWorksWithoutReviews(args: {
     out.push({
       id: w.id,
       title: w.title,
-      coverUrl: w.coverUrl,
+      coverUrls: w.coverUrls,
       publicationStatus: w.publicationStatus,
       publicationStatusId: w.publicationStatusId,
       personalStatus: w.personalStatus,

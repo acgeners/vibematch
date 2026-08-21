@@ -827,7 +827,7 @@ export function ReadingList({
                     className="flex w-68 max-w-full items-stretch gap-2.5 rounded-lg border border-emerald-500/35 bg-card p-2 text-left transition-colors hover:border-emerald-500/60 hover:bg-emerald-500/10"
                   >
                     <CoverImage
-                      url={work.coverUrl}
+                      urls={work.coverUrls}
                       alt=""
                       className="h-16 w-11 shrink-0 rounded object-cover"
                     />
@@ -1290,7 +1290,7 @@ function ReadingCard({
       <CardContent className="flex h-full gap-4 p-3 pl-3.5">
         <div className="relative shrink-0 self-stretch">
           <CoverImage
-            url={work.coverUrl}
+            urls={work.coverUrls}
             alt={work.title}
             className="h-full min-h-48 w-32 rounded-lg object-cover ring-1 ring-border/60"
           />

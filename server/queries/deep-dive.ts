@@ -1,6 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/lib/work-derived"
+import { coverCandidates, pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/lib/work-derived"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getCurrentUserId, getSessionUserId } from "@/server/queries/current-user"
@@ -146,7 +146,7 @@ async function fetchReviewsForWork(workId: string, cap = DEEP_DIVE_REVIEWS_CAP):
 
 async function fetchWorkBundle(workId: string): Promise<{
   work: DeepDiveWorkBundle
-  coverUrl: string | null
+  coverUrls: string[]
 } | null> {
   const supabase = createAdminClient()
   // 🔴 `works`, não a view `works_owner`: ela carrega os 8 `post_*_score`, que são a
@@ -180,7 +180,7 @@ async function fetchWorkBundle(workId: string): Promise<{
     row.canonical_synopsis as string | null | undefined,
     (row.work_synopses as RawSynopsisRow[] | undefined),
   )
-  const coverUrl = pickPrimaryCover(row.work_covers as RawCoverRow[] | undefined)
+  const coverUrls = coverCandidates(row.work_covers as RawCoverRow[] | undefined)
   const [reviews, digestMap] = await Promise.all([
     fetchReviewsForWork(workId),
     fetchReviewDigestsBatch([workId]),
@@ -241,7 +241,7 @@ async function fetchWorkBundle(workId: string): Promise<{
     fit: calc?.personal_fit ?? null,
   }
 
-  return { work, coverUrl }
+  return { work, coverUrls }
 }
 
 /**
@@ -443,7 +443,7 @@ export async function getDeepDiveContext(workId: string): Promise<{
         similars,
         alternatives,
         recentActivity,
-        workCoverUrl: bundle.coverUrl,
+        workCoverUrl: bundle.coverUrls[0] ?? null,
       },
     },
   }
@@ -556,7 +556,7 @@ export interface DeepDiveSummary {
   id: string
   workId: string
   workTitle: string
-  coverUrl: string | null
+  coverUrls: string[]
   matchScore: number | null
   confidence: number | null
   readWhen: DeepDiveReadWhen | null
@@ -629,10 +629,10 @@ export async function listAllDeepDives(limit = 100): Promise<DeepDiveSummary[]> 
   if (worksErr) {
     console.error("[deep-dive] erro hidratando obras dos deep dives:", worksErr)
   }
-  const workById = new Map<string, { title: string; coverUrl: string | null }>(
+  const workById = new Map<string, { title: string; coverUrls: string[] }>(
     (works ?? []).map((w) => {
       const row = w as { id: string; title: string; work_covers?: RawCoverRow[] }
-      return [row.id, { title: row.title, coverUrl: pickPrimaryCover(row.work_covers) }]
+      return [row.id, { title: row.title, coverUrls: coverCandidates(row.work_covers) }]
     }),
   )
 
@@ -643,7 +643,7 @@ export async function listAllDeepDives(limit = 100): Promise<DeepDiveSummary[]> 
       id: r.id as string,
       workId: wid,
       workTitle: w?.title ?? "(obra removida)",
-      coverUrl: w?.coverUrl ?? null,
+      coverUrls: w?.coverUrls ?? [],
       matchScore: r.match_score != null ? Number(r.match_score) : null,
       confidence: r.confidence != null ? Number(r.confidence) : null,
       readWhen: (r.read_when as DeepDiveReadWhen | null) ?? null,

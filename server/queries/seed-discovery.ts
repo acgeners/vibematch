@@ -1,4 +1,5 @@
 import "server-only"
+import { coverCandidates } from "@/lib/work-derived"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
@@ -53,7 +54,7 @@ export interface DiscoverySeedInfo {
   id: string
   title: string
   year: number | null
-  coverUrl: string | null
+  coverUrls: string[]
   /** false = a obra não tem vetor, então ela foi IGNORADA na busca (hoje 4 obras em 988). */
   hasEmbedding: boolean
 }
@@ -66,7 +67,7 @@ export interface DiscoveryWork {
   publicationStatusId: number | null
   personalStatusId: number | null
   isAdult: boolean
-  coverUrl: string | null
+  coverUrls: string[]
   synopsis: string | null
   /** Percentil de parecença com as sementes (0–100) dentro do conjunto avaliado. */
   simPercentile: number
@@ -384,7 +385,7 @@ export async function discoverBySeeds(opts: DiscoverBySeedsOptions): Promise<Dis
       // linhas caíam no placeholder cinza, que lê como "esta obra não tem capa". Medido na
       // nuvem: 980 obras, ZERO sem capa. O fallback continua porque obra nova pode ainda
       // não ter, mas agora ele é a exceção e não a regra.
-      coverUrl: covers.get(b.workId) ?? seedMeta.get(b.workId)?.coverUrl ?? null,
+      coverUrls: covers.get(b.workId) ?? seedMeta.get(b.workId)?.coverUrls ?? [],
       synopsis: (m?.canonical_synopsis ?? "").trim() || null,
       simPercentile: b.simPercentile,
       simRaw: b.simPos,
@@ -594,20 +595,23 @@ async function loadSeedInfo(
     supabase.from("work_embeddings").select("work_id").in("work_id", ids),
   ])
 
-  const coverByWork = new Map<string, string>()
+  // ⚠️ Isto reimplementava a ordenação de capa (is_primary, depois position) pela
+  // SEXTA vez no repo. Hoje agrupa por obra e delega a `coverCandidates`, que é a dona
+  // — assim a semente também cai pra próxima capa quando a primeira morre.
   const covers = (coversResult.data ?? []) as Array<{
     work_id: string
     url: string
     is_primary: boolean | null
     position: number | null
   }>
-  for (const c of [...covers].sort(
-    (a, b) =>
-      Number(Boolean(b.is_primary)) - Number(Boolean(a.is_primary)) ||
-      (a.position ?? 999) - (b.position ?? 999),
-  )) {
-    if (!coverByWork.has(c.work_id)) coverByWork.set(c.work_id, c.url)
+  const linhasPorObra = new Map<string, Array<{ url: string; is_primary: boolean | null; position: number | null }>>()
+  for (const c of covers) {
+    const atual = linhasPorObra.get(c.work_id)
+    if (atual) atual.push(c)
+    else linhasPorObra.set(c.work_id, [c])
   }
+  const coverByWork = new Map<string, string[]>()
+  for (const [workId, linhas] of linhasPorObra) coverByWork.set(workId, coverCandidates(linhas))
 
   const withEmbedding = new Set(
     ((embResult.data ?? []) as Array<{ work_id: string }>).map((r) => r.work_id),
@@ -622,7 +626,7 @@ async function loadSeedInfo(
       id: w.id,
       title: w.title,
       year: w.year,
-      coverUrl: coverByWork.get(w.id) ?? null,
+      coverUrls: coverByWork.get(w.id) ?? [],
       hasEmbedding: withEmbedding.has(w.id),
     })
   }
@@ -642,8 +646,10 @@ async function loadSeedInfo(
 async function loadCoverUrls(
   supabase: ReturnType<typeof createAdminClient>,
   ids: string[],
-): Promise<Map<string, string>> {
-  const out = new Map<string, string>()
+): Promise<Map<string, string[]>> {
+  // Candidatas por obra (ver `coverCandidates`), não a primária: é o que deixa a lista
+  // do /discover cair pra próxima capa quando a primeira morre.
+  const out = new Map<string, string[]>()
   if (ids.length === 0) return out
 
   const { data, error } = await supabase
@@ -662,13 +668,15 @@ async function loadCoverUrls(
     is_primary: boolean | null
     position: number | null
   }>
-  for (const c of [...linhas].sort(
-    (a, b) =>
-      Number(Boolean(b.is_primary)) - Number(Boolean(a.is_primary)) ||
-      (a.position ?? 999) - (b.position ?? 999),
-  )) {
-    if (!out.has(c.work_id)) out.set(c.work_id, c.url)
+  // ⚠️ Isto reimplementava a ordenação de capa pela SÉTIMA vez no repo — a segunda
+  // dentro deste mesmo arquivo. Hoje agrupa e delega ao dono.
+  const porObra = new Map<string, typeof linhas>()
+  for (const c of linhas) {
+    const atual = porObra.get(c.work_id)
+    if (atual) atual.push(c)
+    else porObra.set(c.work_id, [c])
   }
+  for (const [workId, rows] of porObra) out.set(workId, coverCandidates(rows))
   return out
 }
 

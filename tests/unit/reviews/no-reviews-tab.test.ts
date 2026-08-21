@@ -3,7 +3,7 @@ import { isUsefulReviewText, isUsefulReviewLength, MIN_USEFUL_REVIEW_LENGTH } fr
 import { classifyWorksWithoutReviews, type WorkMetaRow } from "@/lib/reviews/no-review-classify"
 
 function work(id: string, title: string, over: Partial<WorkMetaRow> = {}): WorkMetaRow {
-  return { id, title, coverUrl: null, publicationStatus: "Ongoing", personalStatus: "—", aiEvalStatus: "done", canonicalPresent: true, usefulReviewCount: 0, expectedScore: null, interest: null, ...over }
+  return { id, title, coverUrls: [], publicationStatus: "Ongoing", personalStatus: "—", aiEvalStatus: "done", canonicalPresent: true, usefulReviewCount: 0, expectedScore: null, interest: null, ...over }
 }
 
 describe("useful-review rule (centralizada)", () => {

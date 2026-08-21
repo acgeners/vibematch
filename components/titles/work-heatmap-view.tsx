@@ -5,7 +5,7 @@ import { ChevronDown, ChevronUp, ImageOff } from "lucide-react"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { cn } from "@/lib/utils"
-import { pickPrimaryCover } from "@/lib/covers"
+import { coverCandidates } from "@/lib/work-derived"
 import { CoverImage } from "@/components/ui/cover-image"
 import {
   Tooltip,
@@ -488,7 +488,7 @@ export function WorkHeatmapView({
           </thead>
           <tbody>
             {sortedWorks.map((work) => {
-              const cover = pickPrimaryCover(work.work_covers)
+              const cover = coverCandidates(work.work_covers)
               const isSelected = selectedIds.has(work.id)
               return (
                 <tr
@@ -529,9 +529,9 @@ export function WorkHeatmapView({
                         className="flex items-center gap-2.5 hover:underline"
                       >
                         <div className="relative h-10 w-7 shrink-0 overflow-hidden rounded border bg-muted/40">
-                          {cover ? (
+                          {cover.length > 0 ? (
                             <CoverImage
-                              url={cover}
+                              urls={cover}
                               className="h-full w-full object-cover"
                             />
                           ) : (

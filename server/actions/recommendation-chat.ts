@@ -109,7 +109,7 @@ function buildSnapshot(
     items: data.ranked.map((r) => ({
       work_id: r.work_id,
       title: r.work.title,
-      coverUrl: r.coverUrl,
+      coverUrls: r.coverUrls,
       alignment_score: r.alignment_score,
       justification: r.justification,
       top_match_factors: r.top_match_factors,

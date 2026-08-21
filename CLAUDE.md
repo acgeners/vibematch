@@ -3720,16 +3720,58 @@ prévia de hover (todas as listas) · a Bússola · o "Surpreenda-me". Os produt
 chamavam `pickCoverUrls` direto passaram a `coverCandidates`, senão o teto não significaria
 nada — metade das telas mandaria 3 e a outra metade a cauda inteira.
 
-⚠️ **Faltam 29 chamadas passando uma candidata só**, e o número é o TETO de
-`tests/unit/covers/candidatas-de-capa.test.ts`, impresso no TÍTULO do caso: ele desce a cada
-leva e **nunca sobe**. `<CoverImage url=>` novo reprova com arquivo e linha, em vez de nascer
-com o fallback desligado como os 36 que já existiam. A válvula é
-`// cover-url-unica: <motivo>` encostado na chamada — legítima quando não HÁ candidatas (capa
-que a fonte externa devolveu, demo hardcoded). As 6 sondas conferidas, inclusive a válvula nos
-dois sentidos e o teto dentro do `pickCoverUrls`.
+✅ **O passivo fechou em 2026-08-21: ZERO chamadas passam uma candidata só.** O teto do
+`tests/unit/covers/candidatas-de-capa.test.ts` é **0**, impresso no TÍTULO do caso, e
+`<CoverImage url=>` novo reprova com arquivo e linha. A válvula é
+`// cover-url-unica: <motivo>` — legítima quando não HÁ candidatas. Hoje há **uma**: o
+`taste-preview` do login, cuja obra é DEMO com a URL escrita à mão no arquivo.
 
-⚠️ **O comparador (`WorkCompareDrawer`) ficou de fora** — o `CompareWork` guarda uma URL só, e
-migrá-lo é mexer num tipo grande. Ele segue no estado de hoje (sem fallback), não regrediu.
+🔴 **A migração achou SETE reimplementações da mesma ordenação** (is_primary, depois position),
+não as duas do PR anterior. Nenhuma errada; o problema é a ordem da capa passar a depender de
+qual cópia a tela chamou. Todas derivam do dono agora:
+
+| onde | o que era |
+|---|---|
+| `lib/covers.pickPrimaryCover` | régua própria, sem olhar `position` |
+| `coversOf` (`my-list`) | ordenação à mão |
+| `orderedCoverUrls` (`recommendations`) | idem |
+| `pickCoverUrls` LOCAL (`lists`) | **colisão de NOME** — ver abaixo |
+| `coverByWork` + `loadCoverUrls` (`seed-discovery`) | **duas** no mesmo arquivo |
+
+🔴 **A pior não era duplicação, era COLISÃO DE SENTIDO.** `server/queries/lists.ts` tinha um
+`pickCoverUrls` local que responde outra pergunta: o de `lib/work-derived` são as candidatas
+de UMA obra; o local escolhe até 3 OBRAS diferentes pro mosaico do card de grupo. Mesmo nome,
+assinaturas incompatíveis — só não quebrou porque a local sombreava a importada dentro do
+arquivo. E o campo que ela alimenta chamava-se `coverUrls`, o mesmo nome que este PR passou a
+usar para "candidatas da mesma obra". Hoje são `pickMosaicCovers` e `mosaicCovers: string[][]`,
+e o mosaico ganhou fallback de brinde: cada slot leva as candidatas da obra dele.
+
+⚠️ **O que NÃO migrou, e por quê:** os candidatos de FONTE externa
+(`SourceCandidateOption`, `MergedCandidate`, `ExternalSourceCandidateOption`) seguem com uma
+URL só — ali a capa é a que a fonte devolveu, não há candidatas locais, e mudar o tipo
+obrigaria todos os conectores a devolver lista. O primeiro transformador que escrevi tocou os
+três, e o sinal de que estava errado veio do `tsc`, não da leitura.
+
+⚠️ **Custo: zero.** Nenhuma query nova — os produtores já liam `work_covers` inteiro e
+achatavam com `pickPrimaryCover`. O que muda é o payload RSC (+136 B/obra medido no PR
+anterior). E capa não é input do recalc nem do hash de embeddings.
+
+🔴 **DUAS sondas me desmentiram, e as duas eram a válvula construída e DESLIGADA** — o mesmo
+defeito que o `works-owner-colunas-existem` já tinha pago:
+
+1. **A janela só olhava ACIMA do `<CoverImage`.** O lugar natural do marcador é encostado no
+   `url={...}`, que fica DENTRO da tag. A exceção do `taste-preview` foi escrita, ficou
+   dentro, e o teste seguiu acusando como se não existisse.
+2. **O regex usava `\s`, que casa `\n`.** Um `// cover-url-unica:` PELADO passava, porque o
+   `return <CoverImage` da linha de baixo virava as "duas palavras" do motivo. Hoje o motivo
+   é exigido na MESMA linha (`[ \t]`).
+
+Nenhuma das duas aparecia lendo o código — as duas caíram rodando a sonda.
+
+⚠️ **E a suíte pegou uma regressão REAL que o `tsc` não pegou**: a fixture de
+`leitura-capitulo-novo-e-altura` montava `coverUrl` com cast, então a capa sumiu da faixa de
+`/reading` e o `tsc` passou limpo. É o argumento para o teste de RENDER continuar existindo
+ao lado do de tipo.
 
 ## `npm run smoke:logado`: a metade LOGADA, verificada ANTES de publicar
 

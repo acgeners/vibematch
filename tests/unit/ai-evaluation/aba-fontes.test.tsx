@@ -47,7 +47,7 @@ function work(over: Partial<SourceGapWork> = {}): SourceGapWork {
   return {
     id: "w1",
     title: "The Beast I Chose",
-    coverUrl: null,
+    coverUrls: [],
     publicationStatusId: 2,
     hiatusKind: null,
     hiatusKindConfidence: null,

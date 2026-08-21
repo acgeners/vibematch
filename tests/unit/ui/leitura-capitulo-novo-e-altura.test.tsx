@@ -27,7 +27,7 @@ import type { ReadingWork } from "@/server/queries/reading"
 // "Em andamento", que é onde a faixa de novidades e as bandas de ritmo aparecem.
 const base = {
   publicationStatusId: 1,
-  coverUrl: "https://example.test/capa.jpg",
+  coverUrls: ["https://example.test/capa.jpg"],
   lastReadAt: "2026-08-05T12:00:00.000Z",
   lastChapterReleasedAt: "2026-08-07T12:00:00.000Z",
   nextChapterPredictedAt: null,

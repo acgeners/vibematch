@@ -29,7 +29,7 @@ export interface CompareWork extends HiatusFields {
   title: string
   slug: string
   alternativeTitles: string[]
-  coverUrl: string | null
+  coverUrls: string[]
   synopsis: string | null
   year: number | null
   synopsisQuality: string | null
@@ -94,7 +94,7 @@ const GROUP_ID_TO_LABEL: Record<string, string> = Object.fromEntries(
 )
 
 import { titleToSlug } from "@/lib/utils"
-import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
+import { coverCandidates, pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
 
 export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
   const unique = Array.from(new Set(ids.filter(Boolean))).slice(0, MAX_COMPARE_WORKS)
@@ -216,7 +216,7 @@ function mapWorkToCompare(
     title: work.title,
     slug: titleToSlug(work.title),
     alternativeTitles: work.alternative_titles ?? [],
-    coverUrl: primaryCover,
+    coverUrls: coverCandidates(work.work_covers),
     synopsis: canonicalSynopsis ?? primarySynopsis,
     year: (work as { year?: number | null }).year ?? null,
     synopsisQuality: (work as { synopsis_quality?: string | null }).synopsis_quality ?? null,

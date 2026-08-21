@@ -13,7 +13,7 @@ function fmt(n: number): string {
 function CoverCard({ work }: { work: HeroWork }) {
   return (
     <div className="authhero-cover bg-muted">
-      <CoverImage url={work.coverUrl} alt={work.title} className="h-full w-full object-cover" />
+      <CoverImage urls={work.coverUrls} alt={work.title} className="h-full w-full object-cover" />
       {work.nota != null ? (
         <div className="absolute right-1 top-1">
           <ScoreBadge score={work.nota} size="sm" />

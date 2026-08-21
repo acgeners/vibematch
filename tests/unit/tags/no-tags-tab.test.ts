@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { classifyWorksWithoutTags, type TagWorkMetaRow } from "@/lib/tags/no-tags-classify"
 
 function work(id: string, title: string, over: Partial<TagWorkMetaRow> = {}): TagWorkMetaRow {
-  return { id, title, coverUrl: null, publicationStatus: "Ongoing", personalStatus: "—", aiEvalStatus: "done", canonicalPresent: true, tagCount: 0, expectedScore: null, interest: null, ...over }
+  return { id, title, coverUrls: [], publicationStatus: "Ongoing", personalStatus: "—", aiEvalStatus: "done", canonicalPresent: true, tagCount: 0, expectedScore: null, interest: null, ...over }
 }
 
 describe("classifyWorksWithoutTags", () => {

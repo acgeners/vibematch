@@ -172,7 +172,7 @@ export function ContinueHero({
             ao lado dela. */}
         <div className="relative min-h-[248px] w-[148px] shrink-0 sm:w-[184px]">
           <CoverImage
-            url={main.coverUrl}
+            urls={main.coverUrls}
             alt={main.title}
             className="h-full w-full rounded-lg object-cover shadow-sm"
           />
@@ -318,7 +318,7 @@ export function ContinueHero({
                     className="flex items-center gap-3 rounded-lg p-1.5 transition-colors hover:bg-muted/50"
                   >
                     <CoverImage
-                      url={item.coverUrl}
+                      urls={item.coverUrls}
                       alt={item.title}
                       className="h-11 w-8 shrink-0 rounded-md object-cover"
                     />

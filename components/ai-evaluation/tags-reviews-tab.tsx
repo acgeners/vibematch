@@ -20,7 +20,7 @@ import type { UiReadiness } from "@/lib/orchestration/ui-readiness"
 export interface TagsReviewsWork {
   id: string
   title: string
-  coverUrl: string | null
+  coverUrls: string[]
   publicationStatusId: number | null
   hiatusKind: HiatusKind | null
   hiatusKindConfidence: "high" | "low" | null
@@ -200,7 +200,7 @@ export function TagsReviewsTab({
                 key={w.id}
                 workId={w.id}
                 title={w.title}
-                coverUrl={w.coverUrl}
+                coverUrl={w.coverUrls[0] ?? null}
                 expectedScore={w.expectedScore}
                 isAdult={w.isAdult}
                 userScore={w.userScore}

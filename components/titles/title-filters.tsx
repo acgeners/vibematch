@@ -726,9 +726,9 @@ function SearchInputWithHistory({
                           ao servidor. Quem sabe disso é `getCoverImageSrc`, dentro do
                           CoverImage; montando a tag aqui, 1 em cada 5 sugestões desenhava o
                           ícone de imagem quebrada. */}
-                      {s.coverUrl ? (
+                      {s.coverUrls.length > 0 ? (
                         <CoverImage
-                          url={s.coverUrl}
+                          urls={s.coverUrls}
                           className="h-11 w-8 shrink-0 rounded-sm object-cover"
                         />
                       ) : (

@@ -89,7 +89,7 @@ const work = (
 ): AlignedWork => ({
   id: `w${n}`,
   title: `Obra ${n}`,
-  coverUrl: null,
+  coverUrls: [],
   isAdult: false,
   personalFit: 0.5,
   personalFitPercentile: 90,

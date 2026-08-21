@@ -266,7 +266,7 @@ export function SuggestGroupsDialog({ open, onOpenChange, catalog }: SuggestGrou
                                 {checked && <Check className="size-3" />}
                               </span>
                               <CoverImage
-                                url={w.coverUrl}
+                                urls={w.coverUrls}
                                 alt={w.title}
                                 className="h-9 w-7 shrink-0 rounded object-cover"
                               />

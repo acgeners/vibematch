@@ -249,7 +249,7 @@ interface VerdictItem {
   workId: string
   title: string
   slug: string
-  coverUrl: string | null
+  coverUrls: string[]
   alignmentScore: number
   justification: string
 }
@@ -339,9 +339,7 @@ export function WorkCompareDrawer({
         return {
           workId: w.id,
           title: w.title,
-          // O CompareWork ainda guarda uma URL só, então a Bússola aberta a partir
-          // do comparador fica sem fallback — mesmo estado de hoje, migra no PR seguinte.
-          coverUrls: w.coverUrl ? [w.coverUrl] : [],
+          coverUrls: w.coverUrls,
           year: w.year,
           isAdult: w.isAdult,
           publicationStatus: st?.status ?? null,
@@ -517,7 +515,7 @@ export function WorkCompareDrawer({
             workId: r.workId,
             title: w?.title ?? "Obra",
             slug: w?.slug ?? "",
-            coverUrl: w?.coverUrl ?? null,
+            coverUrls: w?.coverUrls ?? [],
             alignmentScore: r.alignmentScore,
             justification: r.justification,
           }
@@ -765,9 +763,9 @@ function VerdictCard({ item, position }: { item: VerdictItem; position: number }
       )}
     >
       <div className="relative h-24 w-16 shrink-0 overflow-hidden rounded border bg-muted">
-        {item.coverUrl ? (
+        {item.coverUrls.length > 0 ? (
           <CoverImage
-            url={item.coverUrl}
+            urls={item.coverUrls}
             alt={item.title}
             className="h-full w-full object-cover"
           />
@@ -1662,9 +1660,9 @@ function CompareHeaderCell({
           O ⠿ ficou como affordance, agora na linha do título. */}
       <div className="flex gap-2.5">
         <div className="relative h-24 w-[4.25rem] shrink-0 overflow-hidden rounded-md border bg-muted/40">
-          {work.coverUrl ? (
+          {work.coverUrls.length > 0 ? (
             <CoverImage
-              url={work.coverUrl}
+              urls={work.coverUrls}
               className="h-full w-full object-cover"
             />
           ) : (

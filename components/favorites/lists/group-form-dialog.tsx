@@ -208,7 +208,7 @@ export function GroupFormDialog({ open, onOpenChange, mode, list, coverCandidate
                           selected ? "border-primary opacity-100" : "border-transparent opacity-50 hover:opacity-90",
                         )}
                       >
-                        <CoverImage url={w.coverUrl} alt={w.title} className="h-full w-full object-cover" />
+                        <CoverImage urls={w.coverUrls} alt={w.title} className="h-full w-full object-cover" />
                         {selected && (
                           <span className="absolute -right-1.5 -top-1.5 grid size-4 place-items-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
                             {idx + 1}

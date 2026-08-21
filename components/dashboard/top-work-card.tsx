@@ -12,7 +12,7 @@ interface TopWorkCardProps {
   work: {
     id: string
     title: string
-    coverUrl: string | null
+    coverUrls: string[]
     expectedScore: number | null
     publicationStatusId: number | null
     personalStatusId: number | null
@@ -49,7 +49,7 @@ export function TopWorkCard({ rank, work, scoreThresholds, hideRank = false }: T
     <div className="group relative flex h-full flex-col gap-2.5 rounded-lg border border-border/65 bg-background/40 p-3 transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:bg-card hover:shadow-md hover:shadow-primary/10">
       <div className="relative overflow-hidden rounded-md">
         <CoverImage
-          url={work.coverUrl}
+          urls={work.coverUrls}
           alt={work.title}
           className="aspect-[3/4] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
         />

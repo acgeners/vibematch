@@ -171,7 +171,8 @@ describe("getMultiGroupFavorites", () => {
     expect(multi.workIds).not.toContain("w3")
     expect(multi.maxGroups).toBe(4)
     // As capas saem das MAIS recorrentes, não das de maior nota (todas empatam em 8 aqui).
-    expect(multi.coverUrls[0]).toBe("https://cdn/w1.jpg")
+    // ⚠️ Cada slot do mosaico é uma OBRA e leva as CANDIDATAS dela, então é lista de listas.
+    expect(multi.mosaicCovers[0]).toEqual(["https://cdn/w1.jpg"])
   })
 
   it("com um grupo só, “vários” não existe", async () => {

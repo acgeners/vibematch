@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchAllRows } from "@/lib/supabase/paginate"
 import { SELECTABLE_EXTERNAL_SOURCES } from "@/lib/external/source-order"
 import { tallySourceGaps } from "@/lib/external/source-gaps"
-import { pickPrimaryCover } from "@/lib/work-derived"
+import { coverCandidates } from "@/lib/work-derived"
 import { workCardCountsRpc } from "@/server/queries/work-card-meta"
 import { filterWorkIdsByInterest } from "@/server/queries/interest-filter"
 import { hiatusFieldsFromRow } from "@/lib/works/hiatus-display"
@@ -15,7 +15,7 @@ export type { SourceLinkState } from "@/lib/external/source-link-state"
 export interface SourceGapWork {
   id: string
   title: string
-  coverUrl: string | null
+  coverUrls: string[]
   publicationStatusId: number | null
   hiatusKind: HiatusKind | null
   hiatusKindConfidence: "high" | "low" | null
@@ -213,7 +213,7 @@ export async function getSourceGapQueue(
     works.push({
       id: w.id,
       title: w.title ?? "",
-      coverUrl: pickPrimaryCover(w.work_covers),
+      coverUrls: coverCandidates(w.work_covers),
       publicationStatusId: w.publication_status_id,
       ...hiatusFieldsFromRow(w),
       personalStatusId: w.personal_status_id,

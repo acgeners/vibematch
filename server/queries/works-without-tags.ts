@@ -3,7 +3,7 @@ import { hiatusFieldsFromRow } from "@/lib/works/hiatus-display"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchAllRows, fetchAllRowsParallel } from "@/lib/supabase/paginate"
-import { pickPrimaryCover } from "@/lib/work-derived"
+import { coverCandidates } from "@/lib/work-derived"
 import { PUBLICATION_STATUSES_BY_ID, PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { classifyWorksWithoutTags, type NoTagsWork, type NoTagsFilters, type TagWorkMetaRow } from "@/lib/tags/no-tags-classify"
 import { loadEffectiveInterest } from "@/lib/synopsis-interest/effective-interest"
@@ -170,7 +170,7 @@ export async function getWorksWithoutTags(
   const works: TagWorkMetaRow[] = activeFewTags.map((w) => ({
     id: w.id,
     title: w.title,
-    coverUrl: pickPrimaryCover(w.work_covers),
+    coverUrls: coverCandidates(w.work_covers),
     publicationStatus: w.publication_status_id != null ? (PUBLICATION_STATUSES_BY_ID[w.publication_status_id]?.status ?? "Unknown") : "Unknown",
     publicationStatusId: w.publication_status_id,
     ...hiatusFieldsFromRow(w),

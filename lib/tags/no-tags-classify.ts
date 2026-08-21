@@ -16,7 +16,7 @@ export interface NoTagsSort {
 export interface NoTagsWork {
   id: string
   title: string
-  coverUrl: string | null
+  coverUrls: string[]
   publicationStatus: string
   publicationStatusId?: number | null
   personalStatus: string
@@ -54,7 +54,7 @@ export interface NoTagsFilters {
 export interface TagWorkMetaRow {
   id: string
   title: string
-  coverUrl: string | null
+  coverUrls: string[]
   publicationStatus: string
   publicationStatusId?: number | null
   personalStatus: string
@@ -115,7 +115,7 @@ export function classifyWorksWithoutTags(args: {
     out.push({
       id: w.id,
       title: w.title,
-      coverUrl: w.coverUrl,
+      coverUrls: w.coverUrls,
       publicationStatus: w.publicationStatus,
       publicationStatusId: w.publicationStatusId,
       personalStatus: w.personalStatus,

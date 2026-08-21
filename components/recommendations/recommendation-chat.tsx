@@ -441,10 +441,10 @@ function RecommendationCards({ snapshot }: { snapshot: ChatRecommendationSnapsho
                 #{i + 1}
               </span>
               <div className="relative h-20 w-14 overflow-hidden rounded border bg-muted">
-                {item.coverUrl ? (
+                {item.coverUrls.length > 0 ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={getCoverImageSrc(item.coverUrl)}
+                    src={getCoverImageSrc(item.coverUrls[0] ?? null)}
                     alt={item.title}
                     className="h-full w-full object-cover"
                     loading="lazy"

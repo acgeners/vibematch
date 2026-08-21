@@ -1,13 +1,13 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { pickPrimaryCover } from "@/lib/covers"
+import { coverCandidates } from "@/lib/work-derived"
 import { HIATUS_SELECT_COLUMNS, hiatusFieldsFromRow } from "@/lib/works/hiatus-display"
 import type { HiatusFields } from "@/lib/works/hiatus-display"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
 
 export type HeroWork = HiatusFields & {
   title: string
-  coverUrl: string
+  coverUrls: string[]
   nota: number | null
   publicationStatusId: number | null
 }
@@ -53,11 +53,11 @@ export async function getAuthHeroWorks(limit = 21): Promise<HeroWork[]> {
 
   const out: HeroWork[] = []
   for (const row of rows) {
-    const coverUrl = pickPrimaryCover(row.works.work_covers)
-    if (!coverUrl) continue
+    const coverUrls = coverCandidates(row.works.work_covers)
+    if (coverUrls.length === 0) continue
     out.push({
       title: row.works.title,
-      coverUrl,
+      coverUrls,
       nota: row.platform_avg,
       publicationStatusId: row.works.publication_status_id,
       ...hiatusFieldsFromRow(row.works),
