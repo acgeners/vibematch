@@ -288,13 +288,25 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**103 arquivos, remedidos em 2026-08-20**):
+banco declara um dos dois (**104 arquivos, remedidos em 2026-08-21**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
-| `--env-file=.env.analysis` na linha de uso | **44** | só LÊ ⇒ vai pro local, de graça |
+| `--env-file=.env.analysis` na linha de uso | **45** | só LÊ ⇒ vai pro local, de graça |
 | `ALVO: NUVEM` no cabeçalho | **49** | GRAVA ⇒ tem que ir pra nuvem |
 | (não tocam o banco) | 9 | fora da régua — entrou o `smoke-browser.mjs`, que só abre rota |
+
+🔴 **A régua tem DOIS rótulos e o mundo tem TRÊS casos — `smoke-logado.mjs` é o terceiro.**
+Ele **grava** (define a senha descartável das contas) e mesmo assim tem de ir pro **local**:
+a razão de "quem grava vai pra nuvem" é que o trabalho some no próximo `db:pull`, e aqui o
+que some é justamente o que deve sumir. Escrever isso na nuvem mexeria na credencial de uma
+conta real. Ele está contado entre os 45, e quem impede o alvo errado não é a convenção — são
+as duas guardas de `exigirLocal()` (o servidor E o banco, conferidos em separado).
+
+⚠️ **E a varredura casa a GRAFIA do marcador no source**: escrever `ALVO:` seguido de `NUVEM`
+em prosa — mesmo para explicar que não se aplica — reclassifica o arquivo. Medido em
+2026-08-21: uma frase explicativa no cabeçalho do `smoke-logado.mjs` moveu a contagem de 49
+para 50. Ao documentar a régua DENTRO de um script, não soletre o marcador da outra categoria.
 
 🔴 **ESTES TRÊS NÚMEROS SÃO CONFERIDOS PELA SUÍTE**, e não por quem editar esta seção —
 `scripts-apontam-pro-local.test.ts` lê a tabela daqui e a compara com a varredura real. É a
@@ -3253,7 +3265,12 @@ conta o CONTEÚDO de cada uma, e depois o `smoke-browser.mjs` (seção própria 
 ```bash
 npm run smoke                                    # TODOS, contra satoria.fly.dev
 npm run smoke -- --base=http://localhost:3001    # TODOS, contra um servidor local
+npm run smoke:logado                             # a metade LOGADA, ANTES de publicar
 ```
+
+⚠️ **`npm run smoke` cobre só a metade ANÔNIMA**, e ele imprime isso ao terminar. As rotas
+gateadas e os ramos logados das rotas públicas são do `npm run smoke:logado`, que roda contra
+um build local — ver a seção própria.
 
 🔴 **`flyctl deploy` direto pula o `deploy.sh` inteiro — as três guardas E os dois smokes.**
 Aconteceu em 2026-08-20, e o quase-acidente foi concreto: uma hora antes, o working tree
@@ -3298,7 +3315,10 @@ código 1.
 
 ### O segundo smoke ABRE num browser — e `pageerror` NÃO é o sinal
 
-`scripts/smoke-browser.mjs`, no fim do `deploy.sh`, depois do de HTTP. Carrega 5 rotas num
+`scripts/smoke-browser.mjs`, no fim do `deploy.sh`, depois do de HTTP. ⚠️ **As 5 rotas dele
+são todas ANÔNIMAS** — a metade logada é do `npm run smoke:logado`, e o limite é maior do que
+parece: a página de obra que ele abre tem 46 elementos anônima e 70 para o curador (medido em
+21/08). Carrega 5 rotas num
 Chromium headless e reprova se alguma quebrar **depois da hidratação** — a família que o smoke
 de cima declara não ver, e que deixou toda página de obra quebrada por um dia em 20/08.
 
@@ -3475,6 +3495,12 @@ testes), é **canal de sinal**. Mais um teste unitário não teria achado nenhum
 
 ### Os quatro canais que faltam, em ordem de retorno
 
+✅ **1b. A metade LOGADA — FEITA em 2026-08-21** (`npm run smoke:logado`, seção própria). O
+item 1 abaixo fechou o canal para o visitante; este fecha para quem tem sessão, que era a
+metade sem instrumento nenhum — inclusive o painel `report_error` do #495. Conferido com
+sonda: numa quebra de hidratação da `/curation`, o smoke de browser passa **verde** e este
+reprova.
+
 ✅ **1. Browser no smoke de deploy — FEITO em 2026-08-20** (`scripts/smoke-browser.mjs`, ver a
 seção própria). ⚠️ E o desenho que estava escrito aqui — *"reprovaria em qualquer erro de
 console"* — **teria falhado nos dois sentidos**: o React 19 engole a exceção da hidratação
@@ -3644,6 +3670,143 @@ outro lado o Cloudflare devolve 403 com `text/html` — então o status também 
 ⚠️ **Sobram 7 obras sem NENHUMA capa viva.** Aí o fallback não tem o que escolher: precisam de
 capa nova de alguma fonte. E 33 telas seguem passando URL única — cobertas pelo conserto no dado,
 mas não se curam sozinhas na próxima fonte que cair.
+
+## `npm run smoke:logado`: a metade LOGADA, verificada ANTES de publicar
+
+`scripts/smoke-logado.mjs` + `scripts/smoke-logado.sh` (2026-08-21). Build de produção contra
+o banco LOCAL, login pela UI nos dois papéis, e as rotas gateadas abertas num Chromium.
+
+```bash
+npm run smoke:logado     # build + sobe + verifica + derruba (~2min)
+```
+
+🔴 **Os outros dois smokes são ANÔNIMOS, e isso deixava metade do app sem instrumento
+nenhum.** Medido em 21/08: o app tem **39 rotas**, **12 gateadas** (7 em `/curation`, 5 em
+`SIGNED_IN_PREFIXES`), e o `smoke-browser.mjs` abre **5** — nenhuma logada.
+
+⚠️ **E o gate do middleware SUBESTIMA o buraco**, porque ele lista quem REDIRECIONA. A página
+de obra responde 200 anônima e troca de árvore com sessão. Medido na mesma obra, no mesmo
+build:
+
+| papel | `[data-slot]` | o que só ele vê |
+|---|---|---|
+| anônimo | **46** | — |
+| leitor | **53** | "Reportar erro na ficha" |
+| curador | **70** | "Atualizar dados" · avaliar |
+
+Ou seja o smoke anônimo cobria **46 dos 70 nós** da maior árvore hidratada do app — a mesma
+que ficou um dia quebrada em 20/08. E o painel `report_error` do #495 é de leitor logado:
+nenhum smoke chegava perto dele.
+
+🔴 **A prova de que ele acha o que o outro não acha, medida com sonda:** com um componente
+que estoura na hidratação da `/curation`, o `smoke-browser.mjs` passou **verde nas 5 rotas** e
+este reprovou.
+
+**Por que LOCAL e não produção** (escolha da Ana, com os dois lados medidos): contra produção
+ele rodaria depois de publicar, exigiria a senha de uma conta real num env var e cobriria
+MENOS — na nuvem **só a conta LEITORA tem senha**, o curador é Google-only, então as 7 rotas
+de `/curation` ficariam de fora. O preço aceito: ele verifica o que VAI subir, não o que está
+no ar; para isso continuam existindo os dois smokes de produção.
+
+### As duas metades, e a segunda é o que nenhum outro instrumento faz
+
+| metade | pergunta | hoje |
+|---|---|---|
+| **alcança** | as rotas que o papel DEVE ver renderizam? | 13 (curador) + 5 (leitor) |
+| **não alcança** | o gate de PAPEL continua de pé? | `/curation` do leitor tem de cair em `/` |
+
+🔴 A negativa é a que pega VAZAMENTO — esta base já pagou 10 per-user. O `smoke-producao.mjs`
+cobre o **anônimo** (rota gateada esperando 307); o que faltava é o papel INSUFICIENTE, que
+só existe com sessão. ⚠️ Contexto de browser NOVO por papel: reusando o do curador, o
+"leitor" seria ele e a negativa passaria verde afirmando o contrário do que houve.
+
+🔴 **O modo de falha do próprio smoke: sessão caída renderiza LIMPO.** Tudo vai para `/login`
+— 200, sem esqueleto, sem erro de JS — e ele aprovaria tendo olhado a tela de login doze
+vezes. Por isso o **caminho final** é conferido em toda rota. E onde a rota não é gateada (a
+página de obra) o caminho não prova nada: ali quem prova é um **texto que só aquele papel
+vê**, o que também dá o piso de graça.
+
+⚠️ **`/my-list` do leitor tem piso próprio (3, contra 8 do padrão)**: a conta leitora tem
+**zero** linhas em `user_work_state` nos dois bancos, então a lista dela é legitimamente
+vazia — 4 elementos. Piso alto ali reprovaria um app são.
+
+### Os sinais: a tabela de 20/08 NÃO se repetiu, e é isso que justifica manter o piso
+
+Remedido em 21/08 numa rota LOGADA (sonda estourando na hidratação da `/curation`):
+
+| sinal | quebrada | sã | 20/08 (anônimo) |
+|---|---|---|---|
+| `[data-slot]` | **0** | 17 | — |
+| esqueleto sobrando | **0** | 0 | **28 × 0** |
+| resposta 5xx | **0** | 0 | **1 × 0** |
+| `pageerror` | **1** | 0 | **0 × 0** |
+
+🔴 **Os dois sinais que decidiram o smoke de browser ficaram MUDOS aqui, e o que decidiu lá
+não servia — `pageerror` — foi o que disparou.** Nenhum sinal isolado serve; é por isso que o
+piso de conteúdo continua existindo ao lado deles. Quem generalizar "o esqueleto é o sinal
+geral" a partir daquela tabela erra nesta.
+
+🔴 **A casca de erro tem DUAS grafias, e o `smoke-browser.mjs` só conhece uma.** Medido: o
+Next 16 serve **"This page couldn't load"** (apóstrofo tipográfico) e `Application error: a
+client-side exception` **não aparece**. Casar só a antiga é ter o detector desligado
+justamente no caso que ele existe para pegar.
+
+### Três armadilhas de mecânica, todas silenciosas
+
+🔴 **`realpath`, não `resolve`, na guarda de "chamado direto" — a versão sem ele FALHOU
+CALADA.** No macOS `mktemp -d` devolve `/var/folders/…`, symlink para `/private/var/…`:
+`process.argv[1]` guarda o caminho digitado e `import.meta.url` guarda o real, então nunca
+batem. Medido: build feito, servidor no ar, e o comando terminou com código **0 sem abrir uma
+única rota**. Mesma família do backup automático que avisava num log que ninguém lia e
+reportava sucesso. ⚠️ O `smoke.mjs` tinha a mesma comparação e só não mordia porque é sempre
+invocado do checkout — corrigido junto.
+
+🔴 **O env vai para a cópia ANTES do build.** `NEXT_PUBLIC_*` é embutido em BUILD TIME: um
+build feito com o `.env.local` apontando para a nuvem produziria um cliente falando com
+PRODUÇÃO enquanto o servidor fala com o local — o smoke definiria senha num banco e
+verificaria outro. ⚠️ O `.env.local` do checkout **não é tocado**; ele é do operador e
+alterna com `db:local`/`db:cloud`.
+
+🔴 **A cópia é do WORKING TREE, não um `git worktree` do HEAD** — que foi a 1ª versão e
+morreu com `Cannot find module …/smoke-logado.mjs`, porque o próprio script ainda não estava
+no índice. O defeito é maior que o sintoma: este smoke é PRÉ-deploy, e a pergunta dele é
+sobre o disco, não sobre o último commit. Amarrado ao HEAD, ele só rodaria depois do momento
+em que serve. ⚠️ É o oposto do `deploy.sh`, e de propósito: lá o alvo é `origin/main` porque
+o que se verifica é o que foi PUBLICADO.
+
+⚠️ **Import ESTÁTICO do `supabase-js`.** Com `await import(join(REPO, "node_modules/…"))` o
+caminho COMPUTADO faz o Vite injetar `import … from "/@vite/client"` ANTES do shebang, e o
+arquivo deixa de parsear na suíte (`Invalid Character !`) embora rode normal no Node.
+
+### `SMOKE-ALVO`: agora existem DOIS tipos de smoke, e a régua tinha um só
+
+Cada `scripts/smoke-*.mjs` declara no cabeçalho `SMOKE-ALVO: producao` (verifica **o que está
+no ar**, depois de publicar, anônimo) ou `SMOKE-ALVO: pre-deploy` (verifica **o que vai
+subir**, contra build local). O wrapper e o `deploy.sh` DERIVAM disso.
+
+🔴 Até 21/08 o teste exigia que TODO smoke fosse chamado pelo `deploy.sh`. Arrastado para
+lá, o smoke logado receberia `--base` de produção e **reprovaria todo deploy pela própria
+guarda de alvo**. A saída não foi excetuá-lo numa lista no teste — foi o alvo sair do próprio
+arquivo, para que o smoke de amanhã caia na exigência certa sozinho.
+
+⚠️ **`npm run smoke` IMPRIME o que não rodou**, com o comando. Um wrapper que roda 2 de 3 e
+termina em "✅" é como "verificado" passa a significar outra coisa sem ninguém decidir nada.
+
+⚠️ **Fail-HARD aqui, ao contrário do `smoke-browser.mjs`** (sem Playwright, sem stack local,
+sem `.env.analysis` ⇒ exit 1). O fail-soft de lá existe porque ele roda DEPOIS de publicar sob
+`set -e`; aqui nada foi publicado, e "não verifiquei" não pode sair como "verifiquei".
+
+⚠️ **Ele SOBRESCREVE a senha das contas do banco local** (`smoke-local-descartavel`, ou
+`SMOKE_SENHA`). É de propósito: o `db:pull` apaga o hash — os usuários são Google-only na
+origem —, então senha combinada à mão envelhece a cada réplica e o smoke passaria a falhar por
+motivo que não é defeito do app.
+
+⚠️ **Custo medido: 1min57s** (build 19s + servidor + 19 verificações + limpeza). O build é
+muito mais barato do que se supunha — a estimativa que circulava era "~2min só de build".
+
+Guardado por `tests/unit/orchestration/smoke-logado-verifica-a-sessao.test.ts` (12 casos) e
+pelos 4 casos novos em `deploy-verifica-o-que-publica.test.ts`. **11 sondas conferidas**,
+inclusive a que congela o achado caro: voltar a comparar caminho sem `realpath` reprova.
 
 ## "Nada a fazer" tem que PROVAR que olhou — o funil dos scripts de correção
 
@@ -5976,15 +6139,19 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.455 passando (+24 pulados) em 331 arquivos** (326 passando + 5 pulados);
-medido em 2026-08-21 com o funil dos scripts de correção: **+9 casos e +1 arquivo**
-(`orchestration/script-de-correcao-declara-o-funil`). Disco (`find`) = índice (`git ls-files`) =
-**331**, conferido DEPOIS do `git add`, sobre `origin/main` (`dd2c9c5`) + só os arquivos deste
-trabalho, em DUAS rodadas limpas com resultado idêntico.
+`npm run test` → **3.470 passando (+24 pulados) em 332 arquivos** (327 passando + 5 pulados);
+medido em 2026-08-21 **depois** de o smoke logado e o funil dos scripts de correção entrarem
+juntos: **+24 casos e +2 arquivos** sobre o canário
+(`orchestration/smoke-logado-verifica-a-sessao`, 12 casos · `deploy-verifica-o-que-publica`, +3
+· `orchestration/script-de-correcao-declara-o-funil`, 9). Disco (`find`) = índice
+(`git ls-files`) = **332**, conferido DEPOIS do `git add`, em DUAS rodadas limpas com resultado
+idêntico.
 
-⚠️ **Este número NÃO inclui o PR do smoke logado**, que estava aberto em paralelo e soma outros
-+15 casos e +1 arquivo. Com os dois no `main` a conta fecha em **3.470 em 332** — remeça em vez
-de somar, que é como esta linha envelheceu todas as vezes.
+🔴 **Este número saiu de RE-MEDIR na resolução do conflito, não de somar os dois PRs.** Os dois
+foram escritos em paralelo, cada um com o seu número (3.461 e 3.455), e nenhum dos dois valia
+depois do merge — o CLAUDE.md de cada branch estava certo sobre uma base que deixou de existir.
+A soma prevista batia (3.470), e isso é sorte de aritmética, não método: quem soma acerta até o
+dia em que os dois PRs tocarem o mesmo arquivo de teste.
 
 ⚠️ **Este número foi REMEDIDO depois do rebase, não somado ao que estava escrito.** A medição
 inicial (3.382 em 325) valia sobre uma `main` que andou 4 commits no meio da sessão — os PRs

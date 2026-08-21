@@ -5,6 +5,8 @@
  *   node scripts/smoke-producao.mjs                       # contra satoria.fly.dev
  *   node scripts/smoke-producao.mjs --base=http://localhost:3001
  *
+ * SMOKE-ALVO: producao
+ *
  * Roda sozinho no fim do `npm run deploy`. Sai com código 1 se qualquer rota reprovar.
  *
  * ── por que ele existe, com o caso que o motivou ──────────────────────────────────────────
