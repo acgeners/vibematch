@@ -3526,10 +3526,14 @@ provar que OLHOU** — cada estágio do funil imprime quantos candidatos passara
 O padrão já existe no `backup-db.mjs` (ele FALHA em vez de gravar backup truncado); falta
 espalhar.
 
-✅ **3. Canário do contrato do PostgREST — FEITO em 2026-08-20** (`npm run contracts`, seção
-própria abaixo). ⚠️ Ele cobre a metade **RPC** (as 8 que o código chama, conferidas contra o
-banco); a metade **embed** — o `ai_evaluations` que virou objeto — segue sem canário, e o
-inventário dela é magro (2 arquivos candidatos, não medidos um a um).
+✅ **3. Canário do contrato do PostgREST — FEITO em 2026-08-20, e a metade EMBED fechou em
+21/08** (`npm run contracts`, seção própria abaixo). Hoje ele confere **8 RPCs e 31 embeds**
+contra o banco.
+
+⚠️ **O inventário que estava escrito aqui — "2 arquivos candidatos" — errou por 33×.** Medido
+ao derivar do código em vez de contar pela forma conhecida: **31 pares distintos em 67
+arquivos**. É a terceira reincidência de
+[[gotcha-contar-pela-forma-conhecida-confirma-o-alcance]] neste arquivo.
 
 🟡 **4. O grande: inventário dos PARES — LEVANTADO em 2026-08-20** (seção própria acima). Os
 três eixos foram medidos: o eixo A rendeu 1 achado real, o eixo B se mostrou NÃO automatizável,
@@ -4165,10 +4169,11 @@ linha sumiu da tabela").
    decisão, ela vira candidata — não antes.
 3. **Eixo B, caso a caso** — sem varredura, porque ela não separa sinal de ruído.
 
-## `npm run contracts`: o contrato das RPCs, conferido contra o BANCO
+## `npm run contracts`: o contrato do PostgREST, conferido contra o BANCO
 
-`scripts/contratos-postgrest.mjs` (ALVO: LOCAL, US$0). Descobre as RPCs que o código chama,
-lê os argumentos no OpenAPI do PostgREST, **executa** as que só leem e compara o que volta.
+`scripts/contratos-postgrest.mjs` (ALVO: LOCAL, US$0). **Duas metades:** as **RPCs** que o
+código chama (descobre, lê os argumentos no OpenAPI, **executa** as que só leem e compara o que
+volta) e a **FORMA dos embeds** que ele lê. Hoje: **8 RPCs e 31 embeds**.
 
 ```bash
 npm run contracts
@@ -4220,7 +4225,53 @@ morde porque a função que ele cobre usa a primeira forma. Morderia na próxima
 
 Hoje o parser só liga o tipo na forma inequívoca (`const { data } = await x.rpc(…)`, com o cast
 sobre `data` antes de qualquer outra `.rpc(`) e **declara como não resolvida** a chamada dentro
-de `Promise.all`, em vez de adivinhar. Guardado por
+de `Promise.all`, em vez de adivinhar.
+
+### A metade EMBED: a FORMA é do BANCO, e mudar não dá erro
+
+🔴 **O PostgREST devolve embed to-one como OBJETO e to-many como ARRAY, e quem decide é a
+direção da FK mais os índices únicos.** O código não tem como saber, e errar não dá erro:
+`?.[0]` sobre objeto é `undefined`, `.campo` sobre array é `undefined`. Foi assim que o `--heal`
+do `adult-content-retroactive-bounds` achou o baseline em **19 de 392** obras, anunciando "nada
+a fazer".
+
+🔴 **A forma NÃO é estável por natureza — ela depende de um índice.** Medido em 21/08:
+`works→calculated_scores` volta **OBJETO** (há unique em `work_id`) e `works→category_scores`
+volta **ARRAY** — mesma direção de FK, formas opostas. **Perder aquele unique transformaria todo
+`.expected_score` direto em `undefined`**, em 13 consumidores, sem erro nenhum. É esse o cenário
+que o canário congela.
+
+Retrato de 21/08: **31 pares, 16 ARRAY e 15 OBJETO**. Os mais consumidos: `works→work_tags` (16
+arquivos), `works→calculated_scores` (13), `works→work_covers` (13).
+
+| o canário reprova quando | por quê |
+|---|---|
+| a forma medida **difere** da declarada em `FORMAS` | todo consumidor quebra em silêncio — a mensagem lista quais |
+| aparece par **novo** sem declaração | declarar é a revisão humana de que o consumidor trata a forma certa; a mensagem já traz a linha para colar |
+| a base **não tem linha**, ou o embed vem **nulo em toda a amostra** | não houve o que olhar — mesma régua da zero-linha nas RPCs |
+
+⚠️ **Par declarado que o código não lê mais vira NOTA, não falha** — é ruído que envelhece, não
+defeito.
+
+⚠️ **`Array.isArray(x) ? x[0] : x` é a guarda defensiva**, e 5 consumidores já a usam. Ela
+tolera as duas formas e por isso NÃO é o que o canário procura — o que ele pega é a forma
+MUDAR. Quando um lugar precisa dela, o dono é `umEmbed()`
+(`scripts/adult-content-retroactive-bounds.ts`).
+
+🔴 **O parser errou de novo, e a sonda é que disse.** Duas armadilhas medidas:
+`${cols.join(", ")}` dentro de um template de select entrava no inventário como uma relação
+chamada **"join"** (chamada de método tem PONTO antes; relação, não); e sem a janela que para
+no `.from(` seguinte, o select de uma query é atribuído à base da **anterior**. ⚠️ E o caso de
+teste dessa segunda **nasceu inofensivo**: ele punha um `.select(` na 1ª query, onde o parser
+para de qualquer jeito — conferido com sonda, seguia verde com a janela removida.
+
+⚠️ **`classificarForma` é exportada e testada em separado**, porque o clone local **não tem
+tabela base vazia** (conferido em 6 candidatas): sem extrair a decisão, os ramos que impedem o
+canário de passar sem olhar ficariam sem exercício nenhum.
+
+Guardado por `tests/unit/orchestration/canario-de-contrato-parser.test.ts` (21 casos). **8
+sondas conferidas**, e **duas me desmentiram** — o caso da janela e o dos diagnósticos
+distintos (exigir só `erro` truthy deixava o guard da base vazia sem rede). Guardado por
 `tests/unit/orchestration/canario-de-contrato-parser.test.ts` (8 casos), que testa o parser com
 o arranjo que produziu o falso positivo — e trava as decisões que fariam o canário passar sem
 olhar (zero linha, banco fora, alvo não-local). As 10 sondas conferidas.
@@ -6433,9 +6484,10 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.490 passando (+24 pulados) em 334 arquivos** (329 passando + 5 pulados);
-remedido em 2026-08-21 com o eixo C (+11 casos e +1 arquivo,
-`orchestration/contagens-do-claude-md`). Disco (`find`) = índice (`git ls-files`) = **334**,
+`npm run test` → **3.502 passando (+24 pulados) em 334 arquivos** (329 passando + 5 pulados);
+remedido em 2026-08-21 com a metade EMBED do canário (**+12 casos e ZERO arquivo** — eles
+entraram no `canario-de-contrato-parser` que já existia, e é por isso que a contagem de
+ARQUIVOS não se move e a de CASOS sim). Disco (`find`) = índice (`git ls-files`) = **334**,
 conferido DEPOIS do `git add`, em DUAS rodadas limpas com resultado idêntico.
 
 ⚠️ **A 1ª rodada trouxe "Errors 1 error" com TODOS os testes passando** (Radix focus-scope
@@ -6448,7 +6500,7 @@ não método.** Ela só funciona enquanto os dois PRs não tocam o mesmo arquivo
 avisa no dia em que tocarem. É a terceira vez que esta linha é resolvida num merge; nas três, o
 que sobreviveu foi RE-MEDIR na base que vira o merge.
 
-Antes: **3.479 em 333** (a resolução do conflito entre o #502 e o #503, escritos em paralelo —
+Antes: **3.490 em 334** (o eixo C — +11 casos e +1 arquivo, `orchestration/contagens-do-claude-md`), **3.479 em 333** (a resolução do conflito entre o #502 e o #503, escritos em paralelo —
 e a soma dos dois deltas teria acertado por sorte de aritmética, não por método: ela só funciona
 enquanto os dois PRs não tocam o mesmo arquivo de teste), **3.471 em 332** (o #502 sozinho — +1 caso e zero arquivo, porque o guard entrou num
 arquivo que já existia) e **3.470 em 332**, medido **depois** de o smoke logado e o funil dos

@@ -2,6 +2,8 @@
 /**
  * CANÁRIO DO CONTRATO DO POSTGREST — ALVO: LOCAL (só lê, US$0)
  *
+ * Duas metades: as RPCs que o código chama, e a FORMA dos embeds que ele lê.
+ *
  *   npm run contracts
  *   node --env-file=.env.local --env-file=.env.analysis scripts/contratos-postgrest.mjs
  *
@@ -292,9 +294,182 @@ function camposDeclarados(arquivo, fn) {
 }
 
 /* ------------------------------------------------------------------ */
+/* 5. A metade EMBED — a FORMA que o PostgREST devolve                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 🔴 O PostgREST devolve embed **to-one** como OBJETO e **to-many** como ARRAY, e quem decide
+ * é o BANCO — a direção da FK mais os índices únicos. O código não tem como saber, e errar não
+ * dá erro: `?.[0]` sobre objeto é `undefined`, `.campo` sobre array é `undefined`. Os dois
+ * somem em silêncio.
+ *
+ * Foi o que aconteceu em 20/08/2026: o tipo dizia `Array<…>`, o código fazia `?.[0]`, e o
+ * `--heal` do `adult-content-retroactive-bounds` achava o baseline em **19 de 392** obras — com
+ * o script anunciando "nada a fazer".
+ *
+ * ⚠️ A forma NÃO é estável por natureza: ela muda se alguém dropar um índice único. Medido:
+ * `works→calculated_scores` volta **OBJETO** (há unique em `work_id`) enquanto
+ * `works→category_scores` volta **ARRAY** — a mesma direção de FK, formas opostas. Perder esse
+ * unique transformaria todo `.expected_score` direto em `undefined`, sem erro.
+ *
+ * Por isso o canário CONGELA a forma medida: par novo exige declaração, e forma que muda
+ * REPROVA.
+ */
+const FORMAS = {
+  "ai_evaluations→ai_evaluation_scores": "ARRAY",
+  "calculated_scores→works": "OBJETO",
+  "category_scores→ai_evaluations": "OBJETO",
+  "category_scores→works": "OBJETO",
+  "curation_requests→works": "OBJETO",
+  "import_rows→imports": "OBJETO",
+  "synopsis_quality_predictions→works_owner": "OBJETO",
+  "tag_subgroup_assignment→tag_subgroup": "OBJETO",
+  "user_work_state→works": "OBJETO",
+  "work_external_ids→works": "OBJETO",
+  "work_genres→genres": "OBJETO",
+  "work_tags→tags": "OBJETO",
+  "work_tags→works": "OBJETO",
+  "works→calculated_scores": "OBJETO",
+  "works→work_embeddings": "OBJETO",
+  "works_owner→calculated_scores": "OBJETO",
+  "works→category_scores": "ARRAY",
+  "works→platform_ratings": "ARRAY",
+  "works→work_covers": "ARRAY",
+  "works→work_external_ids": "ARRAY",
+  "works→work_genres": "ARRAY",
+  "works→work_reviews": "ARRAY",
+  "works→work_synopses": "ARRAY",
+  "works→work_tags": "ARRAY",
+  "works_owner→category_scores": "ARRAY",
+  "works_owner→pilot_taste_scores": "ARRAY",
+  "works_owner→work_covers": "ARRAY",
+  "works_owner→work_external_ids": "ARRAY",
+  "works_owner→work_genres": "ARRAY",
+  "works_owner→work_synopses": "ARRAY",
+  "works_owner→work_tags": "ARRAY",
+}
+
+/**
+ * Os nomes embutidos em NÍVEL 0 do select — `tags(...)` conta; o `x` de `tags(x(y))` não, que é
+ * embed do embed. `alias:` e `!fk` não fazem parte do nome.
+ */
+export function embedsDoSelect(sel) {
+  const out = []
+  let d = 0
+  for (let i = 0; i < sel.length; i++) {
+    const ch = sel[i]
+    if (ch === "(") {
+      if (d === 0) {
+        const m = sel.slice(0, i).match(/([A-Za-z_][A-Za-z0-9_]*)(?:![A-Za-z0-9_]+)?\s*$/)
+        // ⚠️ precedido de ponto é MÉTODO, não tabela: sem isto, `${xs.join(", ")}` dentro de um
+        // template de select entra no inventário como se fosse uma relação chamada "join".
+        if (m && sel[i - m[0].length - 1] !== ".") out.push(m[1])
+      }
+      d++
+    } else if (ch === ")") d--
+  }
+  return out
+}
+
+/** Pares (base, embed) de uma cadeia `.from("X")…\.select("…emb(…)")`. */
+export function paresNoTexto(src) {
+  const out = []
+  const re = /\.from\(\s*["\'`]([a-z_][a-z0-9_]*)["\'`]\s*\)/g
+  let m
+  while ((m = re.exec(src))) {
+    const base = m[1]
+    const resto = src.slice(m.index + m[0].length)
+    // A janela para no `.from(` seguinte: sem isso o select de uma query é atribuído à base da
+    // anterior, e o canário passa a conferir um par que não existe.
+    const fim = Math.min(...[resto.indexOf(".from("), resto.indexOf("\n}\n")].filter((i) => i >= 0).concat([2000]))
+    const sel = resto.slice(0, fim).match(/\.select\(\s*(["\'`])([\s\S]*?)\1/)
+    if (!sel) continue
+    for (const embed of embedsDoSelect(sel[2])) out.push({ base, embed })
+  }
+  return out
+}
+
+/** O universo: todo par que o código lê, derivado do git. */
+function paresDoCodigo() {
+  const mapa = new Map()
+  for (const arquivo of arquivosDe("server", "lib", "app", "scripts")) {
+    for (const { base, embed } of paresNoTexto(readFileSync(arquivo, "utf8"))) {
+      const k = `${base}→${embed}`
+      if (!mapa.has(k)) mapa.set(k, new Set())
+      mapa.get(k).add(arquivo.replace(REPO + "/", ""))
+    }
+  }
+  return mapa
+}
+
+/**
+ * A decisão, separada do fetch para poder ser EXERCITADA: o clone local não tem tabela vazia,
+ * então os ramos de "sem dado" não têm como rodar contra o banco. Deixá-los sem teste seria
+ * confiar justamente no caminho que existe para impedir o canário de passar sem olhar.
+ *
+ * 🔴 Ausência de dado é ERRO, nunca sucesso: sem linha, ou com o embed nulo em todas elas, o
+ * canário não viu forma nenhuma. É a mesma régua da zero-linha na metade das RPCs.
+ */
+export function classificarForma(linhas, embed) {
+  if (!Array.isArray(linhas) || !linhas.length) {
+    return { erro: "a tabela base não tem linha — sem dado não dá para ver a forma" }
+  }
+  const v = linhas.find((x) => x[embed] != null)?.[embed]
+  if (v === undefined) return { erro: "o embed veio nulo em todas as linhas da amostra" }
+  return { forma: Array.isArray(v) ? "ARRAY" : "OBJETO" }
+}
+
+async function formaReal(base, embed) {
+  const r = await fetch(`${URL_}/rest/v1/${base}?select=${embed}(*)&limit=3`, { headers: cabecalhos })
+  if (!r.ok) return { erro: `HTTP ${r.status} ${(await r.text()).slice(0, 90)}` }
+  return classificarForma(await r.json(), embed)
+}
+
+async function conferirEmbeds() {
+  const pares = paresDoCodigo()
+  embedsConferidos = pares.size
+  console.log(`\n  ${pares.size} par(es) de embed no código\n`)
+  for (const [k, consumidores] of [...pares].sort()) {
+    const [base, embed] = k.split("→")
+    const esperada = FORMAS[k]
+    const { forma, erro } = await formaReal(base, embed)
+
+    if (erro) {
+      falhas.push(`${k}: não deu para medir a forma — ${erro}`)
+      console.log(`  ❌ ${k.padEnd(44)} ${erro}`)
+      continue
+    }
+    if (!esperada) {
+      // Par novo NÃO passa calado: declarar é a revisão humana de que o consumidor trata a
+      // forma certa. A mensagem já traz a linha para colar.
+      falhas.push(
+        `${k}: par NOVO, sem forma declarada. O banco devolve ${forma} — confira como ` +
+          `${[...consumidores].join(", ")} o trata e cole em FORMAS: "${k}": "${forma}",`,
+      )
+      console.log(`  ❌ ${k.padEnd(44)} NOVO (banco diz ${forma})`)
+      continue
+    }
+    if (forma !== esperada) {
+      falhas.push(
+        `${k}: o banco passou a devolver ${forma} e o canário esperava ${esperada}. ` +
+          `Todo consumidor quebra em SILÊNCIO (${[...consumidores].join(", ")}).`,
+      )
+      console.log(`  ❌ ${k.padEnd(44)} ${esperada} → ${forma}`)
+      continue
+    }
+    console.log(`  ✅ ${k.padEnd(44)} ${forma} · ${consumidores.size} consumidor(es)`)
+  }
+
+  // Declarado que deixou de existir no código é ruído que envelhece — nota, não falha.
+  const orfas = Object.keys(FORMAS).filter((k) => !pares.has(k))
+  if (orfas.length) notas.push(`FORMAS declara ${orfas.length} par(es) que o código não lê mais: ${orfas.join(", ")}`)
+}
+
+/* ------------------------------------------------------------------ */
 
 const falhas = []
 const notas = []
+let embedsConferidos = 0
 
 async function main() {
   exigirAlvoLocal()
@@ -424,6 +599,9 @@ async function main() {
     )
   }
 
+  // A metade EMBED: a FORMA que o PostgREST devolve, congelada contra o banco.
+  await conferirEmbeds()
+
   if (notas.length) {
     console.log("\n  ℹ️  o que ficou FORA da conferência (não é falha, é alcance):")
     for (const n of notas) console.log(`     · ${n}`)
@@ -434,7 +612,9 @@ async function main() {
     for (const f of falhas) console.error(`   · ${f}`)
     process.exit(1)
   }
-  console.log(`\n✅ ${chamados.length} contratos conferidos contra o banco.`)
+  console.log(
+    `\n✅ ${chamados.length} RPC(s) e ${embedsConferidos} embed(s) conferidos contra o banco.`,
+  )
 }
 
 /**

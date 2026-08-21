@@ -714,6 +714,10 @@ export function varrerWorksOwner(arquivos: string[], ler: Ler): Varredura {
       const depois = src.slice(idx + "works_owner".length)
       if (antes.endsWith(".")) continue // r.works_owner — consumo do embed
       if (/^\s*[?]?\s*:/.test(depois)) continue // chave de tipo / de objeto
+      // NOTAÇÃO `base→embed` do canário de contrato: o nome é METADE de uma chave de string
+      // (`"works_owner→work_tags": "ARRAY"`), não um acesso à view. Estreito de propósito — a
+      // seta só existe nessa notação, então isto não abre a porta para string qualquer.
+      if (depois.startsWith("→") || antes.endsWith("→")) continue
       naoClassificados.push({
         arquivo: f,
         linha: linhaDe(src, idx),
