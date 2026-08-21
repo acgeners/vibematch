@@ -3891,12 +3891,42 @@ levantamento, em três eixos, com o resultado de cada um medido.
 | `ai_evaluation_scores.justification` | 21.702 | 1.837 | **2** |
 | `ai_evaluations.summary` · `review_digest` · `review_summary` · `canonical_synopsis` | 5.231 | **17** | — (universo pequeno demais para varrer) |
 
-🔴 **O achado: `ui_labels.alignment_score` afirma o OPOSTO do fato.** O tooltip diz *"a maioria
-das obras fica sem valor até passar pelo Rankear"* e, medido na NUVEM em 21/08, **697 de 1.010
-obras ativas (69,0%) TÊM veredito**. É a família em forma pura: prosa gravada contra a fonte do
-número, com o lado que a pessoa LÊ sendo o errado. ⚠️ O texto é idêntico no local e na nuvem
-(conferido por hash), então é uma linha só a corrigir — e ela alimenta o seletor de colunas, o
-heatmap e o painel de filtros, não só o tooltip.
+✅ **O achado, CORRIGIDO em 2026-08-20 (migration 196): `ui_labels.alignment_score` afirmava o
+OPOSTO do fato.** O tooltip dizia *"a maioria das obras fica sem valor até passar pelo Rankear"*
+e, remedido na NUVEM, **697 de 1.010 obras ativas (69,0%) TÊM veredito** — no clone local, **695
+de 978 (71,1%)**. Não era número velho: era a afirmação INVERTIDA, e o md5 do texto batia nos
+dois bancos.
+
+🔴 **O levantamento dizia "uma linha só a corrigir", e essa parte estava ERRADA — a mesma
+afirmação vivia em mais TRÊS lugares, um deles visível.** O eixo A varreu prosa gravada no
+BANCO; a frase também estava em prosa de CÓDIGO:
+
+| onde | afirmava | visível |
+|---|---|---|
+| `ui_labels…tooltip_full` | "a maioria fica sem valor até passar pelo Rankear" | **sim** — seletor de colunas, heatmap, painel de filtros |
+| `lib/scores/glossary-notes.ts` | "a maioria das obras fica sem ele" | **sim** — a nota do `/guide/scores` |
+| `server/queries/ranking.ts` | "a maioria das obras tem `alignment_score` NULL" | não — mas **justifica** o filtro que deixa nulo passar |
+| `lib/calculations/decision-breakdown.ts` | "NULL na maioria das obras" | não |
+
+⚠️ **Corrigir só o banco deixaria as duas metades da MESMA página discordando** — no
+`/guide/scores`, o tooltip certo ao lado da nota errada. É o inverso exato do que a 194
+aprendeu com o `personal_fit`, onde o docstring certo não alcançava o texto que a pessoa lê.
+**Eixo que varre uma FONTE só não fecha a família: ele acha o primeiro lado.** O comentário do
+`ranking.ts` é o mais caro dos invisíveis — ele é a JUSTIFICATIVA de o filtro deixar nulo
+passar, então alguém que confie nele pode "consertar" o filtro achando que a premissa caiu.
+
+🔴 **O texto novo NÃO quantifica a cobertura, e a régua é essa — não a frase de ontem.**
+Escrever hoje *"a maioria TEM veredito"* reintroduziria o mesmo defeito com o sinal trocado: a
+cobertura SOBE a cada Rankear, e prosa gravada não acusa a própria defasagem. Quem conta é o
+`/guide/scores`, AO VIVO — e **só para quem tem sessão** (`veredito` está em
+`COVERAGE_PESSOAL`), então um texto que remetesse à contagem mentiria para o visitante. O
+tooltip passa a dizer o que é invariante: como o veredito entra na Prioridade (desvio
+padronizado da média do catálogo, ponderado pela confiança, meio peso se stale) e que a
+AUSÊNCIA dele não penaliza a obra — o fato útil que a frase errada tentava dar.
+
+Guardado por um caso em `tests/unit/guide/dicionario-dos-numeros.test.ts` que **varre as três
+superfícies de texto** do `alignment_score` e reprova QUALQUER quantificação. As 4 sondas
+conferidas — inclusive a que decide: quantificar no sentido CERTO de hoje também reprova.
 
 ✅ **O que estava CERTO na mesma varredura, conferido no código:** `personal_fit` (o `1,5×` das
 evitadas bate com `netNameOverlap`; o "Top 25% = ≥75" bate com `score-tooltip-content.tsx`),
@@ -3967,7 +3997,8 @@ réguas" sobre 13, "7 famílias" sobre 11 e a tabela de `SIGNED_IN_PREFIXES` err
 
 ### O que vale atacar, em ordem
 
-1. **A linha do `alignment_score`** — uma migration, um fato medido, e ela mente hoje.
+1. ✅ **A linha do `alignment_score` — FEITA em 2026-08-20** (migration 196 + as três
+   superfícies de prosa em código). Ver o eixo A acima: eram quatro lugares, não um.
 2. **Eixo C**, escolhendo as contagens por RISCO (as que governam decisão, não as
    descritivas). O padrão já existe e é o mesmo dos dois testes que funcionam: ler a tabela
    daqui e compará-la com a varredura.
@@ -6144,6 +6175,7 @@ Quatro ocorrências MEDIDAS em 2026-08-13/14, todas com suíte verde:
 | card da fila de Interesse | chip "Diverge"/"Bate" (`diverges`) | chip `Δ +1`/`Δ 0` (`delta !== 0`) | o **mesmo predicado**, nas mesmas duas cores, desenhado 2× no mesmo card, com uma 3ª cópia da paleta hand-rollada no `Δ`. Medido: o chip aparecia em 45 de 815 obras (5,5%) e nas 45 o `Δ` já dizia o mesmo — e ele PERDIA a precedência pro "Desatualizado" justo nas 676 stale que tinham o que comparar. Ficou o `Δ` |
 | card de embeddings de `/curation/settings` | a pílula do cabeçalho: contagem do SERVIDOR (`getSettingsItemUnread`) | o StatCard "Sem embedding": `useState` que o `onDone` sobrescrevia com `result.failed` | **"15 pendentes" e "0" no mesmo card, a dois centímetros um do outro**. E `failed` nem é a mesma grandeza — obra que falha ao re-embedar pode já ter linha antiga, ou seja não está "sem embedding". Hoje o número vem só da prop, e quem o atualiza é o `router.refresh()` do fim da execução |
 | explicação do Alinhamento | o **texto** do tooltip e o docstring diziam "40% tag + 30% critério + 30% consistência" | o **código** roda `netNameOverlap` (só tags, sem critério) | a fórmula descrita foi APOSENTADA em 27/06 e virou código morto; as duas superfícies seguiram documentando-a por ~2 meses, e quem lesse o arquivo pra entender o número aprenderia a fórmula errada. Aqui o "outro lado" não era um segundo cálculo — era **prosa**, que não tem como divergir barulhentamente. ✅ **A terceira superfície fechou em 19/08 (migration 194)**: `ui_labels.personal_fit.tooltip_full` ainda dizia "faixas ideais de critério e consistência geral", e ela alimenta o seletor de colunas, o heatmap e o painel de filtros — corrigir o docstring não alcançava o texto que a pessoa LÊ. Guardado por um caso em `dicionario-dos-numeros.test.ts` que casa a AFIRMAÇÃO, não a palavra (o texto novo cita "critério" de propósito, pra dizer que ele não entra) |
+| explicação do **Veredito** | `ui_labels` + a nota do `/guide/scores` diziam "a maioria das obras fica sem valor até passar pelo Rankear" | `calculated_scores.alignment_score`, que existe em **697 de 1.010** (69,0%) | a afirmação estava INVERTIDA, não desatualizada — e vivia em **4** superfícies (2 visíveis). ✅ migration **196**, 20/08. O irmão do caso acima, com a lição a mais: o eixo que varreu só o BANCO achou 1 das 4 |
 | nota calibrada × prosa da avaliação | `category_scores.score`, que a auditoria reescreve | `ai_evaluation_scores.justification`, que ela não toca | **27 das 37** notas calibradas exibiam prosa contradizendo o próprio número (1,79 ponto de distância), sob o selo ✨ de uma avaliação que não as produziu — e `ai_calibrated` não aparecia em UI nenhuma, então nada sinalizava a troca de autor |
 | aceitar sugestão de calibração | a guarda olhava o `source` do score | a nota em si tinha mudado | reavaliação reescreve o valor mantendo `ai_accepted` ⇒ **132 das 583 pendentes (23%)** julgavam um número que já não existia, e aceitar sobrescrevia a reavaliação mais nova sem erro |
 | régua de coerência faixa × nota | um regex por script, com o 1º par de números | `bandForScore`, que usa bin semiaberto | **483 acusações**, das quais 226 eram meio ponto na borda e 6 de 6 amostradas eram citação composta. O real são 71 — e quem derrubou o número foi a AMOSTRAGEM, que o cabeçalho do próprio script já mandava fazer |
@@ -6240,8 +6272,10 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.470 passando (+24 pulados) em 332 arquivos** (327 passando + 5 pulados);
-medido em 2026-08-21 **depois** de o smoke logado e o funil dos scripts de correção entrarem
+`npm run test` → **3.471 passando (+24 pulados) em 332 arquivos** (327 passando + 5 pulados);
+remedido em 2026-08-20 depois da correção do tooltip do Veredito — **+1 caso e ZERO arquivo
+novo**, porque o guard entrou no `dicionario-dos-numeros.test.ts` que já existia. Antes:
+**3.470 em 332**, medido **depois** de o smoke logado e o funil dos scripts de correção entrarem
 juntos: **+24 casos e +2 arquivos** sobre o canário
 (`orchestration/smoke-logado-verifica-a-sessao`, 12 casos · `deploy-verifica-o-que-publica`, +3
 · `orchestration/script-de-correcao-declara-o-funil`, 9). Disco (`find`) = índice

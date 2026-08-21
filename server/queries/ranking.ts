@@ -926,7 +926,7 @@ export async function getRanking(
       })
     }
   }
-  // Veredito IA (alignment) é calculado sob demanda/pago — a maioria das obras tem
+  // Veredito IA (alignment) é calculado sob demanda/pago — parte do catálogo tem
   // alignment_score NULL. Um mínimo/máximo NÃO deve reprovar quem nunca teve o
   // Veredito calculado (senão o filtro esconde catálogos inteiros, ex: Untracked);
   // nulo = "não avaliado por este critério" → passa.
