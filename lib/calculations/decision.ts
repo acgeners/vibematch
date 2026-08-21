@@ -12,8 +12,8 @@
  *    Re-aplicá-lo seria double-counting (versão pior do mesmo sinal). O fit
  *    serve só de DESEMPATE dentro das bandas, na camada de exibição.
  *  - A IA Rk. (alignment_score 0–100) é o ÚNICO ajuste: é um veredito do LLM
- *    INDEPENDENTE, que não está na Prevista. Entra só quando existe (NULL em 29%
- *    das obras) como DESVIO PADRONIZADO — quantos σ ele destoa da própria
+ *    INDEPENDENTE, que não está na Prevista. Entra só quando existe (NULL onde
+ *    ninguém pediu o re-rank) como DESVIO PADRONIZADO — quantos σ ele destoa da própria
  *    distribuição —, ponderado pela confiança e capado em ALIGN_MAX_WEIGHT pra
  *    ajustar, nunca substituir, a previsão calibrada.
  *

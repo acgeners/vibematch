@@ -53,7 +53,7 @@ export interface DecisionBreakdown {
   total: number | null
   /** A âncora: Nota Prevista, intacta. */
   expected: number | null
-  /** Veredito do LLM 0–100. NULL na maioria das obras (nunca passou pelo re-rank). */
+  /** Veredito do LLM 0–100. NULL onde a obra nunca passou pelo re-rank. */
   alignment: number | null
   /** Peso EFETIVO do veredito nesta obra (0–1). 0 quando não há veredito. */
   alignWeight: number

@@ -42,7 +42,7 @@ export const SCORE_NOTES: Record<string, ScoreNote> = {
   alignment_score: {
     tone: "contexto",
     title: "Ele não existe até você pedir.",
-    body: "É o único número da página que custa uma chamada de IA, e por isso a maioria das obras fica sem ele. Onde ele falta, a Prioridade é a Nota Prevista intacta — não há penalidade por não ter passado pelo re-rank.",
+    body: "É o único número da página que custa uma chamada de IA, então ele só existe nas obras em que alguém pediu o re-rank. Onde ele falta, a Prioridade é a Nota Prevista intacta — não há penalidade por não ter passado por ele.",
   },
   decision: {
     tone: "contexto",

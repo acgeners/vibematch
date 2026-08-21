@@ -1,0 +1,44 @@
+-- O tooltip do Veredito IA afirmava o OPOSTO do fato — e a frase era a justificativa
+-- de existir do próprio número.
+--
+-- 🔴 O QUE ESTAVA NO AR: `ui_labels.alignment_score.tooltip_full` terminava com
+--   "a maioria das obras fica sem valor até passar pelo Rankear."
+-- Medido na NUVEM em 2026-08-21: **697 de 1.010 obras ativas (69,0%) TÊM veredito**.
+-- No clone local, 695 de 978 (71,1%) — ou seja a maioria TEM, nos dois bancos, e o
+-- texto afirma que a maioria NÃO tem. Não é número desatualizado: é a afirmação
+-- invertida. O md5 do texto bate nos dois bancos (6528b2c45344aa2262500f37960c3e13),
+-- então é uma linha só.
+--
+-- ⚠️ POR QUE ISTO IMPORTA MAIS DO QUE UM TOOLTIP: esta linha não descreve uma tela,
+-- descreve o NÚMERO — e alimenta quatro superfícies por `LABELS.alignment_score`
+-- (seletor de colunas do /catalog e do /ranking, tooltip do heatmap, painel de filtros
+-- e a página /guide/scores). Quem lesse qualquer uma delas concluiria que a coluna
+-- "Ver." está quase toda vazia e que ordenar por ela não separa nada — quando ela
+-- cobre mais de dois terços do catálogo. É a família "dois critérios pro mesmo fato"
+-- na forma mais cara: prosa gravada contra a fonte do número, com o lado que a pessoa
+-- LÊ sendo o errado. Mesma forma da migration 194 (`personal_fit`).
+--
+-- 🔴 O QUE O TEXTO NOVO NÃO FAZ: cravar a proporção. O defeito antigo foi justamente
+-- uma afirmação de proporção gravada em prosa, que não tem como acusar a própria
+-- defasagem — e a cobertura sobe a cada Rankear. Quem conta é o /guide/scores, AO
+-- VIVO (`count: "exact", head: true`). O tooltip passa a dizer o que é invariante:
+-- como o veredito entra na Prioridade, e que a AUSÊNCIA dele não penaliza a obra —
+-- que era o fato útil que a frase errada tentava dar.
+--
+-- Os três fatos do texto novo, conferidos no código (`lib/calculations/decision.ts`):
+--   · desvio padronizado da própria distribuição do catálogo (não `alignment/10`,
+--     trocado na migration 193 porque a fórmula antiga derrubava 625 das 695 obras)
+--   · ponderado pela confiança, com teto `ALIGN_MAX_WEIGHT = 0.35`
+--   · `STALE_CONFIDENCE_FACTOR = 0.5` — veredito desatualizado vale meio peso
+--   · sem veredito, `alignWeight = 0` ⇒ a Prioridade é a Nota Prevista intacta
+--
+-- ⚠️ `tooltip_short` fica como está: "Veredito do consultor IA (0–100)." não afirma
+-- proporção nenhuma, logo não mente. Reescrevê-lo por simetria só criaria uma segunda
+-- redação do mesmo fato para divergir depois.
+--
+-- Valor anterior, para reversão:
+--   tooltip_full: 'Veredito do consultor IA (0–100), gerado sob demanda. Reordena as recomendações e ajusta a Prioridade — a maioria das obras fica sem valor até passar pelo Rankear.'
+
+update public.ui_labels
+set tooltip_full = 'Veredito do consultor IA (0–100), gerado sob demanda pelo Rankear. Reordena as recomendações e ajusta a Prioridade: entra como desvio da própria média do catálogo, ponderado pela confiança, e vale meio peso quando está desatualizado. Onde ele falta, a Prioridade é a Nota Prevista intacta — não ter passado pelo Rankear não penaliza a obra.'
+where field = 'alignment_score';
