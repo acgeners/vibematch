@@ -53,7 +53,25 @@ for (const [origem, destino] of [
 
 const porta = process.env.PORT ?? "3000"
 console.log(`▲ standalone em http://localhost:${porta}`)
-spawn(process.execPath, [path.join(standalone, "server.js")], {
+const servidor = spawn(process.execPath, [path.join(standalone, "server.js")], {
   stdio: "inherit",
   env: { ...carregarEnvLocal(raiz), ...process.env, PORT: porta },
 }).on("exit", (code) => process.exit(code ?? 0))
+
+/**
+ * 🔴 O sinal tem que ATRAVESSAR até o servidor — este processo é só um lançador.
+ *
+ * Sem isto, um SIGTERM mata o lançador e o `server.js` fica **órfão segurando a porta**, com o
+ * chamador convencido de que derrubou tudo. Foi o que o `smoke-logado.sh` produzia: ele mata o
+ * PID que conhece (este), o neto sobrevive, e o `rm -rf` seguinte apaga o worktree **debaixo de
+ * um servidor que continua no ar** — processo vivo servindo arquivos que já não existem.
+ *
+ * O `exitCode` do filho volta pelo `on("exit")` acima; aqui só encaminhamos o pedido.
+ */
+for (const sinal of ["SIGTERM", "SIGINT"]) {
+  process.on(sinal, () => {
+    servidor.kill(sinal)
+    // Rede curta: se o filho ignorar o pedido, não ficamos presos esperando para sempre.
+    setTimeout(() => servidor.kill("SIGKILL"), 3000).unref()
+  })
+}

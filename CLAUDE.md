@@ -110,8 +110,13 @@ nome de diretório de `exemplo`) e todo escritor chama `podar("<família>")`. Aj
 pela env declarada em cada uma — `BACKUP_KEEP` (5), `PULL_KEEP` (3), `PUSH_STAGE_KEEP` (2),
 `PUSH_EVALS_KEEP` (3), `COFRE_KEEP` (5), `SYNOPSIS_LAB_KEEP` (3), e mais 5.
 
-⚠️ **São 11 hoje** (2026-08-18), e esta linha dizia **7** — a lista de envs acima cobria 6 delas.
+⚠️ **São 14 hoje**, e esta linha já disse **7** e **11** — a lista de envs acima cobre 6 delas.
 Contagem em prosa não acusa a própria defasagem: **não a repita aqui, leia o `FAMILIAS`.**
+
+🔴 **E essa frase não bastou: a linha defasou de 11 para 14 com o aviso escrito nela mesma.** É a
+prova mais curta do eixo C — aviso em prosa não impede a repetição, porque prosa não sabe que está
+defasada. Hoje quem confere é `tests/unit/orchestration/contagens-do-claude-md.test.ts`, que lê
+`FAMILIAS` e reprova a divergência.
 
 ⚠️ **Esta seção já disse "o script mantém os 5 mais recentes" e induzia à conclusão errada.** A
 frase era verdadeira e cobria **6 dos 40 diretórios** — a retenção do `backup-db.mjs` só casa
@@ -288,7 +293,7 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**104 arquivos, remedidos em 2026-08-21**):
+banco declara um dos dois (**104 arquivos, remedidos em 2026-08-20**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
@@ -305,7 +310,7 @@ as duas guardas de `exigirLocal()` (o servidor E o banco, conferidos em separado
 
 ⚠️ **E a varredura casa a GRAFIA do marcador no source**: escrever `ALVO:` seguido de `NUVEM`
 em prosa — mesmo para explicar que não se aplica — reclassifica o arquivo. Medido em
-2026-08-21: uma frase explicativa no cabeçalho do `smoke-logado.mjs` moveu a contagem de 49
+2026-08-20: uma frase explicativa no cabeçalho do `smoke-logado.mjs` moveu a contagem de 49
 para 50. Ao documentar a régua DENTRO de um script, não soletre o marcador da outra categoria.
 
 🔴 **ESTES TRÊS NÚMEROS SÃO CONFERIDOS PELA SUÍTE**, e não por quem editar esta seção —
@@ -2772,14 +2777,16 @@ dois "0,3" que diferem 100×. **Coluna ordenável é o pior caso**: a mistura in
 é maior. A 3ª esqueceu a **quebra que SOMA um total** — o badge de custo por obra imprimia `$0,13`
 sobre `5,37¢ · 3,98¢ · 1,53¢ · 1,14¢ · 0,50¢`, e a conta parava de fechar de olho.
 
-**Hoje são 15 réguas** — conferido, **não** contado de cabeça. Esta linha já dizia "12" quando eram
-13, porque a coluna "Custo USD" da tabela **Por modelo** (`app/curation/ai-usage/page.tsx`) nunca entrou na
-conta. Antes de mexer neste número, rode:
+**Hoje são 16 réguas**, e este número é **CONFERIDO PELA SUÍTE** desde 2026-08-21 — não por quem
+editar esta seção. Ele já disse "12" quando eram 13 (a coluna "Custo USD" de **Por modelo** nunca
+entrou na conta) e **"15" quando eram 16**: o modal de saldo negativo entrou em 14/08 com régua
+própria e ficou 7 dias fora da tabela, na seção que diz "conferido, não contado de cabeça". O grep
+que a suíte roda é este, e ele continua servindo para achar QUEM é a cópia nova:
 
 ```bash
 grep -rn 'makeUsdScale(' --include='*.ts' --include='*.tsx' . \
   --exclude-dir=node_modules --exclude-dir=.next \
-  | grep -v 'lib/format/money.ts' | grep -v '^\.\?/\?tests/'   # → 15 em 2026-08-08
+  | grep -v 'lib/format/money.ts' | grep -v '^\.\?/\?tests/'   # → 16 em 2026-08-21
 ```
 
 Contagem que fecha com ele:
@@ -2794,7 +2801,7 @@ Contagem que fecha com ele:
 | 1 | o toast do backfill de Interesse |
 | 3 | mensagens de bloqueio por teto (`synopsis-quality`, `interest-ui`, `interest-backfill`) |
 | 1 | o badge dev de custo por obra |
-| 1 | o card de saldo |
+| **2** | o saldo — o card de `/curation/ai-usage` **e o modal de saldo negativo**, que dividem os mesmos três termos (informado − gasto = restante) |
 
 ⚠️ **Elemento recorrente cuja distribuição senta EM CIMA do corte precisa de régua própria** — senão
 ele troca de unidade a cada navegação e inverte a leitura sem nada acusar. Medido em 2026-08-08 no
@@ -3318,7 +3325,7 @@ código 1.
 `scripts/smoke-browser.mjs`, no fim do `deploy.sh`, depois do de HTTP. ⚠️ **As 5 rotas dele
 são todas ANÔNIMAS** — a metade logada é do `npm run smoke:logado`, e o limite é maior do que
 parece: a página de obra que ele abre tem 46 elementos anônima e 70 para o curador (medido em
-21/08). Carrega 5 rotas num
+20/08). Carrega 5 rotas num
 Chromium headless e reprova se alguma quebrar **depois da hidratação** — a família que o smoke
 de cima declara não ver, e que deixou toda página de obra quebrada por um dia em 20/08.
 
@@ -3495,7 +3502,7 @@ testes), é **canal de sinal**. Mais um teste unitário não teria achado nenhum
 
 ### Os quatro canais que faltam, em ordem de retorno
 
-✅ **1b. A metade LOGADA — FEITA em 2026-08-21** (`npm run smoke:logado`, seção própria). O
+✅ **1b. A metade LOGADA — FEITA em 2026-08-20** (`npm run smoke:logado`, seção própria). O
 item 1 abaixo fechou o canal para o visitante; este fecha para quem tem sessão, que era a
 metade sem instrumento nenhum — inclusive o painel `report_error` do #495. Conferido com
 sonda: numa quebra de hidratação da `/curation`, o smoke de browser passa **verde** e este
@@ -3508,7 +3515,7 @@ console"* — **teria falhado nos dois sentidos**: o React 19 engole a exceção
 deploy por causa das capas mortas. Os sinais que funcionam foram medidos, não deduzidos: resposta
 **5xx** e **esqueleto sobrando** depois de hidratar.
 
-✅ **2. Script de correção declara o que esperava achar — FEITO em 2026-08-21**
+✅ **2. Script de correção declara o que esperava achar — FEITO em 2026-08-20**
 (`scripts/lib/funil.mjs`, seção própria). Aplicado a 9 scripts; o teste derivado do git achou
 um que a varredura manual não tinha visto. O texto abaixo era o plano:
 
@@ -3524,7 +3531,7 @@ própria abaixo). ⚠️ Ele cobre a metade **RPC** (as 8 que o código chama, c
 banco); a metade **embed** — o `ai_evaluations` que virou objeto — segue sem canário, e o
 inventário dela é magro (2 arquivos candidatos, não medidos um a um).
 
-🟡 **4. O grande: inventário dos PARES — LEVANTADO em 2026-08-21** (seção própria acima). Os
+🟡 **4. O grande: inventário dos PARES — LEVANTADO em 2026-08-20** (seção própria acima). Os
 três eixos foram medidos: o eixo A rendeu 1 achado real, o eixo B se mostrou NÃO automatizável,
 e o eixo C (quase todas as contagens deste arquivo, que ninguém confere) é o filão que sobrou. Nada foi
 corrigido ainda. O texto abaixo era o plano:
@@ -3775,7 +3782,7 @@ ao lado do de tipo.
 
 ## `npm run smoke:logado`: a metade LOGADA, verificada ANTES de publicar
 
-`scripts/smoke-logado.mjs` + `scripts/smoke-logado.sh` (2026-08-21). Build de produção contra
+`scripts/smoke-logado.mjs` + `scripts/smoke-logado.sh` (2026-08-20). Build de produção contra
 o banco LOCAL, login pela UI nos dois papéis, e as rotas gateadas abertas num Chromium.
 
 ```bash
@@ -3783,7 +3790,7 @@ npm run smoke:logado     # build + sobe + verifica + derruba (~2min)
 ```
 
 🔴 **Os outros dois smokes são ANÔNIMOS, e isso deixava metade do app sem instrumento
-nenhum.** Medido em 21/08: o app tem **39 rotas**, **12 gateadas** (7 em `/curation`, 5 em
+nenhum.** Medido em 20/08: o app tem **39 rotas**, **12 gateadas** (7 em `/curation`, 5 em
 `SIGNED_IN_PREFIXES`), e o `smoke-browser.mjs` abre **5** — nenhuma logada.
 
 ⚠️ **E o gate do middleware SUBESTIMA o buraco**, porque ele lista quem REDIRECIONA. A página
@@ -3834,7 +3841,7 @@ vazia — 4 elementos. Piso alto ali reprovaria um app são.
 
 ### Os sinais: a tabela de 20/08 NÃO se repetiu, e é isso que justifica manter o piso
 
-Remedido em 21/08 numa rota LOGADA (sonda estourando na hidratação da `/curation`):
+Remedido em 20/08 numa rota LOGADA (sonda estourando na hidratação da `/curation`):
 
 | sinal | quebrada | sã | 20/08 (anônimo) |
 |---|---|---|---|
@@ -3853,7 +3860,7 @@ Next 16 serve **"This page couldn't load"** (apóstrofo tipográfico) e `Applica
 client-side exception` **não aparece**. Casar só a antiga é ter o detector desligado
 justamente no caso que ele existe para pegar.
 
-### Três armadilhas de mecânica, todas silenciosas
+### Quatro armadilhas de mecânica, todas silenciosas
 
 🔴 **`realpath`, não `resolve`, na guarda de "chamado direto" — a versão sem ele FALHOU
 CALADA.** No macOS `mktemp -d` devolve `/var/folders/…`, symlink para `/private/var/…`:
@@ -3880,13 +3887,29 @@ o que se verifica é o que foi PUBLICADO.
 caminho COMPUTADO faz o Vite injetar `import … from "/@vite/client"` ANTES do shebang, e o
 arquivo deixa de parsear na suíte (`Invalid Character !`) embora rode normal no Node.
 
+🔴 **O sinal não chegava ao servidor: o `cleanup` matava o PAI e o NETO ficava com a porta**
+(corrigido em 21/08). `start-standalone.mjs` é um lançador — ele `spawn`a o
+`.next/standalone/server.js` —, e não encaminhava `SIGTERM`. Então o `kill "$SRV"` derrubava o
+lançador, o servidor sobrevivia órfão na **3100**, e o `rm -rf` da linha seguinte apagava o
+worktree **debaixo de um processo que continuava no ar**, servindo arquivos que já não existiam.
+
+⚠️ **O sintoma era barato e por isso invisível:** a linha 94 já mata quem estiver na porta
+ANTES de subir, então a execução seguinte funcionava. O que ficava preso era RAM e cache entre
+execuções — e o smoke terminava anunciando sucesso, que é a família de sempre.
+
+**São DUAS camadas, e não é redundância:** o lançador encaminha `SIGTERM`/`SIGINT` (a raiz, que
+vale também para o `npm start`) e o `cleanup` confere a PORTA (a rede). São fatos diferentes —
+"o processo terminou" × "a porta está livre" —, a mesma forma de "rota + fonte" do gate de
+sessão. ⚠️ Conferido com sonda contra o script REAL, num standalone falso: a versão de 20/08
+deixa a porta presa depois do `kill`; a de hoje a libera.
+
 ### `SMOKE-ALVO`: agora existem DOIS tipos de smoke, e a régua tinha um só
 
 Cada `scripts/smoke-*.mjs` declara no cabeçalho `SMOKE-ALVO: producao` (verifica **o que está
 no ar**, depois de publicar, anônimo) ou `SMOKE-ALVO: pre-deploy` (verifica **o que vai
 subir**, contra build local). O wrapper e o `deploy.sh` DERIVAM disso.
 
-🔴 Até 21/08 o teste exigia que TODO smoke fosse chamado pelo `deploy.sh`. Arrastado para
+🔴 Até 20/08 o teste exigia que TODO smoke fosse chamado pelo `deploy.sh`. Arrastado para
 lá, o smoke logado receberia `--base` de produção e **reprovaria todo deploy pela própria
 guarda de alvo**. A saída não foi excetuá-lo numa lista no teste — foi o alvo sair do próprio
 arquivo, para que o smoke de amanhã caia na exigência certa sozinho.
@@ -3926,13 +3949,13 @@ to-one como objeto, o código fazia `?.[0]`, e o baseline não era achado em **3
 obras**. O script imprimia "nada a gravar" e saía com sucesso. Quem o pegou foi um contador dar
 0 onde eu esperava 89 — não um teste, não um log.
 
-✅ **Conferido com sonda em 21/08, contra a nuvem:** devolvendo o `?.[0]`, o funil imprime
+✅ **Conferido com sonda em 20/08, contra a nuvem:** devolvendo o `?.[0]`, o funil imprime
 `392 → 0 com baseline da avaliação encontrado` e marca 🔴. Sem o funil, a mesma execução dizia
 só "nada a gravar".
 
 ### A régua do que é DRENO custou duas versões erradas, e as duas caíram rodando
 
-| funil medido na nuvem (21/08) | marca? | por quê |
+| funil medido na nuvem (20/08) | marca? | por quê |
 |---|---|---|
 | `392 com limite → 19 com baseline → 0 a mover` | **sim** | o 19 não é o resultado: algo o engoliu no meio |
 | `1020 obras lidas → 0 fora da régua` | não | o zero É o resultado (passivo fechado em 18/08) |
@@ -3974,7 +3997,7 @@ Guardado por `tests/unit/orchestration/script-de-correcao-declara-o-funil.test.t
 com 3 sondas conferidas: `console.log` solto de volta, funil montado e nunca impresso, e
 dispensa sem motivo.
 
-## Inventário dos PARES: o levantamento de 2026-08-21 (só o mapa, sem correção)
+## Inventário dos PARES: o levantamento de 2026-08-20 (só o mapa, sem correção)
 
 Item 4 dos canais mudos. Este arquivo nomeia a doença — "dois critérios pro mesmo fato" — e a
 trata **sempre depois de doer**. A virada seria inverter: levantar os pares antes. Isto é o
@@ -4065,7 +4088,7 @@ constante desta base foram todos achados por outro caminho — duas telas discor
 contradizendo uma ferramenta. O que funciona é o que já se faz: quando o valor tem dono
 (`LOW_BALANCE_USD`, `STRONG_TAG_WEIGHT`, `CRITERIA_SCALE_LEGEND`), a terceira cópia não nasce.
 
-### Eixo C — prosa DESTE arquivo que cita contagem: 103 afirmações, 2 conferidas
+### Eixo C — prosa DESTE arquivo que cita contagem: 103 afirmações, 11 conferidas
 
 O CLAUDE.md faz **103 afirmações de contagem** (63 distintas) sobre artefatos do próprio
 repositório — a maior parte sobre "arquivos", "colunas", "tabelas", "scripts", "rotas" e
@@ -4086,19 +4109,60 @@ em vez do fato, dentro da seção que existe para nomear esse defeito.
 tabela de alvos e o total de arquivos). Os outros onze o citam em comentário, que não confere
 nada.
 
-⚠️ Ou seja: **quase todas as 103 envelhecem sem nada acusar** — os dois testes cobrem cinco
+⚠️ Ou seja: **quase todas as 103 envelhecem sem nada acusar** — os dois testes cobriam cinco
 números entre eles. É o modo de
 falha que esta seção inteira documenta, e que já produziu "29 / 29" sobre 58 arquivos, "12
 réguas" sobre 13, "7 famílias" sobre 11 e a tabela de `SIGNED_IN_PREFIXES` errada duas vezes.
-É o maior filão que sobrou, e é barato: cada número desses é derivável do disco.
+
+✅ **Atacado em 2026-08-21: as que GOVERNAM DECISÃO passaram a derivar do disco.**
+`tests/unit/orchestration/contagens-do-claude-md.test.ts` confere **9**, e o total sai do
+próprio teste — escrever "N conferidas" à mão aqui seria o defeito de novo. Hoje são
+**11 conferidas** (2 das redes anteriores + 9 deste arquivo).
+
+🔴 **Duas das nove JÁ ESTAVAM ERRADAS no dia em que o teste nasceu**, e nenhuma tinha sido
+notada:
+
+| contagem | prosa | disco | desde |
+|---|---|---|---|
+| réguas de `makeUsdScale` | 15 | **16** | 14/08 — o modal de saldo negativo entrou com régua própria |
+| famílias de `.backups/` | 11 | **14** | três famílias novas |
+
+⚠️ **A das famílias é a mais didática: a própria linha manda "não a repita aqui, leia o
+`FAMILIAS`" — e ela mesma repetiu, e defasou em 3.** A das réguas mora numa seção que diz
+"conferido, **não** contado de cabeça". **Aviso em prosa não impede a repetição**, porque prosa
+não sabe que está defasada; o que impede é um lado DERIVAR do outro.
+
+### A régua do que entra: RISCO, nunca "é derivável"
+
+A maioria das 103 é **descritiva** — medida de tela, retrato de investigação, número histórico
+de um defeito já pago — e congelá-la pintaria a suíte de vermelho por mudança inocente. Entra
+o que satisfaz os três:
+
+1. **governa decisão** — errada, alguém decide errado, ou uma verificação promete cobertura
+   que não tem;
+2. **deriva do disco** — o outro lado existe em código, não numa medição externa;
+3. **muda RARO** — senão vira o alarme que sempre toca, e alarme que sempre toca não é lido.
+
+🔴 **O critério 3 é o que mantém a CONTAGEM DE TESTES fora do teste**, embora ela seja a que
+mais envelhece neste arquivo (já teve ~28 valores). Ela muda a cada PR: um caso sobre ela
+reprovaria toda mudança, e a saída barata para um vermelho constante é desligá-lo.
+
+As nove de hoje, em duas famílias: **cobertura de verificação** (rotas dos 3 smokes, rotas do
+app, rotas gateadas) e **dono único cuja contagem é a defesa contra a próxima cópia** (réguas
+de dinheiro, famílias de retenção, scripts com funil).
+
+⚠️ **A âncora é a AFIRMAÇÃO, não a linha nem a posição** — reescrever o texto ao redor não
+reprova. Mas âncora que deixa de casar **REPROVA**, em vez de passar por vacuidade: é assim
+que esta rede deixaria de existir em silêncio, e é o mesmo contrato de `rotas-de-sessao` ("a
+linha sumiu da tabela").
 
 ### O que vale atacar, em ordem
 
 1. ✅ **A linha do `alignment_score` — FEITA em 2026-08-20** (migration 196 + as três
    superfícies de prosa em código). Ver o eixo A acima: eram quatro lugares, não um.
-2. **Eixo C**, escolhendo as contagens por RISCO (as que governam decisão, não as
-   descritivas). O padrão já existe e é o mesmo dos dois testes que funcionam: ler a tabela
-   daqui e compará-la com a varredura.
+2. ✅ **Eixo C, as que governam decisão — FEITO em 2026-08-21** (9 contagens, 2 achados).
+   Sobram as **descritivas**, que por desenho ficam de fora: quando uma delas for citada numa
+   decisão, ela vira candidata — não antes.
 3. **Eixo B, caso a caso** — sem varredura, porque ela não separa sinal de ruído.
 
 ## `npm run contracts`: o contrato das RPCs, conferido contra o BANCO
@@ -6369,17 +6433,24 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.479 passando (+24 pulados) em 333 arquivos** (328 passando + 5 pulados);
-remedido em 2026-08-21 NA RESOLUÇÃO DO CONFLITO entre o #502 (tooltip do Veredito) e o #503
-(fallback de capa), escritos em paralelo. Disco (`find`) = índice (`git ls-files`) = **333**,
+`npm run test` → **3.490 passando (+24 pulados) em 334 arquivos** (329 passando + 5 pulados);
+remedido em 2026-08-21 com o eixo C (+11 casos e +1 arquivo,
+`orchestration/contagens-do-claude-md`). Disco (`find`) = índice (`git ls-files`) = **334**,
 conferido DEPOIS do `git add`, em DUAS rodadas limpas com resultado idêntico.
+
+⚠️ **A 1ª rodada trouxe "Errors 1 error" com TODOS os testes passando** (Radix focus-scope
+estourando timeout em `ranking-ordenacao-trilha`), e a 2ª veio limpa com contagem idêntica — a
+flakiness de carga descrita abaixo. A régua é a de sempre: re-rodar antes de concluir, nos dois
+sentidos.
 
 ⚠️ **A soma dos dois deltas teria acertado o número desta vez, e isso é sorte de aritmética —
 não método.** Ela só funciona enquanto os dois PRs não tocam o mesmo arquivo de teste, e nada
 avisa no dia em que tocarem. É a terceira vez que esta linha é resolvida num merge; nas três, o
 que sobreviveu foi RE-MEDIR na base que vira o merge.
 
-Antes: **3.471 em 332** (o #502 sozinho — +1 caso e zero arquivo, porque o guard entrou num
+Antes: **3.479 em 333** (a resolução do conflito entre o #502 e o #503, escritos em paralelo —
+e a soma dos dois deltas teria acertado por sorte de aritmética, não por método: ela só funciona
+enquanto os dois PRs não tocam o mesmo arquivo de teste), **3.471 em 332** (o #502 sozinho — +1 caso e zero arquivo, porque o guard entrou num
 arquivo que já existia) e **3.470 em 332**, medido **depois** de o smoke logado e o funil dos
 scripts de correção entrarem juntos: **+24 casos e +2 arquivos** sobre o canário
 (`orchestration/smoke-logado-verifica-a-sessao`, 12 casos · `deploy-verifica-o-que-publica`, +3

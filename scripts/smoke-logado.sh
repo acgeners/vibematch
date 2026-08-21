@@ -60,6 +60,12 @@ SRV=""
 cleanup() {
   # `wait` depois do `kill` engole o "Terminated: 15" que o job control imprime.
   if [ -n "$SRV" ]; then kill "$SRV" 2>/dev/null || true; wait "$SRV" 2>/dev/null || true; fi
+  # 🔴 A PORTA é a prova, não o PID: `start-standalone.mjs` spawna o `server.js`, e até
+  # 21/08 ele não encaminhava o sinal — matar o PID que conhecemos deixava o NETO vivo
+  # segurando a 3100, e o `rm -rf` abaixo apagava o worktree debaixo dele. A raiz foi
+  # corrigida lá; isto aqui é a rede, e ela custa uma linha. As duas camadas existem porque
+  # são fatos diferentes: "o processo terminou" × "a porta está livre".
+  lsof -ti:"$PORTA" 2>/dev/null | xargs kill 2>/dev/null || true
   rm -rf "$(dirname "$WT")" 2>/dev/null || true
 }
 trap cleanup EXIT
