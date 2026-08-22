@@ -3419,6 +3419,38 @@ um sidecar que este Dockerfile nem deploya) passava batido. Precisa de `**/node_
 ⚠️ Regra de leitura: se a saída mostra camadas sendo exportadas/enviadas, o problema **não** é
 credencial. Leia o `WARN Build context is …` no topo antes de mexer em auth.
 
+## Os monitores de produção são DOIS workflows do GitHub — e a ROTA deles apodrece
+
+`.github/workflows/healthcheck.yml` e `keepalive.yml`, de 6 em 6h, os dois batendo em
+`/api/health` (que exercita o banco e devolve 503 quando a query falha). Rodam no GitHub e não no
+launchd de propósito: assim vigiam com o Mac desligado. ⚠️ **O GitHub desativa workflow agendado
+após 60 DIAS SEM COMMIT** — o cron morre sozinho justo no cenário para o qual existe.
+
+🔴 **O healthcheck tem um 2º passo que bate numa ROTA, e ele apodreceu sem nada acusar.** Ele
+chamava `/sobre`, que virou **308** no deploy de 19/08 (a renomeação de 16/08). De 19 a 21/08 o
+monitor mandou **12 e-mails de falha com o banco PERFEITO** — o log de cada um traz
+`HTTP 200 · {"ok":true,"works":1010}` no passo 1. Quem denuncia é o `keepalive`, que não testa
+rota e ficou VERDE o tempo todo: duas ferramentas discordando sobre o mesmo fato.
+
+⚠️ **O caro é o mascaramento, não o falso alarme.** Em 22/08 a quota de egress estourou de novo
+(402 em todo endpoint; `/`, `/catalog` e `/about` em **200 sem dado nenhum**) e o e-mail dessa
+falha chegou visualmente IDÊNTICO aos 12 anteriores — 13º de uma fila que se aprendeu a ignorar.
+É "alarme que sempre toca não é lido" mordendo o próprio monitor
+([[project-supabase-egress-quota-402]]).
+
+⚠️ **`scripts/smoke-producao.mjs` já usava `/about`** — só o workflow ficou para trás, e não
+tinha como ser diferente: o YAML não é compilado, não é importado e não roda na suíte. Hoje quem
+confere é `tests/unit/orchestration/workflow-bate-em-rota-que-existe.test.ts`, que **deriva** os
+workflows do disco, o host do `fly.toml` e os aliases do `redirects()`, e reprova rota que não
+exista em `app/` ou que seja alias 308.
+
+🔴 **Uma das 5 sondas me desmentiu, e o conserto é o padrão da casa:** o filtro que ignora linha
+de COMENTÁRIO é inalcançável pelos workflows de hoje (a prosa histórica cita `/sobre` sem a URL
+completa), então removê-lo mantinha a suíte verde. Ele ganhou caso PRÓPRIO, com texto sintético
+e a função extraída pura — senão seria capacidade construída e DESLIGADA. ⚠️ E o comentário fica
+de fora **de propósito**: no cabeçalho do healthcheck o nome antigo é o CERTO, porque descreve
+como a rota se chamava; congelar prosa histórica seria proteger a grafia, não o fato.
+
 ## `redirect()` num `page.tsx` DERRUBA a página — e a severidade cresce sozinha
 
 🔴 `redirect()` num server component **não devolve 3xx**. O layout já começou a streamar, o
@@ -6484,11 +6516,14 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.502 passando (+24 pulados) em 334 arquivos** (329 passando + 5 pulados);
-remedido em 2026-08-21 com a metade EMBED do canário (**+12 casos e ZERO arquivo** — eles
+`npm run test` → **3.507 passando (+24 pulados) em 335 arquivos** (330 passando + 5 pulados);
+remedido em 2026-08-22 com a rede dos workflows (**+5 casos e +1 arquivo**,
+`orchestration/workflow-bate-em-rota-que-existe`). Disco (`find`) = índice (`git ls-files`) =
+executados = **335**, conferido DEPOIS do `git add`.
+
+Antes: **3.502 em 334** (a metade EMBED do canário: **+12 casos e ZERO arquivo** — eles
 entraram no `canario-de-contrato-parser` que já existia, e é por isso que a contagem de
-ARQUIVOS não se move e a de CASOS sim). Disco (`find`) = índice (`git ls-files`) = **334**,
-conferido DEPOIS do `git add`, em DUAS rodadas limpas com resultado idêntico.
+ARQUIVOS não se move e a de CASOS sim).
 
 ⚠️ **A 1ª rodada trouxe "Errors 1 error" com TODOS os testes passando** (Radix focus-scope
 estourando timeout em `ranking-ordenacao-trilha`), e a 2ª veio limpa com contagem idêntica — a
