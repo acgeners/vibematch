@@ -11,7 +11,7 @@ import { ensureReviewSummary } from "@/lib/orchestration/integrations/reviews"
 import { generateWorkReviewDigest } from "@/server/actions/review-digest"
 import { inferAndPersistTagsForWork } from "@/lib/tags/auto-infer"
 import { triggerAiEvaluation, submitAiReview } from "@/server/actions/ai"
-import { recalculateScoresNow } from "@/server/recalc/queue"
+import { markRecalcPending } from "@/server/recalc/queue"
 import { autoPredictSynopsisQuality } from "@/lib/ai-evaluation/synopsis-quality-runner"
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
 import { refreshEmbeddingForWork } from "@/server/embeddings/refresh"
@@ -204,8 +204,33 @@ export async function generateAllWorkData(
     {
       action: "recalculate_scores",
       run: async () => {
-        const r = await recalculateScoresNow()
-        return r.status === "failed" ? { fatal: true, error: r.error } : { fatal: false, note: r.status }
+        // 🔴 MARCA a pendência; NÃO roda o recálculo global aqui.
+        //
+        // Isto chamava `recalculateScoresNow()` (force=true), que lê o catálogo INTEIRO e
+        // retreina o Ridge. Como a cascata roda UMA VEZ POR OBRA e não existe caller de lote,
+        // "Gerar tudo" em N obras produzia N recálculos globais — medido em 22/08: 3 obras →
+        // 3 recalcs, cada um recalculando as 1000 obras. O single-flight de
+        // `ensureRecalculateScores` não salva: ele deduplica por `generation: lastEditAt`, e
+        // cada obra produz um `lastEditAt` novo, então a dedup nunca alcança.
+        //
+        // Custo medido de UM recalc: 216 queries · 234 ms · 7,14 MB crus (1,78 MB gzip).
+        // Num lote de 20 obras isso são ~33,8 MB de tráfego evitável.
+        //
+        // ⚠️ Nenhum passo POSTERIOR desta cascata depende do recalc — conferido antes de mexer:
+        //   · `generate_embedding` lê `category_scores` (os 9 atributos, gravados pelo passo de
+        //     avaliação logo acima), NUNCA `calculated_scores`;
+        //   · `run_alignment` ESCREVE em `calculated_scores` com
+        //     `.upsert(..., { onConflict: "work_id" })` — cria a linha se ela não existir;
+        //   · `predict_interest_potential` grava na tabela própria.
+        //
+        // Quem roda o recalc depois: os MESMOS três donos que `createWork`,
+        // `createWorksBatch` e `updateWork` já usam — `finalizePendingBatch()` (o banner de
+        // lote pendente), `maybeTriggerStaleRecalc()` (auto ≥1h, disparado pelo fetch de
+        // badges do chrome) e o botão "Recalcular notas". A pendência é um flag em
+        // `formula_config` e só volta a false quando o recálculo completa, então N marcações
+        // viram UMA pendência e nada se perde numa falha parcial ou num retry.
+        await markRecalcPending("generateAllWorkData", { changed: ["category_scores"] })
+        return { fatal: false, note: "pendência marcada (recalc global deferido)" }
       },
     },
     {
