@@ -21,9 +21,20 @@
 import { computeCostUsd } from "@/lib/ai/pricing"
 import type { UsageTokens } from "@/lib/ai/pricing"
 import { COST_SAFETY_MULTIPLIER } from "@/lib/orchestration/cost"
+import { SONNET_MODEL } from "@/lib/ai/models"
 
+// 🔴 O Sonnet vem do DONO, nunca de um literal. Este arquivo chumbava
+// `claude-sonnet-4-6` enquanto o app chamava `claude-sonnet-5`, e o preview passou a
+// superestimar em 50%: `ai_evaluation` exibia $0,0465 onde a chamada real custa ~$0,0310
+// ($3/$15 contra $2/$10 por MTok). O popup que existe para a pessoa AUTORIZAR um gasto
+// mostrava um número que não era o da chamada.
+//
+// ⚠️ O Haiku FICA literal, e a diferença é de natureza: ele não é "o modelo ativo" — é uma
+// escolha deliberada de modelo BARATO para tarefas baratas, que não acompanha a troca do
+// Sonnet. Trocar os dois por `SONNET_MODEL` seria uniformizar nome e perder a intenção.
+// (Dar um dono também ao Haiku é trabalho do registry — A1b.)
 const HAIKU = "claude-haiku-4-5-20251001"
-const SONNET = "claude-sonnet-4-6"
+const SONNET = SONNET_MODEL
 
 /** Limiar abaixo do qual o usuário pode optar por não ser mais avisado. */
 export const DEFAULT_SUPPRESS_THRESHOLD_USD = 0.02

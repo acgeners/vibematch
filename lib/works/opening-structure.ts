@@ -109,7 +109,7 @@ const VERDICT_TOOL: Anthropic.Tool = {
   },
 }
 
-/** Sonnet 5 na promo introdutória ($2/$10 por MTok até 2026-08-31). Ver lib/ai/models.ts. */
+/** Sonnet 5 a $2/$10 por MTok — preço PADRÃO desde 10/08/2026. Ver lib/ai/models.ts. */
 const PRICE_IN_PER_MTOK = 2.0
 const PRICE_OUT_PER_MTOK = 10.0
 const PRICE_PER_SEARCH = 0.01

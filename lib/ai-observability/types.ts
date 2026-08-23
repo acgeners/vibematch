@@ -1,3 +1,4 @@
+import { SONNET_MODEL } from "@/lib/ai/models"
 /**
  * Observabilidade das chamadas de IA (Plano 1 — Fase B, "observabilidade mínima").
  *
@@ -146,12 +147,22 @@ export interface AiOperationDefinition {
 /**
  * Catálogo das operações conhecidas. Documentação — não muda execução.
  * `defaultModel` reflete a constante no respectivo serviço (lib/ai-*).
+ *
+ * 🔴 E "reflete" precisa ser DERIVAÇÃO, não cópia. Até 23/08/2026 as operações Sonnet traziam
+ * o literal `"claude-sonnet-4-6"` enquanto os serviços já chamavam `SONNET_MODEL`
+ * (= `claude-sonnet-5`): dez operações declaravam um modelo que não era o da chamada, e o
+ * `/curation/ai-usage` exibia esse nome. Pior era `synopsis_consolidator`, que declarava
+ * HAIKU e roda SONNET — divergência de TIER, não de versão.
+ *
+ * ⚠️ As entradas Haiku continuam literais de propósito: `review_summarizer`,
+ * `tag_classifier`, `tag_enricher` e `tag_inference` escolhem o modelo BARATO e não
+ * acompanham a troca do Sonnet. Uniformizá-las apagaria a intenção.
  */
 export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   ai_evaluation: {
     key: "ai_evaluation",
     label: "Avaliação IA (9 critérios)",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: true,
     description: "Avaliação dos 9 critérios via tool/Zod, com capa em base64 e auditoria de reviews.",
@@ -165,7 +176,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
      * depois de lê-la. É o ♥..♥♥♥♥ do Interesse.
      */
     label: "Previsão de Interesse",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description:
@@ -174,7 +185,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   recommendation_rank: {
     key: "recommendation_rank",
     label: "Ranking de recomendação",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description: "Re-rank de favoritos pelo LLM; persiste em recommendation_runs.",
@@ -182,7 +193,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   recommendation_taste_profile: {
     key: "recommendation_taste_profile",
     label: "Perfil de gosto",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description: "Gera o taste_profile a partir das obras rotuladas.",
@@ -190,11 +201,16 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   recommendation_chat: {
     key: "recommendation_chat",
     label: "Chat de recomendação",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description: "Turno conversacional de recomendação (pago).",
   },
+  // ⚠️ As duas `calibration_*` mantêm o LITERAL de propósito: são operações APOSENTADAS
+  // (a auditoria de critérios saiu em 16/08/2026 e o relatório de viés em 17/08) e não têm
+  // mais call site. O literal descreve o modelo que aquelas chamadas de fato usaram — as
+  // linhas delas ainda existem em `ai_api_calls`. Derivar de `SONNET_MODEL` afirmaria que
+  // rodaram no Sonnet 5, que é falso.
   calibration_audit: {
     key: "calibration_audit",
     label: "Auditoria de calibração",
@@ -222,7 +238,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   review_digest: {
     key: "review_digest",
     label: "Digest de reviews",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description: "Digest agregado das reviews de uma obra (Sonnet).",
@@ -230,7 +246,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   deep_dive: {
     key: "deep_dive",
     label: "Deep dive",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description: "Análise profunda com extended thinking; persiste em deep_dive_results.",
@@ -238,7 +254,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   synopsis_consolidator: {
     key: "synopsis_consolidator",
     label: "Consolidador de sinopse",
-    defaultModel: "claude-haiku-4-5-20251001",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description: "Funde múltiplas sinopses externas numa só (Haiku).",
@@ -255,7 +271,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   tag_verify: {
     key: "tag_verify",
     label: "Verificação de tags",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "backfill",
     hasResultCache: false,
     description:
@@ -264,7 +280,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   tag_clustering: {
     key: "tag_clustering",
     label: "Clusterização de tags",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "admin",
     hasResultCache: false,
     description: "Propõe clusters/sub-grupos de tags (administrativo).",

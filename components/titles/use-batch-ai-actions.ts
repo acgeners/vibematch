@@ -2,6 +2,8 @@
 
 import { useCallback, useState } from "react"
 import { toast } from "sonner"
+// O modelo EXIBIDO no popup de custo vem do dono — ele nomeia a chamada que vai acontecer.
+import { SONNET_MODEL } from "@/lib/ai/models"
 
 import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { runTask, setTaskProgress } from "@/lib/tasks-store"
@@ -154,7 +156,7 @@ export function useBatchAiActions(opts: { onSettled?: () => void } = {}): BatchA
           likelyUsd: p.likelyUsd,
           upperBoundUsd: p.upperBoundUsd,
           etaSeconds: cost.etaSeconds,
-          model: "claude-sonnet-4-6",
+          model: SONNET_MODEL,
           background: false,
           scale: needCalls,
         },

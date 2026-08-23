@@ -11,6 +11,7 @@
  */
 
 import type { UsageTokens } from "@/lib/ai/pricing"
+import { SONNET_MODEL } from "@/lib/ai/models"
 
 // ---- Identidades -----------------------------------------------------------
 
@@ -104,8 +105,11 @@ export interface ContractPreconditionSnapshot {
 
 // ---- Estimativas (heurísticas) ---------------------------------------------
 
+// Mesmo caso do `cost-preview/catalog.ts`: o Sonnet vem do dono (as estimativas deste
+// registro alimentam o GATE de custo, então um modelo errado aqui bloqueia ou libera pelo
+// preço errado). O Haiku continua literal — é escolha de modelo barato, não "o ativo".
 const HAIKU = "claude-haiku-4-5-20251001"
-const SONNET = "claude-sonnet-4-6"
+const SONNET = SONNET_MODEL
 
 const ZERO: UsageTokens = {
   inputTokens: 0,

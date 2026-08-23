@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { createRequire } from "node:module"
+import { PRICING_SNAPSHOT_TAG } from "@/lib/ai/pricing"
 
 // O adaptador é CJS (consumido por scripts Node puros). Carregamos via require.
 const require = createRequire(import.meta.url)
@@ -20,7 +21,11 @@ describe("scripts/ai-log adapter (§25.6)", () => {
     const c = computeCostUsd("claude-sonnet-4-6", { inputTokens: 1_000_000, outputTokens: 200_000 })
     expect(c.cost_input_usd).toBeCloseTo(3, 6)
     expect(c.cost_output_usd).toBeCloseTo(3, 6)
-    expect(c.pricing_source).toBe("static@2026-05-23")
+    // 🔴 DERIVADO, nunca copiado. Esta linha já foi `"static@2026-05-23"` escrito à mão e
+    // reprovou no primeiro bump legítimo do snapshot — o teste afirmava a tag por um
+    // critério (literal no teste) e o adaptador por outro (o JSON), que é a mesma doença
+    // que o adaptador existe para evitar entre app e scripts.
+    expect(c.pricing_source).toBe(PRICING_SNAPSHOT_TAG)
   })
 
   it("modelo desconhecido → custo 0 + unknown@<model>", () => {

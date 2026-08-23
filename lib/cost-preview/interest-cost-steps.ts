@@ -1,7 +1,13 @@
 import type { CostStep } from "@/components/cost/cost-summary"
 
-/** Modelo exibido nos passos (o estimador de custo usa Sonnet 4-6 como base). */
-const SONNET_LABEL_MODEL = "claude-sonnet-4-6"
+import { SONNET_MODEL } from "@/lib/ai/models"
+
+/**
+ * Modelo exibido nos passos de custo. Vem do DONO: o comentário anterior dizia "o estimador
+ * usa Sonnet 4-6 como base" e isso deixou de ser verdade quando o app foi para o Sonnet 5 —
+ * a tela nomeava um modelo que não era o da chamada.
+ */
+const SONNET_LABEL_MODEL = SONNET_MODEL
 /**
  * ETA da regeneração do perfil (Sonnet, ~100k tokens in + ~6k out). Medido no
  * ai_api_calls (`recommendation_taste_profile`): mediana ~33s, p90 ~39s → ~35s.
