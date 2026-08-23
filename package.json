@@ -64,7 +64,11 @@
     "reading-status:form": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/reading-status-form.ts",
     "reading-status:validate": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local --env-file=.env.analysis scripts/reading-status-validate.ts",
     "db:analysis-env": "node scripts/db-analysis-env.mjs",
-    "db:health": "node scripts/db-health.mjs"
+    "db:health": "node scripts/db-health.mjs",
+    "db:local:auth": "node --env-file=.env.local --env-file=.env.analysis scripts/db-local-bootstrap-auth.mjs",
+    "db:local:backup": "node --env-file=.env.local --env-file=.env.analysis scripts/db-local-backup.mjs",
+    "db:local:restore": "node --env-file=.env.local --env-file=.env.analysis scripts/db-local-restore.mjs",
+    "db:local-primary": "node --env-file=.env.local --env-file=.env.analysis scripts/db-local-primary.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

@@ -105,7 +105,11 @@ const SENHA = process.env.SMOKE_SENHA ?? "smoke-local-descartavel"
  * que alguém escreveu a palavra "localhost"; o que interessa é que `https://satoria.fly.dev`
  * seja recusado — e que `http://localhost.evil.com` também seja.
  */
-export const ehLocal = (u) => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(u ?? "")
+// Dono ÚNICO do predicado: scripts/lib/local-primary.mjs. Reexportado aqui porque o teste
+// (smoke-logado-verifica-a-sessao) o importa deste módulo — duas grafias da mesma regex
+// fariam um script recusar o alvo que o outro aceita.
+export { ehLocal } from "./lib/local-primary.mjs"
+import { ehLocal } from "./lib/local-primary.mjs"
 
 export function exigirLocal() {
   const local = ehLocal

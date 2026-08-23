@@ -21,9 +21,18 @@
 import fs from "node:fs"
 import path from "node:path"
 import { execFileSync, spawnSync } from "node:child_process"
+import { exigirIntencaoParaDestruir } from "./lib/local-primary.mjs"
 import { podar } from "./lib/backups-retencao.mjs"
 
 const ROOT = path.resolve(import.meta.dirname, "..")
+
+// 🔴 ANTES DE TUDO. Este script destrói os schemas `public` e `bkp` do local, e até
+// 2026-08 isso era inofensivo — o local era réplica descartável. Com LOCAL PRIMARY ativo
+// ele é a FONTE DA VERDADE, e este seria o comando que apaga a curadoria.
+exigirIntencaoParaDestruir({
+  comando: "npm run db:pull",
+  oQueDestroi: "DESTRÓI os schemas `public` e `bkp` do banco LOCAL e os recria a partir da nuvem",
+})
 const SCHEMAS = ["public", "bkp"]
 
 const parseEnv = (file) => {

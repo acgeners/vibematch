@@ -91,3 +91,4 @@ Imagens/
 
 # saída do e1:scope (listas de IDs para alimentar o backfill)
 .e1/
+.local-primary

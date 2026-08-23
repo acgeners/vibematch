@@ -110,7 +110,7 @@ nome de diretório de `exemplo`) e todo escritor chama `podar("<família>")`. Aj
 pela env declarada em cada uma — `BACKUP_KEEP` (5), `PULL_KEEP` (3), `PUSH_STAGE_KEEP` (2),
 `PUSH_EVALS_KEEP` (3), `COFRE_KEEP` (5), `SYNOPSIS_LAB_KEEP` (3), e mais 5.
 
-⚠️ **São 14 hoje**, e esta linha já disse **7** e **11** — a lista de envs acima cobre 6 delas.
+⚠️ **São 15 hoje**, e esta linha já disse **7** e **11** — a lista de envs acima cobre 6 delas.
 Contagem em prosa não acusa a própria defasagem: **não a repita aqui, leia o `FAMILIAS`.**
 
 🔴 **E essa frase não bastou: a linha defasou de 11 para 14 com o aviso escrito nela mesma.** É a
