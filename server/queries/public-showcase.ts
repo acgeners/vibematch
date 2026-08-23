@@ -1,5 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { reportHandledServerError } from "@/lib/observability/handled-error"
 import { coverCandidates } from "@/lib/work-derived"
 import { HIATUS_SELECT_COLUMNS, hiatusFieldsFromRow } from "@/lib/works/hiatus-display"
 import type { HiatusFields } from "@/lib/works/hiatus-display"
@@ -84,14 +85,9 @@ export async function getSpotlightWork(): Promise<SpotlightResult> {
     .limit(60)
 
   if (error) {
-    // Sem isto a falha some: este caminho não emite NADA hoje, e o erro nunca chega ao
-    // framework (foi capturado aqui).
-    //
-    // 🔴 SÓ a operação — `error.message` fica de fora de propósito. A2.3 mediu que segredo
-    // pode vir dentro do próprio Error, e o sanitizador que trata disso vive noutra branch;
-    // logar cru aqui seria abrir o vazamento agora para fechá-lo depois. ⚠️ Na integração
-    // com A3.2 esta linha vira o evento estruturado sanitizado, que devolve o detalhe.
-    console.error("[public-showcase] getSpotlightWork falhou")
+    // Sem isto a falha some: o erro nunca chega ao framework (foi capturado aqui), então
+    // `server_error` fica em ZERO enquanto a página responde 200 com o raio-X indisponível.
+    reportHandledServerError({ operation: "public-showcase.getSpotlightWork", error })
     return { status: "unavailable" }
   }
 
@@ -176,8 +172,7 @@ export async function getPublicShowcase(limit = 12): Promise<PublicShowcaseWork[
     .limit(limit * 4)
 
   if (error) {
-    // Só a operação — ver a razão no `getSpotlightWork` acima.
-    console.error("[public-showcase] getPublicShowcase falhou")
+    reportHandledServerError({ operation: "public-showcase.getPublicShowcase", error })
     return null
   }
 

@@ -1,5 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { reportHandledServerError } from "@/lib/observability/handled-error"
 import { coverCandidates } from "@/lib/work-derived"
 import { HIATUS_SELECT_COLUMNS, hiatusFieldsFromRow } from "@/lib/works/hiatus-display"
 import type { HiatusFields } from "@/lib/works/hiatus-display"
@@ -47,9 +48,11 @@ export async function getAuthHeroWorks(limit = 21): Promise<HeroWork[] | null> {
     .limit(90)
 
   if (error) {
-    // 🔴 SÓ a operação: `error.message` pode carregar segredo vindo do próprio Error, e o
-    // sanitizador vive noutra branch. ⚠️ Vira evento estruturado na integração com A3.2.
-    console.error("[auth-hero] getAuthHeroWorks falhou")
+    // A parede do login degrada sozinha, mas a falha precisa deixar rastro: capturada aqui, ela
+    // nunca chega ao `onRequestError`. O detalhe do erro entra SANITIZADO pelos mesmos donos do
+    // `server_error` — a política de "só a operação" existia porque o sanitizador vivia noutra
+    // branch, e essa razão caiu quando A3.2 e A3.5 passaram a conviver.
+    reportHandledServerError({ operation: "auth-hero.getAuthHeroWorks", error })
     return null
   }
 
@@ -108,18 +111,24 @@ export type SiteStats = {
  * antigo achatava os três casos (erro, indefinido e zero real) num número que a tela afirma.
  */
 function contagemDaMetrica(
-  tabela: string,
+  operation: string,
   res: { count: number | null; error: { message: string } | null },
 ): SiteStatValue {
   if (res.error) {
     // Sem isto a falha da home era INVISÍVEL: nenhuma linha de log saía deste caminho.
     //
-    // 🔴 SÓ a tabela — `res.error.message` saiu daqui. A linha nasceu em A3.1 registrando a
-    // mensagem crua, e a política mudou por EVIDÊNCIA, não por gosto: segredo pode vir dentro
-    // do próprio Error, e o sanitizador que trata disso vive noutra branch. O nome da tabela
-    // é seguro porque quem o escolhe é este código, não o erro. ⚠️ A integração com A3.2
-    // devolve o detalhe, já sanitizado, no evento estruturado.
-    console.error(`[site-stats] contagem de ${tabela} falhou`)
+    // ⚠️ Uma OPERAÇÃO POR MÉTRICA, nunca um "site-stats falhou" agregado: as quatro contagens
+    // batem em tabelas diferentes e falham em separado (é o que `contagemDaMetrica` existe para
+    // permitir). Um rótulo só faria as quatro somarem no mesmo balde, e a pergunta "qual delas
+    // cai?" — que é a única acionável aqui — deixaria de ter resposta no log.
+    //
+    // 🔴 A operação chega PRONTA, e não montada aqui a partir do nome da tabela. Com
+    // `\`site-stats.count.${tabela}\``, a string que aparece no log não existia em lugar nenhum
+    // do código: quem lesse `site-stats.count.works` num incidente não achava o callsite por
+    // grep — que é justamente o que o campo existe para permitir. O parâmetro antigo (`tabela`)
+    // não servia para mais nada, então isto não duplica nome nenhum: só o move para onde ele já
+    // era escrito à mão.
+    reportHandledServerError({ operation, error: res.error })
     return null
   }
   return res.count ?? null
@@ -148,9 +157,9 @@ export async function getSiteStats(): Promise<SiteStats> {
     supabase.from("source").select("*", { count: "exact", head: true }),
   ])
   return {
-    works: contagemDaMetrica("works", w),
-    criteria: contagemDaMetrica("category_scores", c),
-    reviews: contagemDaMetrica("work_reviews", r),
-    sources: contagemDaMetrica("source", s),
+    works: contagemDaMetrica("site-stats.count.works", w),
+    criteria: contagemDaMetrica("site-stats.count.category_scores", c),
+    reviews: contagemDaMetrica("site-stats.count.work_reviews", r),
+    sources: contagemDaMetrica("site-stats.count.source", s),
   }
 }

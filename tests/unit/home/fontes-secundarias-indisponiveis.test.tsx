@@ -38,7 +38,19 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }))
 
-const ERRO = { data: null, error: { message: "Expected 3 parts in JWT; got 1" } }
+/**
+ * 🔴 A forma REAL, MEDIDA em 2026-08-23 contra o Supabase local (supabase-js 2.105.1): o
+ * cliente devolve o erro do PostgREST como OBJETO PLANO — `{ code, details, hint, message }`,
+ * com `instanceof Error` FALSO e sem `stack`. Nunca é um `Error`.
+ *
+ * ⚠️ Este mock já esteve "corrigido" para um `Error`, e a correção estava errada: eu havia
+ * medido `new PostgrestError(...)` no Node cru — a classe existe e É `Error`, mas o cliente
+ * NÃO a usa neste caminho. O runtime probe é que desmentiu, com a suíte verde.
+ */
+const ERRO = {
+  data: null,
+  error: { message: "Expected 3 parts in JWT; got 1", code: "PGRST301", details: null, hint: null },
+}
 const VAZIO = { data: [], error: null }
 
 /** Uma linha de `calculated_scores` completa o bastante para virar obra da vitrine. */
@@ -82,6 +94,18 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+/** Lê os eventos estruturados emitidos no `console.error`. */
+function eventos(): Array<Record<string, unknown>> {
+  return logs.map((l) => {
+    try {
+      return JSON.parse(l) as Record<string, unknown>
+    } catch {
+      return { event: "NAO_ERA_JSON", raw: l }
+    }
+  })
+}
+const operacoes = () => eventos().map((e) => e.operation)
+
 async function showcase() {
   const { getPublicShowcase } = await import("@/server/queries/public-showcase")
   return getPublicShowcase(3)
@@ -115,7 +139,7 @@ describe("getPublicShowcase — vazio × indisponível", () => {
     const r = await showcase()
     expect(r).toBeNull()
     expect(r).not.toEqual([])
-    expect(logs.join("\n")).toContain("[public-showcase] getPublicShowcase falhou")
+    expect(operacoes()).toEqual(["public-showcase.getPublicShowcase"])
   })
 })
 
@@ -131,10 +155,10 @@ describe("getAuthHeroWorks — vazio × indisponível", () => {
     expect(logs).toEqual([])
   })
 
-  it("C · erro devolve null e registra log", async () => {
+  it("C · erro devolve null e registra evento", async () => {
     RESPOSTAS = { calculated_scores: ERRO }
     expect(await hero()).toBeNull()
-    expect(logs.join("\n")).toContain("[auth-hero] getAuthHeroWorks falhou")
+    expect(operacoes()).toEqual(["auth-hero.getAuthHeroWorks"])
   })
 })
 
@@ -158,7 +182,7 @@ describe("getSpotlightWork — os TRÊS estados são distinguíveis", () => {
     RESPOSTAS = { calculated_scores: ERRO }
     const r = await spotlight()
     expect(r).toEqual({ status: "unavailable" })
-    expect(logs.join("\n")).toContain("[public-showcase] getSpotlightWork falhou")
+    expect(operacoes()).toEqual(["public-showcase.getSpotlightWork"])
   })
 
   it("🔴 B e C têm representações DIFERENTES — é o ponto do contrato", async () => {
@@ -252,8 +276,8 @@ describe("6 · auth hero: a parede falha e a tela de login segue de pé", () => 
     expect(screen.getByText(/tão bem quanto você/i)).toBeTruthy()
     // A parede decorativa não é desenhada.
     expect(container.querySelector(".authhero-wall")).toBeNull()
-    // O sinal apropriado para um módulo decorativo é o LOG, não um banner.
-    expect(logs.join("\n")).toContain("[auth-hero] getAuthHeroWorks falhou")
+    // O sinal apropriado para um módulo decorativo é o EVENTO, não um banner.
+    expect(operacoes()).toContain("auth-hero.getAuthHeroWorks")
     // E nenhuma mensagem interna vaza para a tela.
     for (const p of ["JWT", "Expected 3 parts", "calculated_scores"]) {
       expect(container.textContent).not.toContain(p)
@@ -275,11 +299,13 @@ describe("6 · auth hero: a parede falha e a tela de login segue de pé", () => 
 
 describe("privacidade do LOG — segredo dentro do próprio Error não sai", () => {
   /**
-   * 🔴 Os exemplos que medi não tinham segredo, e isso NÃO prova que `error.message` seja
-   * seguro como política. Segredo pode vir DENTRO do próprio Error — o sanitizador que trata
-   * disso vive noutra branch (A3.2), então aqui o log carrega SÓ o nome da operação.
+   * 🔴 A POLÍTICA mudou no gate A3.5, e a mudança é o ponto dele. O log carregava só a operação
+   * porque o sanitizador vivia noutra branch (A3.2) — logar mensagem crua seria abrir o
+   * vazamento agora para fechá-lo depois. Com os dois eventos convivendo, a mensagem volta
+   * SANITIZADA pelos mesmos donos, e o diagnóstico deixa de ser jogado fora.
    *
-   * ⚠️ Sonda conferida: restaurar `console.error(prefixo, error.message)` reprova este caso.
+   * ⚠️ `details`, `hint` e `code` NÃO voltam: a defesa deles não é o regex, é a AUSÊNCIA DE
+   * COLETA — o evento tem campo para nome, mensagem e stack do erro, e nada mais.
    */
   const ERRO_VENENOSO = {
     data: null,
@@ -292,20 +318,23 @@ describe("privacidade do LOG — segredo dentro do próprio Error não sai", () 
       hint: "perhaps you meant works.id",
     },
   }
-  const PROIBIDOS = [
-    "OPACA_APIKEY", "OPACA_ROLE", "eyJhbGciOiJIUzI1NiJ9", "PAYLOAD",
-    "leitor@exemplo.test", "public.calculated_scores", "does not exist",
-    "coluna interna do banco", "perhaps you meant", "42703",
+  /** Segredo e PII: redigidos mesmo vindo de dentro do próprio Error. */
+  const SEGREDOS = [
+    "OPACA_APIKEY", "OPACA_ROLE", "eyJhbGciOiJIUzI1NiJ9", "PAYLOAD", "leitor@exemplo.test",
   ]
+  /** Campos do PostgREST que o evento não coleta — ausência por desenho, não por redação. */
+  const NAO_COLETADOS = ["coluna interna do banco", "perhaps you meant", "42703"]
+  const PROIBIDOS = [...SEGREDOS, ...NAO_COLETADOS]
 
-  it("o log nomeia a operação e não carrega NADA do conteúdo do erro", async () => {
+  it("o evento nomeia a operação, redige segredo e preserva o diagnóstico", async () => {
     RESPOSTAS = { calculated_scores: ERRO_VENENOSO as never }
     await showcase()
     const texto = logs.join("\n")
     // O que precisa estar lá: quem falhou.
-    expect(texto).toContain("[public-showcase] getPublicShowcase falhou")
-    // O que não pode estar: qualquer conteúdo arbitrário do erro.
+    expect(operacoes()).toEqual(["public-showcase.getPublicShowcase"])
     for (const p of PROIBIDOS) expect(texto).not.toContain(p)
+    // E o diagnóstico sobrevive — é ele que torna o evento acionável.
+    expect(texto).toContain("does not exist")
   })
 
   it("os outros dois caminhos seguem o MESMO padrão", async () => {
@@ -313,8 +342,10 @@ describe("privacidade do LOG — segredo dentro do próprio Error não sai", () 
     await spotlight()
     await hero()
     const texto = logs.join("\n")
-    expect(texto).toContain("[public-showcase] getSpotlightWork falhou")
-    expect(texto).toContain("[auth-hero] getAuthHeroWorks falhou")
+    expect(operacoes()).toEqual([
+      "public-showcase.getSpotlightWork",
+      "auth-hero.getAuthHeroWorks",
+    ])
     for (const p of PROIBIDOS) expect(texto).not.toContain(p)
   })
 

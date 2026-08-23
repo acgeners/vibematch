@@ -40,7 +40,32 @@ vi.mock("@/lib/supabase/admin", () => ({
 }))
 
 const OK = (n: number): Resposta => ({ count: n, error: null })
-const ERRO = (m = "Expected 3 parts in JWT; got 1"): Resposta => ({ count: null, error: { message: m } })
+
+/**
+ * 🔴 A forma REAL, MEDIDA em 2026-08-23 contra o Supabase local (supabase-js 2.105.1): o
+ * cliente devolve o erro do PostgREST como OBJETO PLANO — `{ code, details, hint, message }`,
+ * com `instanceof Error` FALSO e sem `stack`. Nunca é um `Error`.
+ *
+ * ⚠️ Este mock já esteve "corrigido" para um `Error`, e a correção estava errada: eu havia
+ * medido `new PostgrestError(...)` no Node cru — a classe existe e É `Error`, mas o cliente
+ * NÃO a usa neste caminho. O runtime probe é que desmentiu, com a suíte verde.
+ */
+const ERRO = (m = "Expected 3 parts in JWT; got 1"): Resposta => ({
+  count: null,
+  error: { message: m, code: "PGRST301", details: null, hint: null } as never,
+})
+
+/** Lê os eventos estruturados emitidos no `console.error`. */
+function eventos(): Array<Record<string, unknown>> {
+  return logs.map((l) => {
+    try {
+      return JSON.parse(l) as Record<string, unknown>
+    } catch {
+      return { event: "NAO_ERA_JSON", raw: l }
+    }
+  })
+}
+const operacoes = () => eventos().map((e) => e.operation)
 
 async function ler(): Promise<SiteStats> {
   const { getSiteStats } = await import("@/server/queries/auth-hero")
@@ -80,7 +105,8 @@ describe("getSiteStats — vazio legítimo × backend indisponível", () => {
     expect(s.criteria).toBeNull()
     expect(s.criteria).not.toBe(0)
     expect(s).toEqual({ works: 1010, criteria: null, reviews: 47751, sources: 9 })
-    expect(logs.join("\n")).toContain("[site-stats] contagem de category_scores falhou")
+    // UMA operação por métrica: é o que permite responder "qual das quatro caiu?".
+    expect(operacoes()).toEqual(["site-stats.count.category_scores"])
   })
 
   it("CASO D — falha TOTAL: nenhuma métrica vira zero factual", async () => {
@@ -89,6 +115,15 @@ describe("getSiteStats — vazio legítimo × backend indisponível", () => {
     expect(Object.values(s)).toEqual([null, null, null, null])
     expect(Object.values(s)).not.toContain(0)
     expect(logs).toHaveLength(4)
+    expect(operacoes()).toEqual([
+      "site-stats.count.works",
+      "site-stats.count.category_scores",
+      "site-stats.count.work_reviews",
+      "site-stats.count.source",
+    ])
+    // 🔴 Quatro eventos com o MESMO rótulo seriam indistinguíveis de quatro repetições de uma
+    // falha só — a contagem por operação é o que separa "o banco caiu" de "uma tabela sumiu".
+    expect(new Set(operacoes()).size).toBe(4)
   })
 
   it("count NULO sem erro é 'não sei quantos', não zero", async () => {
@@ -97,33 +132,69 @@ describe("getSiteStats — vazio legítimo × backend indisponível", () => {
   })
 
   /**
-   * 🔴 A versão anterior deste caso passava a mensagem do PostgREST ao log e só proibia
-   * uma lista de PALAVRAS ("service_role", "eyJ", …). Isso protege contra o segredo que
-   * alguém lembrou de escrever, não contra CONTEÚDO ARBITRÁRIO — e conteúdo arbitrário é
-   * exatamente o que `error.message` é. Hoje o log carrega só a TABELA, que quem escolhe é
-   * este código, e o teste exige a ausência do conteúdo do erro, não de um vocabulário.
+   * 🔴 A POLÍTICA mudou aqui, e a mudança é o ponto do gate A3.5. Antes o log carregava só a
+   * tabela — não por gosto, mas porque o sanitizador vivia noutra branch, e logar mensagem crua
+   * seria abrir o vazamento agora para fechá-lo depois. Com A3.2 e A3.5 convivendo, a mensagem
+   * volta SANITIZADA pelos mesmos donos, e o diagnóstico deixa de ser jogado fora.
+   *
+   * ⚠️ O que NÃO volta: `details`, `hint` e `code`. A defesa deles não é o regex — é a
+   * AUSÊNCIA DE COLETA. O evento tem campo para nome, mensagem e stack, e nada mais do erro.
    */
-  it("o log nomeia a tabela e NÃO carrega conteúdo algum do erro", async () => {
+  it("o evento nomeia a operação, redige segredo e NÃO coleta details/hint/code", async () => {
     const VENENOSO = {
       count: null,
       error: {
         message:
           'apikey=OPACA_APIKEY service_role=OPACA_ROLE jwt=eyJhbGciOiJIUzI1NiJ9.PAYLOAD.SIG ' +
           'user=leitor@exemplo.test — relation "public.works" does not exist',
+        code: "42P01",
+        details: "coluna interna",
+        hint: "perhaps you meant",
       },
-    }
+    } as unknown as Resposta
     RESPOSTAS = { works: VENENOSO, category_scores: OK(1), work_reviews: OK(1), source: OK(1) }
     await ler()
     const texto = logs.join("\n")
+
     // Contexto operacional: precisa dizer QUAL contagem falhou.
-    expect(texto).toContain("[site-stats] contagem de works falhou")
+    expect(operacoes()).toEqual(["site-stats.count.works"])
+
+    // SEGREDO e PII: redigidos, mesmo vindo de dentro do próprio Error.
     for (const proibido of [
-      "OPACA_APIKEY", "OPACA_ROLE", "eyJhbGciOiJIUzI1NiJ9", "PAYLOAD",
-      "leitor@exemplo.test", "public.works", "does not exist",
-      "service_role", "apikey", "Bearer", "password",
+      "OPACA_APIKEY", "OPACA_ROLE", "eyJhbGciOiJIUzI1NiJ9", "PAYLOAD", "leitor@exemplo.test",
     ]) {
       expect(texto).not.toContain(proibido)
     }
+    // NÃO COLETADOS: campos do PostgREST que o evento simplesmente não tem.
+    for (const ausente of ["coluna interna", "perhaps you meant", "42P01"]) {
+      expect(texto).not.toContain(ausente)
+    }
+    // E o DIAGNÓSTICO sobrevive — é ele que torna o evento acionável.
+    expect(texto).toContain("does not exist")
+  })
+
+  /**
+   * 🔴 A mensagem VAZIA é o caso que a A3.1 mediu com chave de service inválida — `{message:""}`,
+   * sem `code`, `details` nem `hint`. Remedido em 2026-08-23: continua sendo o que sai.
+   * É ele que torna `operation` obrigatório — sem mensagem, é o único campo que identifica.
+   */
+  it("mensagem VAZIA não inutiliza o evento — quem identifica é a operação", async () => {
+    const VAZIA = { count: null, error: { message: "" } } as unknown as Resposta
+    RESPOSTAS = { works: VAZIA, category_scores: OK(1), work_reviews: OK(1), source: OK(1) }
+    expect((await ler()).works).toBeNull()
+    expect(operacoes()).toEqual(["site-stats.count.works"])
+    expect(eventos()[0].errorMessage).toBe("")
+  })
+
+  /**
+   * 🔴 A regressão que o runtime probe pegou com a suíte VERDE: sobre objeto plano, o evento
+   * saía `errorMessage: "[object Object]"` — cego justo na classe que ele existe para cobrir.
+   */
+  it("a mensagem do objeto plano ENTRA — nada de \"[object Object]\"", async () => {
+    RESPOSTAS = { works: ERRO("column works.x does not exist"), category_scores: OK(1), work_reviews: OK(1), source: OK(1) }
+    await ler()
+    expect(eventos()[0].errorMessage).toBe("column works.x does not exist")
+    expect(logs.join("\n")).not.toContain("[object Object]")
   })
 })
 
