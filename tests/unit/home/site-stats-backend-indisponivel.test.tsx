@@ -126,9 +126,86 @@ describe("getSiteStats — vazio legítimo × backend indisponível", () => {
     expect(new Set(operacoes()).size).toBe(4)
   })
 
-  it("count NULO sem erro é 'não sei quantos', não zero", async () => {
+  /**
+   * 🔴 Este caso NASCEU dizendo que `count` nulo sem erro era "respondeu e não sei quantos", e a
+   * evidência de runtime inverteu isso. `getSiteStats` pede `count: "exact"`, e nessa condição
+   * nenhum cenário legítimo produz `count: null` — medidas 10 variantes contra o PostgREST
+   * local: RLS bloqueando dá 0, filtro sem match dá 0, view conta, `planned`/`estimated`
+   * contam. Os únicos dois que produzem são relação ausente e RPC ausente, os dois FALHA.
+   *
+   * ⚠️ Ele não foi apagado: a asserção que já existia (degrada para `null`, nunca 0) continua
+   * exatamente igual — o que se acrescenta é o SINAL, que faltava. E o recorte é estreito de
+   * propósito: vale para quem PEDE contagem. Consulta sem `count` recebe `null` legitimamente.
+   */
+  it("count NULO sem erro é FALHA nesta contagem — degrada igual, mas deixa rastro", async () => {
     RESPOSTAS = { works: { count: null, error: null }, category_scores: OK(1), work_reviews: OK(1), source: OK(1) }
-    expect((await ler()).works).toBeNull()
+    const s = await ler()
+    expect(s.works).toBeNull()
+    expect(s.works).not.toBe(0)
+    // As outras três seguem saudáveis: a falha é POR MÉTRICA.
+    expect([s.criteria, s.reviews, s.sources]).toEqual([1, 1, 1])
+    expect(operacoes()).toEqual(["site-stats.count.works"])
+  })
+
+  /**
+   * A matriz do contrato, num lugar só: o que a métrica vira e se houve evento. É ela que
+   * separa "zero legítimo" de "não veio contagem", que é a distinção inteira deste gate.
+   */
+  describe("contrato de `count: exact`", () => {
+    const CASOS: Array<[string, { count: number | null; error: { message: string } | null }, number | null, number]> = [
+      ["count 12, sem erro", { count: 12, error: null }, 12, 0],
+      ["count 0, sem erro (zero LEGÍTIMO)", { count: 0, error: null }, 0, 0],
+      ["count null, sem erro (falha mascarada)", { count: null, error: null }, null, 1],
+      ["count null, com erro", { count: null, error: { message: "boom" } }, null, 1],
+    ]
+
+    it.each(CASOS)("%s", async (_rot, resposta, esperado, eventos_) => {
+      RESPOSTAS = { works: resposta, category_scores: OK(1), work_reviews: OK(1), source: OK(1) }
+      expect((await ler()).works).toBe(esperado)
+      expect(logs).toHaveLength(eventos_)
+      if (eventos_ > 0) {
+        expect(operacoes()).toEqual(["site-stats.count.works"])
+        expect(eventos()[0].event).toBe("handled_server_error")
+      }
+    })
+
+    it("zero legítimo NUNCA vira evento, em nenhuma das quatro métricas", async () => {
+      RESPOSTAS = { works: OK(0), category_scores: OK(0), work_reviews: OK(0), source: OK(0) }
+      expect(await ler()).toEqual({ works: 0, criteria: 0, reviews: 0, sources: 0 })
+      expect(logs).toEqual([])
+    })
+
+    it("nenhuma métrica ausente é convertida para 0 — nem com as quatro sem count", async () => {
+      const SEM = { count: null, error: null }
+      RESPOSTAS = { works: SEM, category_scores: SEM, work_reviews: SEM, source: SEM }
+      const s = await ler()
+      expect(Object.values(s)).toEqual([null, null, null, null])
+      expect(Object.values(s)).not.toContain(0)
+      // Uma operação por métrica, as quatro distinguíveis.
+      expect(operacoes().sort()).toEqual([
+        "site-stats.count.category_scores",
+        "site-stats.count.source",
+        "site-stats.count.work_reviews",
+        "site-stats.count.works",
+      ])
+    })
+
+    /**
+     * ⚠️ O evento do caso sem `count` não pode afirmar causa que não medimos: ele descreve o
+     * FATO (a contagem não veio), e a identidade continua sendo a `operation`.
+     */
+    it("o evento sem count descreve o fato, sem inventar detalhe de backend", async () => {
+      RESPOSTAS = { works: { count: null, error: null }, category_scores: OK(1), work_reviews: OK(1), source: OK(1) }
+      await ler()
+      const e = eventos()[0]
+      expect(e.operation).toBe("site-stats.count.works")
+      expect(String(e.errorMessage)).toContain("count")
+      const linha = logs.join("\n")
+      // Nada de causa fabricada, nem de campos que o A3.5 decidiu não coletar.
+      for (const inventado of ["404", "204", "PGRST", "status", "details", "hint", "Not Found"]) {
+        expect(linha).not.toContain(inventado)
+      }
+    })
   })
 
   /**

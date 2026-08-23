@@ -105,10 +105,49 @@ export type SiteStats = {
 }
 
 /**
- * Converte UMA contagem em métrica, e é o único lugar que decide o que `null` significa.
+ * O "erro" do caso sem `count`.
  *
- * ⚠️ `count` nulo SEM erro é "respondeu e não sei quantos" — vira `null`, nunca 0. O `?? 0`
- * antigo achatava os três casos (erro, indefinido e zero real) num número que a tela afirma.
+ * ⚠️ Objeto plano com `message`, e nada além: é a MESMA forma que o supabase-js entrega em
+ * toda falha real (medido — nunca um `Error`, nunca com `stack`), então o evento sai idêntico
+ * aos vizinhos em vez de destoar. Um `new Error` daria um stack do NOSSO código, que é o mesmo
+ * para as quatro operações e leria como se houvesse exceção onde não houve.
+ *
+ * 🔴 A mensagem descreve o que MEDIMOS — a contagem não veio —, nunca uma causa que não temos.
+ * O 404 mascarado é a origem provável, e afirmá-la aqui seria inventar detalhe de backend: o
+ * mesmo estado apareceria numa causa nova que ninguém previu. Quem identifica o evento é a
+ * `operation`, como no resto do A3.5.
+ */
+const CONTAGEM_SEM_COUNT = { message: "contagem exact não retornou count" }
+
+/**
+ * A ausência de `count` numa contagem `exact` não é resultado — é falha SEM erro.
+ *
+ * 🔴 Medido em 2026-08-23, e o achado inverte o que esta função afirmava. `getSiteStats` pede
+ * `count: "exact"`, então resposta saudável DEVE trazer número (o zero legítimo vem como `0`, com
+ * o `content-range` marcando zero linhas). Varridas 10 variantes contra o PostgREST local: com `count`
+ * pedido, **nenhum** cenário legítimo produz `count: null` — nem RLS bloqueando (dá 0), nem
+ * filtro sem match (dá 0), nem view, nem `planned`/`estimated`. Em 6 respostas 2xx, todas
+ * trouxeram `content-range`.
+ *
+ * 🔴 Os únicos dois cenários que produzem `count: null` COM `error: null` são falha: relação
+ * ausente e RPC ausente. E a falha vem mascarada — o PostgREST responde 404, mas com
+ * `head: true` o HTTP não transmite corpo, e o `postgrest-js` (2.105.1,
+ * `dist/index.cjs:381-385`) tem um ramo que, ao não conseguir parsear o corpo VAZIO de um 404,
+ * **reescreve o status para 204 e deixa `error` em null**. Quem engole é o cliente; o
+ * PostgREST está correto, e o `head` é só a condição que expõe.
+ *
+ * ⚠️ Esta função afirmava o contrário — "`count` nulo SEM erro é 'respondeu e não sei
+ * quantos'". Era hipótese defensiva, aceita sem observação; o que existe em runtime é falha
+ * disfarçada de indeterminação. A degradação da tela já estava certa desde a A3.1: o que
+ * faltava era o SINAL, e é só ele que muda aqui.
+ *
+ * ⚠️ A régua é a INVARIANTE do pedido, não o status HTTP: "pedi `exact`, logo espero número".
+ * Casar `status === 204` amarraria a aplicação a um detalhe de uma versão do cliente — o dia
+ * em que o `postgrest-js` corrigir aquele ramo, o 404 volta a chegar como erro e a guarda
+ * viraria código morto sem nada acusar.
+ *
+ * ⚠️ Vale para quem PEDE contagem. Consulta que não pede `count` recebe `null` legitimamente,
+ * e nada disto se aplica a ela.
  */
 function contagemDaMetrica(
   operation: string,
@@ -131,7 +170,14 @@ function contagemDaMetrica(
     reportHandledServerError({ operation, error: res.error })
     return null
   }
-  return res.count ?? null
+
+  const count = res.count ?? null
+  if (count === null) {
+    // A degradação é a MESMA de sempre (null, nunca 0) — o que muda é deixar rastro.
+    reportHandledServerError({ operation, error: CONTAGEM_SEM_COUNT })
+    return null
+  }
+  return count
 }
 
 /**
