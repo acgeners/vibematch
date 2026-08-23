@@ -50,7 +50,11 @@ async function ler(): Promise<SiteStats> {
 let logs: string[] = []
 beforeEach(() => {
   logs = []
-  vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void logs.push(a.join(" ")))
+  // Serializa cada argumento: com `join(" ")` um objeto vira "[object Object]" e um
+  // `console.error(prefixo, error)` — que em produção IMPRIME o conteúdo — passaria batido.
+  vi.spyOn(console, "error").mockImplementation((...a: unknown[]) =>
+    void logs.push(a.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(" ")),
+  )
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -92,18 +96,38 @@ describe("getSiteStats — vazio legítimo × backend indisponível", () => {
     expect((await ler()).works).toBeNull()
   })
 
-  it("o log não carrega segredo — só tabela e mensagem do PostgREST", async () => {
-    RESPOSTAS = { works: ERRO(), category_scores: OK(1), work_reviews: OK(1), source: OK(1) }
+  /**
+   * 🔴 A versão anterior deste caso passava a mensagem do PostgREST ao log e só proibia
+   * uma lista de PALAVRAS ("service_role", "eyJ", …). Isso protege contra o segredo que
+   * alguém lembrou de escrever, não contra CONTEÚDO ARBITRÁRIO — e conteúdo arbitrário é
+   * exatamente o que `error.message` é. Hoje o log carrega só a TABELA, que quem escolhe é
+   * este código, e o teste exige a ausência do conteúdo do erro, não de um vocabulário.
+   */
+  it("o log nomeia a tabela e NÃO carrega conteúdo algum do erro", async () => {
+    const VENENOSO = {
+      count: null,
+      error: {
+        message:
+          'apikey=OPACA_APIKEY service_role=OPACA_ROLE jwt=eyJhbGciOiJIUzI1NiJ9.PAYLOAD.SIG ' +
+          'user=leitor@exemplo.test — relation "public.works" does not exist',
+      },
+    }
+    RESPOSTAS = { works: VENENOSO, category_scores: OK(1), work_reviews: OK(1), source: OK(1) }
     await ler()
     const texto = logs.join("\n")
-    expect(texto).toContain("works")
-    for (const proibido of ["service_role", "eyJ", "@gmail", "apikey", "Bearer", "password"]) {
+    // Contexto operacional: precisa dizer QUAL contagem falhou.
+    expect(texto).toContain("[site-stats] contagem de works falhou")
+    for (const proibido of [
+      "OPACA_APIKEY", "OPACA_ROLE", "eyJhbGciOiJIUzI1NiJ9", "PAYLOAD",
+      "leitor@exemplo.test", "public.works", "does not exist",
+      "service_role", "apikey", "Bearer", "password",
+    ]) {
       expect(texto).not.toContain(proibido)
     }
   })
 })
 
-const VITRINE = { works: [], spotlight: null } as const
+const VITRINE = { works: [], spotlight: { status: "ok", work: null } } as const
 const desenhar = (stats: SiteStats) =>
   render(<PublicHome works={[...VITRINE.works]} stats={stats} spotlight={VITRINE.spotlight} />)
 

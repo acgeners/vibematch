@@ -4,7 +4,7 @@ import { ArrowRight, Star } from "lucide-react"
 import { CoverImage } from "@/components/ui/cover-image"
 import { PublicationStatusBadge } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
-import type { PublicShowcaseWork, SpotlightWork } from "@/server/queries/public-showcase"
+import type { PublicShowcaseWork, SpotlightResult } from "@/server/queries/public-showcase"
 import { CriteriaXray } from "@/components/home/criteria-xray"
 import type { SiteStats } from "@/server/queries/auth-hero"
 
@@ -26,10 +26,11 @@ export function PublicHome({
   stats,
   spotlight,
 }: {
-  works: PublicShowcaseWork[]
+  /** `null` = a consulta da vitrine FALHOU. `[]` = respondeu e não há obra elegível. */
+  works: PublicShowcaseWork[] | null
   stats: SiteStats
-  /** Obra do raio-X. `null` quando nenhuma das melhores tem os 9 critérios + capa. */
-  spotlight: SpotlightWork | null
+  /** Três estados: achou · consultei e não há · não consegui consultar. */
+  spotlight: SpotlightResult
 }) {
   return (
     <div className="flex flex-col gap-10">
@@ -81,11 +82,55 @@ export function PublicHome({
         </dl>
       </div>
 
-        {spotlight && <CriteriaXray work={spotlight} />}
+        {/* ⚠️ Rótulo CURTO ("indisponível no momento"), não frase. Medido em 2026-08-23 com o
+            backend inteiro fora: com frases completas a home mostrava TRÊS avisos abrindo com
+            "Não foi possível carregar", e os dois primeiros ficam lado a lado no mesmo bloco
+            do hero — correção causal virando eco. A3.1 é dona da frase (ela fala da afirmação
+            da página); os módulos ficam com rótulo secundário, proporcional ao que são.
+
+            🔴 Os três estados precisam de desfechos DIFERENTES na tela. Ausência legítima
+            simplesmente não desenha o módulo (a página segue coerente sem ele); falha da
+            consulta DIZ que não conseguiu — senão a home afirma "não há obra que demonstre os
+            nove critérios", que é o argumento da própria página, com base num erro. */}
+        {spotlight.status === "unavailable" ? (
+          <p
+            data-slot="spotlight-indisponivel"
+            className="rounded-lg border border-border/65 bg-background/40 p-6 text-center text-sm text-muted-foreground"
+          >
+            Raio-X indisponível no momento.
+          </p>
+        ) : spotlight.work ? (
+          <CriteriaXray work={spotlight.work} />
+        ) : null}
       </section>
 
       {/* ── prateleira pública ─────────────────────────────────── */}
-      {works.length > 0 && (
+      {/* Vitrine indisponível ≠ vitrine vazia. O cabeçalho fica (a seção existe e o link
+          para o catálogo continua útil) e a GRADE dá lugar a um aviso curto, no lugar dela —
+          esconder a seção inteira seria repetir o defeito, afirmando que não há obra bem
+          avaliada quando o que houve foi a consulta falhar. */}
+      {works === null && (
+        <section className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h2 className="text-base font-bold tracking-tight">Mais bem avaliadas nas plataformas</h2>
+            <Link
+              href="/catalog"
+              className="ml-auto inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-primary hover:underline"
+            >
+              Ver catálogo
+              <ArrowRight className="size-3" />
+            </Link>
+          </div>
+          <p
+            data-slot="vitrine-indisponivel"
+            className="rounded-lg border border-border/65 bg-background/40 p-6 text-center text-sm text-muted-foreground"
+          >
+            Prateleira indisponível no momento.
+          </p>
+        </section>
+      )}
+
+      {works !== null && works.length > 0 && (
         <section className="flex flex-col gap-3">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <h2 className="text-base font-bold tracking-tight">Mais bem avaliadas nas plataformas</h2>

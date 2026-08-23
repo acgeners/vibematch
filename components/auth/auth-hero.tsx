@@ -57,12 +57,17 @@ function StatsRow({ stats }: { stats: SiteStats }) {
 export async function AuthHero() {
   const [works, stats] = await Promise.all([getAuthHeroWorks(24), getSiteStats()])
 
+  // `null` = a consulta falhou; `[]` = respondeu e não há obra com capa. A parede é
+  // `aria-hidden` e decorativa, então os dois desfecham no mesmo desenho (sem parede) — o que
+  // muda é que a falha agora está REGISTRADA no log, em vez de virar lista vazia calada.
+  // Anunciar na tela que o fundo não carregou seria ruído sobre quem está tentando entrar.
+  const parede = works ?? []
   const cols: HeroWork[][] = [[], [], [], []]
-  works.forEach((w, i) => cols[i % 4].push(w))
+  parede.forEach((w, i) => cols[i % 4].push(w))
 
   return (
     <section className="relative hidden overflow-hidden border-r border-border bg-muted md:block">
-      {works.length > 0 ? (
+      {parede.length > 0 ? (
         <div className="authhero-wall" aria-hidden="true">
           {cols.map((list, ci) => (
             <div className="authhero-col" key={ci}>

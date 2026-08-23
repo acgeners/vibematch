@@ -49,7 +49,23 @@ export interface SpotlightWork extends PublicShowcaseWork {
  * aleatória — sorteio aqui mudaria o hero a cada request, quebrando cache e tornando a página
  * impossível de conferir.
  */
-export async function getSpotlightWork(): Promise<SpotlightWork | null> {
+/**
+ * Os TRÊS estados do destaque, que `SpotlightWork | null` não consegue representar.
+ *
+ * 🔴 Um item único tem três desfechos genuinamente distintos — achou / consultei e não há /
+ * não consegui consultar — e o `null` antigo cobria os dois últimos com o MESMO valor. A
+ * consequência é a afirmação falsa: com a query falhando, a home dizia "esta obra não existe"
+ * em vez de "não consegui olhar".
+ *
+ * ⚠️ A assimetria com `getPublicShowcase` (que usa `T[] | null`) é de propósito, não
+ * descuido: numa LISTA, "não achei" e "está vazia" são o mesmo fato, então dois estados
+ * bastam. Num item só, não são. O contrato acompanha o dado, não a simetria.
+ */
+export type SpotlightResult =
+  | { status: "ok"; work: SpotlightWork | null }
+  | { status: "unavailable" }
+
+export async function getSpotlightWork(): Promise<SpotlightResult> {
   const supabase = createAdminClient()
 
   const { data, error } = await supabase
@@ -67,7 +83,17 @@ export async function getSpotlightWork(): Promise<SpotlightWork | null> {
     .order("platform_avg", { ascending: false })
     .limit(60)
 
-  if (error) return null
+  if (error) {
+    // Sem isto a falha some: este caminho não emite NADA hoje, e o erro nunca chega ao
+    // framework (foi capturado aqui).
+    //
+    // 🔴 SÓ a operação — `error.message` fica de fora de propósito. A2.3 mediu que segredo
+    // pode vir dentro do próprio Error, e o sanitizador que trata disso vive noutra branch;
+    // logar cru aqui seria abrir o vazamento agora para fechá-lo depois. ⚠️ Na integração
+    // com A3.2 esta linha vira o evento estruturado sanitizado, que devolve o detalhe.
+    console.error("[public-showcase] getSpotlightWork falhou")
+    return { status: "unavailable" }
+  }
 
   const rows = (data ?? []) as unknown as Array<{
     platform_avg: number | null
@@ -99,22 +125,37 @@ export async function getSpotlightWork(): Promise<SpotlightWork | null> {
     if (CRITERION_SLUGS.some((s) => !bySlug.has(s))) continue
 
     return {
-      id: row.works.id,
-      title: row.works.title,
-      coverUrls,
-      platformAvg: row.platform_avg,
-      totalVotes: row.total_votes ?? 0,
-      publicationStatusId: row.works.publication_status_id,
-      isAdult: false,
-      totalChapters: row.works.total_chapters,
-      ...hiatusFieldsFromRow(row.works),
-      scores: CRITERION_SLUGS.map((slug) => ({ slug, score: bySlug.get(slug) as number })),
+      status: "ok",
+      work: {
+        id: row.works.id,
+        title: row.works.title,
+        coverUrls,
+        platformAvg: row.platform_avg,
+        totalVotes: row.total_votes ?? 0,
+        publicationStatusId: row.works.publication_status_id,
+        isAdult: false,
+        totalChapters: row.works.total_chapters,
+        ...hiatusFieldsFromRow(row.works),
+        scores: CRITERION_SLUGS.map((slug) => ({ slug, score: bySlug.get(slug) as number })),
+      },
     }
   }
-  return null
+  // A consulta RESPONDEU e nenhuma obra satisfez os requisitos (9 critérios + capa + votos).
+  // É ausência legítima, e por isso NÃO é `unavailable`: a página pode dizer com segurança
+  // que não há destaque hoje, em vez de sugerir que algo quebrou.
+  return { status: "ok", work: null }
 }
 
-export async function getPublicShowcase(limit = 12): Promise<PublicShowcaseWork[]> {
+/**
+ * A vitrine pública. `PublicShowcaseWork[]` = a consulta respondeu (e `[]` é vazio legítimo);
+ * `null` = a consulta FALHOU.
+ *
+ * 🔴 Antes o erro virava `[]`, e o consumidor esconde a seção quando a lista é vazia — ou
+ * seja, uma falha da vitrine ficava indistinguível de "o catálogo não tem obra bem avaliada".
+ * O defeito é LOCAL: as outras partes da home podem estar perfeitamente saudáveis, e mesmo
+ * assim a prateleira afirmava ausência de conteúdo.
+ */
+export async function getPublicShowcase(limit = 12): Promise<PublicShowcaseWork[] | null> {
   const supabase = createAdminClient()
 
   // `works!inner` (não `works_owner`): a view é a fonte do DONO e carrega as colunas pessoais
@@ -134,7 +175,11 @@ export async function getPublicShowcase(limit = 12): Promise<PublicShowcaseWork[
     // Over-fetch: parte das melhores não tem capa, e capa faltando numa vitrine é um buraco.
     .limit(limit * 4)
 
-  if (error) return []
+  if (error) {
+    // Só a operação — ver a razão no `getSpotlightWork` acima.
+    console.error("[public-showcase] getPublicShowcase falhou")
+    return null
+  }
 
   const rows = (data ?? []) as unknown as Array<{
     platform_avg: number | null

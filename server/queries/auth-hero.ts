@@ -23,7 +23,16 @@ export type HeroWork = HiatusFields & {
  * do acervo, aqui na primeira tela que um visitante vê. Agora usa `works` e um campo de
  * catálogo; o status pessoal sai do tipo, porque não há "pessoal" sem sessão.
  */
-export async function getAuthHeroWorks(limit = 21): Promise<HeroWork[]> {
+/**
+ * `HeroWork[]` = a consulta respondeu (`[]` é vazio legítimo); `null` = ela FALHOU.
+ *
+ * 🔴 Antes o erro virava `[]`, o mesmo valor de "não há obra com capa" — e o consumidor não
+ * tinha como agir diferente. ⚠️ A parede que ele alimenta é `aria-hidden` e puramente
+ * decorativa (fica ATRÁS do formulário de login), então o tratamento proporcional é
+ * distinguir no CONTRATO e registrar no log, sem aviso na tela: anunciar "não carreguei as
+ * capas de fundo" a quem está tentando entrar é ruído sobre algo que não é conteúdo.
+ */
+export async function getAuthHeroWorks(limit = 21): Promise<HeroWork[] | null> {
   const supabase = createAdminClient()
   // `works` (não `works_owner`): a view é a fonte do DONO. Numa tela deslogada, nenhuma
   // coluna pessoal deve entrar — nem de enfeite.
@@ -37,7 +46,12 @@ export async function getAuthHeroWorks(limit = 21): Promise<HeroWork[]> {
     .order("platform_avg", { ascending: false })
     .limit(90)
 
-  if (error) return []
+  if (error) {
+    // 🔴 SÓ a operação: `error.message` pode carregar segredo vindo do próprio Error, e o
+    // sanitizador vive noutra branch. ⚠️ Vira evento estruturado na integração com A3.2.
+    console.error("[auth-hero] getAuthHeroWorks falhou")
+    return null
+  }
 
   const rows = (data ?? []) as unknown as Array<{
     platform_avg: number | null
@@ -99,8 +113,13 @@ function contagemDaMetrica(
 ): SiteStatValue {
   if (res.error) {
     // Sem isto a falha da home era INVISÍVEL: nenhuma linha de log saía deste caminho.
-    // Só nome de tabela e mensagem do PostgREST — nada de chave, token, e-mail ou id.
-    console.error(`[site-stats] contagem de ${tabela} falhou: ${res.error.message}`)
+    //
+    // 🔴 SÓ a tabela — `res.error.message` saiu daqui. A linha nasceu em A3.1 registrando a
+    // mensagem crua, e a política mudou por EVIDÊNCIA, não por gosto: segredo pode vir dentro
+    // do próprio Error, e o sanitizador que trata disso vive noutra branch. O nome da tabela
+    // é seguro porque quem o escolhe é este código, não o erro. ⚠️ A integração com A3.2
+    // devolve o detalhe, já sanitizado, no evento estruturado.
+    console.error(`[site-stats] contagem de ${tabela} falhou`)
     return null
   }
   return res.count ?? null
