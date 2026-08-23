@@ -32,7 +32,12 @@ function StatsRow({ stats }: { stats: SiteStats }) {
     { n: stats.criteria, label: "critérios avaliados" },
     { n: stats.reviews, label: "reviews analisadas" },
     { n: stats.sources, label: "fontes externas" },
-  ].filter((i) => i.n > 0)
+    // `n` agora é `number | null`: `null` é contagem que FALHOU e `0` é acervo vazio de
+    // verdade. Este painel é decorativo (fica atrás do formulário de login), então os dois
+    // somem — mas a guarda é explícita, e não `i.n > 0`, que trataria null por coincidência.
+    // O predicado de tipo é obrigatório: sem ele o `.filter` não estreita e o `fmt(i.n)`
+    // abaixo deixa de compilar (foi o `tsc` que apontou, não a leitura).
+  ].filter((i): i is { n: number; label: string } => typeof i.n === "number" && i.n > 0)
 
   if (items.length === 0) return null
 

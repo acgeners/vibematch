@@ -53,7 +53,13 @@ const BASE = (args.find((a) => a.startsWith("--base="))?.split("=")[1] ?? "https
  */
 const ROTAS = [
   { rota: "/api/health", status: 200, json: (j) => j?.ok === true && j?.works > 0 },
-  { rota: "/", status: 200, marca: /data-slot="/g, min: 10 },
+  // 🔴 O critério era `data-slot="` com mínimo 10, e a CASCA VAZIA já entrega 65 — medido em
+  // 2026-08-23 com o backend derrubado: a `/` passava verde enquanto anunciava "0 OBRAS" como
+  // fato do acervo. Marcador de casca não separa "renderizou" de "veio vazia" nesta rota.
+  // Agora conta LINK DE OBRA da vitrine (`/catalog/<slug>`), que só existe se
+  // `getPublicShowcase` tiver devolvido linhas — a casca não tem como produzi-lo, e "/catalog"
+  // sozinho (os dois botões de navegação) não casa, porque a barra final é exigida.
+  { rota: "/", status: 200, marca: /href="\/catalog\/[^"]/g, min: 6, o: "obras na vitrine" },
   { rota: "/catalog", status: 200, marca: /data-slot="table-row"/g, min: 10, o: "linhas de obra" },
   { rota: "/ranking", status: 200, marca: /<tr\b/g, min: 5, o: "linhas de obra" },
   { rota: "/guide", status: 200, marca: /<article\b/g, min: 3, o: "cards de conceito" },

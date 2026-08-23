@@ -36,9 +36,19 @@ export function PublicHome({
       {/* ── hero: o argumento à esquerda, a PROVA dele à direita ── */}
       <section className="grid items-center gap-6 pt-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)] lg:gap-10">
       <div className="flex flex-col gap-4">
-        <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">
-          {stats.works.toLocaleString("pt-BR")} obras lidas por critério
-        </p>
+        {/* 🔴 Esta linha imprimia `stats.works` sem guarda: com o banco fora ela anunciava
+            "0 OBRAS LIDAS POR CRITÉRIO" como fato do acervo. `null` é backend indisponível e
+            precisa DIZER isso — esconder o número deixaria os dois estados idênticos para quem
+            olha, que é justamente o que este patch existe para separar. */}
+        {stats.works !== null ? (
+          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">
+            {stats.works.toLocaleString("pt-BR")} obras lidas por critério
+          </p>
+        ) : (
+          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            Não foi possível carregar os números do acervo agora
+          </p>
+        )}
         <h1 className="max-w-[22ch] text-balance text-3xl font-bold leading-[1.1] tracking-tight sm:text-4xl xl:text-5xl">
           Toda obra do catálogo passa por uma leitura de nove critérios.
         </h1>
@@ -164,8 +174,13 @@ export function PublicHome({
   )
 }
 
-function Stat({ value, label }: { value: number; label: string }) {
-  if (!value) return null
+/**
+ * ⚠️ A guarda era `if (!value)`, que escondia `0` e `null` pelo mesmo caminho — os dois
+ * estados que este patch separa. Hoje só `null` (a contagem falhou) some: o aviso da manchete
+ * já explica a ausência. Zero REAL é dado do catálogo e é impresso.
+ */
+function Stat({ value, label }: { value: number | null; label: string }) {
+  if (value === null) return null
   return (
     <div className="flex flex-col">
       <dt className="sr-only">{label}</dt>

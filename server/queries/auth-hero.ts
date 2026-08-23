@@ -67,12 +67,58 @@ export async function getAuthHeroWorks(limit = 21): Promise<HeroWork[]> {
   return out
 }
 
-export type SiteStats = { works: number; criteria: number; reviews: number; sources: number }
+/**
+ * Uma métrica do acervo: `number` quando a query RESPONDEU — e aí `0` é um dado legítimo do
+ * catálogo — ou `null` quando ela FALHOU.
+ *
+ * 🔴 O tipo era `number` e o corpo fazia `count ?? 0`, dando a "banco fora" e "catálogo vazio"
+ * a MESMA representação. Medido em 2026-08-23 injetando uma service key inválida contra o build
+ * de produção: a home respondia HTTP 200 anunciando "0 OBRAS" como fato do acervo — sem erro na
+ * tela, sem UMA linha de log, e com o smoke da `/` aprovando, porque o marcador dele
+ * (`data-slot=`) é satisfeito pela casca vazia. É a família "erro que produz resultado", na
+ * primeira tela que um visitante vê.
+ */
+export type SiteStatValue = number | null
+
+export type SiteStats = {
+  works: SiteStatValue
+  criteria: SiteStatValue
+  reviews: SiteStatValue
+  sources: SiteStatValue
+}
 
 /**
- * Números reais do catálogo pra vitrine do login/signup — contagens (head:true,
- * sem trazer linhas). Falha por-métrica: uma tabela ausente vira 0 e a UI a
- * esconde, nunca derruba a página.
+ * Converte UMA contagem em métrica, e é o único lugar que decide o que `null` significa.
+ *
+ * ⚠️ `count` nulo SEM erro é "respondeu e não sei quantos" — vira `null`, nunca 0. O `?? 0`
+ * antigo achatava os três casos (erro, indefinido e zero real) num número que a tela afirma.
+ */
+function contagemDaMetrica(
+  tabela: string,
+  res: { count: number | null; error: { message: string } | null },
+): SiteStatValue {
+  if (res.error) {
+    // Sem isto a falha da home era INVISÍVEL: nenhuma linha de log saía deste caminho.
+    // Só nome de tabela e mensagem do PostgREST — nada de chave, token, e-mail ou id.
+    console.error(`[site-stats] contagem de ${tabela} falhou: ${res.error.message}`)
+    return null
+  }
+  return res.count ?? null
+}
+
+/**
+ * Números reais do catálogo pra vitrine da home e do login/signup — contagens (head:true, sem
+ * trazer linhas, egress ~zero).
+ *
+ * Falha POR MÉTRICA: uma tabela indisponível vira `null` e as outras três continuam valendo —
+ * derrubar a home inteira por causa de uma contagem seria trocar um defeito por outro maior.
+ * Quem decide o que mostrar é o consumidor; o que esta função garante é que ele consegue
+ * DISTINGUIR ausência de dado de dado ausente.
+ *
+ * ⚠️ `Promise.all` e não `allSettled` porque foi medido: com o backend inalcançável
+ * (conexão recusada) o supabase-js **resolve** com `{ count: null, error: "fetch failed" }` em
+ * vez de rejeitar. Não há promise para estourar aqui, e `allSettled` seria complexidade
+ * defendendo um caso que não existe.
  */
 export async function getSiteStats(): Promise<SiteStats> {
   const supabase = createAdminClient()
@@ -83,9 +129,9 @@ export async function getSiteStats(): Promise<SiteStats> {
     supabase.from("source").select("*", { count: "exact", head: true }),
   ])
   return {
-    works: w.count ?? 0,
-    criteria: c.count ?? 0,
-    reviews: r.count ?? 0,
-    sources: s.count ?? 0,
+    works: contagemDaMetrica("works", w),
+    criteria: contagemDaMetrica("category_scores", c),
+    reviews: contagemDaMetrica("work_reviews", r),
+    sources: contagemDaMetrica("source", s),
   }
 }
