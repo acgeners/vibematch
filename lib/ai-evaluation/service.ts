@@ -468,16 +468,57 @@ const EVALUATION_TOOL = {
   },
 } satisfies Anthropic.Messages.Tool
 
-const evaluationToolPayloadSchema = z.object({
+/**
+ * Contrato ESTRUTURAL do payload. Exportado só para teste.
+ *
+ * 🔴 Cardinalidade NÃO é o contrato — `.length(9)` deixa passar o pior caso.
+ * Medido em 2026-08-24 contra a versão anterior deste schema: dos seis payloads
+ * quebrados sondados (8 itens · duplicata+ausente · 10 itens · slug desconhecido ·
+ * fora de ordem · íntegro), **os seis passavam**. O caso que fecha o argumento tem
+ * exatamente 9 entradas: um slug repetido e outro ausente. A contagem bate, o mapa
+ * fica com 8 chaves, o critério repetido é sobrescrito em silêncio (last-wins) e o
+ * ausente era fabricado logo adiante.
+ *
+ * O contrato real é o CONJUNTO: exatamente `CRITERION_SLUGS`, cada slug uma vez.
+ * Isso subsume cardinalidade, unicidade, ausência e forasteiro numa asserção só —
+ * e deriva da constante, então critério novo no banco entra sozinho.
+ *
+ * ⚠️ Isto NÃO muda o que é pedido ao modelo: `EVALUATION_TOOL` já declara
+ * `minItems`/`maxItems` e o `enum` dos slugs. O que faltava era conferir do lado
+ * de cá — por isso não há bump de `PROMPT_VERSION` nem de
+ * `EVAL_OUTPUT_SCHEMA_VERSION`, e o cache segue válido.
+ */
+export const evaluationToolPayloadSchema = z.object({
   summary: z.string().min(1),
   confidence: z.number().min(0).max(1),
-  scores: z.array(
-    z.object({
-      criterion: z.string(),
-      score: z.number().min(0).max(10),
-      justification: z.string(),
-    })
-  ),
+  scores: z
+    .array(
+      z.object({
+        // `z.enum` (e não `z.string()`) é quem recusa slug desconhecido no ITEM,
+        // com o caminho do erro apontando qual entrada está errada.
+        criterion: z.enum(CRITERION_SLUGS),
+        score: z.number().min(0).max(10),
+        justification: z.string(),
+      })
+    )
+    .superRefine((scores, ctx) => {
+      const vistos = new Set<string>()
+      const duplicados = new Set<string>()
+      for (const s of scores) {
+        if (vistos.has(s.criterion)) duplicados.add(s.criterion)
+        vistos.add(s.criterion)
+      }
+      const ausentes = CRITERION_SLUGS.filter((slug) => !vistos.has(slug))
+      if (duplicados.size === 0 && ausentes.length === 0) return
+      const partes = [
+        ausentes.length > 0 ? `ausente(s): ${ausentes.join(", ")}` : "",
+        duplicados.size > 0 ? `duplicado(s): ${[...duplicados].join(", ")}` : "",
+      ].filter(Boolean)
+      ctx.addIssue({
+        code: "custom",
+        message: `o payload precisa trazer exatamente os ${CRITERION_SLUGS.length} critérios canônicos, um de cada — ${partes.join(" · ")}`,
+      })
+    }),
   reviewsRejectedReason: z.string().optional(),
 })
 
@@ -844,7 +885,10 @@ function extractUsedReviewIds(rawResponse: unknown): string[] {
   return [...ids]
 }
 
-function buildResponseFromToolPayload(
+/** Exportado só para teste: a invariante abaixo só é sondável chamando a função
+ *  com um payload que NÃO passou pelo schema — e exportá-la é seguro justamente
+ *  porque ela lança em vez de fabricar dado. */
+export function buildResponseFromToolPayload(
   payload: EvaluationToolPayload,
   title: string,
   modelName: string,
@@ -858,11 +902,30 @@ function buildResponseFromToolPayload(
     }
   }
 
-  const scores = CRITERION_SLUGS.map((slug) => ({
-    criterionSlug: slug,
-    suggestedScore: scoreMap[slug]?.score ?? 5,
-    justification: scoreMap[slug]?.justification ?? "Não avaliado.",
-  }))
+  const scores = CRITERION_SLUGS.map((slug) => {
+    const nota = scoreMap[slug]
+    // 🔴 INVARIANTE, não fallback. Até 2026-08-24 estas duas linhas eram
+    // `?? 5` e `?? "Não avaliado."`, e elas GRAVAVAM nota inventada: medido na
+    // nuvem, a obra "Undercover Princess" ficou com `adult_content` 5,0 aceito e
+    // vigente em `category_scores` para um critério que o modelo nunca avaliou —
+    // com `confidence` global 0,75, porque os outros oito tinham evidência.
+    // Erro que produz resultado, sem erro na tela e sem log.
+    //
+    // `evaluationToolPayloadSchema` agora garante o conjunto completo, então
+    // chegar aqui sem o slug é defeito de programação, não payload ruim. Lançar
+    // encaminha para o `lastError` → 2ª tentativa (com feedback) → `status:
+    // "failed"` que o fluxo já tem. Nenhum default numérico volta aqui.
+    if (!nota) {
+      throw new Error(
+        `invariante violada em buildResponseFromToolPayload: o payload validado não trouxe o critério "${slug}". Nenhuma nota foi fabricada.`
+      )
+    }
+    return {
+      criterionSlug: slug,
+      suggestedScore: nota.score,
+      justification: nota.justification,
+    }
+  })
 
   return {
     modelName,
