@@ -1,3 +1,4 @@
+import { ACTIVE_MODELS, SONNET_MODEL } from "@/lib/ai/models"
 /**
  * Observabilidade das chamadas de IA (Plano 1 — Fase B, "observabilidade mínima").
  *
@@ -131,11 +132,9 @@ export function isCacheHit(status: AiCacheStatus | null | undefined): boolean {
 
 // ── Definição documentada de uma operação (plano §5) ─────────────────────────
 
-export interface AiOperationDefinition {
+interface AiOperationCommon {
   key: AiOperationKey
   label: string
-  /** Modelo padrão (pode ser sobrescrito por override A/B em ai_evaluation). */
-  defaultModel: string
   /** Categoria de workload TÍPICA da operação (não substitui a classificação por linha). */
   typicalWorkload: AiWorkloadType
   /** Possui cache de resultado que pode curto-circuitar a chamada? */
@@ -143,21 +142,64 @@ export interface AiOperationDefinition {
   description: string
 }
 
+/** Operação com executor vivo — tem configuração operacional corrente. */
+export interface AiOperationActive extends AiOperationCommon {
+  status: "active"
+  /** Modelo padrão (pode ser sobrescrito por override A/B em ai_evaluation). */
+  defaultModel: string
+}
+
+/**
+ * Operação APOSENTADA: o executor saiu do código, mas a chave continua aqui porque as
+ * linhas históricas de `ai_api_calls` precisam resolver rótulo e workload.
+ *
+ * 🔴 **Sem `defaultModel`, e o `?: never` faz o `tsc` recusar** — não é convenção, é o
+ * tipo. Operação sem executor não tem "modelo padrão": qualquer valor ali seria uma
+ * afirmação sobre o passado, e passado mora no DADO (`ai_api_calls.model_name`,
+ * `calibration_runs.model_name`), não no catálogo de configuração.
+ */
+export interface AiOperationRetired extends AiOperationCommon {
+  status: "retired"
+  defaultModel?: never
+}
+
+export type AiOperationDefinition = AiOperationActive | AiOperationRetired
+
 /**
  * Catálogo das operações conhecidas. Documentação — não muda execução.
- * `defaultModel` reflete a constante no respectivo serviço (lib/ai-*).
+ *
+ * Responde "qual é a CONFIGURAÇÃO ATUAL desta operação", nunca "o que já rodou aqui":
+ * `active` traz `defaultModel` (a constante do respectivo serviço em `lib/ai-*`);
+ * `retired` não traz nenhum, e o histórico é lido dos dados persistidos.
+ *
+ * 🔴 E "reflete" precisa ser DERIVAÇÃO, não cópia. Até 23/08/2026 as operações Sonnet traziam
+ * o literal `"claude-sonnet-4-6"` enquanto os serviços já chamavam `SONNET_MODEL`
+ * (= `claude-sonnet-5`): dez operações declaravam um modelo que não era o da chamada, e o
+ * `/curation/ai-usage` exibia esse nome. Pior era `synopsis_consolidator`, que declarava
+ * HAIKU e roda SONNET — divergência de TIER, não de versão.
+ *
+ * ⚠️ As quatro entradas Haiku (`review_summarizer`, `tag_classifier`, `tag_enricher`,
+ * `tag_inference`) derivam de `ACTIVE_MODELS.haiku`, não de `SONNET_MODEL`: elas escolhem
+ * o modelo BARATO e não acompanham a troca do Sonnet — o registry tem um tier POR decisão,
+ * e é isso que preserva a intenção sem deixá-las com literal próprio.
+ *
+ * 🔴 Elas eram literais até 24/08/2026, classificadas como "só display". Deixou de valer
+ * quando `status` passou a existir: numa entrada `active`, `defaultModel` É a configuração
+ * operacional corrente, e configuração corrente não se copia à mão.
  */
 export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   ai_evaluation: {
     key: "ai_evaluation",
+    status: "active",
     label: "Avaliação IA (9 critérios)",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: true,
     description: "Avaliação dos 9 critérios via tool/Zod, com capa em base64 e auditoria de reviews.",
   },
   synopsis_quality_predict: {
     key: "synopsis_quality_predict",
+    status: "active",
     /**
      * A chave (`synopsis_quality_predict`) e a coluna (`synopsis_quality`) são
      * identificadores e ficam — o que mudou foi o CONCEITO: o modelo não julga a
@@ -165,7 +207,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
      * depois de lê-la. É o ♥..♥♥♥♥ do Interesse.
      */
     label: "Previsão de Interesse",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description:
@@ -173,80 +215,100 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   recommendation_rank: {
     key: "recommendation_rank",
+    status: "active",
     label: "Ranking de recomendação",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description: "Re-rank de favoritos pelo LLM; persiste em recommendation_runs.",
   },
   recommendation_taste_profile: {
     key: "recommendation_taste_profile",
+    status: "active",
     label: "Perfil de gosto",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description: "Gera o taste_profile a partir das obras rotuladas.",
   },
   recommendation_chat: {
     key: "recommendation_chat",
+    status: "active",
     label: "Chat de recomendação",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description: "Turno conversacional de recomendação (pago).",
   },
+  // 🔴 As duas `calibration_*` são APOSENTADAS: `lib/ai-calibration/` foi removido em
+  // 16/08/2026 e nenhuma das duas tem call site. Por isso não declaram `defaultModel` —
+  // o modelo que cada execução usou está no DADO (`ai_api_calls.model_name` e
+  // `calibration_runs.model_name`), não aqui.
+  //
+  // ⚠️ Um comentário anterior afirmava que o literal `"claude-sonnet-4-6"` descrevia o
+  // modelo real dessas chamadas. Medido no banco: as 28 linhas de `calibration_audit`
+  // em `ai_api_calls` são **100% `claude-sonnet-5`**, e as execuções em 4.6 (12 runs,
+  // 05–06/2026) são anteriores ao início do log e só existem em `calibration_runs`.
   calibration_audit: {
     key: "calibration_audit",
+    status: "retired",
     label: "Auditoria de calibração",
-    defaultModel: "claude-sonnet-4-6",
     typicalWorkload: "admin",
     hasResultCache: false,
-    description: "Auditoria administrativa de calibração (chunks paralelos).",
+    description: "Auditoria administrativa de calibração (aposentada em 16/08/2026).",
   },
   calibration_bias: {
     key: "calibration_bias",
+    status: "retired",
     label: "Relatório de viés",
-    defaultModel: "claude-sonnet-4-6",
     typicalWorkload: "admin",
     hasResultCache: false,
-    description: "Relatório administrativo de viés de calibração.",
+    description: "Relatório administrativo de viés de calibração (aposentado em 16/08/2026).",
   },
   review_summarizer: {
     key: "review_summarizer",
+    status: "active",
     label: "Resumo de reviews",
-    defaultModel: "claude-haiku-4-5-20251001",
+    defaultModel: ACTIVE_MODELS.haiku,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description: "Resumo curto por review (Haiku).",
   },
   review_digest: {
     key: "review_digest",
+    status: "active",
     label: "Digest de reviews",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description: "Digest agregado das reviews de uma obra (Sonnet).",
   },
   deep_dive: {
     key: "deep_dive",
+    status: "active",
     label: "Deep dive",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description: "Análise profunda com extended thinking; persiste em deep_dive_results.",
   },
   synopsis_consolidator: {
     key: "synopsis_consolidator",
+    status: "active",
     label: "Consolidador de sinopse",
-    defaultModel: "claude-haiku-4-5-20251001",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
-    description: "Funde múltiplas sinopses externas numa só (Haiku).",
+    // ⚠️ "(Sonnet)": o `defaultModel` já vinha do dono, mas esta frase seguia dizendo
+    // "(Haiku)" — as duas metades da MESMA entrada afirmando modelos diferentes, e a
+    // frase é o que a pessoa lê no `/curation/ai-usage`. Migrou para Sonnet no prompt v3.
+    description: "Funde múltiplas sinopses externas numa só (Sonnet).",
   },
   tag_inference: {
     key: "tag_inference",
+    status: "active",
     label: "Inferência de tags",
-    defaultModel: "claude-haiku-4-5-20251001",
+    defaultModel: ACTIVE_MODELS.haiku,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description:
@@ -254,8 +316,9 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   tag_verify: {
     key: "tag_verify",
+    status: "active",
     label: "Verificação de tags",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "backfill",
     hasResultCache: false,
     description:
@@ -263,24 +326,27 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   tag_clustering: {
     key: "tag_clustering",
+    status: "active",
     label: "Clusterização de tags",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: SONNET_MODEL,
     typicalWorkload: "admin",
     hasResultCache: false,
     description: "Propõe clusters/sub-grupos de tags (administrativo).",
   },
   tag_classifier: {
     key: "tag_classifier",
+    status: "active",
     label: "Classificador de tags",
-    defaultModel: "claude-haiku-4-5-20251001",
+    defaultModel: ACTIVE_MODELS.haiku,
     typicalWorkload: "admin",
     hasResultCache: false,
     description: "Classifica tags por grupo (administrativo).",
   },
   tag_enricher: {
     key: "tag_enricher",
+    status: "active",
     label: "Enriquecedor de tags",
-    defaultModel: "claude-haiku-4-5-20251001",
+    defaultModel: ACTIVE_MODELS.haiku,
     typicalWorkload: "admin",
     hasResultCache: false,
     description: "Enriquece tags novas de um grupo (administrativo).",

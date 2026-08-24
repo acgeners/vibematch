@@ -6484,7 +6484,7 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.502 passando (+24 pulados) em 334 arquivos** (329 passando + 5 pulados);
+`npm run test` → **3.522 passando (+24 pulados) em 336 arquivos** (331 passando + 5 pulados);
 remedido em 2026-08-21 com a metade EMBED do canário (**+12 casos e ZERO arquivo** — eles
 entraram no `canario-de-contrato-parser` que já existia, e é por isso que a contagem de
 ARQUIVOS não se move e a de CASOS sim). Disco (`find`) = índice (`git ls-files`) = **334**,

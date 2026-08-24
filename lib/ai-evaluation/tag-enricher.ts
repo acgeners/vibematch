@@ -1,7 +1,8 @@
 import "server-only"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
+import { ACTIVE_MODELS } from "@/lib/ai/models"
 
-const MODEL = "claude-haiku-4-5-20251001"
+const MODEL = ACTIVE_MODELS.haiku
 
 export interface EnrichInputTag {
   name: string

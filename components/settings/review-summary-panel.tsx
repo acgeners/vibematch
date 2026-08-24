@@ -8,6 +8,8 @@ import { StatCard } from "@/components/settings/stat-card"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
 import { useRefresh } from "@/lib/use-refresh"
 import { useCostConfirm } from "@/components/cost/cost-confirm"
+import { previewCost, shortModelName } from "@/lib/cost-preview/catalog"
+import { formatUsdApprox } from "@/lib/format/money"
 import {
   consolidatePendingReviewSummaries,
   type ConsolidateReviewSummariesProgress,
@@ -24,6 +26,11 @@ export function ReviewSummaryPanel({ accent, pendingCount, totalCount }: ReviewS
   const [lastResult, setLastResult] = useState<ConsolidateReviewSummariesProgress | null>(null)
   const refresh = useRefresh()
   const confirmCost = useCostConfirm()
+  // 🔴 Modelo e custo saem do MESMO catálogo que o popup de confirmação consulta. O card
+  // dizia `claude-haiku-4-5` — que nem é um ID válido aqui (`priceForModel` devolve
+  // `unknown@…`) — e estava certo só por coincidência: o executor usa o Haiku ATIVO, e uma
+  // troca de versão deixaria os dois textos para trás sem nada acusar.
+  const porObra = previewCost("review_summary", 1)
 
   const handleRun = async () => {
     const scale = Math.min(pendingCount, 10)
@@ -72,9 +79,10 @@ export function ReviewSummaryPanel({ accent, pendingCount, totalCount }: ReviewS
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-2xl space-y-1 text-sm text-muted-foreground">
           <p>
-            Resume as reviews externas de cada obra em um parágrafo de consenso via Haiku 4.5
-            (~0,2¢ por obra). Mostrado na aba “Notas & Avaliações”. Obras avaliadas/atualizadas
-            de agora em diante já geram o resumo automaticamente — isto cobre as antigas.
+            Resume as reviews externas de cada obra em um parágrafo de consenso via{" "}
+            {shortModelName(porObra.model)} ({formatUsdApprox(porObra.likelyUsd)} por obra).
+            Mostrado na aba “Notas &amp; Avaliações”. Obras avaliadas/atualizadas de agora em
+            diante já geram o resumo automaticamente — isto cobre as antigas.
           </p>
           <p className="text-xs">
             Cada clique processa até 10 obras pendentes — pode rodar várias vezes até zerar.
@@ -101,9 +109,9 @@ export function ReviewSummaryPanel({ accent, pendingCount, totalCount }: ReviewS
         />
         <StatCard
           label="Modelo"
-          value="claude-haiku-4-5"
+          value={porObra.model}
           valueClassName="text-xs"
-          hint="~0,2¢/obra"
+          hint={`${formatUsdApprox(porObra.likelyUsd)}/obra`}
         />
       </div>
 

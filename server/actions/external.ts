@@ -15,7 +15,7 @@ import { isComixRenderConfigured } from "@/lib/external/comix-render-client"
 import { resolveMangagoUrlProd } from "@/lib/external/mangago-resolve-prod"
 import { boolEnv } from "@/lib/external/mangago-band"
 import { AI_EVAL_REVIEW_CAPS, requestAiEvaluation, type AiEvaluationTag } from "@/lib/ai-evaluation/service"
-import { SONNET_MODEL } from "@/lib/ai/models"
+import { ACTIVE_MODELS, SONNET_MODEL } from "@/lib/ai/models"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
 import { recordGenreCandidates } from "@/lib/tags/genre-proposals"
 import { normalizeTagKey, SOURCE_TAG_DENYLIST } from "@/lib/tags/source-tag-filter"
@@ -376,7 +376,7 @@ export interface CandidateAiNeedsReviewConfirmation {
  * Errors propagate to the caller so the wizard can surface them to the user.
  * The caller is responsible for deciding whether to continue without scores.
  */
-const CREATE_FLOW_OPUS_ID = "claude-opus-4-7"
+const CREATE_FLOW_OPUS_ID = ACTIVE_MODELS.opus
 const CREATE_FLOW_SONNET_ID = SONNET_MODEL
 
 /**

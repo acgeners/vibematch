@@ -8,9 +8,15 @@ import {
   COST_SAFETY_MULTIPLIER,
   DEFAULT_MICRO_THRESHOLD_USD,
 } from "@/lib/orchestration/cost"
-import { computeCostUsd, type UsageTokens } from "@/lib/ai/pricing"
+import { computeCostUsd, priceForModel, type UsageTokens } from "@/lib/ai/pricing"
+import { SONNET_MODEL } from "@/lib/ai/models"
 
-const SONNET = "claude-sonnet-4-6"
+// 🔴 DERIVADO, nunca copiado. Esta linha era o literal `"claude-sonnet-4-6"` e o caso 10
+// passou a reprovar quando `contracts.ts` deixou de chumbar o Sonnet: o teste comparava um
+// custo REAL calculado a $3/$15 contra uma ESTIMATIVA calculada a $2/$10 — dois modelos
+// diferentes para a mesma asserção. O que ele quer provar é que o custo real de uma chamada
+// Sonnet cai entre o provável e o teto; para isso os dois lados têm de ser o MESMO Sonnet.
+const SONNET = SONNET_MODEL
 const usage = (i: number, o: number, cr = 0, cw = 0): UsageTokens => ({
   inputTokens: i,
   outputTokens: o,
@@ -25,7 +31,11 @@ describe("endurecimento do custo", () => {
     const b = computeCostUsd(SONNET, u)
     const manual = b.costInputUsd + b.costOutputUsd + b.costCacheReadUsd + b.costCacheCreationUsd
     expect(viaEstimate).toBeCloseTo(manual)
-    expect(manual).toBeCloseTo((5000 / 1e6) * 3 + (1000 / 1e6) * 15)
+    // A TARIFA também vem do dono. Cravar 3/15 aqui repetia o preço do Sonnet 4.6 e
+    // reprovava assim que o modelo ativo mudou — o que este caso quer provar é que
+    // estimador e custo real usam a MESMA tabela, não qual é o número dela.
+    const t = priceForModel(SONNET)!
+    expect(manual).toBeCloseTo((5000 / 1e6) * t.inputPerMTok + (1000 / 1e6) * t.outputPerMTok)
   })
 
   it("2) zero cache ⇒ só input/output", () => {
@@ -41,7 +51,7 @@ describe("endurecimento do custo", () => {
 
   it("4) cache write precificado a cacheCreationPerMTok", () => {
     const b = computeCostUsd(SONNET, usage(0, 0, 0, 10000))
-    expect(b.costCacheCreationUsd).toBeCloseTo((10000 / 1e6) * 3.75)
+    expect(b.costCacheCreationUsd).toBeCloseTo((10000 / 1e6) * priceForModel(SONNET)!.cacheCreationPerMTok)
   })
 
   it("5) quantidade mínima de obras ⇒ estimativa finita e positiva", () => {

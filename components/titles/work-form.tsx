@@ -11,6 +11,7 @@ import { titleToSlug, readingProgressPercent } from "@/lib/utils"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { dedupeSynopsisEntries, joinSynopsisBlocks, splitSynopsesFromText } from "@/lib/work-derived"
 import { workFormSchema } from "@/lib/validations/work.schema"
+import { ACTIVE_MODELS } from "@/lib/ai/models"
 import type { WorkFormValues, WorkFormInput } from "@/lib/validations/work.schema"
 import { ChipInput } from "@/components/ui/chip-input"
 import { Textarea } from "@/components/ui/textarea"
@@ -2809,7 +2810,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                 )}
                 {aiMeta.confidence != null &&
                   aiMeta.confidence < CREATE_FLOW_CONFIRM_THRESHOLD &&
-                  aiMeta.modelName !== "claude-opus-4-7" && (
+                  aiMeta.modelName !== ACTIVE_MODELS.opus && (
                     <div>
                       <Button
                         type="button"

@@ -3,6 +3,8 @@
 import { useState } from "react"
 import { toast } from "sonner"
 import { Loader2, Sparkles } from "lucide-react"
+// O modelo EXIBIDO no popup de custo vem do dono — ele nomeia a chamada que vai acontecer.
+import { SONNET_MODEL } from "@/lib/ai/models"
 
 import { Button } from "@/components/ui/button"
 import { useRefresh } from "@/lib/use-refresh"
@@ -129,7 +131,7 @@ export function InterestBackfillButton({ works, isPaid = true }: { works: Synops
         likelyUsd: plan.likelyUsd,
         upperBoundUsd: plan.upperBoundUsd,
         etaSeconds: cost.etaSeconds,
-        model: "claude-sonnet-4-6",
+        model: SONNET_MODEL,
         background: false,
         scale: plan.needCalls,
       },

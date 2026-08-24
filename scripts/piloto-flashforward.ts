@@ -67,7 +67,7 @@ const STATE_FILE = `${STATE_DIR}/flashforward.json`
 const CUSTO_WEB_ESTIMADO = 0.25
 const CUSTO_LOCAL_ESTIMADO = 0.025
 
-// Sonnet 5 na promo introdutória ($2/$10 por MTok até 2026-08-31). Se `SONNET_MODEL` voltar
+// Sonnet 5 a $2/$10 por MTok (preço PADRÃO desde 10/08/2026). Se `SONNET_MODEL` voltar
 // pro 4.6 em setembro, estes números sobem — o script imprime o modelo junto do custo.
 const PRICE_IN_PER_MTOK = 2.0
 const PRICE_OUT_PER_MTOK = 10.0
