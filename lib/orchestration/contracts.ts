@@ -12,6 +12,7 @@
 
 import type { UsageTokens } from "@/lib/ai/pricing"
 import { SONNET_MODEL } from "@/lib/ai/models"
+import { CONSOLIDATE_SYNOPSIS_USAGE } from "@/lib/ai-recommendation/synopsis-consolidator-usage"
 
 // ---- Identidades -----------------------------------------------------------
 
@@ -162,10 +163,16 @@ export const ACTION_CONTRACTS: Record<ActionName, ActionContract> = {
     // ⚠️ Não dá para importar `CONSOLIDATOR_MODEL` aqui — aquele módulo é `server-only` e
     // este registro é alcançável do cliente (`cost-preview/catalog.ts` → `orchestration/cost`).
     // Os dois derivam do MESMO dono (`SONNET_MODEL`), que é o que mantém gate = executor.
+    //
+    // 🔴 E os TOKENS vêm do mesmo dono que o preview (`CONSOLIDATE_SYNOPSIS_USAGE`), pela
+    // mesma razão: o número aqui e o do `cost-preview/catalog.ts` descrevem a MESMA chamada.
+    // ⚠️ `perItem`, não `base`: `buildUsage` NÃO multiplica `base` por `scale`, e o executor
+    // faz UMA chamada POR OBRA — com `base` o gate devolvia o custo de uma chamada para um
+    // lote de N. Hoje nada pede `scale > 1` aqui, então era defeito LATENTE.
     manual: false,
     produces: "canonical_synopsis",
     inputs: [{ dataKey: "raw_synopsis", requirement: "required_automatic_free" }],
-    estimate: { model: SONNET, base: tokens(1500, 400) },
+    estimate: { model: SONNET, base: ZERO, perItem: CONSOLIDATE_SYNOPSIS_USAGE },
   },
   enrich_tags: {
     action: "enrich_tags",

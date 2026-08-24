@@ -77,15 +77,12 @@ describe("consolidate_synopsis: todas as superfícies resolvem o modelo do EXECU
   it("o gate cobra o preço do modelo do executor para os tokens que ele mesmo declara", () => {
     // Não crava um número: deriva. Assim a asserção sobrevive a uma troca de tarifa
     // ou de estimativa de token, e só cai quando o MODELO voltar a divergir.
-    const est = CONTRATO.estimate!
-    const c = computeCostUsd(CONSOLIDATOR_MODEL, {
-      inputTokens: est.base.inputTokens,
-      outputTokens: est.base.outputTokens,
-      cacheReadTokens: 0,
-      cacheCreationTokens: est.base.cacheCreationTokens,
-    })
-    const esperado = c.costInputUsd + c.costOutputUsd + c.costCacheReadUsd + c.costCacheCreationUsd
+    // ⚠️ Lê o usage RESOLVIDO (`estimateStep(...).usage`), nunca `estimate.base`: os
+    // tokens migraram de `base` para `perItem` no fix da estimativa, e um teste preso
+    // ao slot dá falso vermelho numa mudança que não é do assunto dele.
     const gate = estimateStep("consolidate_synopsis", 1)
+    const c = computeCostUsd(CONSOLIDATOR_MODEL, gate.usage)
+    const esperado = c.costInputUsd + c.costOutputUsd + c.costCacheReadUsd + c.costCacheCreationUsd
     expect(gate.pricingKnown, "modelo sem preço ⇒ o gate viraria Infinity").toBe(true)
     expect(gate.likelyUsd).toBeCloseTo(esperado, 9)
   })
@@ -93,18 +90,11 @@ describe("consolidate_synopsis: todas as superfícies resolvem o modelo do EXECU
   it("o gate NÃO cobra mais o preço de Haiku — a subestimação de 2× está fechada", () => {
     // Contraprova do defeito, na grandeza em que ele doía: com os MESMOS tokens, o
     // Haiku dá metade. Se alguém devolver o literal, este número volta a bater.
-    const est = CONTRATO.estimate!
-    const uso = {
-      inputTokens: est.base.inputTokens,
-      outputTokens: est.base.outputTokens,
-      cacheReadTokens: 0,
-      cacheCreationTokens: est.base.cacheCreationTokens,
-    }
-    const haiku = computeCostUsd("claude-haiku-4-5-20251001", uso)
+    const gate = estimateStep("consolidate_synopsis", 1)
+    const haiku = computeCostUsd("claude-haiku-4-5-20251001", gate.usage)
     const comoHaiku = haiku.costInputUsd + haiku.costOutputUsd
-    const gate = estimateStep("consolidate_synopsis", 1).likelyUsd
-    expect(gate).not.toBeCloseTo(comoHaiku, 9)
-    expect(gate).toBeGreaterThan(comoHaiku)
+    expect(gate.likelyUsd).not.toBeCloseTo(comoHaiku, 9)
+    expect(gate.likelyUsd).toBeGreaterThan(comoHaiku)
   })
 })
 
@@ -113,17 +103,23 @@ describe("o painel de settings MOSTRA o modelo do executor", () => {
   // `previewCost` passaria verde com o literal de volta dentro do StatCard — foi
   // exatamente esse o estado anterior.
   it("o card 'Modelo' imprime o modelo do executor, e nenhum outro", () => {
-    render(<SynopsisConsolidationPanel accent="violet" pendingCount={3} totalCount={10} />)
+    const { container } = render(
+      <SynopsisConsolidationPanel accent="violet" pendingCount={3} totalCount={10} />,
+    )
     const card = screen.getByText("Modelo").closest("div")!
     expect(card.textContent).toContain(CONSOLIDATOR_MODEL)
-    expect(card.textContent, "o painel voltou a nomear Haiku").not.toMatch(/haiku/i)
+    // 🔴 O PAINEL INTEIRO, não só o card. A 1ª versão escopava a `div` do StatCard e
+    // passou verde com a MESMA mentira um elemento ao lado: a prosa acima dizia
+    // "via Haiku 4.5 (~0,2¢ por obra)". Asserção estreita não é asserção.
+    expect(container.textContent, "o painel voltou a nomear Haiku").not.toMatch(/haiku/i)
   })
 
   it("o custo por obra impresso é o do catálogo, não um número escrito à mão", () => {
     render(<SynopsisConsolidationPanel accent="violet" pendingCount={3} totalCount={10} />)
     const card = screen.getByText("Modelo").closest("div")!
     // "~0,2¢/obra" era o custo do HAIKU; o Sonnet custa mais que o dobro disso.
-    expect(card.textContent).not.toContain("0,2¢")
+    // Varre o painel INTEIRO — o mesmo número estava escrito duas vezes.
+    expect(document.body.textContent).not.toContain("0,2¢")
     expect(card.textContent).toMatch(/\/obra/)
   })
 })

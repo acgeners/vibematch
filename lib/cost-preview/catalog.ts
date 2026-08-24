@@ -22,6 +22,7 @@ import { computeCostUsd } from "@/lib/ai/pricing"
 import type { UsageTokens } from "@/lib/ai/pricing"
 import { COST_SAFETY_MULTIPLIER } from "@/lib/orchestration/cost"
 import { SONNET_MODEL } from "@/lib/ai/models"
+import { CONSOLIDATE_SYNOPSIS_USAGE } from "@/lib/ai-recommendation/synopsis-consolidator-usage"
 
 // 🔴 O Sonnet vem do DONO, nunca de um literal. Este arquivo chumbava
 // `claude-sonnet-4-6` enquanto o app chamava `claude-sonnet-5`, e o preview passou a
@@ -170,13 +171,16 @@ const CATALOG: Record<CostActionId, CostSpec> = {
     background: true,
   },
   consolidate_synopsis: {
-    // Sonnet desde o prompt v3 (era Haiku). Tokens e ETA remedidos no
-    // laboratório de 10 obras: ~1500 in / ~330 out, mediana de 6,9 s (o Sonnet
-    // escreve ~33% mais que o Haiku, então tanto o custo quanto o tempo subiram).
+    // Sonnet desde o prompt v3 (era Haiku).
+    // 🔴 Os tokens vêm do DONO ÚNICO (`CONSOLIDATE_SYNOPSIS_USAGE`), compartilhado com o
+    // GATE em `lib/orchestration/contracts.ts` — preview e gate descrevem a MESMA chamada.
+    // O `~1500/330` que morava aqui saiu de um laboratório de 10 obras escolhidas por
+    // defeito conhecido; contra as 228 chamadas reais ele estava no percentil 11.
+    // ⚠️ O ETA continua local: é tempo, não custo, e não tem o outro lado para divergir.
     label: "Consolidar sinopse",
     model: SONNET,
     base: ZERO,
-    perItem: tokens(1500, 330),
+    perItem: CONSOLIDATE_SYNOPSIS_USAGE,
     etaSeconds: 2,
     etaPerItemSeconds: 7,
     background: true,

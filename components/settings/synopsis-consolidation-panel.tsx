@@ -8,7 +8,7 @@ import { StatCard } from "@/components/settings/stat-card"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
 import { useRefresh } from "@/lib/use-refresh"
 import { useCostConfirm } from "@/components/cost/cost-confirm"
-import { previewCost } from "@/lib/cost-preview/catalog"
+import { previewCost, shortModelName } from "@/lib/cost-preview/catalog"
 import { formatUsdApprox } from "@/lib/format/money"
 import {
   consolidatePendingSynopses,
@@ -77,9 +77,10 @@ export function SynopsisConsolidationPanel({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1 text-sm text-muted-foreground max-w-2xl">
           <p>
-            Consolida múltiplas sinopses por obra em uma única canônica via Haiku 4.5
-            (~0,2¢ por obra). Usada nos prompts de recomendação no lugar do texto
-            concatenado com <span className="font-mono">---</span>.
+            Consolida múltiplas sinopses por obra em uma única canônica via{" "}
+            {shortModelName(porObra.model)} ({formatUsdApprox(porObra.likelyUsd)} por obra).
+            Usada nos prompts de recomendação no lugar do texto concatenado com{" "}
+            <span className="font-mono">---</span>.
           </p>
           <p className="text-xs">
             Cada clique processa até 10 obras pendentes — pode rodar várias vezes até zerar.
