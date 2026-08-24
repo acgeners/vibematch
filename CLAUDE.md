@@ -1186,7 +1186,7 @@ lib/
   constants/      – GENERATED files (do not edit by hand)
   external/       – third-party API integrations + multi-source merge logic
   format/         – formatação de valor pra tela (money.ts é o dono único de USD)
-  import/         – GENERATED files + CSV/XLSX import pipeline
+  import/         – reconciliação de lista externa (JSON · XML.gz · lista colada)
   ml/             – Ridge regression for Nota Prevista / expected_score (pure TS, no native deps)
   supabase/       – client factories
   validations/    – Zod schemas
