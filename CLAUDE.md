@@ -6484,11 +6484,12 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.522 passando (+24 pulados) em 336 arquivos** (331 passando + 5 pulados);
-remedido em 2026-08-21 com a metade EMBED do canário (**+12 casos e ZERO arquivo** — eles
-entraram no `canario-de-contrato-parser` que já existia, e é por isso que a contagem de
-ARQUIVOS não se move e a de CASOS sim). Disco (`find`) = índice (`git ls-files`) = **334**,
-conferido DEPOIS do `git add`, em DUAS rodadas limpas com resultado idêntico.
+`npm run test` → **3.720 passando (+24 pulados) em 346 arquivos** (341 passando + 5 pulados);
+remedido em 2026-08-24 na árvore do merge que integrou A1a/A1b com A3/A4 — cada uma das duas
+linhas trouxe **+6 arquivos** sobre os 334 do `main`, e elas não se sobrepõem. Disco (`find`)
+= índice (`git ls-files`) = **346** em árvore LIMPA, e o número do vitest bate com os dois
+porque os 4 `.test.ts` de `services/comix-render` ficam fora da descoberta dele (`exclude:
+["services/**"]` no `vitest.config`): 350 − 4 = 346.
 
 ⚠️ **A 1ª rodada trouxe "Errors 1 error" com TODOS os testes passando** (Radix focus-scope
 estourando timeout em `ranking-ordenacao-trilha`), e a 2ª veio limpa com contagem idêntica — a
@@ -6500,7 +6501,8 @@ não método.** Ela só funciona enquanto os dois PRs não tocam o mesmo arquivo
 avisa no dia em que tocarem. É a terceira vez que esta linha é resolvida num merge; nas três, o
 que sobreviveu foi RE-MEDIR na base que vira o merge.
 
-Antes: **3.490 em 334** (o eixo C — +11 casos e +1 arquivo, `orchestration/contagens-do-claude-md`), **3.479 em 333** (a resolução do conflito entre o #502 e o #503, escritos em paralelo —
+Antes: **3.522 em 336** (a metade EMBED do canário — +12 casos e ZERO arquivo, porque eles
+entraram no `canario-de-contrato-parser` que já existia), **3.490 em 334** (o eixo C — +11 casos e +1 arquivo, `orchestration/contagens-do-claude-md`), **3.479 em 333** (a resolução do conflito entre o #502 e o #503, escritos em paralelo —
 e a soma dos dois deltas teria acertado por sorte de aritmética, não por método: ela só funciona
 enquanto os dois PRs não tocam o mesmo arquivo de teste), **3.471 em 332** (o #502 sozinho — +1 caso e zero arquivo, porque o guard entrou num
 arquivo que já existia) e **3.470 em 332**, medido **depois** de o smoke logado e o funil dos
