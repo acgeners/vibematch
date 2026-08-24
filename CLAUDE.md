@@ -6501,8 +6501,10 @@ não método.** Ela só funciona enquanto os dois PRs não tocam o mesmo arquivo
 avisa no dia em que tocarem. É a terceira vez que esta linha é resolvida num merge; nas três, o
 que sobreviveu foi RE-MEDIR na base que vira o merge.
 
-Antes: **3.522 em 336** (a metade EMBED do canário — +12 casos e ZERO arquivo, porque eles
-entraram no `canario-de-contrato-parser` que já existia), **3.490 em 334** (o eixo C — +11 casos e +1 arquivo, `orchestration/contagens-do-claude-md`), **3.479 em 333** (a resolução do conflito entre o #502 e o #503, escritos em paralelo —
+Antes: **3.522 em 336** (o preço do Sonnet nas quatro superfícies, `90d3124` — +20 casos e
++2 arquivos: `ai/pricing-vence-sem-sucessora` e `ai/quatro-superficies-mesmo-modelo`),
+**3.502 em 334** (a metade EMBED do canário — +12 casos e ZERO arquivo, porque eles entraram
+no `canario-de-contrato-parser` que já existia), **3.490 em 334** (o eixo C — +11 casos e +1 arquivo, `orchestration/contagens-do-claude-md`), **3.479 em 333** (a resolução do conflito entre o #502 e o #503, escritos em paralelo —
 e a soma dos dois deltas teria acertado por sorte de aritmética, não por método: ela só funciona
 enquanto os dois PRs não tocam o mesmo arquivo de teste), **3.471 em 332** (o #502 sozinho — +1 caso e zero arquivo, porque o guard entrou num
 arquivo que já existia) e **3.470 em 332**, medido **depois** de o smoke logado e o funil dos
