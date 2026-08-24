@@ -421,7 +421,11 @@ AVALIE O DESENVOLVIMENTO, NÃO O PONTO DE PARTIDA (generaliza pra couple_dynamic
 
 const CRITERION_SLUG_ENUM = [...CRITERION_SLUGS] as string[]
 
-const EVALUATION_TOOL = {
+/** Exportado só para teste: `tool-schema-pin.test.ts` congela o hash desta
+ *  definição contra `EVAL_OUTPUT_SCHEMA_VERSION`. Sem isso, mudar o contrato de
+ *  saída do modelo não deixa rastro nenhum — o pin do prompt cobre o
+ *  `SYSTEM_PROMPT` (e as rubricas interpoladas nele), mas não a tool. */
+export const EVALUATION_TOOL = {
   name: "submit_evaluation",
   description:
     "Retorna a avaliação estruturada da obra. Use SEMPRE esta tool para responder; não escreva texto livre fora dela.",
