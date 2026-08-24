@@ -1,4 +1,4 @@
-import { SONNET_MODEL } from "@/lib/ai/models"
+import { ACTIVE_MODELS, SONNET_MODEL } from "@/lib/ai/models"
 /**
  * Observabilidade das chamadas de IA (Plano 1 — Fase B, "observabilidade mínima").
  *
@@ -178,9 +178,14 @@ export type AiOperationDefinition = AiOperationActive | AiOperationRetired
  * `/curation/ai-usage` exibia esse nome. Pior era `synopsis_consolidator`, que declarava
  * HAIKU e roda SONNET — divergência de TIER, não de versão.
  *
- * ⚠️ As entradas Haiku continuam literais de propósito: `review_summarizer`,
- * `tag_classifier`, `tag_enricher` e `tag_inference` escolhem o modelo BARATO e não
- * acompanham a troca do Sonnet. Uniformizá-las apagaria a intenção.
+ * ⚠️ As quatro entradas Haiku (`review_summarizer`, `tag_classifier`, `tag_enricher`,
+ * `tag_inference`) derivam de `ACTIVE_MODELS.haiku`, não de `SONNET_MODEL`: elas escolhem
+ * o modelo BARATO e não acompanham a troca do Sonnet — o registry tem um tier POR decisão,
+ * e é isso que preserva a intenção sem deixá-las com literal próprio.
+ *
+ * 🔴 Elas eram literais até 24/08/2026, classificadas como "só display". Deixou de valer
+ * quando `status` passou a existir: numa entrada `active`, `defaultModel` É a configuração
+ * operacional corrente, e configuração corrente não se copia à mão.
  */
 export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   ai_evaluation: {
@@ -264,7 +269,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
     key: "review_summarizer",
     status: "active",
     label: "Resumo de reviews",
-    defaultModel: "claude-haiku-4-5-20251001",
+    defaultModel: ACTIVE_MODELS.haiku,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description: "Resumo curto por review (Haiku).",
@@ -303,7 +308,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
     key: "tag_inference",
     status: "active",
     label: "Inferência de tags",
-    defaultModel: "claude-haiku-4-5-20251001",
+    defaultModel: ACTIVE_MODELS.haiku,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description:
@@ -332,7 +337,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
     key: "tag_classifier",
     status: "active",
     label: "Classificador de tags",
-    defaultModel: "claude-haiku-4-5-20251001",
+    defaultModel: ACTIVE_MODELS.haiku,
     typicalWorkload: "admin",
     hasResultCache: false,
     description: "Classifica tags por grupo (administrativo).",
@@ -341,7 +346,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
     key: "tag_enricher",
     status: "active",
     label: "Enriquecedor de tags",
-    defaultModel: "claude-haiku-4-5-20251001",
+    defaultModel: ACTIVE_MODELS.haiku,
     typicalWorkload: "admin",
     hasResultCache: false,
     description: "Enriquece tags novas de um grupo (administrativo).",

@@ -2,11 +2,11 @@ import "server-only"
 import type Anthropic from "@anthropic-ai/sdk"
 import { createHash } from "node:crypto"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
-import { SONNET_MODEL } from "@/lib/ai/models"
+import { ACTIVE_MODELS, SONNET_MODEL } from "@/lib/ai/models"
 import { hasLeakedMarkup, sanitizeReviewText } from "./digest-integrity"
 import type { ReviewDigest, ReviewDigestTrait } from "./types"
 
-export const REVIEW_SUMMARIZER_MODEL = "claude-haiku-4-5-20251001"
+export const REVIEW_SUMMARIZER_MODEL = ACTIVE_MODELS.haiku
 export const REVIEW_SUMMARIZER_PROMPT_VERSION = "v2"
 
 // Limites pra manter o prompt barato mesmo quando há 100+ reviews: amostra as

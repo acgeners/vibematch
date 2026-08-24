@@ -21,7 +21,7 @@
 import { computeCostUsd } from "@/lib/ai/pricing"
 import type { UsageTokens } from "@/lib/ai/pricing"
 import { COST_SAFETY_MULTIPLIER } from "@/lib/orchestration/cost"
-import { SONNET_MODEL } from "@/lib/ai/models"
+import { ACTIVE_MODELS, SONNET_MODEL } from "@/lib/ai/models"
 import { CONSOLIDATE_SYNOPSIS_USAGE } from "@/lib/ai-recommendation/synopsis-consolidator-usage"
 
 // 🔴 O Sonnet vem do DONO, nunca de um literal. Este arquivo chumbava
@@ -34,7 +34,7 @@ import { CONSOLIDATE_SYNOPSIS_USAGE } from "@/lib/ai-recommendation/synopsis-con
 // escolha deliberada de modelo BARATO para tarefas baratas, que não acompanha a troca do
 // Sonnet. Trocar os dois por `SONNET_MODEL` seria uniformizar nome e perder a intenção.
 // (Dar um dono também ao Haiku é trabalho do registry — A1b.)
-const HAIKU = "claude-haiku-4-5-20251001"
+const HAIKU = ACTIVE_MODELS.haiku
 const SONNET = SONNET_MODEL
 
 /** Limiar abaixo do qual o usuário pode optar por não ser mais avisado. */

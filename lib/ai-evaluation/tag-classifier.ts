@@ -1,11 +1,12 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { ACTIVE_MODELS } from "@/lib/ai/models"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 
 // Fallback tag_group when classification can't decide or fails.
 const OTHER_TAG_GROUP_ID = "606e6239-515b-46c5-b985-9f41f948cdc9"
 
-const MODEL = "claude-haiku-4-5-20251001"
+const MODEL = ACTIVE_MODELS.haiku
 
 interface TagGroupRow {
   id: string

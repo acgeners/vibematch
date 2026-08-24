@@ -7,6 +7,8 @@
 
 export const SONNET_4_6 = "claude-sonnet-4-6"
 export const SONNET_5 = "claude-sonnet-5"
+export const HAIKU_4_5 = "claude-haiku-4-5-20251001"
+export const OPUS_4_7 = "claude-opus-4-7"
 
 /**
  * Sonnet ATIVO.
@@ -43,3 +45,33 @@ export const SONNET_MODEL: string = SONNET_5
 export function modelRejectsSampling(model: string): boolean {
   return /sonnet-5|opus-4-7|opus-4-8/i.test(model)
 }
+
+/**
+ * Os TRÊS modelos ativos do app, num lugar só. Trocar qualquer um é UMA linha aqui.
+ *
+ * 🔴 Cada tier é uma decisão PRÓPRIA, e é por isso que são três entradas e não uma.
+ * O Haiku não é "o Sonnet mais barato": é a escolha deliberada de modelo barato para
+ * tarefa barata (tags, resumo de review, sugestão de grupos), e não acompanha a troca
+ * do Sonnet. O Opus é o override caro do A/B e da criação. Uniformizá-los apagaria a
+ * intenção; deixá-los soltos foi o que permitiu que cada call site decidisse sozinho.
+ *
+ * ⚠️ `sonnet` aponta para `SONNET_MODEL`, nunca repete o literal — o Sonnet segue com
+ * um valor-fonte só. `SONNET_MODEL` continua exportado porque 25 arquivos o importam e
+ * trocá-los seria churn sem ganho; quem quiser o tier pelo registry usa `ACTIVE_MODELS`.
+ *
+ * ⚠️ **Isto é CONFIGURAÇÃO VIVA — não é registro histórico.** Versão congelada por
+ * reprodutibilidade (`confidence-ruler`, os experimentos de `synopsis-interest`, os
+ * pilotos, `compare-models`) e modelo de execução PASSADA (`ai_api_calls.model_name`)
+ * NÃO derivam daqui: derivar faria uma medição antiga afirmar o modelo de amanhã.
+ *
+ * ⚠️ E pricing não mora aqui. A tarifa de cada modelo vive em `lib/ai/pricing-data.json`,
+ * resolvida por `lib/ai/pricing-window.js`. O único acoplamento é um invariante de teste:
+ * todo modelo listado abaixo precisa ter preço conhecido hoje.
+ */
+export const ACTIVE_MODELS = {
+  sonnet: SONNET_MODEL,
+  haiku: HAIKU_4_5,
+  opus: OPUS_4_7,
+} as const
+
+export type ActiveModelTier = keyof typeof ACTIVE_MODELS
