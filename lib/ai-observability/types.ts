@@ -257,7 +257,10 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
     defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
-    description: "Funde múltiplas sinopses externas numa só (Haiku).",
+    // ⚠️ "(Sonnet)": o `defaultModel` já vinha do dono, mas esta frase seguia dizendo
+    // "(Haiku)" — as duas metades da MESMA entrada afirmando modelos diferentes, e a
+    // frase é o que a pessoa lê no `/curation/ai-usage`. Migrou para Sonnet no prompt v3.
+    description: "Funde múltiplas sinopses externas numa só (Sonnet).",
   },
   tag_inference: {
     key: "tag_inference",

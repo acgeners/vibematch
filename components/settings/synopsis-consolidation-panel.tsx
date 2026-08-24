@@ -8,6 +8,8 @@ import { StatCard } from "@/components/settings/stat-card"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
 import { useRefresh } from "@/lib/use-refresh"
 import { useCostConfirm } from "@/components/cost/cost-confirm"
+import { previewCost } from "@/lib/cost-preview/catalog"
+import { formatUsdApprox } from "@/lib/format/money"
 import {
   consolidatePendingSynopses,
   type ConsolidateSynopsesProgress,
@@ -28,6 +30,11 @@ export function SynopsisConsolidationPanel({
   const [lastResult, setLastResult] = useState<ConsolidateSynopsesProgress | null>(null)
   const refresh = useRefresh()
   const confirmCost = useCostConfirm()
+  // 🔴 O modelo e o custo por obra vêm do MESMO catálogo que o popup de confirmação
+  // consulta, nunca de um literal. Este card dizia `claude-haiku-4-5` e "~0,2¢/obra"
+  // enquanto o executor rodava Sonnet 5 desde 30/07/2026: nomeava um modelo que não era
+  // o da chamada e prometia metade do custo, na tela que existe para autorizar o gasto.
+  const porObra = previewCost("consolidate_synopsis", 1)
 
   const handleRun = async () => {
     const scale = Math.min(pendingCount, 10)
@@ -99,9 +106,9 @@ export function SynopsisConsolidationPanel({
         />
         <StatCard
           label="Modelo"
-          value="claude-haiku-4-5"
+          value={porObra.model}
           valueClassName="text-xs"
-          hint="~0,2¢/obra"
+          hint={`${formatUsdApprox(porObra.likelyUsd)}/obra`}
         />
       </div>
 

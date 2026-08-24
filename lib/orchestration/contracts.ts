@@ -154,10 +154,18 @@ export const ACTION_CONTRACTS: Record<ActionName, ActionContract> = {
   consolidate_synopsis: {
     action: "consolidate_synopsis",
     costTier: "micro",
+    // 🔴 SONNET, não Haiku. O executor (`CONSOLIDATOR_MODEL` em
+    // `lib/ai-recommendation/synopsis-consolidator.ts`) é `SONNET_MODEL` desde o prompt v3,
+    // e esta linha ficou em HAIKU: o GATE precificava $0,0035 uma chamada que custa $0,0070
+    // — subestimava em 2,00×. Medido em `ai_api_calls` (clone local, 2026-08-24):
+    // 496 chamadas Haiku até 30/07/2026 e 230 `claude-sonnet-5` de 30/07 a 20/08.
+    // ⚠️ Não dá para importar `CONSOLIDATOR_MODEL` aqui — aquele módulo é `server-only` e
+    // este registro é alcançável do cliente (`cost-preview/catalog.ts` → `orchestration/cost`).
+    // Os dois derivam do MESMO dono (`SONNET_MODEL`), que é o que mantém gate = executor.
     manual: false,
     produces: "canonical_synopsis",
     inputs: [{ dataKey: "raw_synopsis", requirement: "required_automatic_free" }],
-    estimate: { model: HAIKU, base: tokens(1500, 400) },
+    estimate: { model: SONNET, base: tokens(1500, 400) },
   },
   enrich_tags: {
     action: "enrich_tags",
