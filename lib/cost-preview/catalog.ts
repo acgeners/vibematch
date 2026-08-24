@@ -49,8 +49,6 @@ export type CostActionId =
   | "review_digest"
   | "review_summary"
   | "consolidate_synopsis"
-  | "calibration_audit"
-  | "bias_report"
   | "ai_evaluation"
   | "taste_profile"
   | "chat_message"
@@ -184,22 +182,6 @@ const CATALOG: Record<CostActionId, CostSpec> = {
     etaSeconds: 2,
     etaPerItemSeconds: 7,
     background: true,
-  },
-  calibration_audit: {
-    label: "Auditar critérios",
-    model: SONNET,
-    base: tokens(3000, 2000),
-    perItem: tokens(320, 70),
-    etaSeconds: 10,
-    etaPerItemSeconds: 0.3,
-    background: false,
-  },
-  bias_report: {
-    label: "Detectar viés global",
-    model: SONNET,
-    base: tokens(6000, 2000),
-    etaSeconds: 30,
-    background: false,
   },
   ai_evaluation: {
     label: "Avaliação IA",

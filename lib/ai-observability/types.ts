@@ -132,11 +132,9 @@ export function isCacheHit(status: AiCacheStatus | null | undefined): boolean {
 
 // ── Definição documentada de uma operação (plano §5) ─────────────────────────
 
-export interface AiOperationDefinition {
+interface AiOperationCommon {
   key: AiOperationKey
   label: string
-  /** Modelo padrão (pode ser sobrescrito por override A/B em ai_evaluation). */
-  defaultModel: string
   /** Categoria de workload TÍPICA da operação (não substitui a classificação por linha). */
   typicalWorkload: AiWorkloadType
   /** Possui cache de resultado que pode curto-circuitar a chamada? */
@@ -144,9 +142,35 @@ export interface AiOperationDefinition {
   description: string
 }
 
+/** Operação com executor vivo — tem configuração operacional corrente. */
+export interface AiOperationActive extends AiOperationCommon {
+  status: "active"
+  /** Modelo padrão (pode ser sobrescrito por override A/B em ai_evaluation). */
+  defaultModel: string
+}
+
+/**
+ * Operação APOSENTADA: o executor saiu do código, mas a chave continua aqui porque as
+ * linhas históricas de `ai_api_calls` precisam resolver rótulo e workload.
+ *
+ * 🔴 **Sem `defaultModel`, e o `?: never` faz o `tsc` recusar** — não é convenção, é o
+ * tipo. Operação sem executor não tem "modelo padrão": qualquer valor ali seria uma
+ * afirmação sobre o passado, e passado mora no DADO (`ai_api_calls.model_name`,
+ * `calibration_runs.model_name`), não no catálogo de configuração.
+ */
+export interface AiOperationRetired extends AiOperationCommon {
+  status: "retired"
+  defaultModel?: never
+}
+
+export type AiOperationDefinition = AiOperationActive | AiOperationRetired
+
 /**
  * Catálogo das operações conhecidas. Documentação — não muda execução.
- * `defaultModel` reflete a constante no respectivo serviço (lib/ai-*).
+ *
+ * Responde "qual é a CONFIGURAÇÃO ATUAL desta operação", nunca "o que já rodou aqui":
+ * `active` traz `defaultModel` (a constante do respectivo serviço em `lib/ai-*`);
+ * `retired` não traz nenhum, e o histórico é lido dos dados persistidos.
  *
  * 🔴 E "reflete" precisa ser DERIVAÇÃO, não cópia. Até 23/08/2026 as operações Sonnet traziam
  * o literal `"claude-sonnet-4-6"` enquanto os serviços já chamavam `SONNET_MODEL`
@@ -161,6 +185,7 @@ export interface AiOperationDefinition {
 export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   ai_evaluation: {
     key: "ai_evaluation",
+    status: "active",
     label: "Avaliação IA (9 critérios)",
     defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
@@ -169,6 +194,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   synopsis_quality_predict: {
     key: "synopsis_quality_predict",
+    status: "active",
     /**
      * A chave (`synopsis_quality_predict`) e a coluna (`synopsis_quality`) são
      * identificadores e ficam — o que mudou foi o CONCEITO: o modelo não julga a
@@ -184,6 +210,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   recommendation_rank: {
     key: "recommendation_rank",
+    status: "active",
     label: "Ranking de recomendação",
     defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
@@ -192,6 +219,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   recommendation_taste_profile: {
     key: "recommendation_taste_profile",
+    status: "active",
     label: "Perfil de gosto",
     defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
@@ -200,35 +228,41 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   recommendation_chat: {
     key: "recommendation_chat",
+    status: "active",
     label: "Chat de recomendação",
     defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
     hasResultCache: false,
     description: "Turno conversacional de recomendação (pago).",
   },
-  // ⚠️ As duas `calibration_*` mantêm o LITERAL de propósito: são operações APOSENTADAS
-  // (a auditoria de critérios saiu em 16/08/2026 e o relatório de viés em 17/08) e não têm
-  // mais call site. O literal descreve o modelo que aquelas chamadas de fato usaram — as
-  // linhas delas ainda existem em `ai_api_calls`. Derivar de `SONNET_MODEL` afirmaria que
-  // rodaram no Sonnet 5, que é falso.
+  // 🔴 As duas `calibration_*` são APOSENTADAS: `lib/ai-calibration/` foi removido em
+  // 16/08/2026 e nenhuma das duas tem call site. Por isso não declaram `defaultModel` —
+  // o modelo que cada execução usou está no DADO (`ai_api_calls.model_name` e
+  // `calibration_runs.model_name`), não aqui.
+  //
+  // ⚠️ Um comentário anterior afirmava que o literal `"claude-sonnet-4-6"` descrevia o
+  // modelo real dessas chamadas. Medido no banco: as 28 linhas de `calibration_audit`
+  // em `ai_api_calls` são **100% `claude-sonnet-5`**, e as execuções em 4.6 (12 runs,
+  // 05–06/2026) são anteriores ao início do log e só existem em `calibration_runs`.
   calibration_audit: {
     key: "calibration_audit",
+    status: "retired",
     label: "Auditoria de calibração",
-    defaultModel: "claude-sonnet-4-6",
     typicalWorkload: "admin",
     hasResultCache: false,
-    description: "Auditoria administrativa de calibração (chunks paralelos).",
+    description: "Auditoria administrativa de calibração (aposentada em 16/08/2026).",
   },
   calibration_bias: {
     key: "calibration_bias",
+    status: "retired",
     label: "Relatório de viés",
-    defaultModel: "claude-sonnet-4-6",
     typicalWorkload: "admin",
     hasResultCache: false,
-    description: "Relatório administrativo de viés de calibração.",
+    description: "Relatório administrativo de viés de calibração (aposentado em 16/08/2026).",
   },
   review_summarizer: {
     key: "review_summarizer",
+    status: "active",
     label: "Resumo de reviews",
     defaultModel: "claude-haiku-4-5-20251001",
     typicalWorkload: "recurring",
@@ -237,6 +271,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   review_digest: {
     key: "review_digest",
+    status: "active",
     label: "Digest de reviews",
     defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
@@ -245,6 +280,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   deep_dive: {
     key: "deep_dive",
+    status: "active",
     label: "Deep dive",
     defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
@@ -253,6 +289,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   synopsis_consolidator: {
     key: "synopsis_consolidator",
+    status: "active",
     label: "Consolidador de sinopse",
     defaultModel: SONNET_MODEL,
     typicalWorkload: "recurring",
@@ -264,6 +301,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   tag_inference: {
     key: "tag_inference",
+    status: "active",
     label: "Inferência de tags",
     defaultModel: "claude-haiku-4-5-20251001",
     typicalWorkload: "recurring",
@@ -273,6 +311,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   tag_verify: {
     key: "tag_verify",
+    status: "active",
     label: "Verificação de tags",
     defaultModel: SONNET_MODEL,
     typicalWorkload: "backfill",
@@ -282,6 +321,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   tag_clustering: {
     key: "tag_clustering",
+    status: "active",
     label: "Clusterização de tags",
     defaultModel: SONNET_MODEL,
     typicalWorkload: "admin",
@@ -290,6 +330,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   tag_classifier: {
     key: "tag_classifier",
+    status: "active",
     label: "Classificador de tags",
     defaultModel: "claude-haiku-4-5-20251001",
     typicalWorkload: "admin",
@@ -298,6 +339,7 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
   },
   tag_enricher: {
     key: "tag_enricher",
+    status: "active",
     label: "Enriquecedor de tags",
     defaultModel: "claude-haiku-4-5-20251001",
     typicalWorkload: "admin",

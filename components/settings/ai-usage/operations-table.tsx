@@ -332,7 +332,12 @@ function OperationDetail({
 }) {
   const o = row.op
   const c = row.cache
-  const defaultModel = def?.defaultModel ?? topKey(o.byModel) ?? "—"
+  // 🔴 "Modelo padrão" só existe para operação com executor. Para aposentada a frase era
+  // semanticamente falsa — e pior: o literal declarado SUPRIMIA o `topKey(o.byModel)`, que
+  // tinha a resposta certa. `calibration_audit` imprimia "sonnet-4-6" com o bloco
+  // "Por modelo" logo abaixo dizendo `claude-sonnet-5 → 28`, no mesmo <div>.
+  const aposentada = def?.status === "retired"
+  const defaultModel = def?.status === "active" ? def.defaultModel : (topKey(o.byModel) ?? "—")
 
   const blocks: DetailBlockData[] = [
     {
@@ -396,8 +401,17 @@ function OperationDetail({
       <p className="max-w-[74ch] text-[12.5px] leading-relaxed text-foreground/90">
         {def?.description ?? "Operação sem descrição no catálogo."}{" "}
         <span className="text-muted-foreground">
-          Modelo padrão <span className="font-mono text-foreground/80">{defaultModel}</span>
-          {def?.hasResultCache ? " · possui cache de resultado." : "."}
+          {aposentada ? (
+            <>
+              Operação aposentada — sem executor no código. O modelo de cada execução está
+              nos dados abaixo, não numa configuração.
+            </>
+          ) : (
+            <>
+              Modelo padrão <span className="font-mono text-foreground/80">{defaultModel}</span>
+              {def?.hasResultCache ? " · possui cache de resultado." : "."}
+            </>
+          )}
         </span>
       </p>
       <DetailGrid blocks={blocks} />
