@@ -62,9 +62,11 @@ describe("seção 5 — invariantes de desenho", () => {
     .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
     .join("\n")
 
-  it("o piso da seção 5 sai de troca de FAIXA, não da amplitude de 0,289", () => {
+  it("o piso da seção 5 sai de troca de FAIXA, nunca da amplitude", () => {
     // Amplitude é por NOTA e não se converte em faixa: 0,3 pt não cruza no meio da faixa e
     // cruza na borda. Usar uma pela outra é a mesma troca de régua que reprovou a v23–v25.
+    // ⚠️ Este caso já se chamou "…não da amplitude de 0,289". O número saiu do nome quando
+    // foi aposentado (24/08/2026): nome de teste é superfície de leitura como qualquer outra.
     expect(codigo).toMatch(/pisoFlipPct/)
     expect(codigo).toMatch(/new Set\(v\.map\(bandForScore\)\)/)
   })
@@ -73,6 +75,36 @@ describe("seção 5 — invariantes de desenho", () => {
     expect(codigo).not.toMatch(/piso\w*\s*\*\s*\d/)
     // …e o veredito é lido em z, não em porcentagem crua.
     expect(codigo).toMatch(/Math\.abs\(z\)\s*>=\s*2/)
+  })
+
+  /**
+   * 🔴 BASELINE LEGADO. O painel imprimia `(0,289 medido)` duas linhas abaixo do valor que
+   * ele próprio calcula — literal de código anunciado como medição. Nenhuma execução produziu
+   * 0,289; o artefato salvo registra 0,3166 com 1.352 pares. Aposentado em 24/08/2026.
+   *
+   * ⚠️ O guard olha só o CÓDIGO (comentários são filtrados acima), então a nota histórica que
+   * EXPLICA a aposentadoria continua permitida no docstring — é ela que impede a próxima
+   * pessoa de "restaurar" o número achando que era medição.
+   */
+  it("o painel não afirma um baseline legado nem hardcoda substituto", () => {
+    expect(codigo).not.toMatch(/0[.,]289/)
+    // e nenhum outro número faz o papel de piso: a seção 3 imprime o que CALCULOU
+    expect(codigo).toMatch(/f2\(r\.amplitude_com_controle\)/)
+    expect(codigo).toMatch(/f1\(pisoFlipPct\)/)
+    // nenhum decimal solto dentro dos console.log da seção 3
+    const secao3 = codigo.slice(
+      codigo.indexOf("3. REPRODUTIBILIDADE"),
+      codigo.indexOf("4. COERÊNCIA"),
+    )
+    expect(secao3.length).toBeGreaterThan(0)
+    expect(secao3).not.toMatch(/\b\d+[.,]\d+\b/)
+  })
+
+  it("o painel declara que NÃO há baseline causal vigente", () => {
+    // Sem esta frase, imprimir "0,32 pt" ao lado de "piso" reintroduz o defeito com outro
+    // número — a leitura é humana, e é a tela que decide o experimento.
+    expect(codigo).toMatch(/NÃO há baseline causal vigente/)
+    expect(codigo).toMatch(/REGIME MISTO/)
   })
 
   it("o entrypoint é guardado E o cliente é preguiçoso", () => {

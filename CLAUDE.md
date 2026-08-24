@@ -5622,8 +5622,20 @@ SQL sobre o catálogo, **US$0 e sem falso positivo de regex**:
 🔴 **Só o modo `--baseline` responde "melhorou?".** Salve o retrato antes
 (`npm run consistency -- --save=.consistency/<nome>.json`) e compare depois — um número solto
 não decide nada, e foi exatamente medir sem retrato anterior que fez a empreitada v23–v25
-gastar US$2 sem concluir. ⚠️ O piso aqui é o **ruído entre duas rodadas idênticas: 0,289**
-(151 pares); movimento menor que isso não é distinguível de ruído.
+gastar US$2 sem concluir.
+
+🔴 **O "piso de 0,289 (151 pares)" que esta linha afirmava está APOSENTADO (24/08/2026) e
+nunca foi medição.** Ele era literal de código: o docstring do painel o declarava e a seção 3
+imprimia `(0,289 medido)` **duas linhas abaixo do valor que ela mesma calcula**. Nenhuma
+execução do script produziu 0,289 — o artefato salvo (`.consistency/v26-2026-08-10.json`)
+registra **0,3166 com 1.352 pares**. Dois números para o mesmo papel, dentro do instrumento de
+medição, com o falso sendo o que se anunciava como medido.
+
+⚠️ **E não troque por 0,32.** O número que o painel calcula hoje é retrato de **REGIME MISTO**
+(13 combinações versão×modelo, avaliadas em datas diferentes) — serve para comparar retratos,
+não para aprovar experimento. **Não existe baseline causal vigente**; quem for julgar um
+experimento declara antes grandeza, universo, controle e n. Substituir o número por outro
+número seria repetir o defeito com outro valor.
 
 🔴 **Mas `--baseline` NÃO enxerga um PILOTO — use `--piloto=` (seção 5).** O
 `pilot-prompt-*.ts` não grava em `category_scores` nem em `ai_evaluation_scores`, de propósito,
@@ -5661,10 +5673,11 @@ estratos são deliberadamente não representativos (foram escolhidos para concen
 mecanismos), então a diferença mediria a AMOSTRA, com sinal plausível. A seção 5 é **pareada** —
 as mesmas obras, antes × depois.
 
-🔴 **O piso de 0,289 é de AMPLITUDE por nota e NÃO se aplica a faixa** (0,3 pt não cruza no meio
-da faixa e cruza na borda). O piso na grandeza certa é a **troca de faixa entre rodadas
-idênticas: 12,2%** (165/1352 pares, medido 2026-08-10), e a dimensão 3 passou a imprimi-lo. Usar
-um pelo outro é a mesma troca de régua que reprovou a v23–v25 pelo gold.
+🔴 **AMPLITUDE é por nota e NÃO se aplica a faixa** (0,3 pt não cruza no meio da faixa e cruza
+na borda). A grandeza certa para a seção 5 é a **troca de faixa entre rodadas idênticas**, que a
+dimensão 3 **computa e imprime a cada execução** — leia o número de lá, não daqui. Usar uma pela
+outra é a mesma troca de régua que reprovou a v23–v25 pelo gold. ⚠️ Nem esse número é baseline
+causal: ele também é de regime misto (ver o bloco de aposentadoria acima).
 
 ⚠️ **O veredito é `z`, nunca múltiplo do piso.** A 1ª versão comparava `flipPct > piso * 2`, com
 o "2" inventado — e ele deu falso negativo de beira de faca no primeiro uso real (24,4% contra

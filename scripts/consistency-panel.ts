@@ -8,10 +8,21 @@
  * (~0,05) está ABAIXO do que aquele instrumento enxerga. Foi medir a coisa certa com a régua
  * errada, quatro vezes.
  *
- * 🔴 O número que fecha o argumento: o ruído entre DUAS RODADAS IDÊNTICAS é **0,289**
- * (151 pares). Nenhuma diferença de prompt menor que isso é distinguível de ruído por
- * comparação direta. Consistência, ao contrário, é medível sobre o catálogo inteiro — 8.757
- * notas vigentes, sem rótulo humano, sem custo de IA, sem falso positivo de regex.
+ * 🔴 BASELINE LEGADO APOSENTADO (24/08/2026). Este docstring afirmava que "o ruído entre
+ * DUAS RODADAS IDÊNTICAS é 0,289 (151 pares)", e a seção 3 IMPRIMIA "(0,289 medido)" duas
+ * linhas abaixo do valor que ela própria calcula. Os dois eram literais de código: nenhuma
+ * execução deste script produziu 0,289, e o artefato salvo (.consistency/v26-2026-08-10.json)
+ * registra 0,3166 com 1.352 pares. Dois números para o mesmo papel, dentro do instrumento de
+ * medição — e o falso era o que se anunciava como medido.
+ *
+ * 🔴 NÃO existe baseline causal vigente, e este script NÃO define um. O que ele imprime é o
+ * retrato do catálogo em REGIME MISTO (várias versões de prompt × vários modelos, avaliados em
+ * datas diferentes), útil para acompanhar movimento entre retratos — não para aprovar
+ * experimento. Quem for julgar um experimento precisa declarar antes grandeza, universo,
+ * controle e n. Substituir 0,289 pelo número de hoje seria repetir o defeito com outro valor.
+ *
+ * Consistência, ao contrário de acurácia, é medível sobre o catálogo inteiro — sem rótulo
+ * humano, sem custo de IA, sem falso positivo de regex.
  *
  * As quatro dimensões:
  *
@@ -49,10 +60,10 @@
  * diferença contra o catálogo mediria a seleção da amostra, não a mudança de régua, e mediria
  * com sinal plausível. Por isso a seção 5 é PAREADA: as mesmas obras, antes × depois.
  *
- * ⚠️ **O piso do painel (0,289) é de AMPLITUDE por nota e não se aplica a share por faixa.**
- * Usar um piso de uma grandeza para julgar outra é a mesma troca de régua que reprovou a
- * v23–v25 pelo gold. Por isso a dimensão 3 passou a medir também a **taxa de troca de faixa
- * entre rodadas idênticas** — o piso na grandeza em que a seção 5 fala.
+ * ⚠️ **AMPLITUDE é por NOTA e não se aplica a share por FAIXA.** Usar uma grandeza para
+ * julgar a outra é a mesma troca de régua que reprovou a v23–v25 pelo gold. Por isso a
+ * dimensão 3 mede também a **taxa de troca de faixa entre rodadas idênticas** — a grandeza
+ * em que a seção 5 fala. Ela é COMPUTADA a cada execução, nunca citada de cabeça.
  */
 import { createClient } from "@supabase/supabase-js"
 import { CRITERION_SLUGS } from "@/types/domain"
@@ -320,10 +331,10 @@ async function main() {
   const aSem = amplitudes(semControle)
   const aCom = amplitudes(comControle)
 
-  // 🔴 O PISO NA GRANDEZA CERTA. A amplitude (0,289) é por NOTA; a seção 5 fala em FAIXA, e
+  // 🔴 O PISO NA GRANDEZA CERTA. A amplitude é por NOTA; a seção 5 fala em FAIXA, e
   // as duas não se convertem — uma amplitude de 0,3 pt não cruza faixa no meio dela e cruza
   // na borda. Sem este número, "o piloto moveu 15% das notas de faixa" não tem contra o quê
-  // ser lido, e a tentação é comparar com 0,289, que é exatamente a troca de régua que
+  // ser lido, e a tentação é comparar com a amplitude, que é exatamente a troca de régua que
   // reprovou a v23–v25 pelo instrumento errado.
   const paresIdenticos = [...comControle.entries()].filter(([, v]) => v.length > 1)
   const flipsIdenticos = paresIdenticos.filter(([, v]) => new Set(v.map(bandForScore)).size > 1).length
@@ -372,16 +383,21 @@ async function main() {
   if (reguas.detalhe.length > 12) console.log(`   … e mais ${reguas.detalhe.length - 12}`)
 
   const r = reprodutibilidade
+  const combos = reguas.combinacoes
   console.log("\n3. REPRODUTIBILIDADE — amplitude entre reavaliações da mesma obra")
   console.log(`   sem controlar nada        ${f2(r.amplitude_sem_controle)} pt${delta(r.amplitude_sem_controle, base?.reprodutibilidade.amplitude_sem_controle, 2, false)}   (${r.pares_sem_controle} pares)`)
   console.log(`   controlando versão+modelo ${f2(r.amplitude_com_controle)} pt${delta(r.amplitude_com_controle, base?.reprodutibilidade.amplitude_com_controle, 2, false)}   (${r.pares_com_controle} pares)`)
   const atribuivel = r.amplitude_sem_controle ? pct(r.amplitude_sem_controle - r.amplitude_com_controle, r.amplitude_sem_controle) : 0
   console.log(`   ⇒ ${f1(atribuivel)}% da instabilidade vem da MISTURA de réguas, não do modelo`)
-  console.log(`   ⚠️ o piso é o ruído entre rodadas idênticas (0,289 medido) — abaixo disso nada é distinguível`)
+  console.log(
+    `   ⚠️ REGIME MISTO — ${r.pares_com_controle} pares de ${combos} combinações versão×modelo, avaliados em`,
+  )
+  console.log(`      datas diferentes. Descreve o catálogo como ele está; NÃO é baseline causal.`)
+  console.log(`   🔴 NÃO há baseline causal vigente para julgar experimento. Ver a nota no topo.`)
   console.log(`   troca de FAIXA entre rodadas idênticas: ${f1(pisoFlipPct)}%  (${flipsIdenticos}/${paresIdenticos.length} pares)`)
-  console.log(`   ⚠️ este é o piso da seção 5 — a amplitude de 0,289 é por NOTA e NÃO se converte em faixa`)
+  console.log(`   ⚠️ este é o piso da seção 5 — amplitude é por NOTA e NÃO se converte em faixa`)
   const piores = Object.entries(r.por_criterio).sort((a, b) => b[1] - a[1]).slice(0, 3)
-  console.log(`   piores: ${piores.map(([s, v]) => `${s} ${f2(v)}`).join(" · ")}`)
+  console.log(`   piores (amplitude SEM controle de versão+modelo): ${piores.map(([s, v]) => `${s} ${f2(v)}`).join(" · ")}`)
 
   console.log("\n4. COERÊNCIA prosa×nota — rode `scripts/coherence-audit.ts` (checagem A, estrutural)")
   console.log("   ⚠️ só a checagem A sobrevive à validação manual; as semânticas eram regex sobre prosa e deram 5/5 e 6/6 de falso positivo")
