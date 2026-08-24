@@ -6,6 +6,7 @@ import { LogIn } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useChromeBadges } from "@/components/layout/chrome-badges"
 import { AccountChip } from "@/components/layout/account-chip"
+import type { AccountSummary } from "@/server/queries/current-user"
 import { CurationMenu } from "@/components/layout/curation-menu"
 import { useIsAdmin, useIsSignedIn } from "@/components/layout/admin-context"
 import { RecalcPendingControl } from "@/components/recalc/recalc-pending-control"
@@ -89,7 +90,14 @@ const NAV: NavLink[] = [
   { href: "/recommendations", label: "Recomendações", requiresSignedIn: true },
 ]
 
-export function TopNav({ searchIndex }: { searchIndex: SearchEntry[] }) {
+export function TopNav({
+  searchIndex,
+  initialProfile,
+}: {
+  searchIndex: SearchEntry[]
+  /** Resolvido no servidor e repassado ao chip — ver `AccountChip`. */
+  initialProfile: AccountSummary
+}) {
   const isAdmin = useIsAdmin()
   const signedIn = useIsSignedIn()
   const pathname = usePathname()
@@ -182,7 +190,7 @@ export function TopNav({ searchIndex }: { searchIndex: SearchEntry[] }) {
             </Link>
           )}
 
-          <AccountChip compact />
+          <AccountChip compact initialProfile={initialProfile} />
         </div>
       </div>
 

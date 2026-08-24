@@ -13,11 +13,11 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { BookOpenText, ChevronUp, Clock, Gauge, Info, Loader2, LogIn, LogOut, SlidersHorizontal, Sparkles, Upload, UserCircle, UserPlus } from "lucide-react"
 import { getAccountSummary } from "@/server/actions/account"
-import type { AccountSummary } from "@/server/actions/account"
+import type { AccountSummary } from "@/server/queries/current-user"
 import { signOutAction } from "@/server/actions/auth"
 import { useChromeData } from "@/lib/use-refresh"
 import { useChromeBadges } from "@/components/layout/chrome-badges"
-import { useIsSignedIn } from "@/components/layout/admin-context"
+import { useIsSignedIn, useRole } from "@/components/layout/admin-context"
 import { RoleBadge } from "@/components/account/role-badge"
 import {
   DropdownMenu,
@@ -47,37 +47,73 @@ const MENU_LINKS = [
  * re-busca a cada navegação pra refletir edições feitas em /account. Falha
  * silenciosa → cai pro placeholder.
  */
-export function AccountChip({ compact = false }: { compact?: boolean }) {
+/**
+ * Nome, e-mail e avatar mudam por MUTAÇÃO explícita — e quem as edita já dispara
+ * `refreshChrome()` (`components/account/identity-card.tsx`), que força o refetch na hora.
+ *
+ * 🔴 O TTL era ZERO, ou seja: buscava o perfil a cada navegação, para cima de um dado que
+ * quase nunca muda. Com o valor inicial vindo do servidor, isso vira trabalho sem fato por
+ * trás. Revalidar por mutação real, não por navegação.
+ */
+const PERFIL_TTL_MS = 300_000
+
+export function AccountChip({
+  compact = false,
+  initialProfile,
+}: {
+  compact?: boolean
+  /**
+   * Nome, e-mail e avatar já resolvidos no SERVIDOR. Sem isto o chip abria com o ícone neutro
+   * e trocava para o avatar quando o POST voltava — o flicker que sobrava depois de `signedIn`
+   * e `role` terem ido para o servidor.
+   */
+  initialProfile: AccountSummary
+}) {
   const pathname = usePathname()
-  const [summary, setSummary] = useState<AccountSummary | null>(null)
+  const [summary, setSummary] = useState<AccountSummary | null>(initialProfile)
   const [imgError, setImgError] = useState(false)
   const [signingOut, startSignOut] = useTransition()
   // "Suas notas de IA" mora AQUI e só aqui (antes: também como relógio na barra).
   // O contador tem que aparecer no gatilho — dentro do menu ele só existe pra quem já
   // abriu, e aí o item não convoca ninguém.
   const { recQueue } = useChromeBadges()
-  // Sessão pelo CONTEXTO, não pelo `summary` abaixo: os dois fetches são independentes e
-  // o resumo da conta costuma chegar depois dos contadores — condicionar o badge a ele
-  // deixava a fila invisível numa janela real (pego por teste de render). O contexto é a
-  // mesma fonte que decide os destinos da barra, e é fail-closed: `recQueue` NÃO implica
-  // sessão sozinho (`getAlignmentQueueWorks` conta obras do catálogo), então sem este
-  // gate um visitante veria o número do dono.
-  const sessionKnown = useIsSignedIn()
+  // 🔴 Sessão e papel vêm do CONTEXTO — e agora para TUDO neste componente, não só para o
+  // badge da fila. Eles eram lidos daqui E de `summary`, e as duas fontes se contradiziam na
+  // tela: medido em 2026-08-23, entre 354ms e 819ms a barra mostrava o avatar do usuário
+  // logado (que chega com o `summary`) ao lado do botão "Entrar" (que vinha do contexto,
+  // ainda anônimo). 525ms de duas verdades a dois centímetros uma da outra.
+  //
+  // ⚠️ O contexto é a fonte certa das duas porque é ele que nasce do SERVIDOR (ver
+  // `AdminProvider`): está correto no primeiro render, enquanto o `summary` é um POST que
+  // chega depois. O `summary` continua dono do que só ele sabe — nome, e-mail, avatar.
+  const signedIn = useIsSignedIn()
+  const role = useRole()
 
   // Re-busca o resumo da conta a cada navegação e quando uma mutação atualiza o
   // chrome (ex.: editar perfil/plano em /account). Coalescing/lifecycle no hook.
-  useChromeData(getAccountSummary, (s) => {
-    setSummary(s)
-    setImgError(false)
-  })
+  // ⚠️ `temDadoInicial`: o mount não refaz o que o servidor entregou. A reconciliação continua
+  // — quem edita nome ou avatar em `/account` dispara `refreshChrome()` (ver
+  // `components/account/identity-card.tsx`), e é esse evento que traz o valor novo. Revalidar
+  // por mutação REAL, não por navegação.
+  useChromeData(
+    getAccountSummary,
+    (s) => {
+      setSummary(s)
+      setImgError(false)
+    },
+    PERFIL_TTL_MS,
+    undefined,
+    true,
+  )
 
   const active = pathname === "/account" || pathname.startsWith("/account/")
-  const signedIn = summary?.signedIn ?? false
-  // Enquanto o resumo não chega não dá pra saber se há sessão: mostramos os links
-  // (inofensivos) mas NENHUMA ação de auth — um "Entrar" piscando pra quem já está
-  // logado, ou um "Sair" que não sai, mente sobre o estado da sessão.
+  // ⚠️ `loaded` deixou de gatear AÇÃO DE AUTH e passou a significar só "o perfil chegou".
+  // A régua antiga existia porque a sessão vinha junto do perfil: sem ele, não dava para
+  // saber se havia sessão, e oferecer "Entrar" a quem já entrou mente. Hoje a sessão vem do
+  // servidor no primeiro render, então "Entrar"/"Sair" já podem aparecer certos de saída —
+  // o que ainda espera é o texto do nome e do e-mail.
   const loaded = summary !== null
-  const name = summary?.displayName?.trim() || (loaded && !signedIn ? "Visitante" : "Minha conta")
+  const name = summary?.displayName?.trim() || (!signedIn ? "Visitante" : "Minha conta")
   // Logado sem email na linha de user_settings: some a linha em vez de inventar um "—".
   const subtitle = signedIn ? summary?.email : "Entre pra salvar seu catálogo"
 
@@ -116,7 +152,7 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
           )}
         >
           {avatar()}
-          {sessionKnown && recQueue > 0 && (
+          {signedIn && recQueue > 0 && (
             <span
               aria-hidden
               className={cn(
@@ -136,7 +172,7 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
                   alguém abrir /account. Enquanto o resumo não chega, não chuta um papel. */}
               <span className="mt-0.5 block">
                 {summary ? (
-                  <RoleBadge role={summary.role} size="sm" />
+                  <RoleBadge role={role} size="sm" />
                 ) : (
                   <span className="block truncate text-[11px] font-medium text-muted-foreground/70">
                     v1 · catálogo pessoal
@@ -168,7 +204,7 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
             ) : (
               <span className="mt-1 block h-3 w-28 animate-pulse rounded bg-muted" />
             )}
-            {summary && <RoleBadge role={summary.role} size="sm" className="mt-1" />}
+            {signedIn && <RoleBadge role={role} size="sm" className="mt-1" />}
           </div>
         </div>
 
@@ -186,7 +222,7 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
         {/* Primeiro item, e separado do resto: é o único aqui que pede AÇÃO, e é ele que
             explica o número no gatilho. Continua sendo pendência, não rotina — se virar
             visita frequente, o lugar dela passa a ser um chip próprio na barra. */}
-        {sessionKnown && (
+        {signedIn && (
           <>
             <DropdownMenuItem asChild>
               <Link href="/my-ai-scores">
@@ -213,7 +249,7 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
             </DropdownMenuItem>
           ))}
 
-        {loaded && signedIn && (
+        {signedIn && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem
@@ -234,7 +270,7 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
           </>
         )}
 
-        {loaded && !signedIn && (
+        {!signedIn && (
           <>
             <DropdownMenuItem asChild>
               <Link href="/login">

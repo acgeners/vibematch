@@ -1,6 +1,7 @@
 "use server"
 
-import { getCurrentRole, isCurrentUserAdmin, getSessionUserId } from "@/server/queries/current-user"
+import { getCurrentRole, isCurrentUserAdmin, readCurrentUserChrome } from "@/server/queries/current-user"
+import type { CurrentUserChrome } from "@/server/queries/current-user"
 import type { Role } from "@/lib/plans/roles"
 
 /**
@@ -23,11 +24,12 @@ export async function getCurrentUserRole(): Promise<Role> {
   return getCurrentRole()
 }
 
-/** Papel + se HÁ SESSÃO. Ver `getCurrentUserChrome`. */
-export interface CurrentUserChrome {
-  role: Role
-  signedIn: boolean
-}
+// 🔴 NÃO re-exporte o tipo daqui. `export type { CurrentUserChrome }` parece inofensivo —
+// type-only, o `tsc` aprova e a suíte passa —, e MEDIDO em 2026-08-24 ele derruba o módulo em
+// runtime: `ReferenceError: CurrentUserChrome is not defined` na avaliação do chunk, levando
+// junto TODO server action que importe daqui. O login inteiro parou de funcionar, e nenhum
+// instrumento estático viu. Quem consome o tipo importa de `@/server/queries/current-user`,
+// que é o dono dele.
 
 /**
  * O que a UI precisa saber sobre quem está olhando — papel E sessão.
@@ -40,6 +42,8 @@ export interface CurrentUserChrome {
  * botão que só dá erro.
  */
 export async function getCurrentUserChrome(): Promise<CurrentUserChrome> {
-  const [role, sessionUserId] = await Promise.all([getCurrentRole(), getSessionUserId()])
-  return { role, signedIn: sessionUserId != null }
+  // Wrapper fino sobre o resolver server-only. A regra vive lá; aqui só existe a porta HTTP que
+  // o cliente usa para RECONCILIAR (login/logout, navegação) — nunca para descobrir o estado
+  // inicial, que o root layout já entrega renderizado.
+  return readCurrentUserChrome()
 }

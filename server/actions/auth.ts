@@ -165,6 +165,23 @@ export async function updatePasswordAction(
 }
 
 /** Logout. Ainda não está ligado na navegação — exposto pra uso futuro (Fase 3). */
+/**
+ * ⚠️ NÃO acrescente `revalidatePath("/", "layout")` nas transições de sessão achando que ele
+ * conserta o chrome. Eu acrescentei, e a ablação de 2026-08-24 o refutou — quatro variantes
+ * medidas no mesmo build, login e logout:
+ *
+ *   revalidatePath + reconciliação do anônimo   login corrige em 210ms
+ *   revalidatePath SOZINHO                      login NÃO corrige em 6s
+ *   reconciliação do anônimo SOZINHA            login corrige em 238ms
+ *   nenhum dos dois                             login NÃO corrige em 6s
+ *
+ * As linhas 2 e 4 são indistinguíveis: o `revalidatePath` não teve efeito observável em fluxo
+ * nenhum. A razão é estrutural — o layout RAIZ não re-renderiza em navegação client-side, então
+ * invalidar o cache do servidor não faz a prop nova alcançar um Provider já montado. Quem
+ * corrige é a reconciliação do cliente (ver `AdminProvider`).
+ *
+ * ⚠️ O logout funciona nas QUATRO variantes — ele nunca precisou de nada.
+ */
 export async function signOutAction(): Promise<void> {
   const supabase = await createClient()
   await supabase.auth.signOut()

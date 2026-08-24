@@ -141,6 +141,30 @@ export const getCurrentRole = cache(async (): Promise<Role> => {
   return "leitor"
 })
 
+/** Papel + se HÁ SESSÃO — o que o chrome (barra, menu, gates de UI) precisa saber. */
+export interface CurrentUserChrome {
+  role: Role
+  signedIn: boolean
+}
+
+/**
+ * O estado de chrome do usuário atual, resolvido no SERVIDOR.
+ *
+ * 🔴 Este é o resolver; `getCurrentUserChrome` (server/actions/admin.ts) é o wrapper fino que o
+ * cliente chama por POST. A separação existe porque o root layout NÃO pode depender de uma
+ * Server Action: um módulo `"use server"` é superfície HTTP pública, e o layout precisa de uma
+ * LEITURA server-only. Duplicar a regra nos dois lados seria a doença de sempre — dois critérios
+ * para o mesmo fato, com o chrome decidindo por um e o gate por outro.
+ *
+ * ⚠️ A autoridade continua sendo `getSessionUserId()` + `getCurrentRole()`. Isto é só a
+ * composição, e é `cache()` pelo mesmo motivo delas: várias leituras no MESMO request não
+ * repetem a chamada. Request-scoped — nunca cross-user (ver o teste de isolamento).
+ */
+export const readCurrentUserChrome = cache(async (): Promise<CurrentUserChrome> => {
+  const [role, sessionUserId] = await Promise.all([getCurrentRole(), getSessionUserId()])
+  return { role, signedIn: sessionUserId != null }
+})
+
 /**
  * Plano do usuário atual — VISTA derivada do papel (curador/assinante = `paid`;
  * leitor = `free`), para a UI que fala "plano". Não gateia nada: quem autoriza é
@@ -273,6 +297,39 @@ export async function getCurrentUserProfile(admin?: AdminClient): Promise<Curren
     role,
   }
 }
+
+/**
+ * O que o chip da barra mostra do perfil — e SÓ isso.
+ *
+ * 🔴 Sem `signedIn` e sem `role`: quem responde por eles é o `AdminProvider`
+ * (`readCurrentUserChrome`). Eles moraram aqui, e as duas fontes se contradiziam na tela —
+ * medido em 2026-08-23, o avatar chegava com este resumo e o "Entrar" vinha do contexto, 525ms
+ * depois. Um dado, um dono.
+ */
+export interface AccountSummary {
+  displayName: string | null
+  email: string | null
+  avatarUrl: string | null
+}
+
+/**
+ * Resolve o resumo no SERVIDOR, para o chip nascer preenchido em vez de piscar.
+ *
+ * ⚠️ `cache()` pelo mesmo motivo das primitives: dentro do MESMO request, o layout resolve isto
+ * e o chrome ao lado, e ambos passam por `getSessionUserId()` — memoizado, então é UMA leitura
+ * de sessão, não duas. Request-scoped; nada atravessa requests, e é isso que impede o perfil de
+ * uma pessoa aparecer para outra.
+ */
+export const readAccountSummary = cache(async (): Promise<AccountSummary> => {
+  try {
+    const p = await getCurrentUserProfile()
+    return { displayName: p.displayName, email: p.email, avatarUrl: p.avatarUrl }
+  } catch {
+    // Erro transitório devolve o resumo VAZIO — nunca um estado de sessão, que já não mora
+    // aqui. O chip continua desenhando, com o nome caindo no rótulo neutro.
+    return { displayName: null, email: null, avatarUrl: null }
+  }
+})
 
 /**
  * Gate de capability pra server actions. Retorna erro estruturado quando o

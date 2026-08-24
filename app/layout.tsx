@@ -8,6 +8,7 @@ import { AdminProvider } from "@/components/layout/admin-context"
 import { ChromeBadgesProvider } from "@/components/layout/chrome-badges"
 import { DbTargetBanner } from "@/components/layout/db-target-banner"
 import { buildSearchIndex } from "@/server/queries/search-index"
+import { readAccountSummary, readCurrentUserChrome } from "@/server/queries/current-user"
 import { Toaster } from "@/components/ui/sonner"
 import { ThemeProvider } from "@/components/theme-provider"
 import { ActiveChatFab } from "@/components/recommendations/active-chat-fab"
@@ -68,6 +69,21 @@ export default async function RootLayout({
   // Configurações e Preferências). Montado aqui e embarcado no HTML, então buscar um ajuste
   // responde na tecla — só obra vai ao servidor. Ver server/queries/search-index.ts.
   const searchIndex = buildSearchIndex()
+  // Sessão e papel resolvidos AQUI, para o chrome nascer certo em vez de nascer anônimo e se
+  // corrigir depois. Ver `AdminProvider`: o custo do arranjo antigo eram 4 Server Actions
+  // serializadas e 879ms até a barra ficar correta.
+  //
+  // ⚠️ Ler sessão NÃO é exigir sessão: sem cookie `readCurrentUserChrome()` devolve
+  // `{ leitor, false }` sem ir à rede (medido: ZERO chamadas a /auth/v1/user no anônimo), e as
+  // rotas públicas — `/login`, `/about`, `/guide` — seguem intactas. O gate de rota continua
+  // sendo do proxy; este layout não redireciona ninguém.
+  //
+  // ⚠️ Em PARALELO, e não em sequência: os dois passam por `getSessionUserId()`, que é
+  // `cache()` por request — então isto é UMA leitura de sessão, não duas, e não há waterfall.
+  const [chromeInicial, perfilInicial] = await Promise.all([
+    readCurrentUserChrome(),
+    readAccountSummary(),
+  ])
 
   return (
     <html
@@ -84,13 +100,13 @@ export default async function RootLayout({
               dois são diferentes. Devolve null quando o alvo é a nuvem. */}
           <DbTargetBanner />
           <CostConfirmProvider>
-            <AdminProvider>
+            <AdminProvider initial={chromeInicial}>
               {/* Acima do shell: a barra superior e a sidebar da console leem os
                   mesmos contadores, e um fetch por consumidor duplicaria a leitura
                   mais cara do chrome. Ver components/layout/chrome-badges.tsx. */}
               <ChromeBadgesProvider>
                 <AppShell
-                  topNav={<TopNav searchIndex={searchIndex} />}
+                  topNav={<TopNav searchIndex={searchIndex} initialProfile={perfilInicial} />}
                   overlays={
                     <>
                       <MobileNav />

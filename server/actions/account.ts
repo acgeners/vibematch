@@ -8,7 +8,9 @@ import {
   getCurrentUserProfile,
   getCurrentUserSettingsId,
   getSessionUserId,
+  readAccountSummary,
 } from "@/server/queries/current-user"
+import type { AccountSummary } from "@/server/queries/current-user"
 import { getAnthropicBalanceStatus, getOperatorSettingsId } from "@/server/queries/ai-usage"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
 import { accountProfileSchema } from "@/lib/validations/account.schema"
@@ -140,32 +142,17 @@ export async function uploadAvatar(
 // pelo webhook do provedor — não um botão de auto-serviço, que foi exatamente o buraco
 // que o PR #115 fechou.
 
-export interface AccountSummary {
-  displayName: string | null
-  email: string | null
-  avatarUrl: string | null
-  role: Role
-  signedIn: boolean
-}
-
 /**
- * Resumo enxuto do perfil pro "chrome" (chip da sidebar). Action client-callable
- * — a query getCurrentUserProfile é server-only. Omite o userId pra reduzir o
- * payload; o email fica porque é o único lugar do chrome que responde "logado em
- * QUAL conta". Falha silenciosa: nunca derruba o layout.
+ * Wrapper fino sobre `readAccountSummary` — a regra vive no query server-only, e esta é só a
+ * porta HTTP que o chip usa para RECONCILIAR depois de uma mutação real (`app:chrome-refresh`,
+ * disparado por quem edita nome/avatar). O estado inicial vem renderizado do servidor.
+ *
+ * ⚠️ O tipo NÃO é re-exportado daqui: `export type { X }` num módulo `"use server"` derruba o
+ * módulo em runtime (medido em 2026-08-24 — `ReferenceError`, e o login inteiro parou). Quem
+ * precisa do tipo importa de `@/server/queries/current-user`.
  */
 export async function getAccountSummary(): Promise<AccountSummary> {
-  // Fora do try: o menu decide entre "Sair" e "Entrar" por este flag, e um erro
-  // ao ler o perfil não é motivo pra oferecer login a quem já tem sessão.
-  const signedIn = (await getSessionUserId()) !== null
-
-  try {
-    const p = await getCurrentUserProfile()
-    return { displayName: p.displayName, email: p.email, avatarUrl: p.avatarUrl, role: p.role, signedIn }
-  } catch {
-    // Fail-closed: erro transitório NÃO promove ninguém.
-    return { displayName: null, email: null, avatarUrl: null, role: "leitor", signedIn }
-  }
+  return readAccountSummary()
 }
 
 /**

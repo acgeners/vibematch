@@ -109,6 +109,18 @@ export function useChromeData<T>(
   onData: (data: T) => void,
   ttlMs = 0,
   onPatch?: (patch: ChromePatch) => void,
+  /**
+   * O consumidor JÁ recebeu este dado do servidor neste render — então o primeiro fetch é
+   * redundante e deve ser pulado.
+   *
+   * 🔴 Não dá para expressar isso com `ttlMs`: o TTL é comparado contra `lastFetch`, que começa
+   * em zero, e com `ttlMs = 0` a comparação nem roda. Semear `lastFetch` também não bastaria
+   * pelo mesmo motivo. O que muda é QUAL disparo se pula — o primeiro —, não por quanto tempo.
+   *
+   * ⚠️ Pula só o disparo de MONTAGEM. Navegação seguinte, evento `app:chrome-refresh` e TTL
+   * continuam valendo: o dado nasce fresco, não vira imutável.
+   */
+  temDadoInicial = false,
 ): void {
   const pathname = usePathname()
   // "Refamos" fetcher/onData/run pra que callbacks inline não re-rodem os effects
@@ -157,8 +169,14 @@ export function useChromeData<T>(
     runRef.current = run
   })
 
-  // Re-busca a cada navegação (respeitando o TTL).
+  // Re-busca a cada navegação (respeitando o TTL) — menos na montagem, quando o servidor já
+  // entregou o dado. Ver `temDadoInicial`.
+  const pulouPrimeiro = useRef(!temDadoInicial)
   useEffect(() => {
+    if (!pulouPrimeiro.current) {
+      pulouPrimeiro.current = true
+      return
+    }
     run(false)
   }, [pathname, run])
 

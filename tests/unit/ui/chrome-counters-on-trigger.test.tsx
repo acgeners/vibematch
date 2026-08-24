@@ -29,9 +29,16 @@ const session = { signedIn: true }
 vi.mock("@/components/layout/admin-context", () => ({
   useIsSignedIn: () => session.signedIn,
   useIsAdmin: () => false,
+  // ⚠️ O chip passou a ler o PAPEL do contexto também (A4): sessão e papel vinham daqui e do
+  // `getAccountSummary`, e as duas fontes se contradiziam na tela. Sem este mock o componente
+  // nem monta — é o próprio contexto que responde pelas duas coisas agora.
+  useRole: () => "leitor" as const,
 }))
 
 import { AccountChip } from "@/components/layout/account-chip"
+
+// O chip passou a receber o perfil já resolvido pelo servidor (A4): sem ele não monta.
+const PERFIL = { displayName: null, email: null, avatarUrl: null }
 import { CurationMenu } from "@/components/layout/curation-menu"
 
 /**
@@ -62,12 +69,12 @@ describe("contador do chrome aparece sem abrir o menu", () => {
 
   it("avatar mostra a fila de recomendação no gatilho", () => {
     Object.assign(badges, { recQueue: 3 })
-    render(<AccountChip compact />)
+    render(<AccountChip compact initialProfile={PERFIL} />)
     expect(screen.getByText("3")).toBeDefined()
   })
 
   it("sem fila, o avatar não inventa um zero", () => {
-    render(<AccountChip compact />)
+    render(<AccountChip compact initialProfile={PERFIL} />)
     expect(screen.queryByText("0")).toBeNull()
   })
 
@@ -76,7 +83,7 @@ describe("contador do chrome aparece sem abrir o menu", () => {
     // de sessão o anônimo veria o número do dono — a família do [[gotcha-anonimo-vira-dono]].
     session.signedIn = false
     Object.assign(badges, { recQueue: 3 })
-    render(<AccountChip compact />)
+    render(<AccountChip compact initialProfile={PERFIL} />)
     expect(screen.queryByText("3")).toBeNull()
   })
 
