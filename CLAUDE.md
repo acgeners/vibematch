@@ -6484,12 +6484,12 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.720 passando (+24 pulados) em 346 arquivos** (341 passando + 5 pulados);
-remedido em 2026-08-24 na árvore do merge que integrou A1a/A1b com A3/A4 — cada uma das duas
-linhas trouxe **+6 arquivos** sobre os 334 do `main`, e elas não se sobrepõem. Disco (`find`)
-= índice (`git ls-files`) = **346** em árvore LIMPA, e o número do vitest bate com os dois
-porque os 4 `.test.ts` de `services/comix-render` ficam fora da descoberta dele (`exclude:
-["services/**"]` no `vitest.config`): 350 − 4 = 346.
+`npm run test` → **3.724 passando (+24 pulados) em 347 arquivos** (342 passando + 5 pulados);
+medido em 2026-08-24 na integração foundation COMPLETA, depois de E2 e D3 entrarem — E2 trouxe
+**+4 casos e +1 arquivo** (`orchestration/cascata-nao-recalcula-global`) e D3 não trouxe teste
+nenhum. Disco (`find`) = índice (`git ls-files`) = **347** em árvore LIMPA, e o número do
+vitest bate com os dois porque os 4 `.test.ts` de `services/comix-render` ficam fora da
+descoberta dele (`exclude: ["services/**"]` no `vitest.config`): 351 − 4 = 347.
 
 ⚠️ **A 1ª rodada trouxe "Errors 1 error" com TODOS os testes passando** (Radix focus-scope
 estourando timeout em `ranking-ordenacao-trilha`), e a 2ª veio limpa com contagem idêntica — a
@@ -6501,7 +6501,9 @@ não método.** Ela só funciona enquanto os dois PRs não tocam o mesmo arquivo
 avisa no dia em que tocarem. É a terceira vez que esta linha é resolvida num merge; nas três, o
 que sobreviveu foi RE-MEDIR na base que vira o merge.
 
-Antes: **3.522 em 336** (o preço do Sonnet nas quatro superfícies, `90d3124` — +20 casos e
+Antes: **3.720 em 346** (o merge que integrou A1a/A1b com A3/A4 — cada uma das duas linhas
+trouxe +6 arquivos sobre os 334 do `main`, sem sobreposição), **3.522 em 336** (o preço do
+Sonnet nas quatro superfícies, `90d3124` — +20 casos e
 +2 arquivos: `ai/pricing-vence-sem-sucessora` e `ai/quatro-superficies-mesmo-modelo`),
 **3.502 em 334** (a metade EMBED do canário — +12 casos e ZERO arquivo, porque eles entraram
 no `canario-de-contrato-parser` que já existia), **3.490 em 334** (o eixo C — +11 casos e +1 arquivo, `orchestration/contagens-do-claude-md`), **3.479 em 333** (a resolução do conflito entre o #502 e o #503, escritos em paralelo —
