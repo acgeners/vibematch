@@ -1,6 +1,7 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { slugifyTagName } from "@/lib/utils"
 import { TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG, normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
@@ -45,17 +46,25 @@ export interface TagCatalogItem {
 
 export async function listTagCatalog(): Promise<TagCatalogItem[]> {
   const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from("tags")
-    .select("id, name, slug, tag_group_id")
-    .order("name")
-    .limit(10000)
-
-  if (error) {
-    console.error("[listTagCatalog] supabase query failed", error.message)
+  // 🔴 `.limit(10000)` NÃO é honrado: o PostgREST corta em 1000. Medido em 2026-09-08 na
+  // nuvem — `tags` tem 3.042 linhas e esta query via 1.000, ou seja o catálogo de casamento
+  // de tag externa enxergava UM TERÇO do vocabulário. O efeito não é uma tela vazia: é tag
+  // existente não sendo reconhecida e entrando de novo como nova, acumulando duplicata.
+  let data: Array<{ id: string; name: string; slug: string; tag_group_id: string | null }>
+  try {
+    data = await fetchAllRows(
+      (from, to) =>
+        supabase
+          .from("tags")
+          .select("id, name, slug, tag_group_id")
+          .order("name")
+          .range(from, to),
+      "listTagCatalog",
+    )
+  } catch (e) {
+    console.error("[listTagCatalog] supabase query failed", (e as Error).message)
     return []
   }
-  if (!data) return []
 
   return data.map((tag) => {
     const groupSlug = tag.tag_group_id ? (TAG_GROUP_ID_TO_NORMALIZED_SLUG[tag.tag_group_id] ?? "") : ""
