@@ -4,6 +4,7 @@ import { createUserClient } from "@/lib/supabase/user"
 import { fetchAllRows, selectByIdsInChunks } from "@/lib/supabase/paginate"
 import { pickPrimaryCover } from "@/lib/covers"
 import { coverCandidates } from "@/lib/work-derived"
+import type { WorkCoverRow } from "@/lib/work-derived"
 import { CRITERION_SLUGS, type CriterionSlug } from "@/types/domain"
 import type { FavoritesSummary } from "@/server/queries/favorites"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
@@ -774,6 +775,39 @@ export async function countWorksInLists(
 
 /** Catálogo "lite" pro picker de obras (adicionar/remover do grupo) e pra
  *  escolha de capas. Todas as obras não arquivadas, mais leves. */
+/**
+ * Só as capas do mosaico de "Todos os favoritos" — no máximo 3 obras.
+ *
+ * 🔴 Existe para tirar `getWorksLiteForPicker()` do carregamento inicial. Aquele traz o
+ * CATÁLOGO INTEIRO (1.010 obras com capas, 415 KB medidos em 2026-09-08) e o único uso dele
+ * no render era derivar estes 3 mosaicos; o resto só é lido dentro de diálogos. Pedir 1.010
+ * linhas para desenhar 3 é o desperdício que a medição por rota tornou visível.
+ */
+export async function getFavoriteCoverSlots(): Promise<string[][]> {
+  const supabase = createAdminClient()
+  const viewerId = await getSessionUserId()
+  if (!viewerId) return []
+  const { data, error } = await supabase
+    .from("user_work_state")
+    .select("work_id, works!inner(id, is_archived, work_covers(url, is_primary, position))")
+    .eq("user_id", viewerId)
+    .eq("is_favorite", true)
+    .eq("works.is_archived", false)
+    .limit(12)
+  if (error) {
+    console.error("[lists] erro lendo capas do mosaico:", error.message)
+    return []
+  }
+  // limit(12) e não limit(3): obra favorita pode não ter capa, e o mosaico quer 3 COM capa.
+  const slots: string[][] = []
+  for (const row of (data ?? []) as unknown as Array<{ works: { work_covers: WorkCoverRow[] } }>) {
+    const urls = coverCandidates(row.works?.work_covers ?? [])
+    if (urls.length > 0) slots.push(urls)
+    if (slots.length === 3) break
+  }
+  return slots
+}
+
 export async function getWorksLiteForPicker(): Promise<WorkLiteForPicker[]> {
   const supabase = createAdminClient()
   // 🔴 `.limit(3000)` NÃO é honrado: o PostgREST corta em 1000. Medido em 2026-09-08 na

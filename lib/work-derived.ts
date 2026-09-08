@@ -18,7 +18,7 @@ interface SynopsisEntryRow {
   isPrimary?: boolean | null
 }
 
-interface WorkCoverRow {
+export interface WorkCoverRow {
   url?: string | null
   is_primary?: boolean | null
   position?: number | null
