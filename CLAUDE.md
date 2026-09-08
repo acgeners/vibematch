@@ -293,7 +293,7 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**104 arquivos, remedidos em 2026-08-20**):
+banco declara um dos dois (**105 arquivos, remedidos em 2026-09-08**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
