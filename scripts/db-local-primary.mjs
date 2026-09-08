@@ -11,7 +11,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { execFileSync } from "node:child_process"
-import { SENTINELA, lerSentinela, ehLocal } from "./lib/local-primary.mjs"
+import { SENTINELA, lerSentinela, ehLocal , registrarTransicao} from "./lib/local-primary.mjs"
 
 const ROOT = path.resolve(import.meta.dirname, "..")
 const cmd = process.argv[2]
@@ -48,7 +48,9 @@ if (cmd === "on") {
 if (cmd === "off") {
   if (!s) { console.log("\njá estava desligado\n"); process.exit(0) }
   fs.unlinkSync(SENTINELA)
+  registrarTransicao({ de: "LOCAL", para: "CLOUD", motivo: process.argv[3] ?? "(sem motivo declarado)" })
   console.log(`\n✓ LOCAL PRIMARY desligado (estava ativo desde ${s.ativadoEm}).`)
+  console.log(`  primário agora: CLOUD — registrado em .primary-history.jsonl`)
   console.log(`  ⚠️ \`db:pull\` volta a destruir o local sem perguntar.\n`)
   process.exit(0)
 }

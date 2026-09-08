@@ -12,8 +12,9 @@
  * `exigirAlvoLocal` guardava 3 scripts e NÃO guardava o caminho que de fato gasta, que é o
  * dev server. Esta é a guarda que faltava.
  *
- * ⚠️ Só recusa sob LOCAL PRIMARY. Sem sentinela, apontar o dev para a nuvem é uma escolha
- * legítima (curadoria precisa persistir lá) — aí ele apenas AVISA o custo.
+ * ⚠️ Só RECUSA sob LOCAL PRIMARY. Sob CLOUD PRIMARY (o regime desde 2026-09-08) apontar o dev
+ * para a nuvem é a escolha correta, e a guarda vira BANNER — o objetivo é impedir uso
+ * acidental, não bloquear a nuvem.
  */
 import fs from "node:fs"
 import path from "node:path"
@@ -34,6 +35,16 @@ if (localPrimaryAtivo()) {
   process.exit(1)
 }
 
-console.warn(`\n⚠️  dev server apontando para a NUVEM (${url}).`)
-console.warn(`   Medido em 08/2026: ~450 MB/dia neste modo (teto free = 5 GB/ciclo).`)
-console.warn(`   Para desenvolver de graça:  npm run db:local\n`)
+// CLOUD PRIMARY: apontar o dev para a nuvem é a escolha CORRETA, não um acidente — então
+// não se bloqueia. O que se impede é o uso DISTRAÍDO: o banner existe porque o estouro de
+// 08/2026 não veio de ninguém decidir gastar, veio de ninguém perceber que estava gastando.
+const L = "━".repeat(64)
+console.warn(`\n\x1b[43m\x1b[30m${L}\x1b[0m`)
+console.warn(`\x1b[43m\x1b[30m  DATABASE TARGET: CLOUD  —  EGRESS WILL BE CONSUMED${" ".repeat(11)}\x1b[0m`)
+console.warn(`\x1b[43m\x1b[30m${L}\x1b[0m`)
+console.warn(`  projeto : ${url}`)
+console.warn(`  primário: CLOUD (sem sentinela .local-primary)`)
+console.warn(`  medido  : /catalog ~1.494 KB por carregamento · Fast Refresh recarrega a cada save`)
+console.warn(`            08/2026 fechou o ciclo em 5,97 GB de 5 GB neste mesmo modo`)
+console.warn(`  de graça: npm run db:local   (volta o app para o stack local)`)
+console.warn(`  medir    : node scripts/egress-proxy.mjs\n`)

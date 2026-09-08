@@ -91,3 +91,24 @@ export function registrarBackup(caminho) {
   if (!s) return
   fs.writeFileSync(SENTINELA, JSON.stringify({ ...s, ultimoBackup: caminho }, null, 2) + "\n")
 }
+
+/** Onde fica o registro append-only das trocas de primário. */
+export const HISTORICO = path.join(ROOT, ".primary-history.jsonl")
+
+/**
+ * Quem é o primário AGORA — derivado do sentinela, nunca de um segundo arquivo.
+ *
+ * 🔴 "Ausência = nuvem" é a semântica, e ela é correta; o que faltava era ser DIZÍVEL.
+ * Um segundo arquivo declarando o primário divergiria do sentinela na primeira troca —
+ * a familia "dois criterios pro mesmo fato" decidindo qual banco pode ser destruido.
+ */
+export const primarioAtual = () => (localPrimaryAtivo() ? "LOCAL" : "CLOUD")
+
+/**
+ * Registra a troca. Append-only: o histórico é a auditoria de "quem decidiu, e quando" —
+ * sem ele, voltar para a nuvem é indistinguível de alguém ter apagado o sentinela.
+ */
+export function registrarTransicao({ de, para, motivo }) {
+  const linha = JSON.stringify({ em: new Date().toISOString(), de, para, motivo }) + "\n"
+  fs.appendFileSync(HISTORICO, linha)
+}
