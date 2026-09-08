@@ -63,10 +63,18 @@ const VIEWS = new Set(["latest_ai_evaluation_per_work"])
 const PAGE = 1000
 
 async function listTables() {
-  const r = await fetch(`${URL_}/rest/v1/`, {
-    headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
-  })
-  const spec = await r.json()
+  // ⚠️ Rede/DNS caindo aqui é o caso COMUM (projeto pausado perde o DNS), não a exceção.
+  // Sem este catch o script morre com stack trace do `getaddrinfo`, que não diz o que fazer.
+  let r
+  try {
+    r = await fetch(`${URL_}/rest/v1/`, { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } })
+  } catch (e) {
+    console.error(`\n🔴 BACKUP FALHOU — não consegui alcançar ${URL_}`)
+    console.error(`   ${e.cause?.code ?? e.message}${e.cause?.code === "ENOTFOUND" ? "  (DNS sumiu: projeto PAUSADO no free tier?)" : ""}`)
+    console.error(`   Nada foi gravado.\n`)
+    process.exit(1)
+  }
+  const spec = await r.json().catch(() => ({}))
   const defs = spec.definitions ?? spec.components?.schemas ?? {}
   return Object.keys(defs).filter((t) => !VIEWS.has(t)).sort()
 }
@@ -106,9 +114,25 @@ async function dumpTable(table, outDir) {
 const base = process.argv[2] ?? path.join(ROOT, ".backups")
 const stamp = new Date().toISOString().replace(/[:.]/g, "-")
 const outDir = path.join(base, stamp)
-fs.mkdirSync(outDir, { recursive: true })
 
+// 🔴 O mkdir vem DEPOIS da descoberta, de propósito. Criado antes, todo backup falho deixava
+// um diretório vazio em `.backups/` — indistinguível, na listagem, de um backup que rodou e
+// não achou nada. Foram 3 desses que mascararam a falha entre 23/08 e 06/09.
 const tables = await listTables()
+
+// 🔴 FAIL-CLOSED. Esta linha existe porque a ausência dela custou 3 semanas de backup vazio:
+// `listTables()` lê o OpenAPI do PostgREST; com o projeto pausado/restrito o corpo não traz
+// `definitions`, o filtro devolve [], o laço abaixo NÃO EXECUTA e o script imprimia ✅ com
+// zero linha. A guarda de integridade por tabela (`written !== count`) vive DENTRO do laço,
+// então ela protege contra backup TRUNCADO e nunca teve como pegar um backup VAZIO.
+if (tables.length === 0) {
+  console.error(`\n🔴 BACKUP FALHOU — nenhuma tabela descoberta em ${URL_}.`)
+  console.error(`   Isto NÃO é "o banco está vazio": é o PostgREST não ter devolvido o schema.`)
+  console.error(`   Causas conhecidas: projeto PAUSADO (free tier), restrito por quota (402),`)
+  console.error(`   URL/chave erradas, ou o alvo não ser um Supabase.\n`)
+  process.exit(1)
+}
+fs.mkdirSync(outDir, { recursive: true })
 console.log(`backup de ${tables.length} tabelas → ${outDir}\n`)
 
 const manifest = []
@@ -132,6 +156,14 @@ fs.writeFileSync(
     2,
   ),
 )
+
+// 🔴 FAIL-CLOSED nº 2: backup que não trouxe linha nenhuma não é backup.
+if (totalRows === 0) {
+  console.error(`\n🔴 BACKUP FALHOU — ${tables.length} tabelas descobertas e ZERO linhas lidas.`)
+  console.error(`   Um catálogo real nunca fica vazio; isto é falha de acesso, não estado.\n`)
+  fs.rmSync(outDir, { recursive: true, force: true })
+  process.exit(1)
+}
 
 console.log(`\n✅ ${totalRows} linhas em ${tables.length} tabelas · ${(totalBytes / 1024 / 1024).toFixed(1)} MB`)
 console.log(`   manifest: ${path.join(outDir, "manifest.json")}`)

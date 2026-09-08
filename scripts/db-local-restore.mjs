@@ -71,6 +71,19 @@ try {
 } finally {
   fs.unlinkSync(tmp)
 }
+// 🔴 GRANTS. O dump do `db:local:backup` usa `--no-privileges`, entao ele NAO carrega os
+// grants — e sem eles o app restaurado responde "permission denied for schema public" em
+// TODA query. Pior: policy sem GRANT nao filtra nada, o papel `authenticated` precisa do
+// grant de tabela para a RLS ter o que aplicar. O `db:pull` ja fazia isto; o restore nao
+// fazia, e o defeito so aparecia na hora de recuperar — o pior momento possivel.
+execFileSync("psql", [DB, "-X", "-q", "-c",
+  "grant usage on schema public to anon, authenticated, service_role;" +
+  "grant all on schema public to postgres;" +
+  "grant all on all tables in schema public to postgres, anon, authenticated, service_role;" +
+  "grant all on all sequences in schema public to postgres, anon, authenticated, service_role;" +
+  "alter default privileges in schema public grant all on tables to postgres, anon, authenticated, service_role;"],
+  { stdio: ["ignore", "ignore", "ignore"] })
+console.log("  \u2713 grants anon/authenticated/service_role (o dump usa --no-privileges)")
 console.log("  ✓ dump carregado")
 
 // auth: recria os usuários com os MESMOS UUIDs. A senha vem do bootstrap (é local).

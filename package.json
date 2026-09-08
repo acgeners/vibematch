@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/guard-dev-target.mjs",
     "dev": "next dev --port 3001",
     "dev:local-editor": "ENABLE_LOCAL_EXTERNAL_REVIEW_EDITOR=true next dev --hostname 127.0.0.1 --port 3001",
     "build": "next build",
@@ -66,6 +67,7 @@
     "db:analysis-env": "node scripts/db-analysis-env.mjs",
     "db:health": "node scripts/db-health.mjs",
     "db:local:auth": "node --env-file=.env.local --env-file=.env.analysis scripts/db-local-bootstrap-auth.mjs",
+    "backup": "node scripts/backup-primary.mjs",
     "db:local:backup": "node --env-file=.env.local --env-file=.env.analysis scripts/db-local-backup.mjs",
     "db:local:restore": "node --env-file=.env.local --env-file=.env.analysis scripts/db-local-restore.mjs",
     "db:local-primary": "node --env-file=.env.local --env-file=.env.analysis scripts/db-local-primary.mjs"
