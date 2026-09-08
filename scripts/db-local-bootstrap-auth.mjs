@@ -100,6 +100,22 @@ for (const { id, email } of alvos) {
 }
 
 // ── 3. conferência: o dado per-user aponta para usuário que existe? ──────────────────────
+// 🔴 GoTrue NAO le NULL nestas colunas: `Scan error on column "confirmation_token":
+// converting NULL to string is unsupported`, e o login devolve 500 "Database error querying
+// schema" — que nao parece problema de DADO, parece o banco fora do ar. Medido em 2026-09-08
+// num ambiente restaurado de backup: o usuario era criado sem elas e o login local ficava
+// impossivel, no exato momento em que alguem precisa conferir a recuperacao.
+sql(`update auth.users set
+  confirmation_token = coalesce(confirmation_token,''),
+  recovery_token = coalesce(recovery_token,''),
+  email_change_token_new = coalesce(email_change_token_new,''),
+  email_change = coalesce(email_change,''),
+  email_change_token_current = coalesce(email_change_token_current,''),
+  phone_change = coalesce(phone_change,''),
+  phone_change_token = coalesce(phone_change_token,''),
+  reauthentication_token = coalesce(reauthentication_token,'')`)
+console.log("  \u2713 tokens de auth normalizados ('' em vez de NULL \u2014 GoTrue nao le NULL)")
+
 const orfaos = sql(
   `select count(distinct user_id) from user_work_state
    where user_id not in (select id from auth.users)`,

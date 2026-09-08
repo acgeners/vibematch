@@ -36,7 +36,7 @@ const PORTA = Number(process.env.EGRESS_PORTA ?? 54331)
 let marca = "(sem marca)"
 const seg = new Map()   // marca -> { reqs, bytes, linhas, porChave: Map }
 const atual = () => {
-  if (!seg.has(marca)) seg.set(marca, { reqs: 0, bytes: 0, linhas: 0, porChave: new Map() })
+  if (!seg.has(marca)) seg.set(marca, { reqs: 0, bytes: 0, linhas: 0, porChave: new Map(), detalhe: [] })
   return seg.get(marca)
 }
 const tabela = (p) => (p.match(/\/rest\/v1\/([^?]+)/)?.[1] ?? p.split("?")[0])
@@ -65,6 +65,13 @@ http.createServer(async (req, res) => {
     let body = ""; for await (const c of req) body += c
     marca = (body || new URL(req.url, "http://x").searchParams.get("m") || "(sem marca)").trim()
     res.writeHead(200).end(`marca = ${marca}\n`); return
+  }
+  if (req.url.startsWith("/__detalhe")) {
+    const m = new URL(req.url, "http://x").searchParams.get("m")
+    const out = {}
+    for (const [k, v] of seg) if (!m || k === m) out[k] = v.detalhe
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(out))
+    return
   }
   if (req.url.startsWith("/__resumo")) { res.writeHead(200, { "content-type": "text/plain" }).end(resumo() + "\n"); return }
   if (req.url.startsWith("/__zerar")) { seg.clear(); res.writeHead(200).end("zerado\n"); return }
@@ -103,8 +110,13 @@ http.createServer(async (req, res) => {
     const [ini, fim] = cr.split("/")[0].split("-").map(Number)
     if (Number.isFinite(ini) && Number.isFinite(fim)) s.linhas += fim - ini + 1
   }
-  const chave = `${req.method} ${tabela(req.url)}${req.url.includes("?") ? "?" + req.url.split("?")[1].slice(0, 120) : ""}`
+  const faixa = headers["range"] ?? ""
+  const chave = `${req.method} ${faixa} ${tabela(req.url)}${req.url.includes("?") ? "?" + req.url.split("?")[1].slice(0, 120) : ""}`
   s.porChave.set(chave, (s.porChave.get(chave) ?? 0) + 1)
+  // detalhe por request: e o que responde "quais requests respondem pela maior parte dos bytes?"
+  let nlin = 0
+  if (cr?.includes("-")) { const [a, b2] = cr.split("/")[0].split("-").map(Number); if (Number.isFinite(a) && Number.isFinite(b2)) nlin = b2 - a + 1 }
+  s.detalhe.push({ metodo: req.method, url: req.url, faixa, bytes: buf.length, linhas: nlin, status: upstream.status })
 
   res.writeHead(upstream.status, upstream.headers).end(buf)
 }).listen(PORTA, "127.0.0.1", () => {
