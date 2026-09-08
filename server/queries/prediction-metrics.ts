@@ -1,6 +1,7 @@
 import "server-only"
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import {
   computeProspectiveSummary,
   computeErrorByScoreBand,
@@ -172,13 +173,28 @@ export async function getModelMetricsDashboard(): Promise<ModelMetricsDashboard>
   // `discarded_at is null` (migration 168): fora as medições cujo rótulo o usuário APAGOU. Sem
   // gabarito não há acerto nem erro — medir contra uma nota retirada fabrica número. Filtrado
   // aqui, na única leitura, pra que TODA métrica derivada saia limpa por construção.
-  const { data, error } = await supabase
-    .from("prediction_snapshots")
-    .select(
-      "work_id, captured_at, predicted_score, predicted_is_stub, calc_score, decision_score, actual_user_score, formula_version, resolved_at, training_sample_size, ranking_snapshot_id, superseded",
+  // 🔴 `.limit(20000)` NÃO é honrado — o PostgREST corta em 1000. Medido em 2026-09-08:
+  // 9.687 snapshots não descartados, e o painel calculava MAE, RMSE, baselines e erro por
+  // faixa/fórmula/período sobre 1.000 deles — 10,3%. O teto de 20.000 prova que a intenção
+  // era ler TUDO; não era amostragem. E sem `.order()` o recorte segue a ordem física, que
+  // correlaciona com data de inserção: o viés não é só de tamanho, é de PERÍODO.
+  let data: unknown[] | null = null
+  let error: { message: string } | null = null
+  try {
+    data = await fetchAllRows<unknown>(
+      (from, to) =>
+        supabase
+          .from("prediction_snapshots")
+          .select(
+            "work_id, captured_at, predicted_score, predicted_is_stub, calc_score, decision_score, actual_user_score, formula_version, resolved_at, training_sample_size, ranking_snapshot_id, superseded",
+          )
+          .is("discarded_at", null)
+          .range(from, to),
+      "getModelMetricsDashboard.snapshots",
     )
-    .is("discarded_at", null)
-    .limit(20000)
+  } catch (e) {
+    error = { message: (e as Error).message }
+  }
 
   if (error) {
     const status = classifyCollectionError(error)

@@ -452,20 +452,26 @@ export async function getStaleAlignmentWorks(
   // leitura é a MESMA história: `works_owner.personal_status_id` é sempre o do
   // DONO — vem de `getPersonalStateReader()` (per usuário) e filtra em JS.
   const [reader, personalReader] = await Promise.all([getScoresReader(), getPersonalStateReader()])
-  let query = supabase
-    .from("works_owner")
-    .select(
-      "id, title, publication_status_id, work_covers(url, is_primary, position), calculated_scores(alignment_score, alignment_at, alignment_stale)",
-    )
-    .eq("is_archived", false)
-  if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
-    query = query.in("publication_status_id", opts.pubStatusIds)
-  }
-  // Busca ampla — o corte por `limit` agora acontece DEPOIS do filtro em JS (um
-  // corte pré-filtro sub-contaria candidatos reais, dependendo da ordem física
-  // das linhas). Mesmo teto de getAlignmentQueueWorks.
-  const { data, error } = await query.limit(5000)
-  if (error) throw new Error(`Falha listando Veredito IA desatualizados: ${error.message}`)
+  // Busca ampla — o corte acontece DEPOIS do filtro em JS (um corte pré-filtro sub-contaria
+  // candidatos reais, dependendo da ordem física das linhas).
+  //
+  // 🔴 E era exatamente isso que o `.limit(5000)` daqui NÃO entregava: o PostgREST corta em
+  // 1000 de qualquer jeito, anulando em silêncio a intenção que o comentário declarava.
+  // Medido em 2026-09-08: 1.010 obras ativas e recorte ESTÁVEL entre execuções — as MESMAS
+  // 10 obras nunca podiam entrar no pool de Veredito desatualizado, por mais que o filtro
+  // posterior as qualificasse.
+  const data = await fetchAllRows<unknown>((from: number, to: number) => {
+    let q = supabase
+      .from("works_owner")
+      .select(
+        "id, title, publication_status_id, work_covers(url, is_primary, position), calculated_scores(alignment_score, alignment_at, alignment_stale)",
+      )
+      .eq("is_archived", false)
+    if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
+      q = q.in("publication_status_id", opts.pubStatusIds)
+    }
+    return q.range(from, to)
+  }, "getAlignmentQueueWorks.candidates")
 
   const candidates = (data ?? [])
     .map((row) => {
