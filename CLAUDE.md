@@ -3438,6 +3438,38 @@ um sidecar que este Dockerfile nem deploya) passava batido. Precisa de `**/node_
 ⚠️ Regra de leitura: se a saída mostra camadas sendo exportadas/enviadas, o problema **não** é
 credencial. Leia o `WARN Build context is …` no topo antes de mexer em auth.
 
+## Os monitores de produção são DOIS workflows do GitHub — e a ROTA deles apodrece
+
+`.github/workflows/healthcheck.yml` e `keepalive.yml`, de 6 em 6h, os dois batendo em
+`/api/health` (que exercita o banco e devolve 503 quando a query falha). Rodam no GitHub e não no
+launchd de propósito: assim vigiam com o Mac desligado. ⚠️ **O GitHub desativa workflow agendado
+após 60 DIAS SEM COMMIT** — o cron morre sozinho justo no cenário para o qual existe.
+
+🔴 **O healthcheck tem um 2º passo que bate numa ROTA, e ele apodreceu sem nada acusar.** Ele
+chamava `/sobre`, que virou **308** no deploy de 19/08 (a renomeação de 16/08). De 19 a 21/08 o
+monitor mandou **12 e-mails de falha com o banco PERFEITO** — o log de cada um traz
+`HTTP 200 · {"ok":true,"works":1010}` no passo 1. Quem denuncia é o `keepalive`, que não testa
+rota e ficou VERDE o tempo todo: duas ferramentas discordando sobre o mesmo fato.
+
+⚠️ **O caro é o mascaramento, não o falso alarme.** Em 22/08 a quota de egress estourou de novo
+(402 em todo endpoint; `/`, `/catalog` e `/about` em **200 sem dado nenhum**) e o e-mail dessa
+falha chegou visualmente IDÊNTICO aos 12 anteriores — 13º de uma fila que se aprendeu a ignorar.
+É "alarme que sempre toca não é lido" mordendo o próprio monitor
+([[project-supabase-egress-quota-402]]).
+
+⚠️ **`scripts/smoke-producao.mjs` já usava `/about`** — só o workflow ficou para trás, e não
+tinha como ser diferente: o YAML não é compilado, não é importado e não roda na suíte. Hoje quem
+confere é `tests/unit/orchestration/workflow-bate-em-rota-que-existe.test.ts`, que **deriva** os
+workflows do disco, o host do `fly.toml` e os aliases do `redirects()`, e reprova rota que não
+exista em `app/` ou que seja alias 308.
+
+🔴 **Uma das 5 sondas me desmentiu, e o conserto é o padrão da casa:** o filtro que ignora linha
+de COMENTÁRIO é inalcançável pelos workflows de hoje (a prosa histórica cita `/sobre` sem a URL
+completa), então removê-lo mantinha a suíte verde. Ele ganhou caso PRÓPRIO, com texto sintético
+e a função extraída pura — senão seria capacidade construída e DESLIGADA. ⚠️ E o comentário fica
+de fora **de propósito**: no cabeçalho do healthcheck o nome antigo é o CERTO, porque descreve
+como a rota se chamava; congelar prosa histórica seria proteger a grafia, não o fato.
+
 ## `redirect()` num `page.tsx` DERRUBA a página — e a severidade cresce sozinha
 
 🔴 `redirect()` num server component **não devolve 3xx**. O layout já começou a streamar, o
@@ -6604,12 +6636,19 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.585 passando · 1 FALHANDO · +24 pulados em 345 arquivos**; remedido em
-2026-09-21 depois da paginação estável no seed (+5 casos e +1 arquivo,
-`scripts/seed-paginacao-estavel`), por cima da guarda de critérios antes da chamada paga (+8 e
-+2), do aviso do Google no banco local (+3 e +1) e da separação Fantasy/Nobility do mesmo dia
-(migration 197 + seed). Disco (`find`) = índice (`git ls-files`) = **345**, conferido DEPOIS do
-`git add -N`.
+`npm run test` → **3.596 passando · 1 FALHANDO · +24 pulados em 347 arquivos**; remedido em
+2026-09-21 no MERGE de `origin/main` nesta branch, sobre as duas linhas que corriam em PARALELO:
+a da branch, que chegou a **3.591 em 346** (a última entrada foi a paginação ordenada dos
+diag-ablate, +6 casos e +1 arquivo, `scripts/diag-ablate-paginacao-estavel`), e a do `main`, que
+chegou a **3.507 em 335** (a rede dos workflows, **+5 casos e +1 arquivo**,
+`orchestration/workflow-bate-em-rota-que-existe`). Disco (`find`) = índice (`git ls-files`) =
+**347**, medido no estado integrado.
+
+⚠️ **Este merge também DEVOLVEU duas entradas que a branch tinha perdido.** O merge-base dizia
+**3.502 em 334** (a metade EMBED do canário); o `d56b662` trocou só os números para **3.522 em
+336** — deixando a frase dizer "= **334**" ao lado de "336 arquivos" — e o `6a590cb`, ao reescrever
+o bloco, apagou as duas do histórico. É a régua de sempre desta linha em outra forma: reescrever
+de cabeça em vez de acrescentar ao que estava lá. As duas voltaram para o `Antes:` abaixo.
 
 🔴 **A falha é PRÉ-EXISTENTE e foi conferida em worktree LIMPO do HEAD**:
 `tests/unit/ui/hiato-tipo-no-badge.test.ts` → *"o tipo é ignorado quando a publicação não está em
@@ -6632,7 +6671,7 @@ não método.** Ela só funciona enquanto os dois PRs não tocam o mesmo arquivo
 avisa no dia em que tocarem. É a terceira vez que esta linha é resolvida num merge; nas três, o
 que sobreviveu foi RE-MEDIR na base que vira o merge.
 
-Antes: **3.580 em 344** (a guarda de critérios), **3.572 em 342** (o aviso do Google no banco local), **3.569 em 341** (a separação Fantasy/Nobility), **3.490 em 334** (o eixo C — +11 casos e +1 arquivo, `orchestration/contagens-do-claude-md`), **3.479 em 333** (a resolução do conflito entre o #502 e o #503, escritos em paralelo —
+Antes: **3.591 em 346** (a paginação ordenada dos diag-ablate, só na branch), **3.585 em 345** (a paginação estável no seed), **3.580 em 344** (a guarda de critérios), **3.572 em 342** (o aviso do Google no banco local), **3.569 em 341** (a separação Fantasy/Nobility), **3.522 em 336** (re-medido no `d56b662`, 22/08), **3.507 em 335** (a rede dos workflows — no `main`, em paralelo à branch), **3.502 em 334** (a metade EMBED do canário: **+12 casos e ZERO arquivo** — eles entraram no `canario-de-contrato-parser` que já existia, e é por isso que a contagem de ARQUIVOS não se move e a de CASOS sim), **3.490 em 334** (o eixo C — +11 casos e +1 arquivo, `orchestration/contagens-do-claude-md`), **3.479 em 333** (a resolução do conflito entre o #502 e o #503, escritos em paralelo —
 e a soma dos dois deltas teria acertado por sorte de aritmética, não por método: ela só funciona
 enquanto os dois PRs não tocam o mesmo arquivo de teste), **3.471 em 332** (o #502 sozinho — +1 caso e zero arquivo, porque o guard entrou num
 arquivo que já existia) e **3.470 em 332**, medido **depois** de o smoke logado e o funil dos

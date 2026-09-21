@@ -37,5 +37,5 @@ jobs:
 
       - name: rota pública (o app renderiza, não só responde)
         run: |
-          code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 90 https://satoria.fly.dev/sobre)
-          [ "$code" = "200" ] || { echo "::error::/sobre devolveu $code"; exit 1; }
+          code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 90 https://satoria.fly.dev/about)
+          [ "$code" = "200" ] || { echo "::error::/about devolveu $code"; exit 1; }
