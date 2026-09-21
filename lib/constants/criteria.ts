@@ -11,6 +11,8 @@ export const CRITERIA_INFO: Record<
   humor: { name: "Humor", emoji: "😂", description: "Avalia o quanto o humor está presente no tom da obra.\nConsidera se há apenas alívio cômico pontual ou se a comédia é parte frequente e importante da experiência.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/humor.png" },
   drama: { name: "Drama", emoji: "🎭", description: "Avalia a intensidade dos conflitos emocionais da obra.\nConsidera sofrimento, tensão emocional, dilemas, conflitos de relacionamento e o quanto isso afeta o ritmo e as decisões dos personagens.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/drama.png" },
   tragedy: { name: "Tragédia", emoji: "💔", description: "Avalia o peso de acontecimentos trágicos durante o desenvolvimento principal da história (não considera background nem acontecimentos no começo imediato da história).\nConsidera perdas, separações, mortes, injustiças e sofrimento que acontecem no meio da obra e impactam diretamente os personagens principais.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/tragedy.png" },
+  fantasy: { name: "Fantasia", emoji: "✨", description: "Avalia a presença e a participação de magia, poderes, criaturas ou fenômenos NÃO explicados como ciência.\nO teste é ontológico, não visual: tecnologia extraordinária que a obra explica como ciência não conta, e estética fantástica sem fenômeno atuante também não." },
+  nobility: { name: "Nobreza", emoji: "👑", description: "Avalia o quanto aristocracia, realeza e política de corte fazem parte da obra.\nConsidera se o título nobiliárquico é só rótulo ou se hierarquia, sucessão, etiqueta e disputa de poder movem os conflitos. Mundo mágico sem corte NÃO conta aqui." },
 }
 
 export const CRITERIA_RUBRICS: Record<
@@ -96,6 +98,24 @@ export const CRITERIA_RUBRICS: Record<
       "4-6 | Presente mas secundária: sofrimento ou perdas sérias, porém isoladas ou reversíveis. Perda no CONTEXTO ESTABELECIDO (background/situação inicial — ex.: família morta antes do início) NÃO conta; só a DIREÇÃO da trama. Sofrimento psicológico prolongado SEM perda irreversível é drama, não tragédia.",
       "7-8 | Significativa: perdas irreversíveis (mortes, separações definitivas) na direção da trama que reconfiguram a história e marcam os protagonistas.",
       "9-10 | Onipresente: luto e perda irreversível permeiam a obra inteira; tom trágico constante, sensação de inevitabilidade.",
+    ],
+  },
+  fantasy: {
+    title: "Fantasia",
+    ranges: [
+      "0-3 | Ausente: nenhum elemento mágico/sobrenatural ATUANTE. Estética fantástica sem fenômeno operante é esta faixa.",
+      "4-6 | Pontual: mecanismo sobrenatural presente e NÃO recorrente — dispara a premissa e sai de cena.",
+      "7-8 | Estrutural: o fenômeno sobrenatural opera continuamente, ainda que de escopo ontológico estreito.",
+      "9-10 | Onipresente: magia, poderes ou criaturas participam CONTINUAMENTE do mundo e da experiência.",
+    ],
+  },
+  nobility: {
+    title: "Nobreza",
+    ranges: [
+      "0-3 | Ausente: sem estrutura nobiliárquica relevante, ou título só de fachada (é \"duque\", mas isso não muda nada).",
+      "4-6 | Presente mas secundário: há nobres ou corte, porém hierarquia e política não organizam os conflitos.",
+      "7-8 | Estrutural: posição social, sucessão, etiqueta ou disputa de poder moldam os conflitos principais.",
+      "9-10 | Onipresente: a corte é o palco — hierarquia, alianças e política nobiliárquica sustentam quase tudo que acontece.",
     ],
   },
 }

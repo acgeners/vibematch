@@ -125,6 +125,7 @@ const FIELD_TAB_MAP: Record<string, EditTab> = {
   total_chapters: "geral", cover_url: "geral", covers: "geral", external_ids: "geral",
   // Notas e avaliações
   romance: "notas", couple_dynamics: "notas", fantasy_nobility: "notas",
+  fantasy: "notas", nobility: "notas",
   action_adventure: "notas", adult_content: "notas", protagonist: "notas",
   humor: "notas", drama: "notas", tragedy: "notas",
   mu_rating: "notas", mu_votes: "notas", ap_rating: "notas", ap_votes: "notas",
@@ -620,6 +621,8 @@ const getEmptyCreateValues = (): Partial<WorkFormValues> => ({
   romance: null,
   couple_dynamics: null,
   fantasy_nobility: null,
+  fantasy: null,
+  nobility: null,
   action_adventure: null,
   adult_content: null,
   protagonist: null,

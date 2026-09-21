@@ -13,6 +13,8 @@ export const importRowSchema = z.object({
   romance: optionalScore,
   couple_dynamics: optionalScore,
   fantasy_nobility: optionalScore,
+  fantasy: optionalScore,
+  nobility: optionalScore,
   action_adventure: optionalScore,
   adult_content: optionalScore,
   protagonist: optionalScore,

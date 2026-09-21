@@ -81,3 +81,31 @@ describe("os dois consumidores derivam do mesmo dono", () => {
     expect(PAGINA).toContain("Definida pelo limite obrigatório")
   })
 })
+
+/**
+ * 4º autor — a nota HERDADA do critério misto (seed da migration 197).
+ *
+ * 🔴 O caso que decide é o da `proposta: null`: a linha de seed não veio de avaliação nenhuma,
+ * então sem tratar o `source` ANTES do early-return ela cairia em `"modelo"` — creditando ao
+ * modelo uma cópia que modelo nenhum produziu para este critério.
+ */
+describe("legacy_split_copy: a nota herdada tem autor próprio", () => {
+  it("é 'legado' mesmo sem proposta — o seed não tem avaliação por trás", () => {
+    expect(
+      autorDaNota({ source: "legacy_split_copy", exibida: 8, proposta: null, limiteExplica: false }),
+    ).toBe("legado")
+  })
+
+  it("é 'legado' mesmo quando a nota bate com a proposta (não é distância, é fato do source)", () => {
+    expect(
+      autorDaNota({ source: "legacy_split_copy", exibida: 8, proposta: 8, limiteExplica: false }),
+    ).toBe("legado")
+  })
+
+  it("não contamina os outros autores", () => {
+    expect(autorDaNota({ source: "ai_edited", exibida: 8, proposta: 6, limiteExplica: false })).toBe("curadoria")
+    expect(autorDaNota({ source: "ai_calibrated", exibida: 8, proposta: 6, limiteExplica: false })).toBe("auditoria")
+    expect(autorDaNota({ source: "ai_accepted", exibida: 8, proposta: 6, limiteExplica: true })).toBe("limite")
+    expect(autorDaNota({ source: "ai_accepted", exibida: 8, proposta: 6, limiteExplica: false })).toBe("orfa")
+  })
+})

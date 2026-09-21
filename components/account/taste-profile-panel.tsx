@@ -34,7 +34,6 @@ import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { GENRE_NAMES, TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
 import type { PredictionDriver } from "@/lib/calculations/ridge-feature-labels"
-import { CRITERION_SLUGS } from "@/types/domain"
 import { formatUsdApprox } from "@/lib/format/money"
 import { classifyProfileTagOrigin } from "@/lib/ai-recommendation/profile-tag-origin"
 import type {
@@ -68,6 +67,7 @@ import type {
   TasteProfileRow,
 } from "@/lib/ai-recommendation/types"
 import { cn } from "@/lib/utils"
+import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
 
 const TASTE_PROFILE_TASK_ID = "taste-profile"
 
@@ -2012,7 +2012,7 @@ function AdvancedDetails({
             label="Alinhamento (personal_fit)"
             value={confirmation ? `corr. ${confirmation.correlation.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
           />
-          <HoodStat label="Critérios peso ≥ 0.5" value={`${criteriaWithStrongWeight} / ${CRITERION_SLUGS.length}`} />
+          <HoodStat label="Critérios peso ≥ 0.5" value={`${criteriaWithStrongWeight} / ${VISIBLE_CRITERION_SLUGS.length}`} />
           <HoodStat label="Tags amadas / evitadas" value={`${lovedCount} / ${avoidedCount}`} />
           <HoodStat label="Modelo" value={`${profile.model_name} · ${profile.prompt_version}`} />
         </div>
@@ -2037,7 +2037,7 @@ function AdvancedDetails({
         {isThin && !isStub && (
           <p className="rounded-md bg-amber-500/5 p-2.5 text-[11px] leading-relaxed text-amber-700 ring-1 ring-inset ring-amber-500/25 dark:text-amber-300">
             <strong>Perfil magro</strong> ({lovedCount} tags amadas, {criteriaWithStrongWeight}/
-            {CRITERION_SLUGS.length} critérios com peso ≥ 0.5) — isso limita o teto matemático do{" "}
+            {VISIBLE_CRITERION_SLUGS.length} critérios com peso ≥ 0.5) — isso limita o teto matemático do{" "}
             <code className="font-mono">personal_fit</code>. Avalie mais obras com{" "}
             <code className="font-mono">user_score</code> e recompute pra enriquecer os sinais.
           </p>

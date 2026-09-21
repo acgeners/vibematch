@@ -1,7 +1,7 @@
 import { CRITERIA_INFO, CRITERIA_RUBRICS } from "@/lib/constants/criteria"
 import { bandBarBounds } from "@/lib/criteria/justification"
-import { CRITERION_SLUGS } from "@/types/domain"
 import { GLOSSARY_NOTES, type GlossaryNote } from "@/lib/criteria/glossary-notes"
+import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
 
 /**
  * O dicionário dos 9 atributos (`/guide/attributes`) montado a partir da MESMA rubrica que
@@ -94,7 +94,7 @@ export function attributeArtSrc(slug: string, size: 480 | 160 | 64): string {
  * um verbete vazio.
  */
 export function buildGlossary(): GlossaryEntry[] {
-  return CRITERION_SLUGS.map((slug) => {
+  return VISIBLE_CRITERION_SLUGS.map((slug) => {
     const info = CRITERIA_INFO[slug]
     const ranges = CRITERIA_RUBRICS[slug]?.ranges ?? []
     const bands = ranges

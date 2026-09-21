@@ -19,7 +19,7 @@ const ANCHOR = {
   expected: "9,1",
   reasons: [
     "Transmigração + heroína que usa o enredo a seu favor (Smart FL)",
-    "Nobreza + política — fantasy_nobility 9,1 no seu ideal",
+    "Nobreza + política de corte — bem dentro do seu ideal",
     "Contrato falso que vira amor genuíno (o ML frio cai primeiro)",
   ],
   // stance: verde = você ama · vermelho = você evita · neutro = sem relação

@@ -54,6 +54,7 @@ import {
   parseArtFilter,
 } from "@/lib/art/url"
 import { filterSegmentClass, filterSegmentRole } from "@/lib/ui/filter-segment-tone"
+import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
 
 interface SavedFilterPreset {
   id: string
@@ -61,16 +62,21 @@ interface SavedFilterPreset {
   query: string
 }
 
+/**
+ * Rótulo CURTO do critério. As entradas abaixo são ENCURTAMENTOS deliberados ("Casal" em vez de
+ * "Dinâmica entre Protagonistas"); o resto DERIVA de `CRITERIA_INFO`, que é gerado do banco.
+ *
+ * 🔴 Este mapa era literal nos 9 slugs, e isso é uma classe de defeito conhecida: critério novo
+ * no Supabase entrava no filtro com o SLUG CRU no chip ("fantasy") — ou sem chip nenhum —, e o
+ * filtro cortava obras sem que o usuário visse por quê. Medido ao separar Fantasia/Nobreza:
+ * `?min_fantasy=9` recortava 1.010 → 69 obras **sem chip na tela**.
+ */
 const CRITERION_LABELS: Record<string, string> = {
-  romance: "Romance",
+  ...Object.fromEntries(CRITERION_SLUGS.map((slug) => [slug, CRITERIA_INFO[slug]?.name ?? slug])),
+  // encurtamentos (o nome oficial é longo demais para o chip)
   couple_dynamics: "Casal",
-  fantasy_nobility: "Fantasia/Nobreza",
-  action_adventure: "Ação/Aventura",
   adult_content: "Conteúdo adulto",
   protagonist: "Protagonista",
-  humor: "Humor",
-  drama: "Drama",
-  tragedy: "Tragédia",
 }
 
 /**
@@ -120,7 +126,7 @@ const SORTABLE_FIELD_GROUPS: Array<{ label: string; fields: Array<{ value: strin
   },
   {
     label: "Atributos",
-    fields: CRITERION_SLUGS.map((slug) => ({
+    fields: VISIBLE_CRITERION_SLUGS.map((slug) => ({
       value: `crit_${slug}`,
       label: CRITERION_LABELS[slug] ?? slug,
     })),
@@ -1047,7 +1053,7 @@ function buildCriterionScoreDefs(
   unit: CriterionUnit,
   moments: CriterionMoments | null | undefined,
 ): ScoreDef[] {
-  return CRITERION_SLUGS.map((slug) => {
+  return VISIBLE_CRITERION_SLUGS.map((slug) => {
     const base = {
       key: slug,
       emoji: CRITERIA_INFO[slug]?.emoji ?? "",
