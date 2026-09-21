@@ -99,7 +99,16 @@ async function main() {
   const ownerId = await getOwnerUserId(sb)
   const biasMap = await getBiasMap(ownerId, sb)
   const [worksRes, weightsRes, configRes, tasteProfile, declaredTagPrefs, ownerLabels] = await Promise.all([
-    sb.from("works").select(SELECT).eq("is_archived", false).limit(2000),
+    (async () => { // 🔴 .limit(2000) NÃO é honrado pelo PostgREST (corta em 1000). Inócuo até
+      // 16/08 (catálogo tinha 980 ativas) e ATIVO desde 18/08 (1009). Ver etapa 51.
+      const o: any[] = []
+      for (let i = 0; ; i += 1000) {
+        const { data, error } = await sb.from("works").select(SELECT).eq("is_archived", false).range(i, i + 999)
+        if (error) throw new Error(`works: ${error.message}`)
+        o.push(...(data ?? [])); if (!data || data.length < 1000) break
+      }
+      return { data: o }
+    })(),
     sb.from("score_weights").select("*").eq("is_active", true),
     sb.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
     loadCurrentTasteProfile(ownerId),
