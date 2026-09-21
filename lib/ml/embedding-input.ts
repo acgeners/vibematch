@@ -8,7 +8,8 @@
  */
 
 import { createHash } from "node:crypto"
-import { CRITERION_SLUGS, type CategoryScoreMap, type CriterionSlug } from "@/types/domain"
+import type { CategoryScoreMap, CriterionSlug } from "@/types/domain"
+import { SCORING_CRITERION_SLUGS } from "@/lib/calculations/scoring-features"
 
 export interface EmbeddingInputData {
   title: string
@@ -41,7 +42,7 @@ export function buildEmbeddingInput(data: EmbeddingInputData): BuiltEmbeddingInp
     .map((t) => `${(t.group ?? "").trim()}::${t.name.trim()}`)
     .sort()
 
-  const criteria = CRITERION_SLUGS.map((slug) => {
+  const criteria = SCORING_CRITERION_SLUGS.map((slug) => {
     const v = data.categoryScores[slug as CriterionSlug]
     return v != null && Number.isFinite(v) ? `${slug}=${v.toFixed(1)}` : null
   })

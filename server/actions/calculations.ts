@@ -57,6 +57,7 @@ import {
   mergeDeclaredTagPreferences,
 } from "@/lib/ai-recommendation/taste-profile-heuristic"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
+import { SCORING_CRITERION_SLUGS } from "@/lib/calculations/scoring-features"
 import type { DeclaredTagPref } from "@/server/queries/tag-preferences"
 import { loadArtLabels } from "@/server/queries/pilot-taste"
 import { computeArtForCatalog } from "@/lib/art/model"
@@ -1208,7 +1209,7 @@ export function computeRecalc(input: RecalcComputeInput) {
     // avaliação). Nesses casos deixamos expected_score = null: some de todas as
     // telas (badges gateiam em `expected_score != null`; o ranking joga essas
     // obras pro fim via -Infinity). Presença é source-independente (IA/import/manual).
-    const hasAiAttributes = CRITERION_SLUGS.every((slug) => w.categoryScores[slug] != null)
+    const hasAiAttributes = SCORING_CRITERION_SLUGS.every((slug) => w.categoryScores[slug] != null)
     if (!hasAiAttributes) {
       w.expectedScore = null
       w.expectedBaseline = null

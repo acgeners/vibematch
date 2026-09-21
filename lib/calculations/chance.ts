@@ -18,7 +18,8 @@
  * Chance apenas via a feature `interesseOrdinal` (o Interesse-na-obra já as ingere).
  */
 
-import { CRITERION_SLUGS, type CategoryScoreMap, type CriterionSlug } from "@/types/domain"
+import type { CategoryScoreMap, CriterionSlug } from "@/types/domain"
+import { SCORING_CRITERION_SLUGS } from "@/lib/calculations/scoring-features"
 import { MedianImputer, StandardScaler, type NumericRow } from "@/lib/ml/preprocessing"
 import { fitLogisticCV, logit, sigmoid, oofLogits, fitPlatt, type LogisticModel } from "@/lib/ml/logistic"
 
@@ -40,7 +41,7 @@ export interface ChanceInput {
 }
 
 const FEATURE_NAMES = [
-  ...CRITERION_SLUGS,
+  ...SCORING_CRITERION_SLUGS,
   "DeclaredLoved",
   "DeclaredAvoided",
   "PersonalFit",
@@ -49,7 +50,7 @@ const FEATURE_NAMES = [
 
 function buildRow(input: ChanceInput): NumericRow {
   const row: (number | null)[] = []
-  for (const slug of CRITERION_SLUGS) {
+  for (const slug of SCORING_CRITERION_SLUGS) {
     const v = input.categoryScores[slug as CriterionSlug]
     row.push(v == null || !Number.isFinite(v) ? null : v)
   }
