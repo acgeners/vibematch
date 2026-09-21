@@ -590,6 +590,25 @@ local (`update auth.users set encrypted_password = extensions.crypt('…', exten
 Refazer depois de cada `db:pull`. Desde 2026-08-06 há também **"Esqueci minha senha"**
 (`/forgot-password` → e-mail → `/reset-password`), e no local o e-mail cai no **Mailpit** (`:54324`).
 
+✅ **E desde 2026-09-21 a TELA diz isso** — até então o botão "Entrar com Google" chamava
+`signInWithOAuth` e a pessoa caía no JSON cru do GoTrue na barra de endereço. Medido no MESMO
+endpoint (`/auth/v1/authorize?provider=google`): a nuvem devolve **302** pro Google e o local
+devolve **400 `Unsupported provider`** — o botão prometia uma porta que só existe num dos dois
+alvos. Hoje `components/auth/google-button.tsx` desabilita o gatilho no local e **nomeia a saída
+que funciona** (email+senha, que o formulário logo abaixo já oferece).
+
+⚠️ **Quem decide é `isLocalSupabaseUrl()`** — o mesmo dono do `DbTargetBanner`, nunca uma 2ª
+regex de host. Custo em produção **ZERO** (o helper é falso lá) e **sem risco de hidratação**:
+`NEXT_PUBLIC_SUPABASE_URL` é embutido em BUILD TIME, ao contrário do `localStorage` da sidebar.
+⚠️ O aviso é texto VISÍVEL e não `title=`: botão `disabled` sai do tab order, então tooltip
+nativo ali seria explicação inalcançável.
+
+Guardado por `tests/unit/auth/google-no-banco-local.test.tsx` — RENDER de propósito, porque o que
+regride não é a régua (ela já tem dono) e sim o componente deixar de consumi-la. 🔴 A contraprova
+de cada caso é o `process.env` apontando pro alvo **OPOSTO** ao do mock: sem ela, uma regex
+copiada dentro do componente passaria verde. As 3 sondas conferidas — sem o ramo (o código de
+antes) reprova 2 casos, régua própria reprova os **3**, e botão desabilitado MUDO reprova 1.
+
 🔴 **PENDENTE: a recuperação de senha NÃO funciona em produção — falta SMTP.** Remedido na
 Management API em **2026-08-19** (o retrato de 06/08 continua valendo, campo a campo):
 `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_admin_email` e `smtp_sender_name` são
@@ -4515,6 +4534,51 @@ própria**: `fetchAllRows` é serial (6 idas a ~300ms contra o banco de Ohio), e
 isso é `fetchAllRowsParallel`. Não foi feito aqui porque trocar um penhasco distante por uma
 regressão de latência medida em segundos é pior negócio.
 
+### Paginar sem `ORDER BY` não é paginação — e o erro se disfarça de trabalho feito
+
+🔴 **`range()`/`.limit()` sem ordenação NÃO é estável: o Postgres não promete ordem entre
+páginas**, então a mesma linha pode vir duas vezes e outra sumir. É irmão do corte de 1000 —
+ali a leitura cala o que falta, aqui ela *embaralha* — e o sintoma é o mesmo: resultado
+plausível, sem erro.
+
+Medido na NUVEM em 2026-09-21, lendo as 2.050 linhas de `fantasy`+`nobility` em 3 páginas:
+
+| leitura | lidas | **únicas** |
+|---|---|---|
+| sem `order` | 2050 | **1550** |
+| com `order` | 2050 | **2050** |
+| sem `order`, repetindo | 2050 · 2050 | **1525** · **2050** |
+
+⚠️ **É NÃO-DETERMINÍSTICO** — a terceira tentativa acertou por acaso. Uma execução que "deu
+certo" não é prova de que a leitura é estável; foi isso que manteve o defeito invisível.
+
+⚠️ **A chave tem que ser TOTAL** (única no conjunto lido), senão a instabilidade volta dentro
+dos empates: `work_id` basta sob um `criterion_slug` fixo, mas com dois slugs é preciso
+`work_id, criterion_slug`. No `seed-fantasy-nobility-legado.ts` a chave virou **parâmetro
+obrigatório** do `pageAll` — não default, porque o que tem default é o que se esquece.
+
+🔴 **O lado caro não é o que aparece.** Perder linhas na leitura que decide O QUE FAZER faz o
+script **pular trabalho em silêncio** — e ali um `on conflict` não protege, porque a linha
+nunca chega a ser tentada. O que apareceu (linhas re-tentadas) é o lado barato.
+
+❗ **IMPORTANTE, não bloqueador — o padrão é mais largo:** a mesma forma aparece em dezenas de
+scripts e ~20 arquivos do app, incluindo **`lib/supabase/paginate.ts`** (`fetchAllRows`, **32
+consumidores**), cujo docstring cobre o corte de 1.000 e **não menciona estabilidade de ordem**.
+Só morde acima de uma página, e o catálogo passou de 1.000. Fica para investigação causal
+separada, medindo por consumidor — corrigir em bloco sem saber quais leituras passam de uma
+página troca um risco conhecido por um refactor não medido.
+
+### `lote.length` não prova insert — quem prova é o `.select()`
+
+🔴 **Com `ignoreDuplicates: true` (ou `on conflict do nothing`) o Postgres descarta em
+SILÊNCIO**, então `gravadas += lote.length` afirma trabalho que pode não ter acontecido. Medido
+no mesmo dia: o seed anunciou **"500 linhas semeadas"** tendo gravado **zero**. Quem conta é o
+`.select()` no upsert, que devolve as linhas REALMENTE inseridas — e a diferença entre enviadas
+e gravadas é informação, não ruído: imprima-a.
+
+⚠️ É a mesma família do `backup-db.mjs`, que FALHA em vez de gravar backup truncado: operação em
+lote precisa conferir o que o banco aceitou, não o que ela mandou.
+
 ## Texto vindo de FORA quebra a escrita inteira — e o caractere é invisível
 
 🔴 Medido em 2026-08-18 na nuvem: duas escritas da MESMA avaliação voltaram **400**.
@@ -4567,6 +4631,33 @@ These files are **fully overwritten** by `npm run sync-constants` and must not b
 | `types/domain.ts` | `PUBLICATION_STATUSES`, `PERSONAL_STATUSES`, `PLATFORMS`, `CRITERION_SLUGS` arrays |
 
 The canonical list of AI evaluation criteria (`CRITERION_SLUGS`) comes from the `criteria` table where `eval_type = 'IA'`. Any change to criteria must go through the DB and then `sync-constants`.
+
+🔴 **São TRÊS listas de critério, e confundi-las muda cálculo ou tela sem ninguém decidir**
+(desde a migration **197**, 2026-09-21, que separou `fantasy_nobility` em `fantasy` + `nobility`):
+
+| lista | onde | quantos | o que governa |
+|---|---|---|---|
+| `CRITERION_SLUGS` | `types/domain.ts` (**gerado**) | **11** | o que o provider AVALIA e o que `category_scores` aceita |
+| `SCORING_CRITERION_SLUGS` | `lib/calculations/scoring-features.ts` | **9** | o que entra no CÁLCULO — Ridge, Bússola, embeddings, pesos inferidos |
+| `VISIBLE_CRITERION_SLUGS` | `lib/criteria/visible.ts` (derivada) | **10** | o que o LEITOR vê |
+
+⚠️ **`fantasy_nobility` continua existindo — é legado INTERNO, não lixo.** Ele saiu da tela
+(some dos 10 visíveis) e **ficou nos 9 do cálculo**: ainda alimenta a Nota Prevista, ainda é
+avaliado pelo provider e ainda é editável na CURADORIA. A fronteira é **leitura × curadoria**,
+não "toda tela" — tirá-lo do `work-form` deixaria sem manutenção um dado que move a nota.
+
+🔴 **Os 9 do cálculo são CONGELADOS de propósito.** `CRITERION_SLUGS` é gerado do banco, então
+um critério novo o faz crescer sozinho; se o cálculo derivasse dele, a Nota Prevista, a Bússola
+e os embeddings mudariam **sem decisão de ninguém** — e, durante uma transição, as colunas novas
+são cópias exatas de uma terceira. Por isso as duas listas são separadas.
+
+⚠️ Na nuvem, `fantasy` e `nobility` entraram em `score_weights` com **`is_active = false`** e
+peso 0: é isso que mantém a Nota.IA idêntica, porque `gpt.ts` e `calculations.ts` filtram por
+`is_active`. Ativá-los é decisão de produto, não consequência da migration.
+
+⚠️ As **2.050** linhas de `fantasy`/`nobility` na nuvem são `source = 'legacy_split_copy'` —
+cópias do valor do critério misto, sem justificativa e com `ai_evaluation_id` NULL. Elas NÃO são
+avaliação separada; quem as lê como tal afirma uma medição que não houve.
 
 `sync-constants` also backfills `work_tags` from the legacy `works.genres` text array using the `genre` tag group.
 
@@ -4862,6 +4953,35 @@ card continuar dizendo "Avaliar"; 3 sondas). O gate de fontes foi exercitado pon
 ## AI evaluation flow
 
 Two distinct paths both ultimately call `requestAiEvaluation()` in `lib/ai-evaluation/service.ts`:
+
+🔴 **O banco ALVO precisa conhecer os `CRITERION_SLUGS` — e isso é conferido ANTES de gastar**
+(`lib/ai-evaluation/criteria-guard.ts`, 2026-09-21). `ai_evaluation_scores.criterion_slug` tem FK
+para `criteria.slug`, e a gravação acontece **depois** da chamada ao provider: quando o código
+anda à frente do banco, o modelo responde, o insert viola a FK e o `throw` cai **antes** do update
+que grava `summary`/`model_name`/`raw_response`.
+
+⚠️ **O custo foi medido, não estimado:** com `CRITERION_SLUGS` em 11 (Fantasy/Nobility, migration
+197 aplicada só no LOCAL) contra a nuvem em 9, a chamada deu `success` em 20,6s, custou
+**US$0,0647**, e a linha que sobrou é `status = failed` com **todos** aqueles campos vazios. Clicar
+de novo repete o débito — era falha que só se anuncia depois de cobrar.
+
+⚠️ **Mora no ENTRY POINT, nunca nos call sites** — são três (`server/actions/ai.ts`,
+`server/actions/external.ts`, `lib/external/ai-criteria.ts`) e espalhá-la deixaria o quarto nascer
+descoberto. Roda também no caminho de **cache**, de propósito: um hit devolve os mesmos slugs e
+bateria na mesma FK.
+
+⚠️ **Falha FECHADA, ao contrário do gate de `markRecalcPending`** — a assimetria é de custo: lá, na
+dúvida, um badge a mais custa um clique; aqui, seguir custa uma chamada paga que vai ser jogada
+fora. Não conseguir LER `criteria` também aborta, e **zero linha é FALHA** (mesma régua do canário
+de contrato: sem linha não houve o que conferir).
+
+Guardado por `tests/unit/ai-evaluation/criterios-existem-antes-de-pagar.test.ts` (a guarda pura) e
+`guarda-de-criterios-antes-do-provider.test.ts` — este último é o que importa, porque um teste só
+da função passaria verde com ela pendurada DEPOIS do provider. As 4 sondas conferidas: guarda
+removida e guarda **inerte** (`.catch` que engole) reprovam os 3 casos de ordem; ignorar o `error`
+do PostgREST e tratar zero linha como sucesso reprovam o unitário. Conferida também contra os dois
+bancos REAIS — passa no local (11 critérios), barra na nuvem (9) nomeando `fantasy, nobility`, com
+**zero chamadas pagas** em `ai_api_calls`.
 
 **Path A — "✨ Avaliar" (`/curation/works`, "Curadoria da Obra")**
 
@@ -6484,11 +6604,23 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.522 passando (+24 pulados) em 336 arquivos** (331 passando + 5 pulados);
-remedido em 2026-08-21 com a metade EMBED do canário (**+12 casos e ZERO arquivo** — eles
-entraram no `canario-de-contrato-parser` que já existia, e é por isso que a contagem de
-ARQUIVOS não se move e a de CASOS sim). Disco (`find`) = índice (`git ls-files`) = **334**,
-conferido DEPOIS do `git add`, em DUAS rodadas limpas com resultado idêntico.
+`npm run test` → **3.585 passando · 1 FALHANDO · +24 pulados em 345 arquivos**; remedido em
+2026-09-21 depois da paginação estável no seed (+5 casos e +1 arquivo,
+`scripts/seed-paginacao-estavel`), por cima da guarda de critérios antes da chamada paga (+8 e
++2), do aviso do Google no banco local (+3 e +1) e da separação Fantasy/Nobility do mesmo dia
+(migration 197 + seed). Disco (`find`) = índice (`git ls-files`) = **345**, conferido DEPOIS do
+`git add -N`.
+
+🔴 **A falha é PRÉ-EXISTENTE e foi conferida em worktree LIMPO do HEAD**:
+`tests/unit/ui/hiato-tipo-no-badge.test.ts` → *"o tipo é ignorado quando a publicação não está em
+hiato"* espera `uptodate` e recebe `hiatus`. Reproduz sem nenhuma mudança aplicada ⇒ é defeito
+aberto do `classifyPace`, não regressão. ⚠️ **Não a trate como flakiness** — ela reproduz
+isolada, ao contrário da queda de carga descrita abaixo.
+
+⚠️ **O `git add -N` mudou DOIS números do CLAUDE.md, e é o mecanismo funcionando:** as varreduras
+derivam de `git ls-files`, então o script novo só entrou nelas depois do índice — e aí
+`script-de-correcao-declara-o-funil` (9 → **10**) e `scripts-apontam-pro-local` (49 → **50**
+que gravam, 105 → **106** arquivos) reprovaram até a prosa ser corrigida.
 
 ⚠️ **A 1ª rodada trouxe "Errors 1 error" com TODOS os testes passando** (Radix focus-scope
 estourando timeout em `ranking-ordenacao-trilha`), e a 2ª veio limpa com contagem idêntica — a
@@ -6500,7 +6632,7 @@ não método.** Ela só funciona enquanto os dois PRs não tocam o mesmo arquivo
 avisa no dia em que tocarem. É a terceira vez que esta linha é resolvida num merge; nas três, o
 que sobreviveu foi RE-MEDIR na base que vira o merge.
 
-Antes: **3.490 em 334** (o eixo C — +11 casos e +1 arquivo, `orchestration/contagens-do-claude-md`), **3.479 em 333** (a resolução do conflito entre o #502 e o #503, escritos em paralelo —
+Antes: **3.580 em 344** (a guarda de critérios), **3.572 em 342** (o aviso do Google no banco local), **3.569 em 341** (a separação Fantasy/Nobility), **3.490 em 334** (o eixo C — +11 casos e +1 arquivo, `orchestration/contagens-do-claude-md`), **3.479 em 333** (a resolução do conflito entre o #502 e o #503, escritos em paralelo —
 e a soma dos dois deltas teria acertado por sorte de aritmética, não por método: ela só funciona
 enquanto os dois PRs não tocam o mesmo arquivo de teste), **3.471 em 332** (o #502 sozinho — +1 caso e zero arquivo, porque o guard entrou num
 arquivo que já existia) e **3.470 em 332**, medido **depois** de o smoke logado e o funil dos
