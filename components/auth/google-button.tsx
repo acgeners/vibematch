@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { isLocalSupabaseUrl } from "@/lib/db-target"
 import { Button } from "@/components/ui/button"
 
 function GoogleIcon() {
@@ -15,9 +16,37 @@ function GoogleIcon() {
   )
 }
 
-/** Login/signup com Google (OAuth). Redireciona pro Google; volta em /auth/callback. */
+const TRIGGER_CLASS = "h-[46px] w-full gap-2.5 text-[15px]"
+
+/**
+ * Login/signup com Google (OAuth). Redireciona pro Google; volta em /auth/callback.
+ *
+ * 🔴 **No banco LOCAL este botão não tem para onde ir, e falhava DEPOIS do clique.** O
+ * `supabase/config.toml` traz todo provider externo com `enabled = false`, então
+ * `signInWithOAuth` navegava pro GoTrue e a pessoa caía num JSON cru na barra de endereço:
+ * `{"code":400,"error_code":"validation_failed","msg":"Unsupported provider: provider is
+ * not enabled"}`. Medido em 2026-09-21 no MESMO endpoint: a nuvem devolve **302** pro
+ * Google e o local devolve esse **400** — ou seja o botão prometia uma porta que só existe
+ * num dos dois alvos.
+ *
+ * Por isso o ramo local desabilita o gatilho e **nomeia a saída que funciona** (email+senha,
+ * que o formulário logo abaixo já oferece), em vez de deixar a pessoa descobrir pelo erro.
+ * É a mesma razão do `DbTargetBanner`: as contas dos dois bancos são diferentes, e falhar
+ * aqui parece "minha senha não funciona".
+ *
+ * ⚠️ Custo em produção: **ZERO** — `isLocalSupabaseUrl()` é falso lá e o ramo nunca é
+ * alcançado. É o mesmo helper do banner, não uma segunda régua pro mesmo fato.
+ *
+ * ⚠️ **Não quebra hidratação**, ao contrário do `localStorage` da sidebar: quem decide é
+ * `NEXT_PUBLIC_SUPABASE_URL`, embutido em BUILD TIME, então servidor e cliente começam com
+ * o mesmo valor.
+ *
+ * ⚠️ O texto fica VISÍVEL, e não num `title=`: botão desabilitado sai do tab order, então
+ * tooltip nativo ali seria explicação inalcançável — capacidade construída e desligada.
+ */
 export function GoogleButton({ label }: { label: string }) {
   const [loading, setLoading] = useState(false)
+  const semProvider = isLocalSupabaseUrl()
 
   async function handleClick() {
     setLoading(true)
@@ -30,11 +59,25 @@ export function GoogleButton({ label }: { label: string }) {
     if (error) setLoading(false)
   }
 
+  if (semProvider) {
+    return (
+      <div className="flex flex-col gap-2">
+        <Button type="button" variant="outline" className={TRIGGER_CLASS} disabled>
+          <GoogleIcon />
+          {label}
+        </Button>
+        <p className="text-center text-[13px] text-muted-foreground">
+          Indisponível no banco local — entre com email e senha.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <Button
       type="button"
       variant="outline"
-      className="h-[46px] w-full gap-2.5 text-[15px]"
+      className={TRIGGER_CLASS}
       onClick={handleClick}
       disabled={loading}
     >
