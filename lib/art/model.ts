@@ -180,6 +180,17 @@ export interface ArtCatalogResult {
  *   obra COM rótulo         → estimativa out-of-fold, nunca a in-sample
  */
 export function computeArtForCatalog(inputs: ArtCatalogInput[]): Map<string, ArtCatalogResult> {
+  // 🔴 ORDEM CANÔNICA antes de qualquer conta. Os folds do out-of-fold e da escolha de α
+  // (`kFoldIndices`) são sorteados por POSIÇÃO: com o mesmo conjunto em outra ordem, as obras
+  // caíam em folds diferentes e a estimativa mudava — medido em 2026-09-22 em 5 ordens das
+  // mesmas 1.027 obras: até 1,44 na estimativa e 0,64 no percentil. A ordem de entrada
+  // passa a decidir só a ordem de iteração do Map devolvido, nunca um número.
+  const canonico = [...inputs].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const porId = computeArtCanonico(canonico)
+  return new Map(inputs.map((i) => [i.id, porId.get(i.id) ?? { estimate: null, percentile: null }]))
+}
+
+function computeArtCanonico(inputs: ArtCatalogInput[]): Map<string, ArtCatalogResult> {
   const vazio = (): Map<string, ArtCatalogResult> =>
     new Map(inputs.map((i) => [i.id, { estimate: null, percentile: null }]))
 
