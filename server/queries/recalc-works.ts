@@ -38,3 +38,33 @@ export function fetchRecalcWorks(supabase: Pick<SupabaseClient, "from">, page = 
     page,
   )
 }
+
+/** O select de `works` do recálculo POR USUÁRIO — sem `art_signal` (a arte é do catálogo). */
+export const USER_RECALC_WORKS_SELECT = `id, publication_status_id, total_chapters, is_archived,
+           year, year_end, original_title,
+           category_scores(criterion_slug, score, source),
+           platform_ratings(id, platform, rating, vote_count),
+           work_tags(tags(name, tag_group_id))`
+
+/**
+ * As obras ativas do recálculo POR USUÁRIO, na mesma ORDEM CANÔNICA — mesmo defeito, mesmo
+ * remédio (ver `fetchRecalcWorks`): `computeRecalc` sorteia os folds por posição, e quem
+ * consome isto são as notas que a pessoa vê.
+ *
+ * ⚠️ O select é OUTRO de propósito, e não um parâmetro do de cima: este caminho não carrega
+ * `art_signal` nem o slug das tags. Unificá-los engordaria toda recalculada per-user com
+ * colunas que ela não usa.
+ */
+export function fetchUserRecalcWorks(supabase: Pick<SupabaseClient, "from">, page = 1000): Promise<unknown[]> {
+  return fetchAllRows<unknown>(
+    (from: number, to: number) =>
+      supabase
+        .from("works")
+        .select(USER_RECALC_WORKS_SELECT)
+        .eq("is_archived", false)
+        .order("id", { ascending: true })
+        .range(from, to),
+    "user-recalc.works",
+    page,
+  )
+}

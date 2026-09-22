@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { fetchRecalcWorks } from "@/server/queries/recalc-works"
+import { fetchRecalcWorks, fetchUserRecalcWorks } from "@/server/queries/recalc-works"
 import { fetchAllRows } from "@/lib/supabase/paginate"
 
 /**
@@ -46,7 +46,13 @@ const obras: Linha[] = Array.from({ length: 2600 }, (_, i) => ({
 }))
 const ativasOrdenadas = obras.filter((o) => !o.is_archived).map((o) => o.id).sort()
 
-describe("fetchRecalcWorks — a leitura de works do recálculo", () => {
+// Os DOIS boundaries de recálculo: o global e o por usuário. Selects diferentes, mesma régua.
+const LEITORES = [
+  ["fetchRecalcWorks (recálculo global)", fetchRecalcWorks],
+  ["fetchUserRecalcWorks (recálculo por usuário)", fetchUserRecalcWorks],
+] as const
+
+describe.each(LEITORES)("%s — a leitura de works do recálculo", (_nome, ler) => {
   it("contraprova: o falso REPRODUZ o defeito — sem ordem, um UPDATE entre páginas duplica/omite", async () => {
     const { cliente } = clienteFalso(obras, { moverEntrePaginas: true })
     const semOrdem = (await fetchAllRows<Linha>((from, to) =>
@@ -60,17 +66,17 @@ describe("fetchRecalcWorks — a leitura de works do recálculo", () => {
 
   it(`🔴 >1000 obras e ordem física mudando entre páginas: conjunto EXATO e ordenado por id`, async () => {
     const { cliente, paginas } = clienteFalso(obras, { moverEntrePaginas: true })
-    const lidas = (await fetchRecalcWorks(cliente as never)) as Linha[]
+    const lidas = (await ler(cliente as never)) as Linha[]
     expect(paginas()).toBeGreaterThan(2)
     const ids = lidas.map((r) => r.id)
     expect(new Set(ids).size).toBe(ids.length) // nenhuma duplicada
     expect(ids).toEqual(ativasOrdenadas) // nenhuma omitida, nenhuma arquivada, ordem canônica
   })
 
-  it("mesma base em outra ordem física ⇒ resultado byte-idêntico (e em qualquer tamanho de página)", async () => {
-    const a = await fetchRecalcWorks(clienteFalso(obras).cliente as never)
+  it("🔴 duas ordens FÍSICAS diferentes ⇒ mesmo resultado, byte a byte (em qualquer tamanho de página)", async () => {
+    const a = await ler(clienteFalso(obras).cliente as never)
     const invertida = [...obras].reverse()
-    const b = await fetchRecalcWorks(clienteFalso(invertida).cliente as never, 100)
+    const b = await ler(clienteFalso(invertida).cliente as never, 100)
     expect(JSON.stringify(b)).toBe(JSON.stringify(a))
   })
 })

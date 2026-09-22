@@ -51,10 +51,18 @@ const EXECUTE = process.argv.includes("--execute")
 const COM_ESTIMATIVA = process.argv.includes("--com-estimativa")
 const LOTE = 200
 
-async function pageAll<T>(sb: any, table: string, select: string, tune?: (q: any) => any): Promise<T[]> {
+/**
+ * 🔴 `ordem` é OBRIGATÓRIA: `.range()` sem `ORDER BY` pagina sobre a ordem física do heap, que
+ * muda a cada UPDATE — e aí uma linha que troca de lugar entre duas páginas sai duplicada ou
+ * some. Aqui isso grava: sinal de arte extraído de um pool de reviews incompleto, e estimativa
+ * escrita sobre um catálogo incompleto. Medido em 2026-09-22 num caso análogo: 2.050 linhas
+ * lidas viraram 1.550 distintas. Chave ÚNICA (ou o par que identifica a linha).
+ */
+async function pageAll<T>(sb: any, table: string, select: string, ordem: string[], tune?: (q: any) => any): Promise<T[]> {
   const out: T[] = []
   for (let from = 0; ; from += 1000) {
     let q = sb.from(table).select(select).range(from, from + 999)
+    for (const col of ordem) q = q.order(col, { ascending: true })
     if (tune) q = tune(q)
     const { data, error } = await q
     if (error) throw new Error(`${table}: ${error.message}`)
@@ -75,10 +83,10 @@ async function main() {
   console.log(`\n══ SEMENTE DO SINAL DE ARTE — ${EXECUTE ? "EXECUTANDO" : "dry-run"} ══`)
   console.log(`   alvo: ${process.env.NEXT_PUBLIC_SUPABASE_URL}`)
 
-  const works = await pageAll<any>(sb, "works", "id, review_digest, art_signal, is_archived")
+  const works = await pageAll<any>(sb, "works", "id, review_digest, art_signal, is_archived", ["id"])
   const ativas = works.filter((w) => !w.is_archived)
-  const reviews = await pageAll<any>(sb, "work_reviews", "work_id, text")
-  const tagRows = await pageAll<any>(sb, "work_tags", "work_id, tags(slug)")
+  const reviews = await pageAll<any>(sb, "work_reviews", "work_id, text", ["id"])
+  const tagRows = await pageAll<any>(sb, "work_tags", "work_id, tags(slug)", ["work_id", "tag_id"])
 
   const textos = new Map<string, string[]>()
   for (const r of reviews) {
@@ -159,7 +167,7 @@ async function main() {
   // de treino e devolve null em tudo — o script "funcionaria", gravaria zero estimativas e o
   // piloto apareceria vazio sem nada acusar.
   const ownerId = await getOwnerUserId(sb)
-  const rotulos = await pageAll<any>(sb, "pilot_taste_scores", "work_id, like_art_score", (q) =>
+  const rotulos = await pageAll<any>(sb, "pilot_taste_scores", "work_id, like_art_score", ["work_id"], (q) =>
     q.eq("user_id", ownerId).not("like_art_score", "is", null),
   )
   const labelBy = new Map<string, number>(rotulos.map((r) => [r.work_id, Number(r.like_art_score)]))
