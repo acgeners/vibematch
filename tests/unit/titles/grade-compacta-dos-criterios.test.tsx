@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { CriteriaGrid } from "@/components/titles/criteria-grid"
 import type { CriterioItem } from "@/components/titles/criteria-grid"
-import { CRITERION_SLUGS } from "@/types/domain"
+import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
 import { RUBRIC_BANDS, bandForScore } from "@/lib/criteria/justification"
 
 /**
@@ -37,7 +37,7 @@ const montar = (items = CENARIO) => render(<CriteriaGrid items={items} detalhes=
 const abertos = () =>
   CENARIO.filter((c) => screen.queryAllByText(`justificativa de ${c.nome}`).length > 0).map((c) => c.slug)
 
-describe("grade compacta dos 9 critérios", () => {
+describe("grade compacta dos critérios visíveis", () => {
   it("desenha uma linha por critério recebido, com nome e nota", () => {
     montar()
     for (const c of CENARIO) {
@@ -96,7 +96,8 @@ describe("grade compacta dos 9 critérios", () => {
     expect(RUBRIC_BANDS.length).toBe(4)
   })
 
-  it("a página tem os 9 critérios para entregar (contraprova de vacuidade)", () => {
-    expect(CRITERION_SLUGS.length).toBe(9)
+  it("a página tem os critérios VISÍVEIS para entregar (contraprova de vacuidade)", () => {
+    // 10 desde a migration 197: os 9 menos o legado misto, mais fantasy e nobility.
+    expect(VISIBLE_CRITERION_SLUGS.length).toBe(10)
   })
 })

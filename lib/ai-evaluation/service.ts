@@ -9,6 +9,7 @@ import { bandForScore } from "@/lib/criteria/justification"
 // e `scripts/backfill-faixa-citada.ts` a importa daqui.
 export { realinharFaixaCitada } from "@/lib/criteria/justification"
 import { aplicarLimiteAdulto } from "@/lib/ai-evaluation/adult-content-apply"
+import { exigirCriteriosNoBanco } from "@/lib/ai-evaluation/criteria-guard"
 import { normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { SONNET_MODEL } from "@/lib/ai/models"
@@ -172,7 +173,7 @@ export const CONCISE_OUTPUT: boolean = true
 // resposta dele com 5,0: incoerência por construção, a classe de defeito que estamos
 // removendo. Afeta 18 obras (romance ≤ 3).
 //
-export const PROMPT_VERSION = CONCISE_OUTPUT ? "v26" : "v18"
+export const PROMPT_VERSION = CONCISE_OUTPUT ? "v28" : "v18"
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
@@ -796,7 +797,7 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
   }
 
   lines.push(
-    `\nAvalie a obra "${req.title}" com base nas rubricas do sistema. Use todos os gêneros e todas as tags fornecidas. Use o CONSENSO das reviews externas compatíveis como evidência auxiliar, referindo-se a elas de forma genérica (nunca a uma review isolada ou ID). Use apenas evidências presentes nos dados fornecidos; não invente eventos de plot. Retorne todos os 9 critérios pela tool "submit_evaluation". No "summary", refira-se à obra apenas como "${req.title}".`
+    `\nAvalie a obra "${req.title}" com base nas rubricas do sistema. Use todos os gêneros e todas as tags fornecidas. Use o CONSENSO das reviews externas compatíveis como evidência auxiliar, referindo-se a elas de forma genérica (nunca a uma review isolada ou ID). Use apenas evidências presentes nos dados fornecidos; não invente eventos de plot. Retorne todos os ${CRITERION_SLUGS.length} critérios pela tool "submit_evaluation". No "summary", refira-se à obra apenas como "${req.title}".`
   )
 
   if (CONCISE_OUTPUT) {
@@ -1363,7 +1364,7 @@ async function runEvaluationProvider(
     const promptText =
       attempt === 0
         ? userPrompt
-        : `${userPrompt}\n\nA tentativa anterior retornou um payload inválido ou não usou a tool. Responda usando SEMPRE a tool "submit_evaluation", preenchendo todos os 9 critérios e os campos obrigatórios.`
+        : `${userPrompt}\n\nA tentativa anterior retornou um payload inválido ou não usou a tool. Responda usando SEMPRE a tool "submit_evaluation", preenchendo todos os ${CRITERION_SLUGS.length} critérios e os campos obrigatórios.`
 
     const includeImage = !!coverImage && !imageFetchFailed
     // Status da capa NESTA tentativa: enviada (fetch_success) / fallback após
@@ -1494,6 +1495,13 @@ async function runEvaluationProvider(
 export async function requestAiEvaluation(
   req: AiEvaluationRequest
 ): Promise<AiEvaluationResponse> {
+  // 🔴 ANTES de qualquer gasto — e antes do cache, que devolveria os MESMOS slugs e bateria na
+  // mesma FK. As notas são gravadas depois da chamada ao provider (`server/actions/ai.ts`), então
+  // `CRITERION_SLUGS` divergir do banco alvo custa a chamada inteira e descarta a resposta já
+  // comprada. Medido em 2026-09-21: US$0,0647 debitados e a avaliação salva vazia. Ver
+  // `criteria-guard.ts` para por que esta guarda falha FECHADA.
+  await exigirCriteriosNoBanco()
+
   // Observabilidade (Plano 1): 1 id por SOLICITAÇÃO lógica, compartilhado por
   // todas as tentativas físicas. workload = experiment quando há override de
   // modelo (botão "Reavaliar com…"/compare-models).

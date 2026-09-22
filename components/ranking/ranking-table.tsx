@@ -294,7 +294,13 @@ interface RankingTableProps {
   favoriteGroups?: ListPickerOption[]
 }
 
-const KEY_CRITERIA = ["romance", "fantasy_nobility", "protagonist", "drama", "tragedy"]
+/**
+ * Os critérios em destaque na linha. `fantasy_nobility` saiu: ele é o construto MISTO e não
+ * pode ser afirmado ao leitor (ver lib/criteria/visible.ts). Entra `fantasy`, que é o eixo que
+ * o rótulo antigo já prometia — e `nobility` fica de fora porque 60,4% do catálogo é "forte"
+ * nela (medido), então destacá-la não separa nada.
+ */
+const KEY_CRITERIA = ["romance", "fantasy", "protagonist", "drama", "tragedy"]
 
 const STORAGE_KEY = "ranking_col_widths_v1"
 
@@ -2078,7 +2084,15 @@ const HIGHLIGHT_SHORT_NAME: Record<string, string> = {
   romance: "Romance",
   couple_dynamics: "Casal",
   protagonist: "Protagonista",
-  fantasy_nobility: "Fantasia",
+  /**
+   * 🔴 Este mapa chamava `fantasy_nobility` de "Fantasia" — e ele media as DUAS coisas, então o
+   * chip afirmava fantasia sobre obras que pontuaram por nobreza. Hoje os dois têm slug próprio
+   * e o rótulo do legado voltou a ser o nome real dele (ele não aparece mais nesta tela, mas o
+   * mapa é consultado por chave e um rótulo mentiroso aqui reapareceria no primeiro reuso).
+   */
+  fantasy_nobility: "Fantasia/Nobreza",
+  fantasy: "Fantasia",
+  nobility: "Nobreza",
   action_adventure: "Ação",
   humor: "Humor",
   drama: "Drama",

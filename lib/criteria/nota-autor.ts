@@ -29,6 +29,11 @@ export type AutorDaNota =
    * auditoria contar ficha órfã como saudável — o instrumento aprovando o que existe para pegar.
    */
   | "orfa"
+  /**
+   * A nota é HERDADA do critério misto (`source: legacy_split_copy`, migration 197). Nenhum
+   * modelo a produziu para este critério: é cópia do `fantasy_nobility` da obra.
+   */
+  | "legado"
 
 /** Diferença mínima para dizer que alguém MOVEU a nota (as notas andam de 0,5 em 0,5). */
 const EPSILON = 0.05
@@ -49,6 +54,14 @@ export function autorDaNota(args: {
   limiteExplica: boolean
 }): AutorDaNota {
   const { source, exibida, proposta, limiteExplica } = args
+
+  /**
+   * 🔴 ANTES do early-return, e o motivo é mecânico: a nota de seed não tem `proposta` (não veio
+   * de avaliação nenhuma), então ela cairia em `"modelo"` — creditando ao modelo uma cópia que
+   * modelo nenhum produziu para este critério. É fato do `source`, não da distância entre notas.
+   */
+  if (source === "legacy_split_copy") return "legado"
+
   if (exibida == null || proposta == null) return "modelo"
   if (Math.abs(exibida - proposta) < EPSILON) return "modelo"
 

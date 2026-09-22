@@ -1,9 +1,10 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useCallback, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import { carregarCatalogoDoPicker } from "@/server/actions/lists"
 import { FolderOpen, Heart, Layers, MessageSquare, Pencil, Plus, Sparkles, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -32,7 +33,7 @@ interface GroupsIndexProps {
   multi: MultiGroupFavorites
   /** Grupos 100% contidos em outro — o card do CONTIDO avisa. */
   nested: NestedGroupPair[]
-  catalog: WorkLiteForPicker[]
+  coverSlots: string[][]
 }
 
 const STACK_POS = [
@@ -131,7 +132,7 @@ export function GroupsIndex({
   ungrouped,
   multi,
   nested,
-  catalog,
+  coverSlots,
 }: GroupsIndexProps) {
   // Um aviso por grupo CONTIDO. É raro por construção (1 par em 33 na medição de
   // 2026-08-15) — se um dia deixar de ser, o aviso estará dizendo a verdade sobre uma
@@ -146,10 +147,23 @@ export function GroupsIndex({
 
   // Cada slot do mosaico é uma OBRA diferente, então cada um leva as candidatas DELA:
   // é uma lista de listas, não uma lista de URLs.
-  const allCoverUrls: string[][] = catalog
-    .filter((w) => w.isFavorite && w.coverUrls.length > 0)
-    .slice(0, 3)
-    .map((w) => w.coverUrls)
+  // 🔴 O catálogo do picker NÃO vem mais no carregamento — ele custava 415 KB por visita
+  // para alimentar um diálogo atrás de um clique. Os 3 mosaicos, que são o único uso no
+  // render, chegam prontos de `getFavoriteCoverSlots()`.
+  const allCoverUrls: string[][] = coverSlots
+  const [catalog, setCatalog] = useState<WorkLiteForPicker[]>([])
+  const [catalogoCarregando, setCatalogoCarregando] = useState(false)
+  const garantirCatalogo = useCallback(async () => {
+    if (catalog.length > 0 || catalogoCarregando) return
+    setCatalogoCarregando(true)
+    try {
+      setCatalog(await carregarCatalogoDoPicker())
+    } catch {
+      toast.error("Não consegui carregar o catálogo.")
+    } finally {
+      setCatalogoCarregando(false)
+    }
+  }, [catalog.length, catalogoCarregando])
 
   function confirmDelete() {
     const target = deleting
@@ -186,7 +200,7 @@ export function GroupsIndex({
           {lists.length} grupo{lists.length !== 1 ? "s" : ""} · organize seus favoritos em recortes.
         </p>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setSuggestOpen(true)}>
+          <Button variant="outline" onClick={() => (garantirCatalogo(), setSuggestOpen(true))}>
             <Sparkles /> Sugerir grupos com IA
           </Button>
           <Button onClick={() => setCreateOpen(true)}>
@@ -322,7 +336,7 @@ export function GroupsIndex({
                 size="icon-sm"
                 aria-label="Editar grupo"
                 title="Editar grupo"
-                onClick={() => setEditing(list)}
+                onClick={() => { garantirCatalogo(); setEditing(list) }}
               >
                 <Pencil />
               </Button>

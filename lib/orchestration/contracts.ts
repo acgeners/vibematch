@@ -11,6 +11,8 @@
  */
 
 import type { UsageTokens } from "@/lib/ai/pricing"
+import { ACTIVE_MODELS, SONNET_MODEL } from "@/lib/ai/models"
+import { CONSOLIDATE_SYNOPSIS_USAGE } from "@/lib/ai-recommendation/synopsis-consolidator-usage"
 
 // ---- Identidades -----------------------------------------------------------
 
@@ -104,8 +106,11 @@ export interface ContractPreconditionSnapshot {
 
 // ---- Estimativas (heurísticas) ---------------------------------------------
 
-const HAIKU = "claude-haiku-4-5-20251001"
-const SONNET = "claude-sonnet-4-6"
+// Mesmo caso do `cost-preview/catalog.ts`: o Sonnet vem do dono (as estimativas deste
+// registro alimentam o GATE de custo, então um modelo errado aqui bloqueia ou libera pelo
+// preço errado). O Haiku continua literal — é escolha de modelo barato, não "o ativo".
+const HAIKU = ACTIVE_MODELS.haiku
+const SONNET = SONNET_MODEL
 
 const ZERO: UsageTokens = {
   inputTokens: 0,
@@ -150,10 +155,24 @@ export const ACTION_CONTRACTS: Record<ActionName, ActionContract> = {
   consolidate_synopsis: {
     action: "consolidate_synopsis",
     costTier: "micro",
+    // 🔴 SONNET, não Haiku. O executor (`CONSOLIDATOR_MODEL` em
+    // `lib/ai-recommendation/synopsis-consolidator.ts`) é `SONNET_MODEL` desde o prompt v3,
+    // e esta linha ficou em HAIKU: o GATE precificava $0,0035 uma chamada que custa $0,0070
+    // — subestimava em 2,00×. Medido em `ai_api_calls` (clone local, 2026-08-24):
+    // 496 chamadas Haiku até 30/07/2026 e 230 `claude-sonnet-5` de 30/07 a 20/08.
+    // ⚠️ Não dá para importar `CONSOLIDATOR_MODEL` aqui — aquele módulo é `server-only` e
+    // este registro é alcançável do cliente (`cost-preview/catalog.ts` → `orchestration/cost`).
+    // Os dois derivam do MESMO dono (`SONNET_MODEL`), que é o que mantém gate = executor.
+    //
+    // 🔴 E os TOKENS vêm do mesmo dono que o preview (`CONSOLIDATE_SYNOPSIS_USAGE`), pela
+    // mesma razão: o número aqui e o do `cost-preview/catalog.ts` descrevem a MESMA chamada.
+    // ⚠️ `perItem`, não `base`: `buildUsage` NÃO multiplica `base` por `scale`, e o executor
+    // faz UMA chamada POR OBRA — com `base` o gate devolvia o custo de uma chamada para um
+    // lote de N. Hoje nada pede `scale > 1` aqui, então era defeito LATENTE.
     manual: false,
     produces: "canonical_synopsis",
     inputs: [{ dataKey: "raw_synopsis", requirement: "required_automatic_free" }],
-    estimate: { model: HAIKU, base: tokens(1500, 400) },
+    estimate: { model: SONNET, base: ZERO, perItem: CONSOLIDATE_SYNOPSIS_USAGE },
   },
   enrich_tags: {
     action: "enrich_tags",

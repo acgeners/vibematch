@@ -1,5 +1,6 @@
 import "server-only"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
+import { ACTIVE_MODELS } from "@/lib/ai/models"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Curadoria por IA: lê TODOS os favoritos do usuário (balde plano) e propõe até
@@ -9,7 +10,7 @@ import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-clie
 // tool forçada. Ver [[project_favorites_groups_feature]].
 // ────────────────────────────────────────────────────────────────────────────
 
-const MODEL = "claude-haiku-4-5-20251001"
+const MODEL = ACTIVE_MODELS.haiku
 
 /** Uma obra favorita, já enxuta pro prompt (posição = índice 1-based na lista). */
 export interface FavoriteWork {

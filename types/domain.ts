@@ -55,6 +55,8 @@ export const CRITERION_SLUGS = [
   "humor",
   "drama",
   "tragedy",
+  "fantasy",
+  "nobility",
 ] as const
 export type CriterionSlug = (typeof CRITERION_SLUGS)[number]
 
@@ -64,6 +66,12 @@ export const SCORE_SOURCES = [
   "ai_accepted",
   "ai_edited",
   "ai_calibrated",
+  /**
+   * Seed de transição da migration 197: `fantasy`/`nobility` receberam o valor do
+   * `fantasy_nobility` da obra. NÃO é avaliação — `ai_evaluation_id` fica null e não há
+   * justificativa. Sai sozinho quando a obra passar por uma avaliação real.
+   */
+  "legacy_split_copy",
 ] as const
 export type ScoreSource = (typeof SCORE_SOURCES)[number]
 

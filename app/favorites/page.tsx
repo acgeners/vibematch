@@ -12,7 +12,7 @@ import {
   getListsWithSummary,
   getMultiGroupFavorites,
   getUngroupedFavorites,
-  getWorksLiteForPicker,
+  getFavoriteCoverSlots,
 } from "@/server/queries/lists"
 
 // Índice de /favorites: grupos (recortes) + card fixo "Todos os favoritos" + card derivado
@@ -20,7 +20,7 @@ import {
 export const metadata = { title: "Favoritos" }
 
 export default async function FavoritesPage() {
-  const [lists, summary, ungrouped, multi, membership, catalog, scoreThresholds, canAi] =
+  const [lists, summary, ungrouped, multi, membership, coverSlots, scoreThresholds, canAi] =
     await Promise.all([
       getListsWithSummary(),
       getFavoritesSummary(),
@@ -29,7 +29,7 @@ export default async function FavoritesPage() {
       // `getMultiGroupFavorites` consome dele.
       getMultiGroupFavorites(),
       getGroupMembership(),
-      getWorksLiteForPicker(),
+      getFavoriteCoverSlots(),
       getScoreColorThresholds(),
       canConsumeAi(),
     ])
@@ -60,7 +60,7 @@ export default async function FavoritesPage() {
         ungrouped={ungrouped}
         multi={multi}
         nested={membership.nested}
-        catalog={catalog}
+        coverSlots={coverSlots}
       />
     </div>
   )

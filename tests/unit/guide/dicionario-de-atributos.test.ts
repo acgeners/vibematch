@@ -6,6 +6,7 @@ import { GLOSSARY_NOTES } from "@/lib/criteria/glossary-notes"
 import { CRITERIA_RUBRICS } from "@/lib/constants/criteria"
 import { bandForScore } from "@/lib/criteria/justification"
 import { CRITERION_SLUGS } from "@/types/domain"
+import { VISIBLE_CRITERION_SLUGS, LEGACY_HIDDEN_SLUGS } from "@/lib/criteria/visible"
 
 const RAIZ = process.cwd()
 const TAMANHOS = [480, 160, 64] as const
@@ -19,11 +20,21 @@ const TAMANHOS = [480, 160, 64] as const
 describe("dicionário dos atributos", () => {
   const entries = buildGlossary()
 
-  it("tem um verbete para cada critério, na ordem canônica", () => {
-    expect(entries.map((e) => e.slug)).toEqual([...CRITERION_SLUGS])
+  it("tem um verbete para cada critério VISÍVEL, na ordem canônica", () => {
+    expect(entries.map((e) => e.slug)).toEqual([...VISIBLE_CRITERION_SLUGS])
   })
 
-  it.each(CRITERION_SLUGS)("%s tem nome, descrição e as 4 faixas", (slug) => {
+  /**
+   * 🔴 A rede no outro sentido. Sem ela, o legado misto voltaria ao dicionário no primeiro
+   * refactor e ninguém notaria: a página abriria normalmente, ensinando ao leitor uma régua que
+   * o produto deixou de afirmar (ver lib/criteria/visible.ts para o porquê).
+   */
+  it.each(LEGACY_HIDDEN_SLUGS)("%s é LEGADO e NÃO pode ter verbete", (slug) => {
+    expect(entries.find((e) => e.slug === slug), `${slug} voltou ao dicionário`).toBeUndefined()
+    expect(CRITERION_SLUGS as readonly string[], `${slug} sumiu do banco`).toContain(slug)
+  })
+
+  it.each(VISIBLE_CRITERION_SLUGS)("%s tem nome, descrição e as 4 faixas", (slug) => {
     const entry = entries.find((e) => e.slug === slug)
     expect(entry, `sem verbete para ${slug}`).toBeDefined()
     expect(entry!.name.length, `${slug} sem nome`).toBeGreaterThan(0)
@@ -37,7 +48,7 @@ describe("dicionário dos atributos", () => {
     }
   })
 
-  it.each(CRITERION_SLUGS)("%s tem as três artes preparadas em public/", (slug) => {
+  it.each(VISIBLE_CRITERION_SLUGS)("%s tem as três artes preparadas em public/", (slug) => {
     for (const tamanho of TAMANHOS) {
       const src = attributeArtSrc(slug, tamanho)
       const arquivo = join(RAIZ, "public", src.replace(/^\//, ""))
@@ -51,7 +62,7 @@ describe("dicionário dos atributos", () => {
   it("as artes são WebP de verdade, não PNG renomeado", () => {
     // O Chromium devolve PNG em silêncio quando não codifica o formato pedido, e o script
     // grava com extensão .webp mesmo assim. Os 4 primeiros bytes denunciam.
-    for (const slug of CRITERION_SLUGS) {
+    for (const slug of VISIBLE_CRITERION_SLUGS) {
       const arquivo = join(RAIZ, "public", attributeArtSrc(slug, 480).replace(/^\//, ""))
       if (!existsSync(arquivo)) continue
       const cabecalho = readFileSync(arquivo).subarray(0, 4).toString("ascii")
@@ -114,7 +125,7 @@ describe("dicionário dos atributos", () => {
   it("cada faixa da rubrica ainda declara o rótulo com |", () => {
     // O parser depende do formato "0-3 | Rótulo: definição". Se o banco mudar a forma, a
     // página perde os rótulos em silêncio — aqui isso vira falha.
-    for (const slug of CRITERION_SLUGS) {
+    for (const slug of VISIBLE_CRITERION_SLUGS) {
       for (const range of CRITERIA_RUBRICS[slug]?.ranges ?? []) {
         expect(range, `${slug}: faixa sem "|"`).toContain("|")
         expect(range, `${slug}: faixa sem ":"`).toContain(":")

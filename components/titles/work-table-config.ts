@@ -1,6 +1,7 @@
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { CRITERION_SLUGS } from "@/types/domain"
+import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
 
 export type WorkColumnGroup = "basico" | "notas" | "criterios"
 
@@ -169,7 +170,7 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
   { key: "ai_status", label: LABELS.ai_status.abbrev, configLabel: LABELS.ai_status.full, description: LABELS.ai_status.tooltip_full, align: "center", group: "basico" },
   { key: "updated_at", label: LABELS.updated_at.abbrev, configLabel: LABELS.updated_at.full, description: LABELS.updated_at.tooltip_full, align: "center", group: "basico" },
   { key: "last_read_at", label: LABELS.last_read_at.abbrev, configLabel: LABELS.last_read_at.full, description: LABELS.last_read_at.tooltip_full, align: "center", group: "basico" },
-  ...CRITERION_SLUGS.map((slug) => ({
+  ...VISIBLE_CRITERION_SLUGS.map((slug) => ({
     key: `crit_${slug}`,
     label: CRITERIA_INFO[slug]?.emoji ?? slug,
     configLabel: `${CRITERIA_INFO[slug]?.emoji ?? ""} ${CRITERIA_INFO[slug]?.name ?? slug}`.trim(),
@@ -390,6 +391,9 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   // e discordavam, e o `/ranking` era o lado sem a exceção. Declarar aqui faz nenhum dos dois
   // importar.
   //
+  // 🔴 Aqui é CRITERION_SLUGS (não VISIBLE) de propósito: largura faltando cai no `?? 100`
+  // invisível, e o legado ainda pode ser renderizado por uma config salva. Declarar a mais
+  // é inofensivo; declarar a menos é o bug de coluna espremida.
   // Derivado de `CRITERION_SLUGS` pelo mesmo motivo que `WORK_TABLE_COLUMNS` deriva: critério
   // novo no Supabase nasce com largura, não no fallback invisível.
   ...Object.fromEntries(CRITERION_SLUGS.map((slug) => [`crit_${slug}`, 48])),

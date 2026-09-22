@@ -20,6 +20,7 @@ import {
 } from "@/lib/ai-evaluation/no-reviews"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import { SHOW_HAIKU_AB } from "@/lib/ai-evaluation/ab-config"
+import { ACTIVE_MODELS } from "@/lib/ai/models"
 import { describeCrossRuler, formatRuler } from "@/lib/ai-evaluation/confidence-ruler"
 import { confidenceTextClass } from "@/lib/ai-evaluation/confidence-tone"
 import type { AiEvaluation } from "@/types/domain"
@@ -338,12 +339,12 @@ export function AiEvaluationReviewForm({
   }
 
   const showOpusButton =
-    !!onReevaluate && isLowConfidence && evaluation.model_name !== "claude-opus-4-7"
+    !!onReevaluate && isLowConfidence && evaluation.model_name !== ACTIVE_MODELS.opus
 
   // A/B de modelo: oculto por padrão (Haiku se mostrou pior na rubrica).
   // Reexibir via SHOW_HAIKU_AB em lib/ai-evaluation/ab-config.ts.
   const showHaikuButton =
-    SHOW_HAIKU_AB && !!onReevaluate && evaluation.model_name !== "claude-haiku-4-5-20251001"
+    SHOW_HAIKU_AB && !!onReevaluate && evaluation.model_name !== ACTIVE_MODELS.haiku
 
   return (
     <div className="space-y-4">

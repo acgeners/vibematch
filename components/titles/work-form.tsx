@@ -11,6 +11,7 @@ import { titleToSlug, readingProgressPercent } from "@/lib/utils"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { dedupeSynopsisEntries, joinSynopsisBlocks, splitSynopsesFromText } from "@/lib/work-derived"
 import { workFormSchema } from "@/lib/validations/work.schema"
+import { ACTIVE_MODELS } from "@/lib/ai/models"
 import type { WorkFormValues, WorkFormInput } from "@/lib/validations/work.schema"
 import { ChipInput } from "@/components/ui/chip-input"
 import { Textarea } from "@/components/ui/textarea"
@@ -124,6 +125,7 @@ const FIELD_TAB_MAP: Record<string, EditTab> = {
   total_chapters: "geral", cover_url: "geral", covers: "geral", external_ids: "geral",
   // Notas e avaliações
   romance: "notas", couple_dynamics: "notas", fantasy_nobility: "notas",
+  fantasy: "notas", nobility: "notas",
   action_adventure: "notas", adult_content: "notas", protagonist: "notas",
   humor: "notas", drama: "notas", tragedy: "notas",
   mu_rating: "notas", mu_votes: "notas", ap_rating: "notas", ap_votes: "notas",
@@ -619,6 +621,8 @@ const getEmptyCreateValues = (): Partial<WorkFormValues> => ({
   romance: null,
   couple_dynamics: null,
   fantasy_nobility: null,
+  fantasy: null,
+  nobility: null,
   action_adventure: null,
   adult_content: null,
   protagonist: null,
@@ -2809,7 +2813,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                 )}
                 {aiMeta.confidence != null &&
                   aiMeta.confidence < CREATE_FLOW_CONFIRM_THRESHOLD &&
-                  aiMeta.modelName !== "claude-opus-4-7" && (
+                  aiMeta.modelName !== ACTIVE_MODELS.opus && (
                     <div>
                       <Button
                         type="button"

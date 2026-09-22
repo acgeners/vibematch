@@ -1,11 +1,11 @@
 import "server-only"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
-import { SONNET_MODEL } from "@/lib/ai/models"
+import { ACTIVE_MODELS, SONNET_MODEL } from "@/lib/ai/models"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>
 
-const MODEL = "claude-haiku-4-5-20251001"
+const MODEL = ACTIVE_MODELS.haiku
 
 // Grupos inferíveis da sinopse, incluídos por inteiro (menos o subgrupo "Looks").
 const INCLUDED_FULL = new Set([

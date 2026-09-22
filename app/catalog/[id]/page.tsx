@@ -120,7 +120,6 @@ import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/consta
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { computeAdultContentBounds, clampAdultContentScore } from "@/lib/ai-evaluation/adult-content-rules"
 import { autorDaNota } from "@/lib/criteria/nota-autor"
-import { CRITERION_SLUGS } from "@/types/domain"
 import { isFollowingPersonalStatus, personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 import {
   DEFAULT_POST_READING_WEIGHTS,
@@ -132,6 +131,7 @@ import { STATUS_CHIP_BASE, STATUS_TONE } from "@/lib/ui/status-tone"
 import { verdictBandClass } from "@/lib/ui/verdict-band"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { unstable_cache } from "next/cache"
+import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
 
 interface TitleDetailPageProps {
   params: Promise<{ id: string }>
@@ -1374,7 +1374,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           {(() => {
             const itens: CriterioItem[] = []
             const detalhes: React.ReactNode[] = []
-            for (const slug of CRITERION_SLUGS) {
+            // Leitura: o legado misto sai da grade (ver lib/criteria/visible.ts). Ele continua
+            // no cálculo e na curadoria — só não é mais afirmado ao leitor.
+            for (const slug of VISIBLE_CRITERION_SLUGS) {
               const info = CRITERIA_INFO[slug]
               const score = scoreMap[slug]
               const aiScore = latestAiScoreMap.get(slug)
@@ -1415,6 +1417,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   clampAdultContentScore(iaSuggested, adultContentBounds) === score,
               })
               const isUserEdited = autor === "curadoria"
+              /**
+               * Quarto autor (migration 197): a nota é HERDADA do critério misto — cópia do
+               * `fantasy_nobility` da obra, com `source: legacy_split_copy`. Nenhum modelo a
+               * produziu para este critério, e por isso ela não tem justificativa própria.
+               */
+              const isHerdado = autor === "legado"
               /**
                * 🔴 Terceiro autor possível: o LIMITE de `adult_content`. Ele move a nota e
                * deixa `source: ai_accepted`, então até 2026-08-20 essa nota era a única sem
@@ -1487,6 +1495,16 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                        igual, senão viram dois nomes pra mesma coisa a dois centímetros. */
                     <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">
                       Definida pelo limite obrigatório · a IA sugeria {iaSuggested!.toFixed(1)}
+                    </p>
+                  )}
+                  {isHerdado && (
+                    /* Procedência, não estado — mesma régua dos outros três créditos: sem cor,
+                       porque âmbar aqui significaria "desatualizado" (ver STATUS_TONE), e a nota
+                       herdada não está desatualizada: ela nunca foi avaliada separadamente.
+                       ⚠️ Marca DISCRETA de propósito: no dia do seed ela vale para ~99,7% das
+                       fichas, e um chip visível em toda obra é o alarme que ninguém lê. */
+                    <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                      Herdada do critério combinado · ainda não avaliada separadamente
                     </p>
                   )}
                   {isCalibrated && (

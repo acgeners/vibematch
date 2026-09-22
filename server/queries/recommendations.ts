@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin"
+import { cache } from "react"
 import { HIATUS_SELECT_COLUMNS, hiatusFieldsFromRow } from "@/lib/works/hiatus-display"
 import type { HiatusFields } from "@/lib/works/hiatus-display"
 import { getInterestReader } from "@/server/queries/user-interest"
@@ -451,20 +452,26 @@ export async function getStaleAlignmentWorks(
   // leitura é a MESMA história: `works_owner.personal_status_id` é sempre o do
   // DONO — vem de `getPersonalStateReader()` (per usuário) e filtra em JS.
   const [reader, personalReader] = await Promise.all([getScoresReader(), getPersonalStateReader()])
-  let query = supabase
-    .from("works_owner")
-    .select(
-      "id, title, publication_status_id, work_covers(url, is_primary, position), calculated_scores(alignment_score, alignment_at, alignment_stale)",
-    )
-    .eq("is_archived", false)
-  if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
-    query = query.in("publication_status_id", opts.pubStatusIds)
-  }
-  // Busca ampla — o corte por `limit` agora acontece DEPOIS do filtro em JS (um
-  // corte pré-filtro sub-contaria candidatos reais, dependendo da ordem física
-  // das linhas). Mesmo teto de getAlignmentQueueWorks.
-  const { data, error } = await query.limit(5000)
-  if (error) throw new Error(`Falha listando Veredito IA desatualizados: ${error.message}`)
+  // Busca ampla — o corte acontece DEPOIS do filtro em JS (um corte pré-filtro sub-contaria
+  // candidatos reais, dependendo da ordem física das linhas).
+  //
+  // 🔴 E era exatamente isso que o `.limit(5000)` daqui NÃO entregava: o PostgREST corta em
+  // 1000 de qualquer jeito, anulando em silêncio a intenção que o comentário declarava.
+  // Medido em 2026-09-08: 1.010 obras ativas e recorte ESTÁVEL entre execuções — as MESMAS
+  // 10 obras nunca podiam entrar no pool de Veredito desatualizado, por mais que o filtro
+  // posterior as qualificasse.
+  const data = await fetchAllRows<unknown>((from: number, to: number) => {
+    let q = supabase
+      .from("works_owner")
+      .select(
+        "id, title, publication_status_id, work_covers(url, is_primary, position), calculated_scores(alignment_score, alignment_at, alignment_stale)",
+      )
+      .eq("is_archived", false)
+    if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
+      q = q.in("publication_status_id", opts.pubStatusIds)
+    }
+    return q.range(from, to)
+  }, "getAlignmentQueueWorks.candidates")
 
   const candidates = (data ?? [])
     .map((row) => {
@@ -887,6 +894,44 @@ function orderedCoverUrls(covers: RawCoverRow[] | undefined): string[] {
   return [...new Set(list)]
 }
 
+/**
+ * Todas as previsões de sinopse de quem está olhando — memoizada POR REQUISIÇÃO.
+ *
+ * 🔴 Por que existe. Medido em 2026-09-08 numa sessão autenticada de 4 rotas: esta leitura
+ * varreu a tabela inteira 5 VEZES (3 páginas por varredura, 2.386 linhas cada) porque os
+ * badges do chrome chamam `getSynopsisQueueWorks({countOnly:true})` em TODA navegação — e a
+ * varredura acontece ANTES de qualquer short-circuit de `countOnly`. Só o bloco de previsões
+ * respondeu por 2.234 KB de uma sessão de 7.310 KB (30,6%).
+ *
+ * ⚠️ `cache()` e não um filtro mais estreito, de propósito: a contagem depende do estado
+ * derivado das previsões (`unpredicted`/`stale`), então os dados SÃO necessários. O que não
+ * era necessário é relê-los. Memoização não muda linha nenhuma — a paridade é por
+ * construção, não por conferência.
+ *
+ * ⚠️ Escopo por requisição: duas pessoas nunca compartilham o resultado, e a próxima
+ * requisição relê. `getInterestReader` já é `cache()`, então o `.in(taste_profile_id)` é
+ * estável dentro do request.
+ */
+const lerPrevisoesDoPerfil = cache(async (): Promise<Array<{ work_id: string } & SynopsisPredRow>> => {
+  const supabase = createAdminClient()
+  const interest = await getInterestReader()
+  return fetchAllRowsParallel<{ work_id: string } & SynopsisPredRow>(
+    () =>
+      interest.scope(
+        supabase.from("synopsis_quality_predictions").select("work_id", { count: "exact", head: true }),
+      ),
+    (from, to) =>
+      interest
+        .scope(
+          supabase
+            .from("synopsis_quality_predictions")
+            .select("id, work_id, predicted_quality, stale, confidence, prompt_version, predicted_at"),
+        )
+        .range(from, to),
+    "Falha lendo previsões de sinopse",
+  )
+})
+
 export async function getSynopsisQueueWorks(opts: {
   states?: Array<"stale" | "unpredicted" | "predicted">
   pubStatusIds?: number[]
@@ -931,22 +976,10 @@ export async function getSynopsisQueueWorks(opts: {
   // `justification` (texto longo ≈ 72% do payload) fica FORA deste lote — é
   // hidratada sob demanda só pras obras exibidas (`hydrateJustifications`), cortando
   // ~1,2MB de egress por load. O `id` entra pra permitir esse fetch direcionado.
+  // `interest` segue necessário aqui: o `hydrateJustifications` reaplica o escopo por
+  // defesa em profundidade (justification descreve o GOSTO de alguém).
   const interest = await getInterestReader()
-  const predRows = await fetchAllRowsParallel<{ work_id: string } & SynopsisPredRow>(
-    () =>
-      interest.scope(
-        supabase.from("synopsis_quality_predictions").select("work_id", { count: "exact", head: true }),
-      ),
-    (from, to) =>
-      interest
-        .scope(
-          supabase
-            .from("synopsis_quality_predictions")
-            .select("id, work_id, predicted_quality, stale, confidence, prompt_version, predicted_at"),
-        )
-        .range(from, to),
-    "Falha lendo previsões de sinopse",
-  )
+  const predRows = await lerPrevisoesDoPerfil()
   // Pode haver VÁRIAS previsões por obra (uma por versão de prompt). Agrupa e
   // escolhe a "ativa" (versão atual, senão a de maior versão) pra exibição.
   const verNum = (v: string | null | undefined) => {

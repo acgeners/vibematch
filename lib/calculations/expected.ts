@@ -34,7 +34,8 @@
  * quebrar callers; UI pode esconder o waterfall quality quando soma zero.
  */
 
-import { CRITERION_SLUGS, type CategoryScoreMap, type CriterionSlug } from "@/types/domain"
+import type { CategoryScoreMap, CriterionSlug } from "@/types/domain"
+import { SCORING_CRITERION_SLUGS } from "@/lib/calculations/scoring-features"
 import {
   CategoricalImputer,
   MedianImputer,
@@ -60,7 +61,7 @@ const SINOPSE_MAP: Record<string, number> = {
 // comportamento do legado Nota.Calc. `ExpectedScoreInput.observationAdjustment`
 // continua existindo, mas não entra mais em `buildNumericRow`.
 const BASELINE_NUMERIC_FEATURES = [
-  ...CRITERION_SLUGS,
+  ...SCORING_CRITERION_SLUGS,
   "IA(n)",
   "Nota.M",
   "LogVotos",
@@ -189,7 +190,7 @@ function buildNumericRow(
   includeArt = false,
 ): NumericRow {
   const row: (number | null)[] = []
-  for (const slug of CRITERION_SLUGS) {
+  for (const slug of SCORING_CRITERION_SLUGS) {
     const v = input.categoryScores[slug as CriterionSlug]
     row.push(v == null || !Number.isFinite(v) ? null : v)
   }

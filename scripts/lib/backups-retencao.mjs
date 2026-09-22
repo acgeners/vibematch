@@ -73,6 +73,19 @@ export const FAMILIAS = [
     env: "BACKUP_KEEP",
   },
   {
+    id: "local-primary",
+    dono: "db-local-backup.mjs",
+    // 🔴 A única família cujo original NÃO é recriável. As outras são derivadas da nuvem
+    // (`pull`, `backup`) ou de uma operação repetível; esta guarda o banco LOCAL enquanto ele
+    // é a FONTE DA VERDADE temporária — o que ela protege não existe em outro lugar.
+    // Por isso o teto é alto: 12 execuções, não 3.
+    oQueE: "pg_dump do banco LOCAL enquanto LOCAL PRIMARY está ativo — schema + dado + os UUIDs do auth",
+    casa: (n) => /^local-primary-\d{4}-\d{2}-\d{2}T/.test(n),
+    exemplo: "local-primary-2026-08-22T21-30-00-000Z",
+    keepPadrao: 12,
+    env: "LOCAL_PRIMARY_KEEP",
+  },
+  {
     id: "pull",
     dono: "db-pull-to-local.mjs",
     // Guardamos mais destes do que o tamanho sugere: é o ÚNICO backup do projeto que inclui

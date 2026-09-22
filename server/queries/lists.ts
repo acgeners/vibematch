@@ -4,6 +4,7 @@ import { createUserClient } from "@/lib/supabase/user"
 import { fetchAllRows, selectByIdsInChunks } from "@/lib/supabase/paginate"
 import { pickPrimaryCover } from "@/lib/covers"
 import { coverCandidates } from "@/lib/work-derived"
+import type { WorkCoverRow } from "@/lib/work-derived"
 import { CRITERION_SLUGS, type CriterionSlug } from "@/types/domain"
 import type { FavoritesSummary } from "@/server/queries/favorites"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
@@ -774,20 +775,61 @@ export async function countWorksInLists(
 
 /** Catálogo "lite" pro picker de obras (adicionar/remover do grupo) e pra
  *  escolha de capas. Todas as obras não arquivadas, mais leves. */
+/**
+ * Só as capas do mosaico de "Todos os favoritos" — no máximo 3 obras.
+ *
+ * 🔴 Existe para tirar `getWorksLiteForPicker()` do carregamento inicial. Aquele traz o
+ * CATÁLOGO INTEIRO (1.010 obras com capas, 415 KB medidos em 2026-09-08) e o único uso dele
+ * no render era derivar estes 3 mosaicos; o resto só é lido dentro de diálogos. Pedir 1.010
+ * linhas para desenhar 3 é o desperdício que a medição por rota tornou visível.
+ */
+export async function getFavoriteCoverSlots(): Promise<string[][]> {
+  const supabase = createAdminClient()
+  const viewerId = await getSessionUserId()
+  if (!viewerId) return []
+  const { data, error } = await supabase
+    .from("user_work_state")
+    .select("work_id, works!inner(id, is_archived, work_covers(url, is_primary, position))")
+    .eq("user_id", viewerId)
+    .eq("is_favorite", true)
+    .eq("works.is_archived", false)
+    .limit(12)
+  if (error) {
+    console.error("[lists] erro lendo capas do mosaico:", error.message)
+    return []
+  }
+  // limit(12) e não limit(3): obra favorita pode não ter capa, e o mosaico quer 3 COM capa.
+  const slots: string[][] = []
+  for (const row of (data ?? []) as unknown as Array<{ works: { work_covers: WorkCoverRow[] } }>) {
+    const urls = coverCandidates(row.works?.work_covers ?? [])
+    if (urls.length > 0) slots.push(urls)
+    if (slots.length === 3) break
+  }
+  return slots
+}
+
 export async function getWorksLiteForPicker(): Promise<WorkLiteForPicker[]> {
   const supabase = createAdminClient()
-  let query = supabase
-    .from("works")
-    .select("id, title, calculated_scores(expected_score), work_covers(url, is_primary, position)")
-    .eq("is_archived", false)
-    .order("title", { ascending: true })
-    .limit(3000)
-  // Quem oculta 18+ não vê obras adultas nem no picker de adicionar à lista.
-  if (await getHideAdultContent()) query = query.eq("is_adult", false)
-  const { data, error } = await query
-
-  if (error) {
-    console.error("[lists] erro lendo catálogo lite:", error.message)
+  // 🔴 `.limit(3000)` NÃO é honrado: o PostgREST corta em 1000. Medido em 2026-09-08 na
+  // nuvem — 1.010 obras ativas e esta query devolvia 1.000, ou seja 10 obras sumiam do
+  // picker de adicionar à lista e do escolhedor de capas, sem erro e sem log.
+  const esconderAdulto = await getHideAdultContent()
+  const montar = (from: number, to: number) => {
+    let q = supabase
+      .from("works")
+      .select("id, title, calculated_scores(expected_score), work_covers(url, is_primary, position)")
+      .eq("is_archived", false)
+      .order("title", { ascending: true })
+      .range(from, to)
+    // Quem oculta 18+ não vê obras adultas nem no picker de adicionar à lista.
+    if (esconderAdulto) q = q.eq("is_adult", false)
+    return q
+  }
+  let data: unknown[] = []
+  try {
+    data = await fetchAllRows<unknown>(montar, "getWorksLiteForPicker")
+  } catch (e) {
+    console.error("[lists] erro lendo catálogo lite:", (e as Error).message)
     return []
   }
 

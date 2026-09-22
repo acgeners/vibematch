@@ -3,6 +3,8 @@
 import { randomUUID } from "node:crypto"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getWorksLiteForPicker } from "@/server/queries/lists"
+import type { WorkLiteForPicker } from "@/server/queries/lists"
 import { ensureAdmin, ensureSignedIn, ensurePermission } from "@/server/queries/current-user"
 import { createUserClient } from "@/lib/supabase/user"
 import { writeReadingState } from "@/server/queries/user-work-state"
@@ -420,4 +422,15 @@ export async function createGroupFromProposal(input: {
     if ("error" in added) return { error: added.error }
   }
   return { data: { id: created.data.id } }
+}
+
+/**
+ * Catálogo do picker, SOB DEMANDA. Chamado quando um diálogo abre, nunca no carregamento.
+ *
+ * 🔴 Medido em 2026-09-08: no carregamento inicial isto custava 415 KB por visita a
+ * /favorites — e DOBRAVA, porque o prefetch de /favorites/[listId] renderiza a outra página
+ * que chamava a mesma função. Nada disso aparecia na tela: o picker está atrás de um clique.
+ */
+export async function carregarCatalogoDoPicker(): Promise<WorkLiteForPicker[]> {
+  return getWorksLiteForPicker()
 }

@@ -14,6 +14,7 @@
  */
 
 import type { ContractPreconditionSnapshot, DataKey } from "./contracts"
+import { CRITERION_SLUGS } from "@/types/domain"
 
 export type DataReadiness = "absent" | "fresh" | "stale" | "partial"
 
@@ -95,7 +96,7 @@ export function resolveReadiness(s: WorkReadinessSnapshot): Record<DataKey, Data
           ? "stale"
           : "fresh",
     category_scores_ai:
-      s.categoryScoresAiCount >= 9 ? "fresh" : s.categoryScoresAiCount > 0 ? "partial" : "absent",
+      s.categoryScoresAiCount >= CRITERION_SLUGS.length ? "fresh" : s.categoryScoresAiCount > 0 ? "partial" : "absent",
     calculated_scores: fromPresentStale(s.scores),
     interest_prediction: fromPresentStale(s.interest),
     // Data keys usados só pela cascata IMPERATIVA generate_all (não são input de

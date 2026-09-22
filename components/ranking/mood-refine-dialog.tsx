@@ -14,12 +14,13 @@ import {
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
-import { CRITERION_SLUGS, type CriterionSlug } from "@/types/domain"
+import { type CriterionSlug } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import type { AttributeWeight, MoodExclusionKey, MoodPracticalDimension, MoodRefine } from "@/lib/calculations/mood-refine"
 import { BIPOLAR_DIMENSIONS, MOOD_DIMENSION_INFO, MOOD_EXCLUSION_GROUPS, UNIPOLAR_DIMENSIONS } from "@/lib/ui/mood-dimensions"
 import { MoodPreview, type MoodPreviewWork } from "@/components/ranking/mood-preview"
 import { filterMoodWorks, isMoodActive } from "@/lib/calculations/mood-refine"
+import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
 
 const EMPTY_MOOD: MoodRefine = { attributes: {}, practical: {} }
 
@@ -299,7 +300,7 @@ export function MoodRefineDialog({
               </p>
             )}
             <div className="grid grid-flow-row gap-x-6 sm:grid-flow-col sm:grid-cols-2 sm:grid-rows-5">
-              {CRITERION_SLUGS.map((slug) => {
+              {VISIBLE_CRITERION_SLUGS.map((slug) => {
                 const info = CRITERIA_INFO[slug]
                 const cur = mood.attributes[slug] ?? null
                 return (

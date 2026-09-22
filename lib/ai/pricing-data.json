@@ -1,29 +1,48 @@
 {
-  "snapshotTag": "static@2026-05-23",
+  "snapshotTag": "static@2026-08-22",
+  "fonte": "https://platform.claude.com/docs/en/about-claude/pricing (conferido 2026-08-22)",
+  "nota": "models[<id>] é um ARRAY de janelas, resolvido por lib/ai/pricing-window.js (o MESMO resolvedor do app e dos scripts). validUntil é INCLUSIVO (fim do dia UTC). A ÚLTIMA janela de todo modelo em uso tem que ser ABERTA (validUntil null), senão o preço vence sem sucessora e o custo passa a ser registrado como ZERO. Guardado por tests/unit/ai/pricing-vence-sem-sucessora.test.ts.",
   "models": {
-    "claude-sonnet-4-6": {
-      "inputPerMTok": 3,
-      "outputPerMTok": 15,
-      "cacheReadPerMTok": 0.3,
-      "cacheCreationPerMTok": 3.75
-    },
-    "claude-sonnet-5": {
-      "inputPerMTok": 2,
-      "outputPerMTok": 10,
-      "cacheReadPerMTok": 0.2,
-      "cacheCreationPerMTok": 2.5
-    },
-    "claude-opus-4-7": {
-      "inputPerMTok": 5,
-      "outputPerMTok": 25,
-      "cacheReadPerMTok": 0.5,
-      "cacheCreationPerMTok": 6.25
-    },
-    "claude-haiku-4-5-20251001": {
-      "inputPerMTok": 1,
-      "outputPerMTok": 5,
-      "cacheReadPerMTok": 0.1,
-      "cacheCreationPerMTok": 1.25
-    }
+    "claude-sonnet-4-6": [
+      {
+        "validFrom": null,
+        "validUntil": null,
+        "inputPerMTok": 3,
+        "outputPerMTok": 15,
+        "cacheReadPerMTok": 0.3,
+        "cacheCreationPerMTok": 3.75
+      }
+    ],
+    "claude-sonnet-5": [
+      {
+        "validFrom": null,
+        "validUntil": null,
+        "inputPerMTok": 2,
+        "outputPerMTok": 10,
+        "cacheReadPerMTok": 0.2,
+        "cacheCreationPerMTok": 2.5,
+        "nota": "Preço PADRÃO. Anunciado como introdutório até 2026-08-31 e tornado permanente em 10/08/2026 — o aumento para $3/$15 em 01/09 NÃO vai acontecer (nota `claude-sonnet-5-introductory-pricing` na página de pricing)."
+      }
+    ],
+    "claude-opus-4-7": [
+      {
+        "validFrom": null,
+        "validUntil": null,
+        "inputPerMTok": 5,
+        "outputPerMTok": 25,
+        "cacheReadPerMTok": 0.5,
+        "cacheCreationPerMTok": 6.25
+      }
+    ],
+    "claude-haiku-4-5-20251001": [
+      {
+        "validFrom": null,
+        "validUntil": null,
+        "inputPerMTok": 1,
+        "outputPerMTok": 5,
+        "cacheReadPerMTok": 0.1,
+        "cacheCreationPerMTok": 1.25
+      }
+    ]
   }
 }

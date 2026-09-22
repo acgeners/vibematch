@@ -22,13 +22,13 @@ import type { AiEvaluation } from "@/types/domain"
 import { pickPrimaryCover, splitSynopsesForEvaluation } from "@/lib/work-derived"
 import { isSameSynopsis } from "@/lib/synopsis-text"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
-import { SONNET_MODEL } from "@/lib/ai/models"
+import { ACTIVE_MODELS, SONNET_MODEL } from "@/lib/ai/models"
 import { pgSafeDeep, pgSafeText } from "@/lib/text/pg-safe-text"
 import { ensureAdmin } from "@/server/queries/current-user"
 
-const OPUS_MODEL_ID = "claude-opus-4-7"
+const OPUS_MODEL_ID = ACTIVE_MODELS.opus
 const SONNET_MODEL_ID = SONNET_MODEL
-const HAIKU_MODEL_ID = "claude-haiku-4-5-20251001"
+const HAIKU_MODEL_ID = ACTIVE_MODELS.haiku
 
 type ReevalModel = "sonnet" | "opus" | "haiku"
 

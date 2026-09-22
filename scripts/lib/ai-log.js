@@ -13,11 +13,14 @@
 // Uso (ESM):  import { loggedCreate } from "./lib/ai-log.js"
 
 const pricingData = require("../../lib/ai/pricing-data.json")
+// MESMO resolvedor do app (lib/ai/pricing.ts). Duas implementações da seleção de janela
+// fariam scripts e app gravarem custos diferentes na MESMA tabela ai_api_calls.
+const { resolvePricingWindow } = require("../../lib/ai/pricing-window.js")
 
 const MILLION = 1_000_000
 
 function computeCostUsd(model, usage) {
-  const price = pricingData.models[model]
+  const price = resolvePricingWindow(pricingData.models, model)
   if (!price) {
     return {
       cost_input_usd: 0,

@@ -7,6 +7,7 @@ import "server-only"
 
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { getPublicationStatusNameById } from "@/lib/constants/status-lookups"
 import {
   normalizeGPT,
@@ -56,6 +57,7 @@ import {
   mergeDeclaredTagPreferences,
 } from "@/lib/ai-recommendation/taste-profile-heuristic"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
+import { SCORING_CRITERION_SLUGS } from "@/lib/calculations/scoring-features"
 import type { DeclaredTagPref } from "@/server/queries/tag-preferences"
 import { loadArtLabels } from "@/server/queries/pilot-taste"
 import { computeArtForCatalog } from "@/lib/art/model"
@@ -513,18 +515,29 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   // reclama: ele cai na média do treino e devolve 878 notas plausíveis e erradas.
   const [worksRes, weightsRes, configRes, tasteProfile, declaredTagPrefs, ownerLabels, artLabels] =
     await Promise.all([
-      supabase
-        .from("works")
-        .select(
-          `id, publication_status_id, total_chapters, is_archived,
+      // 🔴 `.limit(2000)` NÃO é honrado — o PostgREST corta em 1000. Medido em 2026-09-08:
+      // 1.010 obras ativas na nuvem, então 10 delas ficavam FORA do recalc: nunca entravam
+      // no treino do Ridge nem recebiam nota nova, e a tela mostrava a nota velha sem nada
+      // acusar. Paginado, o custo é +1 requisição por execução.
+      (async () => {
+        const rows = await fetchAllRows<unknown>(
+          (from: number, to: number) =>
+            supabase
+              .from("works")
+              .select(
+                `id, publication_status_id, total_chapters, is_archived,
          year, year_end, original_title,
          art_signal,
          category_scores(criterion_slug, score, source),
          platform_ratings(id, platform, rating, vote_count),
          work_tags(tags(name, slug, tag_group_id))`
+              )
+              .eq("is_archived", false)
+              .range(from, to),
+          "recalculateAll.works",
         )
-        .eq("is_archived", false)
-        .limit(2000),
+        return { data: rows, error: null as { message: string } | null }
+      })(),
       supabase.from("score_weights").select("*").eq("is_active", true),
       supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
       // 🔴 EXPLÍCITO, não "o corrente". O recalc roda em background, sem sessão — e até a
@@ -1196,7 +1209,7 @@ export function computeRecalc(input: RecalcComputeInput) {
     // avaliação). Nesses casos deixamos expected_score = null: some de todas as
     // telas (badges gateiam em `expected_score != null`; o ranking joga essas
     // obras pro fim via -Infinity). Presença é source-independente (IA/import/manual).
-    const hasAiAttributes = CRITERION_SLUGS.every((slug) => w.categoryScores[slug] != null)
+    const hasAiAttributes = SCORING_CRITERION_SLUGS.every((slug) => w.categoryScores[slug] != null)
     if (!hasAiAttributes) {
       w.expectedScore = null
       w.expectedBaseline = null

@@ -1,5 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { computeRecalc, buildWork, type RawWork } from "@/server/actions/calculations"
 import { loadLabelsFor, withOwnerLabels, mirrorOwnerScores } from "@/server/queries/owner-labels"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
@@ -63,17 +64,28 @@ export async function recalculateForUser(userId: string): Promise<UserRecalcResu
       // Só CATÁLOGO. As colunas pessoais não vêm daqui: `withOwnerLabels` sobrescreve TODAS as
       // PERSONAL_COLUMNS com as DESTE usuário (`loadLabelsFor(userId)`), tenham vindo no select
       // ou não — pedi-las a `works` traria o dado do DONO e seria descartado do mesmo jeito.
-      supabase
-        .from("works")
-        .select(
-          `id, publication_status_id, total_chapters, is_archived,
+      // 🔴 `.limit(2000)` NÃO é honrado — o PostgREST corta em 1000. Medido em 2026-09-08:
+      // 1.010 obras ativas, recorte ESTÁVEL, então as MESMAS 10 nunca recebiam nota nova
+      // para quem não é o dono — a antiga seguia em uso no ranking e na recomendação, sem
+      // erro e sem log.
+      (async () => {
+        const rows = await fetchAllRows<unknown>(
+          (from: number, to: number) =>
+            supabase
+              .from("works")
+              .select(
+                `id, publication_status_id, total_chapters, is_archived,
            year, year_end, original_title,
            category_scores(criterion_slug, score, source),
            platform_ratings(id, platform, rating, vote_count),
            work_tags(tags(name, tag_group_id))`,
+              )
+              .eq("is_archived", false)
+              .range(from, to),
+          "user-recalc.works",
         )
-        .eq("is_archived", false)
-        .limit(2000),
+        return { data: rows, error: null as { message: string } | null }
+      })(),
       supabase.from("score_weights").select("*").eq("is_active", true),
       supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
       // Sem piso: 3 rótulos é normal pra quem chegou agora — não é falha.

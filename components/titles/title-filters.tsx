@@ -42,17 +42,23 @@ import { cn } from "@/lib/utils"
 import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 import { CollapseIconTrigger, CollapseTitleTrigger } from "@/components/ui/collapse-trigger"
 import { ActiveFilterChips } from "@/components/ranking/active-filter-chips"
+import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
 
+/**
+ * Rótulo CURTO do critério. As entradas abaixo são ENCURTAMENTOS deliberados ("Casal" em vez de
+ * "Dinâmica entre Protagonistas"); o resto DERIVA de `CRITERIA_INFO`, que é gerado do banco.
+ *
+ * 🔴 Este mapa era literal nos 9 slugs, e isso é uma classe de defeito conhecida: critério novo
+ * no Supabase entrava no filtro com o SLUG CRU no chip ("fantasy") — ou sem chip nenhum —, e o
+ * filtro cortava obras sem que o usuário visse por quê. Medido ao separar Fantasia/Nobreza:
+ * `?min_fantasy=9` recortava 1.010 → 69 obras **sem chip na tela**.
+ */
 const CRITERION_LABELS: Record<string, string> = {
-  romance: "Romance",
+  ...Object.fromEntries(CRITERION_SLUGS.map((slug) => [slug, CRITERIA_INFO[slug]?.name ?? slug])),
+  // encurtamentos (o nome oficial é longo demais para o chip)
   couple_dynamics: "Casal",
-  fantasy_nobility: "Fantasia/Nobreza",
-  action_adventure: "Ação/Aventura",
   adult_content: "Conteúdo adulto",
   protagonist: "Protagonista",
-  humor: "Humor",
-  drama: "Drama",
-  tragedy: "Tragédia",
 }
 
 const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
@@ -67,7 +73,7 @@ const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
  * Ordenar pelos 9 atributos. O backend de /catalog já aceitava `crit_<slug>`
  * (a whitelist em app/catalog/page.tsx), só a UI não oferecia.
  */
-const CRITERION_SORT_FIELDS: Array<{ value: string; label: string }> = CRITERION_SLUGS.map(
+const CRITERION_SORT_FIELDS: Array<{ value: string; label: string }> = VISIBLE_CRITERION_SLUGS.map(
   (slug) => ({
     value: `crit_${slug}`,
     label: `${CRITERIA_INFO[slug]?.emoji ?? ""} ${CRITERION_LABELS[slug] ?? slug}`.trim(),
@@ -962,6 +968,11 @@ export function TitleFilters({
   const adultParam = searchParams.get("adult")
   const adultMode: "all" | "hide" | "only" =
     adultParam === "hide" ? "hide" : adultParam === "only" ? "only" : "all"
+  /**
+   * 🔴 CRITERION_SLUGS, não VISIBLE: um preset antigo pode trazer `min_fantasy_nobility` na URL,
+   * e o parser do servidor continua aplicando. Contar só os visíveis faria o filtro do legado
+   * cortar obras SEM aparecer no contador — filtro invisível é o "erro que produz resultado".
+   */
   const criterionRangeCount = CRITERION_SLUGS.filter(
     (slug) => searchParams.get(`min_${slug}`) || searchParams.get(`max_${slug}`),
   ).length
@@ -992,6 +1003,7 @@ export function TitleFilters({
   pushRange("fit", LABELS.personal_fit.full, "min_fit", "max_fit")
   pushRange("platform", LABELS.platform_avg.full, "min_platform_avg", "max_platform_avg")
   pushRange("votes", LABELS.total_votes.full, "min_votes", "max_votes")
+  // Idem: o CHIP de filtro ativo cobre o legado, senão um preset antigo filtra em silêncio.
   for (const slug of CRITERION_SLUGS) {
     pushRange(`crit-${slug}`, CRITERION_LABELS[slug] ?? slug, `min_${slug}`, `max_${slug}`)
   }
@@ -1439,7 +1451,7 @@ export function TitleFilters({
                 /catalog é pra navegar; filtro literal é o certo aqui. */}
             <FilterCard title={`Notas dos 9 atributos${criterionRangeCount ? ` (${criterionRangeCount})` : ""}`}>
               <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
-                {CRITERION_SLUGS.map((slug) => (
+                {VISIBLE_CRITERION_SLUGS.map((slug) => (
                   <ScoreRangeCard
                     key={slug}
                     emoji={CRITERIA_INFO[slug]?.emoji ?? "•"}

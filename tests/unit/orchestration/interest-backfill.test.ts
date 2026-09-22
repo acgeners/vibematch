@@ -81,12 +81,12 @@ class ExecGateway implements InterestGateway {
 
 const profileFresh = (row: TasteProfileRow): ((d: EnsureTasteProfileDeps) => Promise<EnsureTasteProfileOutcome>) => async () => ({ status: "fresh", profile: row })
 const profileRegen = (row: TasteProfileRow, state: { calls: number }): ((d: EnsureTasteProfileDeps) => Promise<EnsureTasteProfileOutcome>) => async () => { state.calls++; return { status: "succeeded", profile: row, ranLlm: true, costUsd: 0.4 } }
-function fakePredict(state: { calls: number; max: number; cur: number }): DefaultPredictFn {
+function fakePredict(state: { calls: number; max: number; cur: number }, usageUsd = 0.01): DefaultPredictFn {
   return async () => {
     state.cur++; state.max = Math.max(state.max, state.cur); state.calls++
     await new Promise((r) => setTimeout(r, 5))
     state.cur--
-    return { predictedQuality: "♥♥♥", justification: "j", confidence: 0.6, modelName: MODEL, promptVersion: PROMPT_VERSION, apiCallId: null, usageUsd: 0.01 }
+    return { predictedQuality: "♥♥♥", justification: "j", confidence: 0.6, modelName: MODEL, promptVersion: PROMPT_VERSION, apiCallId: null, usageUsd }
   }
 }
 
@@ -383,12 +383,33 @@ describe("execução (mocks/no-op)", () => {
     const plan = await planInterestBackfill({ gateway: gw })
     const exec = new ExecGateway(); for (const w of gw.works) exec.works.set(w.workId, w)
     const st = { calls: 0, max: 0, cur: 0 }
-    // upper/item ~0.016; teto 0.05 ⇒ inicia enquanto acc+0.016 ≤ 0.05 (acc real $0.01/item)
-    const res = await runInterestBackfill({ planSignature: plan.planSignature, maxCostUsd: 0.05, planGateway: gw, interestGateway: exec, ensureProfile: profileFresh(profileRow("LIB")), predict: fakePredict(st), jobStore: new InMemoryJobStore(), concurrency: 1 })
-    if (res.status === "completed" || res.status === "partial") {
-      expect(res.report.stoppedByCost).toBe(true)
-      expect(st.calls).toBeLessThan(4)
-    }
+
+    // 🔴 O cenário precisa de DOIS ingredientes, e a versão anterior deste caso tinha só um.
+    //
+    // O hard cap (`plan.estimatedUpperBoundUsd > maxCostUsd`) barra a execução INTEIRA antes
+    // de começar. Então um teto pequeno não exercita o soft-cap — ele devolve
+    // `blocked_cost_confirmation` e o caso passava por VACUIDADE, porque o `if (status ===
+    // completed | partial)` pulava as asserções em silêncio. Conferido com sonda: desligando
+    // o soft-cap em produção, o caso continuava verde.
+    //
+    // O soft-cap só tem o que fazer quando o custo REAL supera a estimativa. Logo:
+    //   teto  = o upper bound do plano (passa raspando no hard cap)
+    //   real  = metade do teto por chamada (bem acima do upper por item)
+    // ⇒ 1ª chamada acumula metade; a 2ª ainda cabe; a 3ª estouraria e NÃO é iniciada.
+    const teto = plan.estimatedUpperBoundUsd
+    const res = await runInterestBackfill({
+      planSignature: plan.planSignature, maxCostUsd: teto, planGateway: gw, interestGateway: exec,
+      ensureProfile: profileFresh(profileRow("LIB")), predict: fakePredict(st, teto / 2),
+      jobStore: new InMemoryJobStore(), concurrency: 1,
+    })
+
+    // ⚠️ Sem `if`: o status é AFIRMADO. Era o guard que tornava o caso vacuoso — qualquer
+    // desfecho fora de completed/partial pulava tudo e o teste passava sem provar nada.
+    expect(res.status === "completed" || res.status === "partial", `status inesperado: ${res.status}`).toBe(true)
+    if (res.status !== "completed" && res.status !== "partial") return
+    expect(res.report.stoppedByCost, "o soft-cap não parou a execução").toBe(true)
+    expect(st.calls).toBeLessThan(4)
+    expect(st.calls).toBeGreaterThan(0)
   })
 
   it("29) após regen, previsões usam o NOVO perfil", async () => {

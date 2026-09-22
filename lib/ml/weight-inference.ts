@@ -14,7 +14,8 @@
  *   - Confiança via bootstrap (resample com reposição, ver std dos coefs).
  */
 
-import { CRITERION_SLUGS, type CategoryScoreMap, type CriterionSlug } from "@/types/domain"
+import type { CategoryScoreMap, CriterionSlug } from "@/types/domain"
+import { SCORING_CRITERION_SLUGS } from "@/lib/calculations/scoring-features"
 import { MedianImputer, StandardScaler } from "@/lib/ml/preprocessing"
 import { fitRidgeCV } from "@/lib/ml/ridge"
 
@@ -80,7 +81,7 @@ function buildMatrices(
   const y: number[] = []
   for (const inp of inputs) {
     const row: (number | null)[] = []
-    for (const slug of CRITERION_SLUGS) {
+    for (const slug of SCORING_CRITERION_SLUGS) {
       const v = inp.categoryScores[slug as CriterionSlug]
       row.push(v == null || !Number.isFinite(v) ? null : v)
     }
@@ -189,7 +190,7 @@ export function inferScoreWeights(
   // Filtra obras com todos os 9 critérios presentes E user_score válido
   const valid = inputs.filter((inp) => {
     if (!Number.isFinite(inp.userScore)) return false
-    for (const slug of CRITERION_SLUGS) {
+    for (const slug of SCORING_CRITERION_SLUGS) {
       const v = inp.categoryScores[slug as CriterionSlug]
       if (v == null || !Number.isFinite(v)) return false
     }
@@ -225,7 +226,7 @@ export function inferScoreWeights(
   const currentBySlug = new Map(currentWeights.map((w) => [w.slug, w.weight]))
   const rescaled = rescaleSuggestions(meanCoef, currentWeights)
 
-  const suggestions: WeightSuggestion[] = CRITERION_SLUGS.map((slug, i) => {
+  const suggestions: WeightSuggestion[] = SCORING_CRITERION_SLUGS.map((slug, i) => {
     const current = currentBySlug.get(slug) ?? 0
     const suggested = rescaled[i]
     return {

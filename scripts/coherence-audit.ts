@@ -257,7 +257,7 @@ async function doTela(): Promise<ItemTela[]> {
 async function auditoriaDaTela() {
   const itens = await doTela()
   const semAutor: ItemTela[] = []
-  let coerentes = 0, creditadoHumano = 0, creditadoAuditoria = 0, creditadoLimite = 0, semFaixa = 0
+  let coerentes = 0, creditadoHumano = 0, creditadoAuditoria = 0, creditadoLimite = 0, creditadoLegado = 0, semFaixa = 0
   for (const it of itens) {
     const citada = parseJustification(it.just).band
     if (!citada) { semFaixa++; continue }
@@ -268,6 +268,10 @@ async function auditoriaDaTela() {
       case "curadoria": creditadoHumano++; break
       case "auditoria": creditadoAuditoria++; break
       case "limite": creditadoLimite++; break
+      // 🔴 Sem este caso, a nota HERDADA (seed da migration 197) cairia no `default` e a
+      // auditoria a contaria como ÓRFÃ — exatamente o instrumento confirmando o defeito que
+      // ele existe para pegar. A tela credita "Herdada do critério combinado"; aqui também.
+      case "legado": creditadoLegado++; break
       default: semAutor.push(it)
     }
   }
@@ -280,6 +284,7 @@ ${"=".repeat(96)}`)
   console.log(`  diverge, creditado "Ajustada por você":    ${creditadoHumano}`)
   console.log(`  diverge, creditado "pela auditoria":       ${creditadoAuditoria}`)
   console.log(`  diverge, creditado "pelo limite":          ${creditadoLimite}`)
+  console.log(`  herdado do critério combinado (seed):      ${creditadoLegado}`)
   console.log(`  🔴 diverge e NINGUÉM assume:               ${semAutor.length}`)
   for (const it of semAutor.slice(0, 25))
     console.log(`     [${it.slug}] ${it.titulo} — exibe ${it.exibida}, IA propôs ${it.proposta} (${it.source})`)

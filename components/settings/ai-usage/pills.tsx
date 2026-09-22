@@ -49,6 +49,22 @@ export function StatusPill({ status }: { status: "success" | "error" }) {
   )
 }
 
+/**
+ * Operação sem executor: a chave sobrevive só para as linhas históricas resolverem
+ * rótulo. Slate porque na régua de estado deste projeto é o tom de "não se aplica" —
+ * não é falha nem pendência, e não pede ação de ninguém.
+ */
+export function RetiredPill() {
+  return (
+    <span
+      className="inline-flex items-center rounded bg-muted/50 px-1.5 py-0.5 text-[10.5px] font-semibold text-muted-foreground"
+      title="Operação aposentada — sem executor no código"
+    >
+      aposentada
+    </span>
+  )
+}
+
 export function CachePill() {
   return (
     <span className="inline-flex items-center rounded bg-emerald-500/12 px-1.5 py-0.5 text-[10.5px] font-semibold text-emerald-700 dark:text-emerald-300">

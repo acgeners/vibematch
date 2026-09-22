@@ -5,6 +5,7 @@ import {
   type WorkReadinessSnapshot,
 } from "@/lib/orchestration/readiness"
 import { ACTION_CONTRACTS, DATA_KEY_PRODUCER } from "@/lib/orchestration/contracts"
+import { CRITERION_SLUGS } from "@/types/domain"
 
 function snap(overrides: Partial<WorkReadinessSnapshot> = {}): WorkReadinessSnapshot {
   return { ...emptyReadinessSnapshot(), ...overrides }
@@ -34,7 +35,7 @@ describe("resolveReadiness", () => {
   })
 
   it("category_scores_ai: 9⇒fresh, parcial⇒partial, 0⇒absent", () => {
-    expect(resolveReadiness(snap({ categoryScoresAiCount: 9 })).category_scores_ai).toBe("fresh")
+    expect(resolveReadiness(snap({ categoryScoresAiCount: CRITERION_SLUGS.length })).category_scores_ai).toBe("fresh")
     expect(resolveReadiness(snap({ categoryScoresAiCount: 5 })).category_scores_ai).toBe("partial")
     expect(resolveReadiness(snap({ categoryScoresAiCount: 0 })).category_scores_ai).toBe("absent")
   })

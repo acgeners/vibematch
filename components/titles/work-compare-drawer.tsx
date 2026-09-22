@@ -81,6 +81,7 @@ import {
   type ColumnPickerConfig,
 } from "@/components/ui/column-picker"
 import { CompareToolbar } from "@/components/titles/compare-toolbar"
+import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
 
 const HIDDEN_ROWS_STORAGE_KEY = "compare_hidden_rows_v1"
 // v3 → v4: adiciona as linhas "Prioridade" (decision) e "Alinhamento"
@@ -150,7 +151,7 @@ const COMPARE_ROW_GROUPS: CompareRowGroup[] = [
   {
     id: "criterios",
     label: "Critérios",
-    rows: CRITERION_SLUGS.map((slug) => ({
+    rows: VISIBLE_CRITERION_SLUGS.map((slug) => ({
       key: `crit:${slug}`,
       label: `${CRITERIA_INFO[slug]?.emoji ?? ""} ${CRITERIA_INFO[slug]?.name ?? slug}`.trim(),
     })),

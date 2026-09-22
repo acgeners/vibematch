@@ -15,6 +15,7 @@
 // de logger dos scripts (scripts/lib/ai-log.js) — preços NÃO são duplicados
 // (plano §17). Atualize só o JSON.
 import pricingData from "./pricing-data.json"
+import { resolvePricingWindow } from "./pricing-window.js"
 
 export interface ModelPricing {
   inputPerMTok: number
@@ -25,7 +26,16 @@ export interface ModelPricing {
 
 export const PRICING_SNAPSHOT_TAG = pricingData.snapshotTag
 
-export const MODEL_PRICING: Record<string, ModelPricing> = { ...pricingData.models }
+/**
+ * Overrides de preço consultados ANTES das janelas do JSON. Nasce VAZIO — existe como
+ * costura para teste (injetar um modelo fictício) e para um override pontual em runtime.
+ *
+ * ⚠️ NÃO é a tabela de preços. Ela mora em `pricing-data.json`, em janelas com validade,
+ * e é resolvida a cada chamada por `priceForModel` — congelar um mapa no import faria o
+ * preço parar no instante do boot, e um servidor que atravessasse a virada de uma janela
+ * (ex.: o fim da promo do Sonnet 5 em 31/08) seguiria cobrando o preço velho até reiniciar.
+ */
+export const MODEL_PRICING: Record<string, ModelPricing> = {}
 
 export interface UsageTokens {
   inputTokens: number
@@ -44,12 +54,28 @@ export interface CostBreakdown {
 
 const MILLION = 1_000_000
 
-export function priceForModel(model: string): ModelPricing | null {
-  return MODEL_PRICING[model] ?? null
+/**
+ * Preço vigente de um modelo no instante `at` (default: agora).
+ *
+ * A resolução é POR CHAMADA, nunca no import: o custo de cada linha de `ai_api_calls` é
+ * "o preço na hora em que a chamada aconteceu", e o histórico já gravado não é reescrito.
+ * Quem seleciona a janela é `lib/ai/pricing-window.js` — o MESMO resolvedor que
+ * `scripts/lib/ai-log.js` usa, para app e scripts não gravarem custos diferentes na
+ * mesma tabela.
+ */
+export function priceForModel(model: string, at?: Date | number): ModelPricing | null {
+  return (
+    MODEL_PRICING[model] ??
+    resolvePricingWindow(
+      pricingData.models as Parameters<typeof resolvePricingWindow>[0],
+      model,
+      at,
+    )
+  )
 }
 
-export function computeCostUsd(model: string, usage: UsageTokens): CostBreakdown {
-  const price = priceForModel(model)
+export function computeCostUsd(model: string, usage: UsageTokens, at?: Date | number): CostBreakdown {
+  const price = priceForModel(model, at)
   if (!price) {
     return {
       costInputUsd: 0,

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import { buildPlan } from "@/lib/orchestration/planner"
 import { emptyReadinessSnapshot, type WorkReadinessSnapshot } from "@/lib/orchestration/readiness"
 import { toUiReadiness, checkInferTags } from "@/lib/orchestration/ui-readiness"
+import { CRITERION_SLUGS } from "@/types/domain"
 
 /** Snapshot base "pronto p/ Interesse" com overrides. */
 function snap(over: Partial<WorkReadinessSnapshot> = {}): WorkReadinessSnapshot {
@@ -73,20 +74,20 @@ const uiV = (s: WorkReadinessSnapshot) =>
 
 describe("toUiReadiness · Veredito (run_alignment, sem inputs no contrato)", () => {
   it("perfil ok + 9 attrs + sinopse + digest → ready, alta", () => {
-    const r = uiV(snap({ categoryScoresAiCount: 9 }))
+    const r = uiV(snap({ categoryScoresAiCount: CRITERION_SLUGS.length }))
     expect(r.ready).toBe(true)
     expect(r.weakening).toHaveLength(0)
     expect(r.confidence).toBe("alta")
   })
 
   it("perfil stub → bloqueia (HARD de UI, fora do contrato)", () => {
-    const r = uiV(snap({ categoryScoresAiCount: 9, tasteProfile: { present: true, isStub: true, stale: false } }))
+    const r = uiV(snap({ categoryScoresAiCount: CRITERION_SLUGS.length, tasteProfile: { present: true, isStub: true, stale: false } }))
     expect(r.ready).toBe(false)
     expect(r.blocking.some((b) => b.dataKey === "taste_profile")).toBe(true)
   })
 
   it("sem perfil → bloqueia", () => {
-    const r = uiV(snap({ categoryScoresAiCount: 9, tasteProfile: { present: false, isStub: false, stale: false } }))
+    const r = uiV(snap({ categoryScoresAiCount: CRITERION_SLUGS.length, tasteProfile: { present: false, isStub: false, stale: false } }))
     expect(r.ready).toBe(false)
   })
 

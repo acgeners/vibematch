@@ -688,7 +688,21 @@ export async function getRanking(
     ? await selectByIdsInChunks(restrictIds, (chunk) =>
         buildWorksQuery().in("id", chunk).limit(2000),
       )
-    : await buildWorksQuery().order("title").limit(2000)
+    : await (async () => {
+        // 🔴 O `.limit(2000)` era teto EXPLÍCITO que o PostgREST NÃO honra: ele corta em 1000
+        // de qualquer jeito. Medido em 2026-09-08 contra a nuvem: 1.010 obras ativas e a
+        // resposta trazia 1.000 — 10 obras sumiam de /catalog e /ranking em silêncio, sem
+        // erro e sem log. O comentário acima datava "1009 obras ativas em 2026-08-18" e
+        // tratava a paginação como dívida futura; o penhasco já tinha sido cruzado.
+        // `fetchAllRows` (serial) basta: 1.010 linhas são 2 páginas, não as 6 idas que
+        // motivavam a ressalva de latência.
+        type Linha = NonNullable<Awaited<ReturnType<typeof buildWorksQuery>>["data"]>[number]
+        const rows = await fetchAllRows<Linha>(
+          (from, to) => buildWorksQuery().order("title").range(from, to),
+          "getRanking.works",
+        )
+        return { data: rows, error: null }
+      })()
 
   if (error) throw new Error(error.message)
 

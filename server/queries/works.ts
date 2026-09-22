@@ -125,12 +125,28 @@ export async function resolveWorksByTitles(titles: string[]): Promise<TitleResol
   if (queries.length === 0) return []
 
   const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from("works")
-    .select("id, title, original_title, alternative_titles")
-    .eq("is_archived", false)
-    .limit(5000)
-  if (error) throw new Error(`Falha resolvendo títulos: ${error.message}`)
+  // 🔴 `.limit(5000)` NÃO é honrado — o PostgREST corta em 1000. Medido em 2026-09-08:
+  // 1.010 obras ativas, e o recorte é ESTÁVEL entre execuções, então as MESMAS 10 obras
+  // ficavam permanentemente invisíveis a esta resolução por título. Como ela alimenta a
+  // detecção de duplicata, uma obra equivalente a qualquer uma dessas 10 nunca seria
+  // reconhecida: o cadastro entraria como nova, criando duplicata real e silenciosa.
+  const works0 = await fetchAllRows<{
+    id: string
+    title: string | null
+    original_title: string | null
+    alternative_titles: string[] | null
+  }>(
+    (from, to) =>
+      supabase
+        .from("works")
+        .select("id, title, original_title, alternative_titles")
+        .eq("is_archived", false)
+        .range(from, to),
+    "resolveWorksByTitles",
+  )
+  const data = works0
+  const error = null as { message: string } | null
+  if (error) throw new Error(`Falha resolvendo títulos: ${(error as { message: string }).message}`)
   const works = (data ?? []) as Array<{
     id: string
     title: string | null

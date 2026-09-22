@@ -242,9 +242,11 @@ export async function predictSynopsisQuality(
       client,
       {
         model: MODEL,
-        // 600 (era 400): o tokenizer do Sonnet 5 conta ~34% mais tokens, então o
-        // teto antigo arriscava truncar a saída estruturada. Só um teto — não
-        // custa nada a mais no 4.6 (paga-se pelo output real, não pelo cap).
+        // 600 (era 400): o tokenizer da família 4.7+ — que inclui o Sonnet 5 — produz
+        // ~30% mais tokens para o mesmo texto (número OFICIAL da página de pricing; este
+        // comentário já cravou "~34%", que era inferência). Com o teto antigo a saída
+        // estruturada arriscava truncar. É só um TETO: paga-se pelo output real, não pelo
+        // cap, então subir não custa nada em modelo nenhum.
         max_tokens: 600,
         temperature: 0,
         system,

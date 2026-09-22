@@ -119,6 +119,11 @@ export const workFormBase = z.object({
   romance: scoreField("Romance"),
   couple_dynamics: scoreField("Dinâmica do Casal"),
   fantasy_nobility: scoreField("Fantasia/Nobreza"),
+  // Separados desde a migration 197. `fantasy_nobility` fica como LEGADO: continua
+  // alimentando SCORING_CRITERION_SLUGS (Ridge, Bússola, embeddings) e é editável
+  // na curadoria, mas sai das superfícies de leitura.
+  fantasy: scoreField("Fantasia"),
+  nobility: scoreField("Nobreza"),
   action_adventure: scoreField("Ação/Aventura"),
   adult_content: scoreField("Conteúdo Adulto"),
   protagonist: scoreField("Protagonista Marcante"),

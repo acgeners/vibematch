@@ -21,9 +21,21 @@
 import { computeCostUsd } from "@/lib/ai/pricing"
 import type { UsageTokens } from "@/lib/ai/pricing"
 import { COST_SAFETY_MULTIPLIER } from "@/lib/orchestration/cost"
+import { ACTIVE_MODELS, SONNET_MODEL } from "@/lib/ai/models"
+import { CONSOLIDATE_SYNOPSIS_USAGE } from "@/lib/ai-recommendation/synopsis-consolidator-usage"
 
-const HAIKU = "claude-haiku-4-5-20251001"
-const SONNET = "claude-sonnet-4-6"
+// 🔴 O Sonnet vem do DONO, nunca de um literal. Este arquivo chumbava
+// `claude-sonnet-4-6` enquanto o app chamava `claude-sonnet-5`, e o preview passou a
+// superestimar em 50%: `ai_evaluation` exibia $0,0465 onde a chamada real custa ~$0,0310
+// ($3/$15 contra $2/$10 por MTok). O popup que existe para a pessoa AUTORIZAR um gasto
+// mostrava um número que não era o da chamada.
+//
+// ⚠️ O Haiku FICA literal, e a diferença é de natureza: ele não é "o modelo ativo" — é uma
+// escolha deliberada de modelo BARATO para tarefas baratas, que não acompanha a troca do
+// Sonnet. Trocar os dois por `SONNET_MODEL` seria uniformizar nome e perder a intenção.
+// (Dar um dono também ao Haiku é trabalho do registry — A1b.)
+const HAIKU = ACTIVE_MODELS.haiku
+const SONNET = SONNET_MODEL
 
 /** Limiar abaixo do qual o usuário pode optar por não ser mais avisado. */
 export const DEFAULT_SUPPRESS_THRESHOLD_USD = 0.02
@@ -37,8 +49,6 @@ export type CostActionId =
   | "review_digest"
   | "review_summary"
   | "consolidate_synopsis"
-  | "calibration_audit"
-  | "bias_report"
   | "ai_evaluation"
   | "taste_profile"
   | "chat_message"
@@ -159,32 +169,19 @@ const CATALOG: Record<CostActionId, CostSpec> = {
     background: true,
   },
   consolidate_synopsis: {
-    // Sonnet desde o prompt v3 (era Haiku). Tokens e ETA remedidos no
-    // laboratório de 10 obras: ~1500 in / ~330 out, mediana de 6,9 s (o Sonnet
-    // escreve ~33% mais que o Haiku, então tanto o custo quanto o tempo subiram).
+    // Sonnet desde o prompt v3 (era Haiku).
+    // 🔴 Os tokens vêm do DONO ÚNICO (`CONSOLIDATE_SYNOPSIS_USAGE`), compartilhado com o
+    // GATE em `lib/orchestration/contracts.ts` — preview e gate descrevem a MESMA chamada.
+    // O `~1500/330` que morava aqui saiu de um laboratório de 10 obras escolhidas por
+    // defeito conhecido; contra as 228 chamadas reais ele estava no percentil 11.
+    // ⚠️ O ETA continua local: é tempo, não custo, e não tem o outro lado para divergir.
     label: "Consolidar sinopse",
     model: SONNET,
     base: ZERO,
-    perItem: tokens(1500, 330),
+    perItem: CONSOLIDATE_SYNOPSIS_USAGE,
     etaSeconds: 2,
     etaPerItemSeconds: 7,
     background: true,
-  },
-  calibration_audit: {
-    label: "Auditar critérios",
-    model: SONNET,
-    base: tokens(3000, 2000),
-    perItem: tokens(320, 70),
-    etaSeconds: 10,
-    etaPerItemSeconds: 0.3,
-    background: false,
-  },
-  bias_report: {
-    label: "Detectar viés global",
-    model: SONNET,
-    base: tokens(6000, 2000),
-    etaSeconds: 30,
-    background: false,
   },
   ai_evaluation: {
     label: "Avaliação IA",

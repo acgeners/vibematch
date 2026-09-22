@@ -13,6 +13,7 @@
  */
 
 import type { ActionName, CostTier, DataKey } from "./contracts"
+import { CRITERION_SLUGS } from "@/types/domain"
 import { LABELS } from "@/lib/constants/ui-labels"
 import type { ExecutionPlan } from "./planner"
 import type { WorkReadinessSnapshot } from "./readiness"
@@ -152,7 +153,7 @@ export const GENERATOR_UI: Partial<Record<ActionName, GeneratorUi>> = {
         dataKey: "category_scores_ai",
         impact: "importa",
         hint: "sem a avaliação IA o veredito se baseia só em título/tags/perfil",
-        present: (s) => s.categoryScoresAiCount >= 9,
+        present: (s) => s.categoryScoresAiCount >= CRITERION_SLUGS.length,
       },
       {
         dataKey: "canonical_synopsis",
