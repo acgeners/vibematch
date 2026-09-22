@@ -1,6 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { fetchAllRows } from "@/lib/supabase/paginate"
+import { fetchUserRecalcWorks } from "@/server/queries/recalc-works"
 import { computeRecalc, buildWork, type RawWork } from "@/server/actions/calculations"
 import { loadLabelsFor, withOwnerLabels, mirrorOwnerScores } from "@/server/queries/owner-labels"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
@@ -68,22 +68,11 @@ export async function recalculateForUser(userId: string): Promise<UserRecalcResu
       // 1.010 obras ativas, recorte ESTÁVEL, então as MESMAS 10 nunca recebiam nota nova
       // para quem não é o dono — a antiga seguia em uso no ranking e na recomendação, sem
       // erro e sem log.
+      //
+      // 🔴 Em ORDEM CANÔNICA (por id), pelo mesmo motivo do recálculo global: sem ela as notas
+      // DELA mudam a cada UPDATE em `works`, com os mesmos dados — ver `fetchUserRecalcWorks`.
       (async () => {
-        const rows = await fetchAllRows<unknown>(
-          (from: number, to: number) =>
-            supabase
-              .from("works")
-              .select(
-                `id, publication_status_id, total_chapters, is_archived,
-           year, year_end, original_title,
-           category_scores(criterion_slug, score, source),
-           platform_ratings(id, platform, rating, vote_count),
-           work_tags(tags(name, tag_group_id))`,
-              )
-              .eq("is_archived", false)
-              .range(from, to),
-          "user-recalc.works",
-        )
+        const rows = await fetchUserRecalcWorks(supabase)
         return { data: rows, error: null as { message: string } | null }
       })(),
       supabase.from("score_weights").select("*").eq("is_active", true),

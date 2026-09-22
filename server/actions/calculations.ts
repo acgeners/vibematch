@@ -7,7 +7,7 @@ import "server-only"
 
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { fetchAllRows } from "@/lib/supabase/paginate"
+import { fetchRecalcWorks } from "@/server/queries/recalc-works"
 import { getPublicationStatusNameById } from "@/lib/constants/status-lookups"
 import {
   normalizeGPT,
@@ -519,23 +519,11 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
       // 1.010 obras ativas na nuvem, então 10 delas ficavam FORA do recalc: nunca entravam
       // no treino do Ridge nem recebiam nota nova, e a tela mostrava a nota velha sem nada
       // acusar. Paginado, o custo é +1 requisição por execução.
+      //
+      // 🔴 Em ORDEM CANÔNICA (por id): sem ela o recálculo sai diferente a cada UPDATE em
+      // `works`, com os mesmos dados — ver `fetchRecalcWorks`.
       (async () => {
-        const rows = await fetchAllRows<unknown>(
-          (from: number, to: number) =>
-            supabase
-              .from("works")
-              .select(
-                `id, publication_status_id, total_chapters, is_archived,
-         year, year_end, original_title,
-         art_signal,
-         category_scores(criterion_slug, score, source),
-         platform_ratings(id, platform, rating, vote_count),
-         work_tags(tags(name, slug, tag_group_id))`
-              )
-              .eq("is_archived", false)
-              .range(from, to),
-          "recalculateAll.works",
-        )
+        const rows = await fetchRecalcWorks(supabase)
         return { data: rows, error: null as { message: string } | null }
       })(),
       supabase.from("score_weights").select("*").eq("is_active", true),
