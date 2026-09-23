@@ -118,18 +118,22 @@ export const workFormBase = z.object({
   // Notas por critério
   romance: scoreField("Romance"),
   couple_dynamics: scoreField("Dinâmica do Casal"),
-  fantasy_nobility: scoreField("Fantasia/Nobreza"),
-  // Separados desde a migration 197. `fantasy_nobility` fica como LEGADO: continua
-  // alimentando SCORING_CRITERION_SLUGS (Ridge, Bússola, embeddings) e é editável
-  // na curadoria, mas sai das superfícies de leitura.
   fantasy: scoreField("Fantasia"),
-  nobility: scoreField("Nobreza"),
-  action_adventure: scoreField("Ação/Aventura"),
+  setting_era: scoreField("Ambientação Temporal"),
+  action_adventure: scoreField("Dinamismo Narrativo"),
   adult_content: scoreField("Conteúdo Adulto"),
   protagonist: scoreField("Protagonista Marcante"),
   humor: scoreField("Humor"),
   drama: scoreField("Drama"),
   tragedy: scoreField("Tragédia"),
+  angst: scoreField("Angústia"),
+  // 🔴 LEGADO, aceito mas NÃO produzido. `fantasy_nobility` e `nobility` deixaram de ser
+  // critérios de IA na migration 198; os campos continuam no schema porque o formulário de
+  // CURADORIA ainda edita a nota histórica e o import antigo ainda pode trazê-los. Aceitar é
+  // o lado seguro: recusar transformaria uma planilha de 2026-05 em erro de validação.
+  // Nenhuma avaliação nova os escreve — a tool não os oferece (CRITERION_SLUGS).
+  fantasy_nobility: scoreField("Fantasia/Nobreza (legado)"),
+  nobility: scoreField("Nobreza (legado)"),
 
   // Plataformas externas
   mu_rating: z.number().min(0).max(10).nullable().optional(),

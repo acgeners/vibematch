@@ -2,30 +2,35 @@ export const CRITERIA_INFO: Record<
   string,
   { name: string; emoji: string; description: string; iconUrl?: string }
 > = {
-  romance: { name: "Romance", emoji: "💞", description: "Avalia o quanto o romance está presente e influencia a obra.\nConsidera se o relacionamento é apenas um detalhe, um subplot relevante ou o eixo principal da história.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/romance.png" },
+  romance: { name: "Romance", emoji: "💞", description: "Unipolar de intensidade. Participação e peso narrativo de uma relação romântica que SE DESENVOLVE ao longo da experiência.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/romance.png" },
   couple_dynamics: { name: "Dinâmica entre Protagonistas", emoji: "💑", description: "Avalia a qualidade da dinâmica entre os personagens principais — o vínculo MAIS CENTRAL da obra, nesta ordem de prioridade: casal principal; depois família (pais, irmãos, filhos); depois os demais vínculos recorrentes (mestre e discípulo, equipe, rivalidade, amizade). Numa obra de romance é sobre o casal; num drama familiar, entre o protagonista e a família.\nConsidera se a dinâmica é destrutiva, conflituosa, saudável, divertida, comunicativa ou baseada em parceria.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/couple_dynamics.png" },
-  fantasy_nobility: { name: "Fantasia/Nobreza", emoji: "👑", description: "Avalia o quanto elementos de fantasia, magia, nobreza, realeza ou política de corte fazem parte da obra.\nConsidera se esses elementos são só estética ou se realmente moldam o mundo, os conflitos e as decisões dos personagens.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/fantasy_nobility.png" },
-  action_adventure: { name: "Ação/Aventura", emoji: "⚔️", description: "Avalia o nível de movimento, tensão e eventos marcantes da história.\nConsidera se a obra é mais cotidiana/parada ou se envolve missões, conflitos externos, perigos, batalhas, viagens ou eventos de grande escala.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/action_adventure.png" },
+  fantasy: { name: "Fantasia", emoji: "✨", description: "Unipolar de intensidade. Presença e participação de magia, poderes, criaturas ou fenômenos NÃO explicados como ciência." },
+  setting_era: { name: "Ambientação Temporal", emoji: "🏛️", description: "Bipolar. Posição entre mundos inspirados em períodos pré-modernos e ambientes contemporâneos. Pergunta canônica: \"em que DIREÇÃO temporal e social está a ambientação?\"" },
+  action_adventure: { name: "Dinamismo Narrativo", emoji: "⚔️", description: "Bipolar. Posição entre uma história de rotina e pequenas mudanças e uma movida por eventos externos, objetivos, perigo e deslocamento. DESCRITIVO — não é avaliação de qualidade do pacing.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/action_adventure.png" },
   adult_content: { name: "Conteúdo Adulto", emoji: "🔥", description: "Avalia o nível de sexualização ou conteúdo sexual presente na obra.\nConsidera desde ausência quase total até cenas explícitas recorrentes, levando em conta frequência, intensidade e relevância para a narrativa.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/adult_content.png" },
-  protagonist: { name: "Protagonista Marcante", emoji: "🦸", description: "Avalia o quanto o protagonista se destaca e impacta a história — presença em cena e AGÊNCIA (decisões que movem a trama). NÃO avalia qualidade: se é simpático, bem escrito ou agradável. Mary Sues, OPs, FLs frias/insensíveis/inconsistentes, vilões marcantes têm presença FORTE, não fraca.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/protagonist.png" },
+  protagonist: { name: "Protagonista Marcante", emoji: "🦸", description: "Unipolar de intensidade. Centralidade em cena E agência sobre a trama, de qualquer valência. Toda faixa descreve o nível REPRESENTATIVO do par (centralidade, agência) na experiência como um todo: quando uma das duas varia materialmente, as fases relevantes entram EM CONJUNTO — é PROIBIDO pontuar pelo pico, pela fase inicial, pela fase final, por média dos checkpoints ou por peso temporal. As fases são evidência, não parcelas.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/protagonist.png" },
   humor: { name: "Humor", emoji: "😂", description: "Avalia o quanto o humor está presente no tom da obra.\nConsidera se há apenas alívio cômico pontual ou se a comédia é parte frequente e importante da experiência.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/humor.png" },
-  drama: { name: "Drama", emoji: "🎭", description: "Avalia a intensidade dos conflitos emocionais da obra.\nConsidera sofrimento, tensão emocional, dilemas, conflitos de relacionamento e o quanto isso afeta o ritmo e as decisões dos personagens.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/drama.png" },
+  drama: { name: "Drama", emoji: "🎭", description: "Unipolar de intensidade. Quantidade, frequência, duração e importância do conflito emocional — AGNÓSTICO quanto à resolução.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/drama.png" },
   tragedy: { name: "Tragédia", emoji: "💔", description: "Avalia o peso de acontecimentos trágicos durante o desenvolvimento principal da história (não considera background nem acontecimentos no começo imediato da história).\nConsidera perdas, separações, mortes, injustiças e sofrimento que acontecem no meio da obra e impactam diretamente os personagens principais.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/tragedy.png" },
-  fantasy: { name: "Fantasia", emoji: "✨", description: "Avalia a presença e a participação de magia, poderes, criaturas ou fenômenos NÃO explicados como ciência.\nO teste é ontológico, não visual: tecnologia extraordinária que a obra explica como ciência não conta, e estética fantástica sem fenômeno atuante também não." },
-  nobility: { name: "Nobreza", emoji: "👑", description: "Avalia o quanto aristocracia, realeza e política de corte fazem parte da obra.\nConsidera se o título nobiliárquico é só rótulo ou se hierarquia, sucessão, etiqueta e disputa de poder movem os conflitos. Mundo mágico sem corte NÃO conta aqui." },
+  angst: { name: "Angústia", emoji: "🥀", description: "Unipolar de intensidade. Saldo entre ACÚMULO de sofrimento e ALÍVIO EFICAZ ao longo da leitura. Redutores contam pelo EFEITO, nunca pela presença." },
 }
 
 export const CRITERIA_RUBRICS: Record<
   string,
-  { title: string; ranges: string[]; note?: string }
+  { title: string; ranges: string[]; note?: string; guidance?: string[] }
 > = {
   romance: {
     title: "Romance",
     ranges: [
-      "0-3 | Ausente: nenhum conteúdo romântico se desenvolvendo — sem casal, sem interação/tensão romântica. \"Amor\" como TEMA, sem romance retratado (um obcecado por algo inalcançável, sem interação), é esta faixa.",
-      "4-6 | Presente mas secundário: existe um fio romântico, mas pouco desenvolvido — poucas cenas/beats; acessório para quem procura romance.",
-      "7-8 | Substancial: a relação se desenvolve com cenas e beats claros (atração, tensão, aproximação, declaração). Slow burn com foco romântico é esta faixa (desenvolve, só gradual).",
-      "9-10 | Onipresente: desenvolvimento e cenas românticas permeiam a obra; a experiência é dominada pelo romance do casal.",
+      "0-3 | Romance ausente ou marginal. Vínculo intenso não-romântico NÃO conta.",
+      "4-6 | Romance presente com densidade baixa — formalizado, prometido ou motivador, sem desenvolvimento recorrente.",
+      "7-8 | Romance recorrente e desenvolvido, ocupando parte relevante da experiência — inclusive quando o casal se estabelece cedo e o desenvolvimento continua.",
+      "9-10 | Romance recorrente, desenvolvido e estruturante da experiência.",
+    ],
+    guidance: [
+      "FRONTEIRA PRINCIPAL — DENSIDADE de desenvolvimento. Não é presença, não é centralidade motivacional, não é intensidade da tensão. Para SUBIR: o romance precisa ocupar mais da experiência com desenvolvimento, não gerar mais tensão. Para DESCER: a relação existe mas não se desenvolve em cena.",
+      "ÂNCORAS: 9-10 A Business Proposal, Semantic Error (recorrência longitudinal; slow burn de alta densidade) — 7-8 Another Typical Fantasy Romance (casal estabelecido cedo, desenvolvimento segue) — 0-3 Omniscient Reader (vínculo intenso que NÃO é romance) — fronteira 4-6/7-8 Kaguya-sama, Maybe Meant to Be.",
+      "NÃO FAÇA: promover por tensão altíssima (Kaguya-sama: centralidade e tensão altíssimas com entrega concreta menor ⇒ não sobe) · tratar formalização como desenvolvimento (Maybe Meant to Be: a formalização precede a experiência romântica) · somar milestones tardios como densidade (Solo Leveling: milestones ≠ densidade proporcional) · ler vínculo intenso como romance · confundir com Conteúdo Adulto (ressalva de Semantic Error).",
     ],
   },
   couple_dynamics: {
@@ -37,22 +42,47 @@ export const CRITERIA_RUBRICS: Record<
       "9-10 | Construtiva: parceria, apoio mútuo, comunicação e crescimento conjunto. Dois personagens danificados que se curam e se entendem (cura ENCENADA, cedo na obra) são esta faixa.",
     ],
   },
-  fantasy_nobility: {
-    title: "Fantasia/Nobreza",
+  fantasy: {
+    title: "Fantasia",
     ranges: [
-      "0-3 | Ausente ou estético: mundo comum, ou fantasia/nobreza só de fachada (é \"príncipe\", mas isso não importa).",
-      "4-6 | Presente mas secundário: elementos de fantasia/nobreza influenciam partes da obra, mas não a organizam.",
-      "7-8 | Estrutural: magia, política nobre, aristocracia, reencarnação ou regras do mundo moldam os conflitos principais.",
-      "9-10 | Onipresente: magia/nobreza/regras do mundo aparecem constantemente e sustentam quase tudo que acontece.",
+      "0-3 | Nenhum elemento mágico/sobrenatural ATUANTE.",
+      "4-6 | Mecanismo sobrenatural presente e NÃO recorrente — dispara a premissa e sai de cena.",
+      "7-8 | Fenômeno sobrenatural ESTRUTURAL, ainda que de escopo ontológico estreito.",
+      "9-10 | Magia/poderes/criaturas participam CONTINUAMENTE do mundo e da experiência.",
+    ],
+    guidance: [
+      "FRONTEIRA PRINCIPAL — dois testes, NESTA ORDEM. (1) Teste ontológico: como a obra explica o fenômeno? Explicado como ciência/tecnologia ⇒ NÃO é Fantasia, por mais extraordinário que seja. (2) Recorrência/participação: aparece uma vez e sai, ou opera no mundo continuamente? Para SUBIR: mais participação estrutural. Para DESCER: o fenômeno deixa de operar.",
+      "ÂNCORAS: 9-10 Villains Are Destined to Die (interface de jogo NÃO é tecnologia explicada pela obra) — 7-8 Unholy Blood, See You in My 19th Life (escopo estreito, porém estrutural) — 4-6 Marry My Husband (mecanismo inicial ≠ recorrência) — 0-3 A Business Proposal, Whale Star, Semantic Error — stress: Cyberpunk Edgerunners (tecnologia extraordinária NÃO é Fantasia).",
+      "NÃO FAÇA: tratar estética fantástica como Fantasia atuante (o teste é ontológico, não visual) · tecnologia extraordinária = Fantasia (Cyberpunk) · retelling de mito = Fantasia (Whale Star: o retelling de sereia não dá Fantasia) · pouca variedade = pouca participação (See You in My 19th Life) · premissa sobrenatural = faixa alta (Marry My Husband: dispara e sai).",
+    ],
+  },
+  setting_era: {
+    title: "Ambientação Temporal",
+    ranges: [
+      "0-3 | Ambientação histórica / de época / pré-moderna — inclusive mundos INSPIRADOS em períodos pré-modernos, sem historicidade real.",
+      "4-6 | A obra ocupa os DOIS lados de forma material — o presente é atravessado por outra época de modo estrutural.",
+      "7-8 | Contemporânea COM deslocamento temporal que não muda a direção.",
+      "9-10 | Contemporânea sem truque · futurista entra aqui como extensão declarada do polo.",
+    ],
+    guidance: [
+      "FRONTEIRA PRINCIPAL — DIREÇÃO, não historicidade. A escala responde para que lado a ambientação aponta. Um mundo pré-moderno FICCIONAL está no polo histórico porque a direção é clara; que ele não seja um período real é ressalva que viaja, não deslocamento de faixa.",
+      "ÂNCORAS: 0-3 Whale Star (histórico sem nobreza e sem magia), A Bride's Story (histórico cotidiano), Villains Are Destined to Die (de época/pré-moderno inspirado) — 4-6 See You in My 19th Life (memória de épocas ≠ obra histórica) — 7-8 Marry My Husband (regrediu ≠ virou histórico) — 9-10 A Business Proposal, Semantic Error; Cyberpunk Edgerunners como extensão futurista.",
+      "NÃO FAÇA: medir grau de historicidade (o eixo é direção; Villains prova a diferença) · regressão/reencarnação = histórico (Marry My Husband) · memória de outras épocas = obra histórica (See You in My 19th Life) · chamar mundo pré-moderno ficcional de \"histórico realista\".",
     ],
   },
   action_adventure: {
-    title: "Ação/Aventura",
+    title: "Dinamismo Narrativo",
     ranges: [
-      "0-3 | Ausente: cotidiano, sem conflito externo relevante (slice of life).",
-      "4-6 | Presente mas secundário: alguns eventos de tensão/ação (inclui perseguição, fuga, competição, intriga política com risco real), mas o foco é outro.",
-      "7-8 | Significativa: situações de ação/risco marcantes e frequentes, ou raras mas de alto risco; ritmo acelerado.",
-      "9-10 | Onipresente: ação, perigo e eventos de grande escala são constantes e intensos, quase sem respiro cotidiano.",
+      "0-3 | Rotina, convivência e conversa; acontecimentos reorganizam a convivência, não viram aventura.",
+      "4-6 | Intermediário real — diálogo, investigação ou estratégia predominam COM progressão externa efetiva.",
+      "7-8 | Eventos externos, objetivos e deslocamento movem a história de forma RECORRENTE.",
+      "9-10 | Progressão material, deslocamento e perigo ESTRUTURAM a experiência.",
+    ],
+    guidance: [
+      "FRONTEIRA PRINCIPAL — O QUE MOVE A HISTÓRIA. Não é velocidade, não é presença de ação, não é volume de diálogo. Para SUBIR: mais da experiência é movida por evento externo e objetivo. Para DESCER: o que move volta a ser convivência e rotina.",
+      "REGRA LONGITUDINAL: a banda representa o dinamismo CARACTERÍSTICO da experiência como um todo. Fases entram conforme sua RELEVÂNCIA. PROIBIDO: pico automático · fase final automática · média dos checkpoints · pesos por arco. Mudar de dinamismo não é premiado nem penalizado. Obra cotidiana com UM arco explosivo NÃO sobe pelo pico; obra que começa parada e passa a MAIOR PARTE com progressão constante PODE sustentar banda alta; fases substanciais em níveis diferentes ⇒ a banda reflete a experiência MISTA.",
+      "ÂNCORAS: 0-3 Seasons of Blossom (cotidiano com Drama alto), Maybe Meant to Be — 4-6 The Ember Knight (diálogo/estratégia COM progressão externa) — 7-8 The Perks of Being an S-Class Heroine (aventureiro dentro de rofan) — 9-10 The Greatest Estate Developer (progressão material, crises, deslocamento), Blue Lock (alto SEM combate).",
+      "NÃO FAÇA: pacing lento = Dinamismo baixo (Frieren: a leitura correta é intermediário) · ação presente = Dinamismo alto (Spy × Family) · exigir combate para faixa alta (Blue Lock) · Drama alto = Dinamismo alto (Seasons of Blossom) · muito diálogo = faixa baixa (The Ember Knight) · pontuar pelo arco mais movimentado.",
     ],
   },
   adult_content: {
@@ -67,10 +97,16 @@ export const CRITERIA_RUBRICS: Record<
   protagonist: {
     title: "Protagonista Marcante",
     ranges: [
-      "0-3 | Presença mínima: sem agência, decisões irrelevantes, substituível por outro personagem sem mudar a história.",
-      "4-6 | Presença moderada: conduz a história e tem personalidade reconhecível, mas não domina as cenas.",
-      "7-8 | Presença forte: agência clara, decisões movem a trama, personalidade marcante — mesmo se polêmica (Mary Sue, OP, insensível, inconsistente CONFIRMAM presença forte, não fraca).",
-      "9-10 | Presença dominante: no centro de quase todas as cenas e decisões; sustentaria o interesse mesmo sem plot.",
+      "0-3 | Centralidade E agência representativas baixas — a personagem é conduzida pelos acontecimentos, e as decisões dela não têm efeito estrutural. Presença NÃO equivale a condução narrativa. É CONJUNÇÃO: agência baixa com centralidade alta é 4-6, não aqui.",
+      "4-6 | Protagonismo moderado — centralidade OU agência é relevante, mas não as duas de forma forte E sustentada. As decisões importam sem que a personagem reorganize a narrativa de forma dominante. A agência pode ser parcial, localizada, diluída por coralidade ou não sustentada ao longo da obra.",
+      "7-8 | Protagonismo forte — centralidade alta E agência real e consequente, representativas ao longo da experiência: as decisões alteram significativamente o curso da narrativa DENTRO de um enquadramento que a personagem não controla.",
+      "9-10 | Protagonismo estruturante — a narrativa é fortemente organizada em torno dela E as escolhas dela reorganizam repetidamente o próprio ENQUADRAMENTO da história. Centralidade e agência ambas muito altas e representativas.",
+    ],
+    guidance: [
+      "NENHUMA TRAJETÓRIA É REQUISITO DE FAIXA: agência constrangida por sistema, agência sem poder institucional, agência que varia ao longo da obra e agência exercida em consequências relacionais e não políticas são FORMAS de produzir protagonismo — a faixa mede o NÍVEL, não a forma. Nenhuma pode ser exigida, e nenhuma por si só qualifica.",
+      "FRONTEIRA PRINCIPAL — AGÊNCIA, cruzada com centralidade. Para SUBIR: as decisões precisam ALTERAR O RUMO, não só ocorrer. Para DESCER: a personagem está em cena mas o rumo é decidido por outros.",
+      "SEPARADOR 7-8 × 9-10 — dentro do enquadramento × SOBRE o enquadramento. Não é fórmula e não é trajetória: é a MAGNITUDE do que as decisões alcançam. 7-8 = as decisões mudam a trajetória dela dentro de um enquadramento que ela não controla (Villains Are Destined to Die: o sistema do jogo; The Apothecary Diaries: a corte, sem poder institucional). 9-10 = as decisões mudam o ENQUADRAMENTO em si (The Villainess Lives Again; The Ember Knight: o gatilho não é dele, as respostas é que reorganizam).",
+      "NÃO FAÇA: poder/força/competência = protagonismo (One-Punch Man) · presença em cena = agência (Under the Oak Tree) · exigir controle total para faixa alta (Villains: agência alta sob constrangimento) · exigir poder institucional (Apothecary) · exigir força física (The Ember Knight) · ler valência moral como protagonismo (o construto é de qualquer valência) · pontuar pela fase mais forte ou pela mais fraca (a banda é o nível representativo; uma fase não é uma banda) · tratar agência que CESSA como agência constrangida (constrangida é agir sob limite e cabe em 7-8; cessar é deixar de agir e entra na agregação como o nível baixo que é) · competência = agência (\"ela resolve tudo sem esforço\" é competência; resolver sem que a decisão custe ou altere o rumo não sobe faixa).",
     ],
   },
   humor: {
@@ -85,10 +121,15 @@ export const CRITERIA_RUBRICS: Record<
   drama: {
     title: "Drama",
     ranges: [
-      "0-3 | Ausente: pouco conflito emocional; problemas simples e de resolução rápida.",
-      "4-6 | Presente mas secundário: conflitos emocionais existem, mas controlados. (Fricção romântica leve — ciúme, mal-entendido do casal — não é drama por si só.)",
-      "7-8 | Significativo: conflitos emocionais profundos e recorrentes movem a obra.",
-      "9-10 | Onipresente: carga emocional intensa e constante do início ao fim. Drama = intensidade E DURAÇÃO do conflito emocional (que PODE se resolver) — distinto de tragédia (gravidade e irreversibilidade das perdas).",
+      "0-3 | Pouco conflito emocional; tensões pequenas, resolvidas na própria cena.",
+      "4-6 | Conflito presente porém EPISÓDICO — não estrutura a experiência.",
+      "7-8 | Conflito emocional RECORRENTE e importante, inclusive com progresso e catarse.",
+      "9-10 | Conflito recorrente, duradouro e CENTRAL à experiência.",
+    ],
+    guidance: [
+      "FRONTEIRA PRINCIPAL — RECORRÊNCIA e importância do conflito. Para SUBIR: o conflito precisa VOLTAR e PESAR, não ser maior num momento. Para DESCER: o conflito passa a ser episódico ou resolvido em cena.",
+      "ÂNCORAS: 9-10 What It Means to Be You (Drama alto + Angústia muito alta + Tragédia baixa), Villains Are Destined to Die — 7-8 Marry My Husband (Drama alto COM progresso e catarse) — 0-3 A Sign of Affection (manga) — stress: Kaguya-sama (Drama alto + Humor alto), Look Back (poucos conflitos + uma perda enorme).",
+      "NÃO FAÇA: deixar a resolução abaixar Drama (Marry My Husband tem catarse e permanece alto) · um evento enorme = Drama alto (Look Back: poucos conflitos + uma perda enorme ⇒ isso é Tragédia, não Drama) · Humor alto exclui Drama alto (Kaguya-sama) · muito conflito = Angústia extrema (Betrayal of Dignity: são construtos diferentes) · ler final feliz como Drama baixo (agnóstico quanto à resolução).",
     ],
   },
   tragedy: {
@@ -100,22 +141,18 @@ export const CRITERIA_RUBRICS: Record<
       "9-10 | Onipresente: luto e perda irreversível permeiam a obra inteira; tom trágico constante, sensação de inevitabilidade.",
     ],
   },
-  fantasy: {
-    title: "Fantasia",
+  angst: {
+    title: "Angústia",
     ranges: [
-      "0-3 | Ausente: nenhum elemento mágico/sobrenatural ATUANTE. Estética fantástica sem fenômeno operante é esta faixa.",
-      "4-6 | Pontual: mecanismo sobrenatural presente e NÃO recorrente — dispara a premissa e sai de cena.",
-      "7-8 | Estrutural: o fenômeno sobrenatural opera continuamente, ainda que de escopo ontológico estreito.",
-      "9-10 | Onipresente: magia, poderes ou criaturas participam CONTINUAMENTE do mundo e da experiência.",
+      "0-3 | Sofrimento resolvido ou compensado dentro da experiência.",
+      "4-6 | Sofrimento presente COM alívio eficaz — o suporte de fato funciona.",
+      "7-8 | O ACÚMULO SUPERA O ALÍVIO de forma recorrente.",
+      "9-10 | Sofrimento persiste e se acumula; o alívio é ausente, tardio ou INEFICAZ.",
     ],
-  },
-  nobility: {
-    title: "Nobreza",
-    ranges: [
-      "0-3 | Ausente: sem estrutura nobiliárquica relevante, ou título só de fachada (é \"duque\", mas isso não muda nada).",
-      "4-6 | Presente mas secundário: há nobres ou corte, porém hierarquia e política não organizam os conflitos.",
-      "7-8 | Estrutural: posição social, sucessão, etiqueta ou disputa de poder moldam os conflitos principais.",
-      "9-10 | Onipresente: a corte é o palco — hierarquia, alianças e política nobiliárquica sustentam quase tudo que acontece.",
+    guidance: [
+      "FRONTEIRA PRINCIPAL — O SALDO. Não é a quantidade de eventos ruins. Para SUBIR: o alívio precisa FALHAR ou CHEGAR TARDE. Para DESCER: o redutor precisa FUNCIONAR — presença de suporte não basta, ele tem que desfazer o acúmulo.",
+      "ÂNCORAS: 9-10 What It Means to Be You (Angústia muito alta SEM Tragédia proporcional; o alívio chega DEPOIS do acúmulo), How to Win My Husband Over (suporte insuficiente) — 7-8 Villains Are Destined to Die — 0-3 A Sign of Affection (manga; sofrimentos resolvidos) — stress: Look Back (agudo × acumulativo), Betrayal of Dignity (toxicidade ≠ Angústia automática).",
+      "NÃO FAÇA: contar eventos ruins (o que decide é o SALDO, não a quantidade) · deixar a presença de suporte abaixar a nota (o redutor conta pelo efeito — tem que funcionar) · toxicidade = Angústia (Betrayal of Dignity) · agudo = acumulativo (Look Back) · Drama alto ⇒ Angústia alta (Marry My Husband: Drama alto COM Angústia baixa) · Tragédia ⇒ Angústia (What It Means to Be You: Angústia muito alta SEM Tragédia proporcional).",
     ],
   },
 }

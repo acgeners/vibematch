@@ -131,7 +131,7 @@ async function main() {
   }
 
   const [criteriaRes, pubStatusRes, persStatusRes, sourceRes, tagGroupRes, tagsRes, genresRes, tooltipsRes, uiLabelsRes] = await Promise.all([
-    supabase.from("criteria").select("eval_type, slug, criteria, emoji, description, weight, key, ranges, icon_url").order("id"),
+    supabase.from("criteria").select("eval_type, slug, criteria, emoji, description, weight, key, ranges, icon_url, guidance, display_order").order("display_order", { nullsFirst: false }).order("id"),
     supabase.from("publication_status").select("id, status, slug, short, color, symbol").order("id"),
     supabase
       .from("personal_status")
@@ -210,7 +210,13 @@ async function main() {
 
   const criteriaRubricsEntries = iaCriteria.map(c => {
     const ranges = (c.ranges || []).map(r => `      ${JSON.stringify(r)},`).join("\n")
-    return `  ${c.slug}: {\n    title: ${JSON.stringify(c.criteria)},\n    ranges: [\n${ranges}\n    ],\n  },`
+    // `guidance` = os blocos operacionais (FRONTEIRA PRINCIPAL, REGRA LONGITUDINAL, ÂNCORAS,
+    // NÃO FAÇA). Coluna nullable desde a migration 198; critério sem ela não emite o campo.
+    const g = Array.isArray(c.guidance) ? c.guidance : []
+    const guidance = g.length
+      ? `\n    guidance: [\n${g.map(x => `      ${JSON.stringify(x)},`).join("\n")}\n    ],`
+      : ""
+    return `  ${c.slug}: {\n    title: ${JSON.stringify(c.criteria)},\n    ranges: [\n${ranges}\n    ],${guidance}\n  },`
   }).join("\n")
 
   // Lookup texto→canonical para o normalizer de import (CSV/XLSX). Mapeia
@@ -255,7 +261,7 @@ ${criteriaInfoEntries}
 
 export const CRITERIA_RUBRICS: Record<
   string,
-  { title: string; ranges: string[]; note?: string }
+  { title: string; ranges: string[]; note?: string; guidance?: string[] }
 > = {
 ${criteriaRubricsEntries}
 }

@@ -31,18 +31,25 @@ describe("PROMPT_VERSION acompanha o texto do prompt", () => {
   /**
    * Versão e sha256 do SYSTEM_PROMPT andam JUNTOS — atualize os dois na mesma mudança.
    *
-   * ⚠️ v26 → **v28**, pulando a v27 DE PROPÓSITO. A v27 já nomeia OUTRO prompt na história do
-   * projeto (branch `arquivo/prompt-v27`, piloto de 30 obras pago em 11/08 e reprovado), e
-   * reusar o número faria "v27" significar duas réguas diferentes — o mesmo motivo pelo qual a
-   * v24 nunca virou versão de prompt e a v22 não voltou a ser usada quando a v25 foi revertida.
-   * Conferido no banco LOCAL: zero avaliações com `prompt_version = 'v27'`.
+   * ⚠️ v28 → **v30**, pulando a v29 DE PROPÓSITO. A v29 já nomeia OUTRO prompt na história do
+   * projeto (a base do candidato, `gate-validacao-accuracy-v29`), e reusar o número faria "v29"
+   * significar duas réguas diferentes — o mesmo motivo pelo qual a v27 foi pulada antes, e ela
+   * segue gasta (`arquivo/prompt-v27`). Conferido na NUVEM: nenhuma avaliação usa "v30", e a
+   * única menção a "v30" no corpus da auditoria é uma lista do que NÃO foi feito.
    *
-   * 🔴 O que mudou nesta versão: `fantasy` e `nobility` entraram em `criteria` (migration 197) e
-   * `buildCriteriaPromptSection` passou a enumerar 11 critérios em vez de 9. A régua mudou de
-   * verdade — o hash abaixo é a prova.
+   * 🔴 O que mudou nesta versão: o producer alvo dos 11 (`v29+alvo11-c1`). `fantasy_nobility` e
+   * `nobility` saíram; `setting_era` e `angst` entraram; `action_adventure` virou "Dinamismo
+   * Narrativo" (o SLUG não muda); os blocos operacionais do c1 (FRONTEIRA / REGRA LONGITUDINAL /
+   * ÂNCORAS / NÃO FAÇA) passaram a ser renderizados de `criteria.guidance`; entraram a REGRA
+   * PARA HUMOR (v29) e o bloco de COMPATIBILIZAÇÃO; saiu a REGRA OBRIGATÓRIA PARA
+   * FANTASY_NOBILITY.
+   *
+   * ⚠️ A região "CRITÉRIOS … COMPATIBILIZAÇÃO" é BYTE-IDÊNTICA ao artefato aprovado
+   * `SYSTEM_PROMPT-v29+alvo11-c1.txt`; quem prova isso é `producer-alvo-11.test.ts`. O hash
+   * abaixo cobre o prompt INTEIRO, inclusive as regras que ficaram de fora daquela região.
    */
-  const PINNED_VERSION = "v28"
-  const PINNED_SHA256 = "0bc85511fe81f83cc2c0d8eead64299bde819aec7dd8247988ddde4436df7a3a"
+  const PINNED_VERSION = "v30"
+  const PINNED_SHA256 = "6f9e4378b5406b68539d9226c53f393ab19d6aa2a55c053ad273eeed2e4a0580"
 
   it("está fixada na versão que este hash descreve", () => {
     expect(PROMPT_VERSION).toBe(PINNED_VERSION)

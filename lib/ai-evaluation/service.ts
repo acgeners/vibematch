@@ -173,7 +173,7 @@ export const CONCISE_OUTPUT: boolean = true
 // resposta dele com 5,0: incoerência por construção, a classe de defeito que estamos
 // removendo. Afeta 18 obras (romance ≤ 3).
 //
-export const PROMPT_VERSION = CONCISE_OUTPUT ? "v28" : "v18"
+export const PROMPT_VERSION = CONCISE_OUTPUT ? "v30" : "v18"
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
@@ -233,7 +233,12 @@ function buildCriteriaPromptSection(): string {
       .map((range) => `- ${range}`)
       .join("\n")
 
-    return `${index + 1}. ${slug} (${rubric?.title ?? info?.name ?? slug})${description}\n${ranges}`
+    // 🔴 `guidance` são os blocos operacionais do c1 (FRONTEIRA PRINCIPAL, REGRA LONGITUDINAL,
+    // ÂNCORAS, NÃO FAÇA). Vêm de `criteria.guidance` (migration 198) e entram DEPOIS das faixas,
+    // uma linha por bloco — é a posição do artefato aprovado. Critério sem guidance não emite
+    // linha nenhuma, que é o caso de couple_dynamics, adult_content, humor e tragedy.
+    const guidance = (rubric?.guidance ?? []).map((g) => `\n${g}`).join("")
+    return `${index + 1}. ${slug} (${rubric?.title ?? info?.name ?? slug})${description}\n${ranges}${guidance}`
   }).join("\n\n")
 }
 
@@ -262,8 +267,9 @@ TAGS POR GRUPO — GUIA DE PESO POR CRITÉRIO:
 Use o grupo das tags fornecidas como sinal principal por critério. Peso entre parênteses indica o quanto o grupo é indicativo daquele critério:
 - romance: grupo "romance" (alto), grupo "relationship_dynamics" (médio — apenas quando a tag descreve o casal).
 - couple_dynamics: grupo "relationship_dynamics" (médio — apenas quando a tag descreve o casal), grupo "characters" (baixo — apenas quando a tag descreve como o personagem se relaciona amorosamente).
-- fantasy_nobility: grupo "fantasy" (alto), grupo "setting" (alto), grupo "scifi" (médio), grupo "cast" (médio).
-- action_adventure: grupo "superpowers" (médio/alto), grupo "characters" (médio — apenas quando a tag descreve habilidades dos protagonistas).
+- fantasy: grupo "fantasy" (alto), grupo "scifi" (médio — o teste é ontológico: tecnologia que a obra explica como ciência NÃO é Fantasia).
+- setting_era: grupo "setting" (alto).
+- action_adventure: grupo "superpowers" (médio/alto), grupo "characters" (médio — apenas quando a tag descreve habilidades dos protagonistas). A rubrica de Dinamismo Narrativo tem PRECEDÊNCIA sobre este guia: o eixo é O QUE MOVE A HISTÓRIA, não presença de combate — tag de poder ou luta só é indício quando o que ela descreve MOVE a trama.
 - adult_content: grupo "content_indicator" (alto).
 - protagonist: grupo "characters" (alto).
 - humor: grupo "tone_mood" (alto).
@@ -339,7 +345,7 @@ Couple dynamics:
 - "Healing each other", "soft moments together" → carinhosa
 
 Drama:
-- "I cried", "tear-jerker", "emotional rollercoaster", "broke me", "angst", "suffering" → drama alto
+- "I cried", "tear-jerker", "emotional rollercoaster", "broke me" → drama alto
 - "Heartbreak", "betrayal arc", "the way they hurt each other" → drama significativo
 
 Humor:
@@ -373,7 +379,6 @@ USO DA CAPA (quando fornecida como imagem anexada antes do prompt):
   · Caricatura, expressões cômicas exageradas, poses descontraídas → indício de humor
   · Paleta sombria, expressões sérias/tristes/raivosas → indício de drama/tragedy
   · Armas, cenas de batalha, postura combativa → indício de action_adventure
-  · Vestimenta nobre/medieval, cenário de corte/palácio → indício de fantasy_nobility
   · Roupas reveladoras, intimidade visual → indício fraco de adult_content (só sobe nota se corroborado por tag/review)
 - A capa SOZINHA não justifica nota ≥ 7 em nenhum critério. Confirme com outras evidências antes de subir.
 - A capa SOZINHA também não justifica nota < 5 (princípio "ausência de evidência" continua valendo).
@@ -386,8 +391,10 @@ CRITÉRIOS, DESCRIÇÕES E RUBRICAS (use a descrição para entender o que cada 
 
 ${buildCriteriaPromptSection()}
 
-REGRA OBRIGATÓRIA PARA FANTASY_NOBILITY:
-Obras ambientadas majoritariamente em corte, aristocracia, realeza, império, ducado, nobreza ou famílias nobres devem receber nota alta quando esse ambiente organiza a premissa e os conflitos. Se a obra combina nobreza/realeza com reencarnação, transmigração, isekai, regressão, segunda chance ou viagem no tempo, trate isso como evidência estrutural forte: em geral use 7-8, ou 9-10 se política nobre, magia, regras do mundo ou hierarquia social definirem a história. Não deixe em 4-6 quando a ambientação de nobreza/realeza for central.
+COMPATIBILIZAÇÃO DAS REGRAS GERAIS COM AS RUBRICAS ACIMA (tem PRECEDÊNCIA sobre as regras gerais citadas; onde divergirem, vale ESTA):
+- 🔴 A regra geral "notas 0-4 são RESERVADAS pra ausência clara; se há QUALQUER evidência a nota deve ser ≥ 5" — e o lembrete posterior "presença com ressalvas → mín 5" — NÃO se aplica a setting_era, action_adventure e angst. Nesses critérios, notas baixas representam o polo baixo definido pela própria rubrica, e não ausência do critério.
+- 🔴 A regra de COERÊNCIA JUSTIFICATIVA × FAIXA que liga vocabulário a faixa ("presença constante", "frequente", "recorrente", "um dos pilares", "elemento central", "abundante" → 7-8 ou 9-10; "pontual", "esporádico", "leve", "sutil", "subliminar" → não 7-8) NÃO se aplica a setting_era, action_adventure, angst, romance e protagonist. Nesses critérios, a faixa segue a fronteira da própria rubrica.
+- 🔴 Para romance, a rubrica acima tem PRECEDÊNCIA sobre a orientação legada de ROMANCE em "AVALIE O DESENVOLVIMENTO"; para protagonist, tem PRECEDÊNCIA sobre o bloco "PROTAGONISTA MARCANTE" em "INTERPRETAÇÃO DE REVIEWS DE USUÁRIOS". Onde divergirem, vale a rubrica.
 
 REGRA PARA ADULT_CONTENT (leia com atenção — a natureza do conteúdo manda, não a frequência):
 - Pontue adult_content com base em sinopse, tags (especialmente do grupo "content_indicator"), gêneros e reviews compatíveis.
@@ -396,6 +403,19 @@ REGRA PARA ADULT_CONTENT (leia com atenção — a natureza do conteúdo manda, 
 - Marcadores de EDIÇÃO ("[R19 disponível]", "Original Webtoon: R19", "Official Translations (R19)") dizem apenas que EXISTE uma edição R19 desta história em algum lugar. Isso NÃO é evidência de que a obra avaliada mostre conteúdo explícito — com frequência a obra avaliada é justamente a versão sem ele. Trate como dica fraca, nunca como piso.
 - A marcação "R15 but Based on a R19 Novel" diz o contrário de conteúdo explícito: a obra avaliada é R15, o R19 é do novel de origem. Nesse caso adult_content tem TETO, não piso.
 - Quando houver piso ou teto obrigatório para esta obra, ele vem informado no prompt do usuário. Sem essa informação, não invente piso a partir de marcador.
+
+REGRA PARA HUMOR — RUBRICA SUBSTITUÍDA (tem PRECEDÊNCIA sobre as faixas de humor listadas na seção de critérios acima; onde as duas divergirem, vale ESTA):
+Humor mede QUANTO humor/comédia está presente e participa do registro narrativo da obra. Avalie a experiência global, não uma cena.
+- 0-3: humor ausente, muito raro, residual ou pouco relevante para a experiência global. Pode haver ocorrência isolada sem que comédia seja uma presença perceptível.
+- 4-6: humor presente de forma secundária e perceptível — alívio cômico, gags, situações engraçadas ou personagens cômicos, recorrentes o bastante para fazer parte da experiência, mas sem dominar o registro.
+- 7-8: humor significativo e frequente; a comédia é parte importante e consistente do registro narrativo, ainda que a obra também tenha romance, drama, ação, angústia ou outros tons fortes.
+- 9-10: humor dominante, definidor ou fortemente característico da experiência global — a obra é construída de forma recorrente em torno de comédia, gags, timing, sátira, humor negro, situações cômicas ou equivalentes. NÃO é exigido que a obra faça rir "o tempo todo".
+- 🔴 NÃO rebaixe humor por clima pesado. Drama alto, angústia alta, tragédia ou tom sombrio NÃO reduzem humor. Humor alto + Drama alto e Humor alto + Angústia alta são combinações LEGÍTIMAS e esperadas. "Tom sério" NÃO é critério da faixa 0-3: o que define a faixa é quanta construção cômica participa da experiência, nada mais.
+- 🔴 EFICÁCIA NÃO ENTRA NA NOTA. Humor mede construção e presença de comédia, não se a piada funcionou. Comédia mal executada continua sendo humor alto se a obra é construída para o riso. Review dizendo "não achei engraçado" ou "o humor não funcionou pra mim" informa qualidade percebida e NÃO apaga a presença estrutural de humor.
+- 🔴 LEVEZA NÃO É HUMOR. Obra leve, confortável, sem sofrimento ou com final feliz pode ter humor baixo; obra sombria pode ter humor alto. Não confunda conforto, ausência de drama ou final feliz com comédia.
+- 🔴 A regra geral "notas 0-4 são RESERVADAS pra ausência clara; se há QUALQUER evidência a nota deve ser ≥ 5" NÃO se aplica a humor. Uma ou poucas gags, um personagem ocasionalmente cômico ou alívio cômico muito esparso PODEM continuar em 0-3 quando o humor é residual na experiência global.
+- ⚠️ E o inverso também vale: AUSÊNCIA DE EVIDÊNCIA NÃO É EVIDÊNCIA DE AUSÊNCIA. NÃO coloque em 0-3 só porque não há tag de comédia, review mencionando humor ou sinal na sinopse. Silêncio sobre humor é INCERTEZA: reflita isso na "confidence", nunca empurrando a nota para baixo. Pese o VOLUME de evidência — silêncio numa obra muito documentada é sinal fraco de ausência; silêncio numa obra com poucas reviews e sinopse curta praticamente não informa nada. Isto é ponderação, não fórmula.
+- Gênero "Comedy" e tags de comédia ("Gag Humor", "Comedic Misunderstanding/s", "Comedic Facial Expressions", "Parody", "Black Humor", "Running Gags"…) são EVIDÊNCIA relevante — nunca nota automática. Não existe piso, teto nem valor derivado para humor: a nota é seu julgamento pela rubrica acima.
 
 REGRA PARA COUPLE_DYNAMICS (leia com atenção):
 Couple_dynamics é avaliada pelo RESULTADO EMOCIONAL do casal na obra, NÃO pela forma da dinâmica. Tags como BDSM, Femdom, Dom/Sub, Master-Pet, posse, ciúme intenso, "Yandere ML/FL", "Masochistic ML", "Submissive ML/FL", "Crazy ML/FL" NÃO determinam automaticamente 0-3. Antes de pontuar, avalie:

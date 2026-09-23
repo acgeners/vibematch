@@ -45,18 +45,30 @@ export type AiEvalStatus = (typeof AI_EVAL_STATUSES)[number]
 export const PLATFORMS = ["mangaupdates", "myanimelist", "anilist", "animeplanet", "comick", "mangadex", "kitsu", "comix", "mangago", "outros"] as const
 export type Platform = (typeof PLATFORMS)[number]
 
+/**
+ * Os critérios que a IA AVALIA e o produto mostra — GERADO por `sync-constants` a partir de
+ * `criteria` (eval_type='IA'), na ordem de `display_order`.
+ *
+ * 🔴 `fantasy_nobility` e `nobility` NÃO estão aqui, e isso é decisão de produto, não limpeza:
+ * os dois saíram de `eval_type='IA'` na migration 198 e viraram LEGADO. Nenhuma linha deles foi
+ * apagada — `category_scores`, `ai_evaluation_scores`, `attribute_bias` e
+ * `user_attribute_assessment` seguem intactos e a FK para `criteria.slug` continua de pé.
+ *
+ * ⚠️ Quem entra no CÁLCULO é outra lista: `SCORING_CRITERION_SLUGS` (9). `setting_era` e `angst`
+ * são avaliados e exibidos, mas não entram no Ridge — ver `lib/calculations/scoring-features.ts`.
+ */
 export const CRITERION_SLUGS = [
   "romance",
   "couple_dynamics",
-  "fantasy_nobility",
+  "fantasy",
+  "setting_era",
   "action_adventure",
   "adult_content",
   "protagonist",
   "humor",
   "drama",
   "tragedy",
-  "fantasy",
-  "nobility",
+  "angst",
 ] as const
 export type CriterionSlug = (typeof CRITERION_SLUGS)[number]
 
@@ -70,6 +82,10 @@ export const SCORE_SOURCES = [
    * Seed de transição da migration 197: `fantasy`/`nobility` receberam o valor do
    * `fantasy_nobility` da obra. NÃO é avaliação — `ai_evaluation_id` fica null e não há
    * justificativa. Sai sozinho quando a obra passar por uma avaliação real.
+   *
+   * 🔴 É este valor que a instrumentação de deriva conta: `fantasy` com source
+   * `legacy_split_copy` ainda é o legado disfarçado; com qualquer outro source já é Fantasia
+   * de verdade. Ver `fantasy_real_count` em `calibration_history`.
    */
   "legacy_split_copy",
 ] as const
