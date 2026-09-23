@@ -58,6 +58,7 @@ import {
 } from "@/lib/ai-recommendation/taste-profile-heuristic"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { SCORING_CRITERION_SLUGS } from "@/lib/calculations/scoring-features"
+import { readFantasyDrift, scoringCriteriaSignature } from "@/server/queries/fantasy-drift"
 import type { DeclaredTagPref } from "@/server/queries/tag-preferences"
 import { loadArtLabels } from "@/server/queries/pilot-taste"
 import { computeArtForCatalog } from "@/lib/art/model"
@@ -758,6 +759,15 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
 
   // Snapshot histórico — append-only. Falha aqui não invalida o recálculo;
   // só perde uma entrada do gráfico de tendência.
+  // Deriva do slot 3: quanto de `fantasy` já é avaliação real e quanto ainda é o seed da 197.
+  // Falha aqui não invalida o recálculo — é observabilidade; perde-se uma linha da série.
+  let drift: Awaited<ReturnType<typeof readFantasyDrift>> | null = null
+  try {
+    drift = await readFantasyDrift(supabase)
+  } catch (e) {
+    console.warn("[recalculateAll] fantasy-drift falhou:", (e as Error).message)
+  }
+
   const { error: historyErr } = await supabase.from("calibration_history").insert({
     formula_version: config.formula_version,
     stacker_enabled: false,
@@ -770,6 +780,10 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
     train_size: expectedPredictor.trainSize,
     total_works: works.length,
     stacker_coefficients: null,
+    fantasy_real_count: drift?.real ?? null,
+    fantasy_legacy_copy_count: drift?.legacy ?? null,
+    fantasy_real_ratio: drift?.ratio ?? null,
+    scoring_criteria_signature: scoringCriteriaSignature(),
   })
   if (historyErr) {
     console.warn("[recalculateAll] calibration_history insert falhou:", historyErr.message)
