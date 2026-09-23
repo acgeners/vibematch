@@ -97,6 +97,27 @@ export type PostScoreField = (typeof POST_SCORE_FIELDS)[number]
 // sem ter que mudar callers; qualityAdj passa a ser sempre 0.
 const QUALITY_NUMERIC_FEATURES = [] as const
 
+/**
+ * Os nomes do bloco baseline para uma lista de critérios qualquer.
+ *
+ * 🔴 Existe SÓ para o harness de diagnóstico `/curation/model-metrics/criteria-experiment`,
+ * que compara os 9 oficiais contra os 11 do producer alvo. Produção não passa `criterios` e
+ * cai em `SCORING_CRITERION_SLUGS` — o comportamento não muda em lugar nenhum.
+ *
+ * ⚠️ `BASELINE_NUMERIC_FEATURES` (exportado como `EXPECTED_BASELINE_FEATURES`) continua sendo
+ * a lista OFICIAL e é o que o dicionário do `/guide/scores` enumera. Não derive a oficial
+ * daqui: a constante é o contrato, esta função é a exceção.
+ */
+function baselineNumericFeatures(criterios: readonly string[]): readonly string[] {
+  return [...criterios, ...BASELINE_NUMERIC_FEATURES.slice(SCORING_CRITERION_SLUGS.length)]
+}
+
+/** Opções do modelo. Só o harness experimental as usa; produção omite. */
+export interface ExpectedModelOptions {
+  /** Critérios no vetor. Default: `SCORING_CRITERION_SLUGS` (os 9 oficiais). */
+  criterionSlugs?: readonly string[]
+}
+
 const NUMERIC_FEATURE_NAMES = [
   ...BASELINE_NUMERIC_FEATURES,
   ...QUALITY_NUMERIC_FEATURES,
@@ -188,9 +209,10 @@ function buildNumericRow(
   input: ExpectedScoreInput,
   includeQuality = false,
   includeArt = false,
+  criterios: readonly string[] = SCORING_CRITERION_SLUGS,
 ): NumericRow {
   const row: (number | null)[] = []
-  for (const slug of SCORING_CRITERION_SLUGS) {
+  for (const slug of criterios) {
     const v = input.categoryScores[slug as CriterionSlug]
     row.push(v == null || !Number.isFinite(v) ? null : v)
   }
@@ -240,16 +262,19 @@ export function trainExpectedPredictor(
   trainTargets: number[],
   includeQuality = false,
   includeArt = false,
+  opts: ExpectedModelOptions = {},
 ): TrainedExpectedPredictor {
+  const criterios = opts.criterionSlugs ?? SCORING_CRITERION_SLUGS
   if (trainInputs.length !== trainTargets.length) {
     throw new Error("trainExpectedPredictor: inputs and targets length mismatch")
   }
 
   // Feature set numérico depende do plano: Pago (includeQuality) adiciona os
   // 8 quality granulares; Free fica só nos 14 baseline.
+  const nomesBase = baselineNumericFeatures(criterios)
   const baselineFeatureNames: readonly string[] = includeArt
-    ? [...BASELINE_NUMERIC_FEATURES, "ArtEstimate"]
-    : BASELINE_NUMERIC_FEATURES
+    ? [...nomesBase, "ArtEstimate"]
+    : nomesBase
   const baselineCount = baselineFeatureNames.length
   const qualityFeatureNames: readonly string[] = includeQuality ? POST_SCORE_FIELDS : []
   const numericFeatureNames = [...baselineFeatureNames, ...qualityFeatureNames]
@@ -288,7 +313,7 @@ export function trainExpectedPredictor(
     }
   }
 
-  const numericRows = trainInputs.map((inp) => buildNumericRow(inp, includeQuality, includeArt))
+  const numericRows = trainInputs.map((inp) => buildNumericRow(inp, includeQuality, includeArt, criterios))
   const categoricalRows = trainInputs.map(buildCategoricalRow)
 
   const numImputer = new MedianImputer().fit(numericRows)
@@ -340,7 +365,7 @@ export function trainExpectedPredictor(
   }
 
   function transform(inputs: ExpectedScoreInput[]): number[][] {
-    const numRows = inputs.map((inp) => buildNumericRow(inp, includeQuality, includeArt))
+    const numRows = inputs.map((inp) => buildNumericRow(inp, includeQuality, includeArt, criterios))
     const catRows = inputs.map(buildCategoricalRow)
     const numImp = numImputer.transform(numRows)
     const numSc = numScaler.transform(numImp)
@@ -442,6 +467,7 @@ export function expectedOutOfFoldPredictions(
   includeQuality = false,
   kFolds = 5,
   includeArt = false,
+  opts: ExpectedModelOptions = {},
 ): number[] | null {
   if (inputs.length !== targets.length) {
     throw new Error("expectedOutOfFoldPredictions: inputs/targets length mismatch")
@@ -482,7 +508,7 @@ export function expectedOutOfFoldPredictions(
       }
     }
     if (trIn.length === 0 || teIn.length === 0) continue
-    const predictor = trainExpectedPredictor(trIn, trTg, includeQuality, includeArt)
+    const predictor = trainExpectedPredictor(trIn, trTg, includeQuality, includeArt, opts)
     if (predictor.isStub) {
       const fallback = trTg.length > 0 ? trTg.reduce((a, b) => a + b, 0) / trTg.length : 7.0
       for (const idx of teOrder) preds[idx] = fallback
