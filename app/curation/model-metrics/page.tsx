@@ -81,8 +81,8 @@ export default async function ModelMetricsPage() {
       />
 
       {/*
-        Entrada SECUNDÁRIA, e por isso um link e não um card: o experimento 9 × 11 é
-        diagnóstico pontual, não uma métrica que se acompanha. Toda a análise mora na rota
+        Entrada SECUNDÁRIA, e por isso um link e não um card: o experimento da Nota Prevista
+        é diagnóstico pontual, não uma métrica que se acompanha. Toda a análise mora na rota
         dedicada — pendurá-la aqui misturaria o que o produto USA com o que ele TESTA.
       */}
       <Link
@@ -90,9 +90,9 @@ export default async function ModelMetricsPage() {
         className="flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-sm hover:bg-muted/50"
       >
         <FlaskConical className="size-4 shrink-0 text-muted-foreground" />
-        <span className="font-medium">Comparar 9 × 11 atributos</span>
+        <span className="font-medium">Comparar Nota Prevista: 9 × 11 atributos</span>
         <span className="text-xs text-muted-foreground">
-          setting_era e angst melhoram a previsão? · US$0, não grava nada
+          setting_era e angst melhoram o Ridge? · US$0, não grava nada
         </span>
       </Link>
 

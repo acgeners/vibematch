@@ -3845,8 +3845,13 @@ npm run smoke:logado     # build + sobe + verifica + derruba (~2min)
 ```
 
 🔴 **Os outros dois smokes são ANÔNIMOS, e isso deixava metade do app sem instrumento
-nenhum.** Medido em 20/08: o app tem **39 rotas**, **12 gateadas** (7 em `/curation`, 5 em
+nenhum.** Hoje o app tem **40 rotas**, **13 gateadas** (8 em `/curation`, 5 em
 `SIGNED_IN_PREFIXES`), e o `smoke-browser.mjs` abre **5** — nenhuma logada.
+
+⚠️ Era **39/12** em 20/08 e a rede do eixo C acusou a defasagem no mesmo PR que a causou —
+`/curation/model-metrics/criteria-experiment`. E ela só acusou **depois do `git add`**: a
+varredura deriva de `git ls-files`, então rota nova fica invisível enquanto está
+não-rastreada ([[gotcha-suite-verde-por-arquivo-nao-rastreado]]).
 
 ⚠️ **E o gate do middleware SUBESTIMA o buraco**, porque ele lista quem REDIRECIONA. A página
 de obra responde 200 anônima e troca de árvore com sessão. Medido na mesma obra, no mesmo

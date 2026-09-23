@@ -74,7 +74,7 @@ export function CriteriaExperimentPanel({
           {rodando ? "Comparando…" : "Executar comparação"}
         </Button>
         <span className="text-xs text-muted-foreground">
-          US$0 · nada é gravado · {DEFAULT_PERMUTATIONS} permutações
+          Só a Nota Prevista (Ridge) · US$0 · nada é gravado · {DEFAULT_PERMUTATIONS} permutações
         </span>
       </div>
 
@@ -122,36 +122,36 @@ export function CriteriaExperimentPanel({
           {/* ── análise principal ───────────────────────────────────── */}
           <div className="rounded-xl border border-border bg-card p-4">
             <h3 className="text-sm font-semibold">
-              Análise principal · coorte completa{" "}
+              Análise principal · Nota Prevista na coorte completa{" "}
               <span className="font-normal text-muted-foreground">(n = {r.principal.n})</span>
             </h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Os dois braços nas <strong>mesmas obras</strong>, com os mesmos folds. É esta que
-              decide se os dois atributos acrescentam sinal.
+              O mesmo Ridge, nas <strong>mesmas obras</strong> e com os mesmos folds, com 9 e com
+              11 critérios. É esta que decide se os dois atributos acrescentam sinal preditivo.
             </p>
             {r.principal.oficial && r.principal.experimental ? (
               <>
                 <div className="mt-3">
-                  <Linha rotulo="CV MAE OOF · oficial (9)" valor={n4(r.principal.oficial.cvMae)} />
+                  <Linha rotulo="CV MAE OOF · Ridge 9" valor={n4(r.principal.oficial.cvMae)} />
                   <Linha
-                    rotulo="CV MAE OOF · experimental (11)"
+                    rotulo="CV MAE OOF · Ridge 11"
                     valor={n4(r.principal.experimental.cvMae)}
                   />
                   <Linha
                     rotulo="Δ CV MAE"
                     valor={sinal(r.principal.deltaCvMae)}
-                    dica="negativo = o experimental erra menos"
+                    dica="negativo = o Ridge de 11 erra menos"
                   />
                   <Linha
-                    rotulo="rho(previsão, user_score) · 9"
+                    rotulo="rho(Nota Prevista, user_score) · 9"
                     valor={n4(r.principal.oficial.rhoComRotulo)}
                   />
                   <Linha
-                    rotulo="rho(previsão, user_score) · 11"
+                    rotulo="rho(Nota Prevista, user_score) · 11"
                     valor={n4(r.principal.experimental.rhoComRotulo)}
                   />
                   <Linha
-                    rotulo="Spearman entre as duas previsões"
+                    rotulo="Spearman entre as duas Notas Previstas"
                     valor={n4(r.principal.spearmanEntreOsDois)}
                   />
                   <Linha
@@ -259,7 +259,7 @@ export function CriteriaExperimentPanel({
           {/* ── análise secundária ──────────────────────────────────── */}
           <div className="rounded-xl border border-dashed border-border bg-card p-4">
             <h3 className="text-sm font-semibold">
-              Análise secundária · catálogo rotulado, com imputação
+              Análise secundária · Nota Prevista no catálogo rotulado, com imputação
             </h3>
             <p className="mt-0.5 rounded-lg bg-amber-500/15 p-2.5 text-xs text-amber-700 dark:text-amber-300">
               <strong>Não é a evidência principal.</strong> Aqui{" "}
@@ -273,8 +273,8 @@ export function CriteriaExperimentPanel({
               <Linha rotulo="com setting_era real" valor={String(r.secundaria.cobertura.comSettingEra)} />
               <Linha rotulo="com angst real" valor={String(r.secundaria.cobertura.comAngst)} />
               <Linha rotulo="com ambos" valor={String(r.secundaria.cobertura.comAmbos)} />
-              <Linha rotulo="MAE OOF · 9" valor={n4(r.secundaria.maeOficial)} />
-              <Linha rotulo="MAE OOF · 11" valor={n4(r.secundaria.maeExperimental)} />
+              <Linha rotulo="MAE OOF · Ridge 9" valor={n4(r.secundaria.maeOficial)} />
+              <Linha rotulo="MAE OOF · Ridge 11" valor={n4(r.secundaria.maeExperimental)} />
               <Linha rotulo="Δ" valor={sinal(r.secundaria.delta)} />
             </div>
           </div>

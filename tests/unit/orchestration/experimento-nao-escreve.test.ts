@@ -184,3 +184,60 @@ describe("pré-198 a página não estoura", () => {
     expect(i, "checa disponibilidade DEPOIS de ler o catálogo").toBeLessThan(j)
   })
 })
+
+describe("a tela diz que o ESCOPO é a Nota Prevista, não o cálculo inteiro", () => {
+  const pagina = src("app/curation/model-metrics/criteria-experiment/page.tsx")
+  const entrada = src("app/curation/model-metrics/page.tsx")
+  const painel = src("components/curation/criteria-experiment-panel.tsx")
+
+  /**
+   * 🔴 "9 × 11" sozinho sugere que o cálculo INTEIRO roda com 11 — e não roda. O experimento
+   * mexe só no vetor do Ridge; Nota.IA, Chance/Bússola, embeddings e a inferência de pesos
+   * seguem nos 9 oficiais e nem entram na comparação. Sem o nome certo, um Δ de cvMAE seria
+   * lido como o efeito no produto todo.
+   */
+  it("o heading e a entrada nomeiam a Nota Prevista", () => {
+    expect(pagina).toContain('title="Comparar Nota Prevista: 9 × 11 atributos"')
+    expect(entrada).toContain("Comparar Nota Prevista: 9 × 11 atributos")
+  })
+
+  it("a explicação de escopo está no topo da página", () => {
+    expect(pagina).toContain("<strong>Nota Prevista (Ridge)</strong>")
+    expect(pagina).toContain("Os demais componentes do cálculo oficial")
+    expect(pagina).toContain("permanecem inalterados")
+  })
+
+  /** O que fica FORA é o que impede a leitura larga — por isso é asserido item a item. */
+  it.each(["Nota.IA", "Chance/Bússola", "embeddings", "inferência de pesos"])(
+    "a página declara que %s NÃO entra na comparação", (componente) => {
+      expect(pagina).toContain("Não entram nesta comparação")
+      expect(pagina).toContain(componente)
+    },
+  )
+
+  it("os dois braços são descritos como o MESMO Ridge", () => {
+    expect(pagina).toContain("Ridge com os 9 critérios atuais")
+    expect(pagina).toContain("o MESMO Ridge + 2 critérios")
+    expect(pagina).toContain("O ranking oficial não é alterado")
+  })
+
+  /**
+   * ⚠️ Os rótulos das métricas também precisam do escopo: "CV MAE OOF · 9" sem dizer Ridge
+   * volta a soar como o cálculo todo. Aqui basta o rótulo — a ressalva longa fica no topo.
+   */
+  it("os rótulos das métricas dizem Ridge / Nota Prevista", () => {
+    expect(painel).toContain('rotulo="CV MAE OOF · Ridge 9"')
+    expect(painel).toContain('rotulo="CV MAE OOF · Ridge 11"')
+    expect(painel).toContain("rho(Nota Prevista, user_score)")
+    expect(painel).toContain("Só a Nota Prevista (Ridge)")
+  })
+
+  it("nenhum heading da feature promete '11 atributos' sem escopo", () => {
+    for (const [nome, texto] of [["página", pagina], ["entrada", entrada]] as const) {
+      // heading antigo: "Comparar 9 × 11 atributos" sem "Nota Prevista" antes
+      expect(texto, `${nome} voltou ao heading sem escopo`).not.toMatch(
+        /Comparar 9 × 11 atributos/,
+      )
+    }
+  })
+})
