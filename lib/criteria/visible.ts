@@ -1,33 +1,30 @@
 import { CRITERION_SLUGS, type CriterionSlug } from "@/types/domain"
 
 /**
- * Os critérios que o LEITOR vê. Hoje = os 11 do banco menos o legado misto.
+ * Os critérios que o LEITOR vê. Hoje = os 11 de `CRITERION_SLUGS`, sem exceção.
  *
- * 🔴 POR QUE `fantasy_nobility` SAI DA TELA. Ele é um construto MISTO, e isso foi medido
- * (auditoria, etapa 56): r(fantasia, nobreza) = 0,118 — eixos praticamente independentes — e das
- * 839 obras com nota >= 7, **48,3% são só nobreza, 8,3% só fantasia, 21,1% ambas e 22,3% nem uma
- * nem outra**. A mesma nota significa quatro coisas, então quem filtra por ">= 7" recebe os
- * quatro grupos misturados sem como distinguir. *Light and Shadow* tem 9,0 com ZERO tags de
- * magia; *The Spark in Your Eyes* tem 8,5 com ZERO nobreza.
+ * 🔴 ESTA LISTA FICOU VAZIA, E ISSO É O CONSERTO — não um descuido. Até a migration 198,
+ * `fantasy_nobility` estava em `CRITERION_SLUGS` (era critério de IA) e precisava ser escondido
+ * aqui: é um construto MISTO, medido na etapa 56 da auditoria — r(fantasia, nobreza) = 0,118, e
+ * das 839 obras com nota >= 7, 48,3% são só nobreza, 8,3% só fantasia, 21,1% ambas e 22,3% nem
+ * uma nem outra. A mesma nota significava quatro coisas.
  *
- * 🔴 POR QUE ELE NÃO É APAGADO. Ele continua em `SCORING_CRITERION_SLUGS` — alimenta o Ridge, a
- * Bússola, os embeddings e a guarda de `expected_score` —, continua sendo avaliado pelo provider
- * e continua editável na CURADORIA. Mostrá-lo ao lado de `fantasy` e `nobility` seriam três
- * afirmações sobre o mesmo assunto na mesma tela.
+ * A 198 tirou `fantasy_nobility` e `nobility` de `eval_type='IA'`, então os dois deixaram de
+ * entrar em `CRITERION_SLUGS` e não há mais o que filtrar: quem os removia agora é a origem.
  *
- * ⚠️ A FRONTEIRA É LEITURA × CURADORIA, não "toda tela". Tirar o campo do `work-form` ou do
- * modal de revisão de IA deixaria sem manutenção o dado que ainda move a Nota Prevista — e o
- * `import.schema` passaria a recusar listas que trazem a coluna. Esses pontos mantêm o legado,
- * rotulado como tal.
+ * ⚠️ O módulo CONTINUA existindo, e não por inércia. `isLegacyHiddenCriterion` é consultada por
+ * telas de CURADORIA e por leitores de preset/URL antigos, que ainda encontram os dois slugs em
+ * dado histórico — `category_scores` e `ai_evaluation_scores` seguem intactos. Apagar a régua
+ * faria um `min_fantasy_nobility` guardado em 2026-08 voltar a pintar coluna para o leitor.
  */
-export const LEGACY_HIDDEN_SLUGS = ["fantasy_nobility"] as const
+export const LEGACY_HIDDEN_SLUGS = ["fantasy_nobility", "nobility"] as const
 export type LegacyHiddenSlug = (typeof LEGACY_HIDDEN_SLUGS)[number]
 
 const OCULTOS = new Set<string>(LEGACY_HIDDEN_SLUGS)
 
 /** Os critérios visíveis ao leitor, na ordem canônica. */
 export const VISIBLE_CRITERION_SLUGS = CRITERION_SLUGS.filter(
-  (slug): slug is Exclude<CriterionSlug, LegacyHiddenSlug> => !OCULTOS.has(slug),
+  (slug): slug is Exclude<CriterionSlug, LegacyHiddenSlug & CriterionSlug> => !OCULTOS.has(slug),
 )
 
 /** `true` quando o critério é legado e não deve aparecer para quem só LÊ. */

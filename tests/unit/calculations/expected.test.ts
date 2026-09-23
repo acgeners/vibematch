@@ -15,7 +15,7 @@ const baseInput = (overrides: Partial<ExpectedScoreInput> = {}): ExpectedScoreIn
   categoryScores: {
     romance: 8,
     couple_dynamics: 7,
-    fantasy_nobility: 6,
+    fantasy: 6,
     action_adventure: 5,
     adult_content: 0,
     protagonist: 8,
@@ -69,7 +69,7 @@ describe("trainExpectedPredictor (single Ridge + decomposition)", () => {
           categoryScores: {
             romance,
             couple_dynamics: 5,
-            fantasy_nobility: 5,
+            fantasy: 5,
             action_adventure: 5,
             adult_content: 0,
             protagonist: 6,
@@ -239,7 +239,7 @@ describe("trainExpectedPredictor (single Ridge + decomposition)", () => {
     expect(EXPECTED_BASELINE_FEATURES).toEqual([
       "romance",
       "couple_dynamics",
-      "fantasy_nobility",
+      "fantasy",
       "action_adventure",
       "adult_content",
       "protagonist",

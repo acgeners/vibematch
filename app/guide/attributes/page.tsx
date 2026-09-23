@@ -3,7 +3,7 @@ import { BookOpenText } from "lucide-react"
 import { Header } from "@/components/layout/header"
 import { AttributeIndex } from "@/components/guide/attribute-index"
 import { BackToTop } from "@/components/guide/back-to-top"
-import { attributeArtSrc, buildGlossary } from "@/lib/criteria/glossary"
+import { attributeArtSrc, buildGlossary, hasAttributeArt } from "@/lib/criteria/glossary"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Dicionário dos atributos" }
@@ -39,7 +39,8 @@ export default function DicionarioDeAtributosPage() {
         items={entries.map((e) => ({
           slug: e.slug,
           name: e.name,
-          icon: attributeArtSrc(e.slug, 160),
+          // Critério sem arte preparada entra no índice sem ícone, nunca com 404.
+          icon: hasAttributeArt(e.slug) ? attributeArtSrc(e.slug, 160) : null,
         }))}
       />
 
@@ -127,14 +128,16 @@ export default function DicionarioDeAtributosPage() {
                 <tr key={entry.slug} className="border-b border-border/60 last:border-b-0 hover:bg-muted/40">
                   <td className="px-4 py-2.5">
                     <Link href={`#${entry.slug}`} className="flex items-center gap-2.5 whitespace-nowrap font-semibold">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={attributeArtSrc(entry.slug, 64)}
-                        alt=""
-                        width={26}
-                        height={26}
-                        className="size-[26px] shrink-0"
-                      />
+                      {hasAttributeArt(entry.slug) ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          src={attributeArtSrc(entry.slug, 64)}
+                          alt=""
+                          width={26}
+                          height={26}
+                          className="size-[26px] shrink-0"
+                        />
+                      ) : null}
                       {entry.name}
                     </Link>
                   </td>
@@ -147,7 +150,9 @@ export default function DicionarioDeAtributosPage() {
                             : "bg-primary/15 text-primary"
                         }`}
                       >
-                        {faixa.label}
+                        {/* Sem apelido (7 dos 11 no producer c1), a pílula mostra a própria
+                            faixa — informação que existe, em vez de um chip vazio. */}
+                        {faixa.label || faixa.band}
                       </span>
                     </td>
                   ))}
@@ -174,16 +179,18 @@ export default function DicionarioDeAtributosPage() {
               i === 0 ? "pt-2" : "border-t border-border"
             }`}
           >
-            <div className="w-full max-w-[200px] self-start md:sticky md:top-[calc(var(--top-nav-h)+15px)]">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={attributeArtSrc(entry.slug, 480)}
-                alt={`Arte do atributo ${entry.name}`}
-                width={480}
-                height={480}
-                className="aspect-square w-full object-contain"
-              />
-            </div>
+            {hasAttributeArt(entry.slug) ? (
+              <div className="w-full max-w-[200px] self-start md:sticky md:top-[calc(var(--top-nav-h)+15px)]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={attributeArtSrc(entry.slug, 480)}
+                  alt={`Arte do atributo ${entry.name}`}
+                  width={480}
+                  height={480}
+                  className="aspect-square w-full object-contain"
+                />
+              </div>
+            ) : null}
 
             <div className="flex min-w-0 flex-col gap-4">
               {/* O título é o que substitui o índice grudado: ~44px em vez de 288px, e diz
@@ -229,7 +236,7 @@ export default function DicionarioDeAtributosPage() {
                       </span>
                     </div>
                     <div className="min-w-0">
-                      <h4 className="text-[15px] font-semibold">{faixa.label}</h4>
+                      {faixa.label ? <h4 className="text-[15px] font-semibold">{faixa.label}</h4> : null}
                       {faixa.text && (
                         <p className="max-w-[76ch] text-sm leading-relaxed text-muted-foreground">
                           {faixa.text}

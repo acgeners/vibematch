@@ -13,14 +13,17 @@ import { inferScoreWeights, type WeightInferenceInput } from "@/lib/ml/weight-in
 /**
  * O CÁLCULO NÃO PODE CRESCER COM O BANCO.
  *
- * `CRITERION_SLUGS` é gerado de `criteria` e vai a 11 (fantasy/nobility). O vetor de features do
+ * `CRITERION_SLUGS` é gerado de `criteria` e tem 11 (migration 198). O vetor de features do
  * Ridge, da Bússola, do embedding e a guarda de `expected_score` ficam nos 9 — senão inserir uma
- * linha no Supabase muda a Nota Prevista de todo o catálogo sem ninguém decidir, e durante a
- * transição as duas colunas novas são CÓPIAS EXATAS de `fantasy_nobility` (seed legacy_split_copy).
+ * linha no Supabase muda a Nota Prevista de todo o catálogo sem ninguém decidir.
+ *
+ * 🔴 O slot 3 carrega `fantasy`, não o legado `fantasy_nobility`: ver a medição citada em
+ * `lib/calculations/scoring-features.ts`. `setting_era` e `angst` são avaliados e exibidos, e
+ * ficam FORA do cálculo — são eles que os casos abaixo usam para provar que a lista não cresce.
  */
 
 const OS_NOVE = [
-  "romance", "couple_dynamics", "fantasy_nobility", "action_adventure",
+  "romance", "couple_dynamics", "fantasy", "action_adventure",
   "adult_content", "protagonist", "humor", "drama", "tragedy",
 ] as const
 
@@ -29,15 +32,15 @@ const scores9 = (): CategoryScoreMap =>
   Object.fromEntries(OS_NOVE.map((s, i) => [s, 3 + ((i * 7) % 8) * 0.5]))
 
 /**
- * Os mesmos 9 + fantasy/nobility, como ficam DEPOIS do seed.
+ * Os mesmos 9 + setting_era/angst — os dois avaliados que NÃO entram no cálculo.
  * 🔴 Os valores VARIAM com `i` e são CORRELACIONADOS com o alvo de propósito: uma coluna
  * constante tem desvio zero e o Ridge a ignora — o fixture passaria verde mesmo com o código
  * lendo a lista do banco. Foi o que a primeira sonda flagrou.
  */
 const scores11 = (i = 0): CategoryScoreMap => ({
   ...scores9(),
-  fantasy: (i * 2.3) % 10,
-  nobility: 10 - ((i * 1.7) % 10),
+  setting_era: (i * 2.3) % 10,
+  angst: 10 - ((i * 1.7) % 10),
 })
 
 describe("SCORING_CRITERION_SLUGS é a lista CONGELADA do cálculo", () => {
@@ -72,8 +75,11 @@ describe("acrescentar critérios NÃO muda número nenhum do produto", () => {
    */
   it("as duas listas têm tamanhos DIFERENTES — senão os casos abaixo não provam nada", () => {
     expect(CRITERION_SLUGS.length).toBeGreaterThan(SCORING_CRITERION_SLUGS.length)
-    expect(CRITERION_SLUGS as readonly string[]).toContain("fantasy")
-    expect(CRITERION_SLUGS as readonly string[]).toContain("nobility")
+    expect(CRITERION_SLUGS as readonly string[]).toContain("setting_era")
+    expect(CRITERION_SLUGS as readonly string[]).toContain("angst")
+    // e os dois LEGADOS saíram do producer — não podem voltar por iteração do banco
+    expect(CRITERION_SLUGS as readonly string[]).not.toContain("fantasy_nobility")
+    expect(CRITERION_SLUGS as readonly string[]).not.toContain("nobility")
   })
 
   it("o texto embedado é byte a byte idêntico com 9 ou com 11 notas", () => {
