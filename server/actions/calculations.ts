@@ -59,6 +59,7 @@ import {
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { SCORING_CRITERION_SLUGS } from "@/lib/calculations/scoring-features"
 import { readFantasyDrift, scoringCriteriaSignature } from "@/server/queries/fantasy-drift"
+import { conferirContratoDoCalculo, mensagemDeContratoQuebrado } from "@/lib/calculations/scoring-contract"
 import type { DeclaredTagPref } from "@/server/queries/tag-preferences"
 import { loadArtLabels } from "@/server/queries/pilot-taste"
 import { computeArtForCatalog } from "@/lib/art/model"
@@ -966,6 +967,13 @@ export interface RecalcComputeInput {
  * diagnóstico de blast radius (recomputar com 1 obra perturbada, em memória).
  */
 export function computeRecalc(input: RecalcComputeInput) {
+  // 🔴 ANTES de qualquer conta: a Nota.IA sai dos pesos do BANCO e o Ridge da lista do CÓDIGO.
+  // Se os dois conjuntos divergirem, esta rodada seria metade de cada contrato — ver
+  // `lib/calculations/scoring-contract.ts`. Aqui, e não em `recalculateAll`, porque este é o
+  // ponto por onde passam OS DOIS caminhos de recálculo (o do dono e o per-usuário).
+  const contrato = conferirContratoDoCalculo(input.weights)
+  if (!contrato.ok) throw new Error(mensagemDeContratoQuebrado(contrato))
+
   const { works, weights, config, tasteProfile, declaredTagPrefs, includeQuality, aiQualityByWork, effectiveInterestByWork = new Map<string, string | null>(), fast = false } = input
 
   // ---------- 1) Percentis de votos -> pseudo_votes_* ----------

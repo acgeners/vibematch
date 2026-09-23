@@ -27,13 +27,40 @@
 -- `attribute_bias` dele começa em n=0 e acumula sozinho. Copiar o viés de um construto MISTO
 -- para um construto NOVO afirmaria uma medição que não houve.
 --
--- ── ORDEM OBRIGATÓRIA ────────────────────────────────────────────────────────────────────────
--- O código da branch `feat/producer-alvo-11` PRECISA estar no ar ANTES desta migration:
--- `SCORING_CRITERION_SLUGS` já troca o slot 3 para `fantasy`, e `fantasy` tem valor em TODAS as
--- 1.026 obras (o seed `legacy_split_copy` da 197). Na ordem inversa, `CRITERION_SLUGS` perderia
--- `fantasy_nobility` enquanto o vetor ainda o exige e a guarda de `calculations.ts` anularia o
--- `expected_score` do catálogo inteiro — sem erro e sem log.
--- Depois de aplicar: `npm run sync-constants` e `npm run contracts`.
+-- ── ORDEM OBRIGATÓRIA: DEPLOY PRIMEIRO, ESTA MIGRATION DEPOIS ────────────────────────────────
+--
+-- 🔴 O risco NÃO é a guarda de completude, e esta linha já afirmou que era. Medido em
+-- 2026-09-22: `fantasy` tem valor nas 1.026 obras (seed `legacy_split_copy` da 197), então o
+-- `expected_score` sobrevive nos dois estados — 5 obras sem nota antes e 5 depois, as mesmas.
+--
+-- 🔴 O risco REAL é um HÍBRIDO no cálculo, e ele vem de o conjunto da Nota.IA sair do BANCO
+-- (`gpt.ts` itera `score_weights` filtrando `is_active`) enquanto o do Ridge sai do CÓDIGO
+-- (`SCORING_CRITERION_SLUGS`). Medido nos quatro estados:
+--
+--   A · código antigo + banco atual   → coerente
+--   B · código NOVO   + banco atual   → Nota.IA sobre `fantasy_nobility`, Ridge sobre `fantasy`
+--   C · código antigo + banco pós-198 → Nota.IA sobre `fantasy`, Ridge sobre `fantasy_nobility`
+--   D · código NOVO   + banco pós-198 → coerente
+--
+-- B e C gravariam `calculated_scores` das 1.027 obras com metade de cada contrato, sem erro e
+-- sem log — hoje quase invisível (as colunas são cópias em 1.025 de 1.026) e crescendo sozinho
+-- conforme avaliações reais chegarem.
+--
+-- 🟢 O estado B está FECHADO por código: `computeRecalc` aborta quando os dois conjuntos
+-- divergem (`lib/calculations/scoring-contract.ts`), sem gravar nada e deixando `recalc_pending`
+-- de pé. Conferido contra a nuvem: o recalc ABORTA hoje com o código novo, e volta a rodar
+-- assim que esta migration passa o peso de `fantasy_nobility` para `fantasy` (passo 5).
+--
+-- ⚠️ O estado C NÃO tem essa rede: o bundle antigo já está no ar e não conhece a guarda. Por
+-- isso a ordem é obrigatória — aplicar esta migration ANTES do deploy cria um híbrido que nada
+-- acusa. Se isso acontecer por acidente, a saída é deployar imediatamente.
+--
+-- SEQUÊNCIA:
+--   1. deploy do código  (estado B — recalc ABORTA, avaliação de IA ABORTA pelo criteria-guard)
+--   2. esta migration    (estado D)
+--   3. `npm run sync-constants`  → deve dar DIFF ZERO (a branch já traz o output esperado)
+--   4. `npm run contracts`       → confere o contrato do PostgREST contra o banco
+--   5. o recalc pendente volta a rodar sozinho no gatilho seguinte, já no contrato novo
 
 begin;
 
