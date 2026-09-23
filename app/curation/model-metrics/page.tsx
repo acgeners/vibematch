@@ -1,4 +1,5 @@
-import { Activity } from "lucide-react"
+import Link from "next/link"
+import { Activity, FlaskConical } from "lucide-react"
 import { Header } from "@/components/layout/header"
 import { getModelMetricsDashboard, MIN_RANKING_GROUP_SIZE } from "@/server/queries/prediction-metrics"
 import type { CollectionStatus } from "@/lib/server/predictions/collection-status"
@@ -78,6 +79,22 @@ export default async function ModelMetricsPage() {
         description="Validação prequencial: previsões registradas ANTES da nota real (prediction_snapshots). Métrica principal = 1 previsão por obra; baselines no mesmo conjunto."
         icon={<Activity />}
       />
+
+      {/*
+        Entrada SECUNDÁRIA, e por isso um link e não um card: o experimento da Nota Prevista
+        é diagnóstico pontual, não uma métrica que se acompanha. Toda a análise mora na rota
+        dedicada — pendurá-la aqui misturaria o que o produto USA com o que ele TESTA.
+      */}
+      <Link
+        href="/curation/model-metrics/criteria-experiment"
+        className="flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-sm hover:bg-muted/50"
+      >
+        <FlaskConical className="size-4 shrink-0 text-muted-foreground" />
+        <span className="font-medium">Comparar Nota Prevista: 9 × 11 atributos</span>
+        <span className="text-xs text-muted-foreground">
+          setting_era e angst melhoram o Ridge? · US$0, não grava nada
+        </span>
+      </Link>
 
       <p
         className={

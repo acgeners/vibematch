@@ -58,6 +58,8 @@ import {
 } from "@/lib/ai-recommendation/taste-profile-heuristic"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { SCORING_CRITERION_SLUGS } from "@/lib/calculations/scoring-features"
+import { readFantasyDrift, scoringCriteriaSignature } from "@/server/queries/fantasy-drift"
+import { conferirContratoDoCalculo, mensagemDeContratoQuebrado } from "@/lib/calculations/scoring-contract"
 import type { DeclaredTagPref } from "@/server/queries/tag-preferences"
 import { loadArtLabels } from "@/server/queries/pilot-taste"
 import { computeArtForCatalog } from "@/lib/art/model"
@@ -758,6 +760,15 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
 
   // Snapshot histórico — append-only. Falha aqui não invalida o recálculo;
   // só perde uma entrada do gráfico de tendência.
+  // Deriva do slot 3: quanto de `fantasy` já é avaliação real e quanto ainda é o seed da 197.
+  // Falha aqui não invalida o recálculo — é observabilidade; perde-se uma linha da série.
+  let drift: Awaited<ReturnType<typeof readFantasyDrift>> | null = null
+  try {
+    drift = await readFantasyDrift(supabase)
+  } catch (e) {
+    console.warn("[recalculateAll] fantasy-drift falhou:", (e as Error).message)
+  }
+
   const { error: historyErr } = await supabase.from("calibration_history").insert({
     formula_version: config.formula_version,
     stacker_enabled: false,
@@ -770,6 +781,10 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
     train_size: expectedPredictor.trainSize,
     total_works: works.length,
     stacker_coefficients: null,
+    fantasy_real_count: drift?.real ?? null,
+    fantasy_legacy_copy_count: drift?.legacy ?? null,
+    fantasy_real_ratio: drift?.ratio ?? null,
+    scoring_criteria_signature: scoringCriteriaSignature(),
   })
   if (historyErr) {
     console.warn("[recalculateAll] calibration_history insert falhou:", historyErr.message)
@@ -952,6 +967,13 @@ export interface RecalcComputeInput {
  * diagnóstico de blast radius (recomputar com 1 obra perturbada, em memória).
  */
 export function computeRecalc(input: RecalcComputeInput) {
+  // 🔴 ANTES de qualquer conta: a Nota.IA sai dos pesos do BANCO e o Ridge da lista do CÓDIGO.
+  // Se os dois conjuntos divergirem, esta rodada seria metade de cada contrato — ver
+  // `lib/calculations/scoring-contract.ts`. Aqui, e não em `recalculateAll`, porque este é o
+  // ponto por onde passam OS DOIS caminhos de recálculo (o do dono e o per-usuário).
+  const contrato = conferirContratoDoCalculo(input.weights)
+  if (!contrato.ok) throw new Error(mensagemDeContratoQuebrado(contrato))
+
   const { works, weights, config, tasteProfile, declaredTagPrefs, includeQuality, aiQualityByWork, effectiveInterestByWork = new Map<string, string | null>(), fast = false } = input
 
   // ---------- 1) Percentis de votos -> pseudo_votes_* ----------

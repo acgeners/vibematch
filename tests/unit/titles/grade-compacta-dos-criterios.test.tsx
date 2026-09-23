@@ -97,7 +97,8 @@ describe("grade compacta dos critérios visíveis", () => {
   })
 
   it("a página tem os critérios VISÍVEIS para entregar (contraprova de vacuidade)", () => {
-    // 10 desde a migration 197: os 9 menos o legado misto, mais fantasy e nobility.
-    expect(VISIBLE_CRITERION_SLUGS.length).toBe(10)
+    // 11 desde a migration 198: o producer alvo inteiro. Os dois LEGADOS
+    // (fantasy_nobility, nobility) saíram de eval_type='IA' e nem chegam a CRITERION_SLUGS.
+    expect(VISIBLE_CRITERION_SLUGS.length).toBe(11)
   })
 })

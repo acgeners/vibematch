@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { attributeArtSrc, buildGlossary } from "@/lib/criteria/glossary"
+import { ATTRIBUTE_ART_PENDING, attributeArtSrc, buildGlossary, hasAttributeArt } from "@/lib/criteria/glossary"
 import { GLOSSARY_NOTES } from "@/lib/criteria/glossary-notes"
 import { CRITERIA_RUBRICS } from "@/lib/constants/criteria"
 import { bandForScore } from "@/lib/criteria/justification"
@@ -31,7 +31,10 @@ describe("dicionário dos atributos", () => {
    */
   it.each(LEGACY_HIDDEN_SLUGS)("%s é LEGADO e NÃO pode ter verbete", (slug) => {
     expect(entries.find((e) => e.slug === slug), `${slug} voltou ao dicionário`).toBeUndefined()
-    expect(CRITERION_SLUGS as readonly string[], `${slug} sumiu do banco`).toContain(slug)
+    // 🔴 Desde a migration 198 a defesa é na ORIGEM: os dois saíram de `eval_type='IA'`, então
+    // nem chegam a `CRITERION_SLUGS`. Antes eles chegavam e eram filtrados aqui; se voltarem à
+    // lista do banco, o filtro de `visible.ts` os pega — mas é este caso que avisa que voltaram.
+    expect(CRITERION_SLUGS as readonly string[], `${slug} voltou ao producer`).not.toContain(slug)
   })
 
   it.each(VISIBLE_CRITERION_SLUGS)("%s tem nome, descrição e as 4 faixas", (slug) => {
@@ -43,12 +46,15 @@ describe("dicionário dos atributos", () => {
     // desenharia uma escala incompleta sem nada acusar.
     expect(entry!.bands, `${slug} não tem 4 faixas parseadas`).toHaveLength(4)
     for (const band of entry!.bands) {
-      expect(band.label.length, `${slug} ${band.band} sem rótulo`).toBeGreaterThan(0)
+      // 🔴 O que a página PRECISA ter é a DEFINIÇÃO — é ela que responde "o que significa
+      // romance 7,5?". O apelido curto ("Ausente", "Smut") é opcional: 7 dos 11 critérios do
+      // producer c1 escrevem a faixa sem "Rótulo:", e ali a pílula mostra a própria faixa.
       expect(band.text.length, `${slug} ${band.band} sem definição`).toBeGreaterThan(20)
     }
   })
 
-  it.each(VISIBLE_CRITERION_SLUGS)("%s tem as três artes preparadas em public/", (slug) => {
+  it.each(VISIBLE_CRITERION_SLUGS.filter((s) => hasAttributeArt(s)))(
+    "%s tem as três artes preparadas em public/", (slug) => {
     for (const tamanho of TAMANHOS) {
       const src = attributeArtSrc(slug, tamanho)
       const arquivo = join(RAIZ, "public", src.replace(/^\//, ""))
@@ -56,6 +62,24 @@ describe("dicionário dos atributos", () => {
         existsSync(arquivo),
         `falta ${src} — rode: node scripts/preparar-artes-atributos.mjs`
       ).toBe(true)
+    }
+  })
+
+  /**
+   * 🔴 A lacuna de arte tem de ser DECLARADA e CONTADA — senão ela cresce calada.
+   * O caso acima pula os pendentes; este garante que pular custa registro, que o registro tem
+   * motivo no dono (`ATTRIBUTE_ART_PENDING` em `lib/criteria/glossary.ts`) e que ninguém
+   * declara um slug que JÁ tem arte só para calar o teste.
+   */
+  it(`a lacuna de arte é declarada, e hoje são ${ATTRIBUTE_ART_PENDING.length} (setting_era, angst)`, () => {
+    expect([...ATTRIBUTE_ART_PENDING].sort()).toEqual(["angst", "setting_era"])
+    for (const slug of ATTRIBUTE_ART_PENDING) {
+      expect(CRITERION_SLUGS as readonly string[], `${slug} nem é critério`).toContain(slug)
+      const arquivo = join(RAIZ, "public", attributeArtSrc(slug, 480).replace(/^\//, ""))
+      expect(
+        existsSync(arquivo),
+        `${slug} JÁ tem arte — tire-o de ATTRIBUTE_ART_PENDING em vez de manter a exceção`,
+      ).toBe(false)
     }
   })
 
@@ -122,13 +146,13 @@ describe("dicionário dos atributos", () => {
     }
   })
 
-  it("cada faixa da rubrica ainda declara o rótulo com |", () => {
-    // O parser depende do formato "0-3 | Rótulo: definição". Se o banco mudar a forma, a
-    // página perde os rótulos em silêncio — aqui isso vira falha.
+  it("cada faixa da rubrica ainda separa a banda com |", () => {
+    // O parser precisa do "|" para achar a banda ("0-3"): sem ele a faixa é DESCARTADA e a
+    // escala desenha incompleta, em silêncio. Já o ":" é opcional — ele só dá o apelido curto,
+    // e 7 dos 11 critérios do producer c1 escrevem a faixa sem apelido.
     for (const slug of VISIBLE_CRITERION_SLUGS) {
       for (const range of CRITERIA_RUBRICS[slug]?.ranges ?? []) {
         expect(range, `${slug}: faixa sem "|"`).toContain("|")
-        expect(range, `${slug}: faixa sem ":"`).toContain(":")
       }
     }
   })

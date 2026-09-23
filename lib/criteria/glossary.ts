@@ -36,9 +36,9 @@ export interface GlossaryEntry {
 /**
  * "0-3 | Ausente: nenhum conteúdo romântico…" → as três partes.
  *
- * Faixa sem "|" (rubrica escrita como frase corrida) devolve o texto inteiro como rótulo e
- * fica sem definição — degrada para menos informação, nunca para informação errada. Dar
- * apelido curto a ela é edição de banco, não de código.
+ * Faixa sem "|" é descartada. Faixa sem ":" fica sem APELIDO e mantém a definição inteira —
+ * degrada para menos informação, nunca para informação errada. Dar apelido curto a ela é
+ * edição de banco, não de código.
  */
 function parseRange(range: string): { band: string; label: string; text: string } | null {
   const bruto = range.trim()
@@ -47,7 +47,12 @@ function parseRange(range: string): { band: string; label: string; text: string 
   const band = bruto.slice(0, barra).trim()
   const resto = bruto.slice(barra + 1).trim()
   const doisPontos = resto.indexOf(":")
-  if (doisPontos === -1) return { band, label: resto, text: "" }
+  // 🔴 Sem ":" a faixa não tem APELIDO — e é assim que o producer c1 escreve 7 dos 11
+  // (ex.: "0-3 | Romance ausente ou marginal."). O texto inteiro vai para `text`, que é o que
+  // responde "o que significa romance 7,5?"; `label` fica vazio e a página não desenha o
+  // cabeçalho. A versão anterior fazia o oposto — punha a frase inteira no rótulo e deixava a
+  // DEFINIÇÃO vazia —, o que na tela virava um título longo sobre um corpo em branco.
+  if (doisPontos === -1) return { band, label: "", text: capitalizar(resto) }
   return {
     band,
     label: resto.slice(0, doisPontos).trim(),
@@ -79,6 +84,25 @@ function coverageLabel(band: string): string {
   const [lo, hi] = bandBarBounds(band)
   const fim = hi >= 10 ? "10" : `${(hi - 0.1).toFixed(1).replace(".", ",")}`
   return `${lo.toFixed(1).replace(".", ",")}–${fim}`
+}
+
+/**
+ * 🔴 Critérios SEM arte preparada — lacuna DECLARADA, não silenciosa.
+ *
+ * O producer alvo (migration 198) trouxe `setting_era` e `angst`, e a arte deles ainda não
+ * existe: as fontes ficam em `Imagens/Atributos/` (fora do git) e ninguém desenhou as duas.
+ * Sem esta lista a página pediria `/attributes/setting_era-480.webp`, o servidor devolveria 404
+ * e o leitor veria o ícone de imagem quebrada — falha visível, porém muda para a suíte.
+ *
+ * ⚠️ Isto é DÍVIDA com prazo, não arranjo permanente: rode
+ * `node scripts/preparar-artes-atributos.mjs` quando as artes existirem e apague o slug daqui.
+ * O teste conta os itens no TÍTULO do caso, então a lista não cresce sem aparecer.
+ */
+export const ATTRIBUTE_ART_PENDING: readonly string[] = ["setting_era", "angst"]
+
+/** `true` quando existe arte preparada para o critério. */
+export function hasAttributeArt(slug: string): boolean {
+  return !ATTRIBUTE_ART_PENDING.includes(slug)
 }
 
 /** Caminho da arte pronta em `public/attributes` (ver `scripts/preparar-artes-atributos.mjs`). */

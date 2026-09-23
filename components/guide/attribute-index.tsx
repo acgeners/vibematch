@@ -4,7 +4,8 @@ import { cn } from "@/lib/utils"
 interface IndexItem {
   slug: string
   name: string
-  icon: string
+  /** `null` para critério sem arte preparada — ver `ATTRIBUTE_ART_PENDING`. */
+  icon: string | null
 }
 
 /**
@@ -68,14 +69,20 @@ export function AttributeIndex({ items }: { items: IndexItem[] }) {
             i === 5 && "min-[660px]:col-start-2"
           )}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={item.icon}
-            alt=""
-            width={76}
-            height={76}
-            className="size-[56px] shrink-0 min-[660px]:size-[76px]"
-          />
+          {/* Sem arte preparada, o card reserva o MESMO espaço em vazio: sem isso a tira
+              perderia altura só nesses itens e a grade desalinharia. */}
+          {item.icon ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={item.icon}
+              alt=""
+              width={76}
+              height={76}
+              className="size-[56px] shrink-0 min-[660px]:size-[76px]"
+            />
+          ) : (
+            <span aria-hidden className="size-[56px] shrink-0 min-[660px]:size-[76px]" />
+          )}
           {/* 🔴 A BARRA vira ponto de quebra. "Fantasia/Nobreza" é UMA palavra para o
               navegador (107px a 12,5px) e não quebra sozinha: na tira de 96px ela vazava 35px
               do card, sem corte, sem rolagem e sem erro — os três canais mudos de sempre. O

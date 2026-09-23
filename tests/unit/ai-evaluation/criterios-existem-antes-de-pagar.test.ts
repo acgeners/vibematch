@@ -37,11 +37,11 @@ describe("exigirCriteriosNoBanco", () => {
     await expect(exigirCriteriosNoBanco()).resolves.toBeUndefined()
   })
 
-  it("aborta NOMEANDO os que faltam — o caso Fantasy/Nobility", async () => {
-    resposta.data = todos().filter((c) => c.slug !== "fantasy" && c.slug !== "nobility")
+  it("aborta NOMEANDO os que faltam — o caso setting_era/angst", async () => {
+    resposta.data = todos().filter((c) => c.slug !== "setting_era" && c.slug !== "angst")
 
-    await expect(exigirCriteriosNoBanco()).rejects.toThrow(/fantasy/)
-    await expect(exigirCriteriosNoBanco()).rejects.toThrow(/nobility/)
+    await expect(exigirCriteriosNoBanco()).rejects.toThrow(/setting_era/)
+    await expect(exigirCriteriosNoBanco()).rejects.toThrow(/angst/)
   })
 
   it("diz QUAL banco e que nada foi pago — senão a mensagem não é acionável", async () => {
