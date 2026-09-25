@@ -16,7 +16,21 @@ npm run lint
 npm run consistency  # painel de consistência das notas de atributo (US$0; --save/--baseline)
 npm run fontes       # cobertura por fonte externa (US$0). --falta=<fonte>[:reviews] LISTA as lacunas
 npm run db:egress    # quanto de egress as últimas 24h custaram (mede no local, quota zero)
+
+npm run recalc:scores:cloud  # recálculo global US$0 na NUVEM — o catálogo que os leitores veem
+npm run recalc:scores:local  # o mesmo, no clone LOCAL descartável
 ```
+
+🔴 **`npm run recalc:scores` (sem sufixo) RECUSA — e é de propósito.** Até 2026-09-23 ele era
+`--env-file=.env.local --env-file=.env.analysis`, e como o último `--env-file` vence, este
+comando de ESCRITA resolvia para `127.0.0.1:54321`: com o stack local no ar ele recalculava a
+réplica e imprimia `✓ recalc concluído · recalc_pending agora=false`, ou seja anunciava sucesso
+sobre o banco errado. ⚠️ A correção **não** foi inverter a ordem dos `.env` — isso trocaria o
+alvo em silêncio, a mesma classe de defeito com o sinal invertido, e quem rodasse por hábito
+passaria a escrever em PRODUÇÃO. O alvo agora é declarado (`--cloud`/`--local`) e **conferido
+contra a URL efetiva nas duas direções**, reusando `isLocalSupabaseUrl` (`lib/db-target.ts`),
+que é o dono do predicado. Guardado por
+`tests/unit/orchestration/recalc-scores-alvo-explicito.test.ts` (5 sondas conferidas).
 
 `sync-constants` needs `SUPABASE_SERVICE_ROLE_KEY` in env. It overwrites the files listed in the **Constants generated from DB** section below — never hand-edit them.
 
@@ -4714,7 +4728,7 @@ Recalculation is triggered server-side by `recalculateAll()` in `server/actions/
 a fila em `server/recalc/queue.ts` (debounce de 1h; um teste de arquitetura garante que só o runner
 importa). ⚠️ **Não existe recálculo por obra** — `recalculateWork` foi citado aqui por muito tempo e
 **não existe no código** (conferido 2026-07-29: zero referências). Toda edição de dado custa uma leitura
-do catálogo inteiro: **5,3 MB** por rodada (medido). É o maior consumidor de egress do projeto. The honest cross-validated MAE of Nota Prevista is stored in `formula_config` (`cv_mae_expected`). Since the `user_score` label switched from craft to **taste** (2026-07-16 — the average of the 7 fixed taste axes, excluding the "Final"; see `computeTasteUserScore`), the absolute cvMAE rose to **~0.73** (was ~0.58 under craft). This is a **scale artifact**, not a regression: the taste target has a wider spread (σ 0.95→1.25, baseline MAE 0.73→0.98), so normalized the model is slightly better (cvMAE/baseline 0.79→0.75). Don't read the raw ~0.73 as "the model got worse".
+do catálogo inteiro: **5,3 MB** por rodada (medido). É o maior consumidor de egress do projeto. The honest cross-validated MAE of Nota Prevista is stored in `formula_config` (`cv_mae_expected_stage1`; in `calibration_history` the column is `cv_mae_expected`). Since the `user_score` label switched from craft to **taste** (2026-07-16 — the average of the 7 fixed taste axes, excluding the "Final"; see `computeTasteUserScore`), the absolute cvMAE rose to **~0.73** (was ~0.58 under craft). This is a **scale artifact**, not a regression: the taste target has a wider spread (σ 0.95→1.25, baseline MAE 0.73→0.98), so normalized the model is slightly better (cvMAE/baseline 0.79→0.75). Don't read the raw ~0.73 as "the model got worse".
 
 ## "Alinhamento" é SÓ TAG, e é uma soma sem denominador
 
@@ -6641,7 +6655,19 @@ que adotar a conveniente ([[gotcha-doc-afirma-correcao-revertida]]).
 
 ## Tests
 
-`npm run test` → **3.596 passando · 1 FALHANDO · +24 pulados em 347 arquivos**; remedido em
+`npm run test` → **3.758 passando · 1 FALHANDO · +24 pulados em 356 arquivos**; remedido em
+2026-09-23, depois do fast-forward para `cab6511` (o rollout dos 11, que trouxe **6 arquivos de
+teste**) e do hardening de alvo/diagnóstico (**+1 arquivo**,
+`orchestration/recalc-scores-alvo-explicito`, e +7 casos em `criterios-existem-antes-de-pagar`).
+Disco (`find`) = índice (`git ls-files`) = **356**, medido com o arquivo novo já em `git add -N`
+— sem isso a medição conta o que não vai para o commit.
+
+⚠️ **O número anterior (3.596 em 347) não estava errado: ele era verdade sobre `f8c7843`**, o
+HEAD de antes do ff. Quem editar esta linha depois de atualizar o checkout precisa RE-MEDIR, não
+somar o próprio delta — a diferença aqui foi de 162 casos, e só 17 deles eram do trabalho da
+sessão.
+
+Antes: **3.596 em 347**; remedido em
 2026-09-21 no MERGE de `origin/main` nesta branch, sobre as duas linhas que corriam em PARALELO:
 a da branch, que chegou a **3.591 em 346** (a última entrada foi a paginação ordenada dos
 diag-ablate, +6 casos e +1 arquivo, `scripts/diag-ablate-paginacao-estavel`), e a do `main`, que
