@@ -590,14 +590,13 @@ export async function planInterestBackfillForIds(
     // Já frescas na versão ativa ⇒ puladas (reuse). Estima só o restante.
     const activeVersion = resolveInterestPromptVersion()
     const fresh = await fetchAllRows<{ work_id: string }>(
-      (from, to) =>
+      () =>
         supabase
           .from("synopsis_quality_predictions")
           .select("work_id")
           .eq("prompt_version", activeVersion)
-          .eq("stale", false)
-          .range(from, to),
-      "Falha listando previsões frescas",
+          .eq("stale", false),
+      { orderBy: ["id"], label: "Falha listando previsões frescas" },
     )
     const freshSet = new Set(fresh.map((r) => r.work_id))
     const targetIds = ids.filter((id) => !freshSet.has(id))

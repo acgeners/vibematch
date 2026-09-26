@@ -460,18 +460,21 @@ export async function getStaleAlignmentWorks(
   // Medido em 2026-09-08: 1.010 obras ativas e recorte ESTÁVEL entre execuções — as MESMAS
   // 10 obras nunca podiam entrar no pool de Veredito desatualizado, por mais que o filtro
   // posterior as qualificasse.
-  const data = await fetchAllRows<unknown>((from: number, to: number) => {
-    let q = supabase
-      .from("works_owner")
-      .select(
-        "id, title, publication_status_id, work_covers(url, is_primary, position), calculated_scores(alignment_score, alignment_at, alignment_stale)",
-      )
-      .eq("is_archived", false)
-    if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
-      q = q.in("publication_status_id", opts.pubStatusIds)
-    }
-    return q.range(from, to)
-  }, "getAlignmentQueueWorks.candidates")
+  const data = await fetchAllRows<unknown>(
+    () => {
+      let q = supabase
+        .from("works_owner")
+        .select(
+          "id, title, publication_status_id, work_covers(url, is_primary, position), calculated_scores(alignment_score, alignment_at, alignment_stale)",
+        )
+        .eq("is_archived", false)
+      if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
+        q = q.in("publication_status_id", opts.pubStatusIds)
+      }
+      return q
+    },
+    { orderBy: ["id"], label: "getAlignmentQueueWorks.candidates" },
+  )
 
   const candidates = (data ?? [])
     .map((row) => {
@@ -764,14 +767,13 @@ async function getVeredictoReadAckIds(): Promise<Set<string>> {
   const supabase = createAdminClient()
   try {
     const rows = await fetchAllRows<{ work_id: string }>(
-      (from, to) =>
+      () =>
         supabase
           .from("ai_eval_read_acks")
           .select("work_id")
           .eq("user_id", userId)
-          .eq("queue", "veredito")
-          .range(from, to),
-      "getVeredictoReadAckIds",
+          .eq("queue", "veredito"),
+      { orderBy: ["user_id", "work_id", "queue"], label: "getVeredictoReadAckIds" },
     )
     return new Set(rows.map((r) => r.work_id))
   } catch (err) {
@@ -865,8 +867,24 @@ interface SynopsisPredRow {
   predicted_at?: string | null
 }
 
+// `updated_at` entra para a fila paginada ordenar EM MEMÓRIA (ver `byUpdatedAtDesc`).
 const SYNOPSIS_QUEUE_SELECT =
-  "id, title, publication_status_id, synopsis_quality, synopsis_quality_source, work_covers(url, is_primary, position), calculated_scores(expected_score)"
+  "id, title, publication_status_id, synopsis_quality, synopsis_quality_source, updated_at, work_covers(url, is_primary, position), calculated_scores(expected_score)"
+
+/**
+ * Ordem funcional das filas de Interesse: mais recente primeiro, `id` desempatando.
+ *
+ * 🔴 Aplicada DEPOIS de carregar tudo, nunca como ordem da paginação: `updated_at` muda
+ * enquanto as páginas são lidas (qualquer escrita na obra o reescreve), então paginar por
+ * ele deixaria uma obra pular de página e sair duplicada ou sumir. A paginação vai por
+ * `id`, que não muda.
+ */
+function byUpdatedAtDesc(a: Record<string, unknown>, b: Record<string, unknown>): number {
+  const ua = String(a.updated_at ?? "")
+  const ub = String(b.updated_at ?? "")
+  if (ua !== ub) return ua < ub ? 1 : -1
+  return String(a.id) < String(b.id) ? 1 : String(a.id) > String(b.id) ? -1 : 0
+}
 
 // Probe defensivo da coluna `synopsis_interest_skipped` (migration 121). Enquanto a
 // migration não for aplicada, a fila simplesmente não filtra pulados (não quebra).
@@ -920,15 +938,14 @@ const lerPrevisoesDoPerfil = cache(async (): Promise<Array<{ work_id: string } &
       interest.scope(
         supabase.from("synopsis_quality_predictions").select("work_id", { count: "exact", head: true }),
       ),
-    (from, to) =>
+    () =>
       interest
         .scope(
           supabase
             .from("synopsis_quality_predictions")
             .select("id, work_id, predicted_quality, stale, confidence, prompt_version, predicted_at"),
-        )
-        .range(from, to),
-    "Falha lendo previsões de sinopse",
+        ),
+    { orderBy: ["id"], label: "Falha lendo previsões de sinopse" },
   )
 })
 
@@ -1156,7 +1173,6 @@ export async function getSynopsisQueueWorks(opts: {
         .eq("is_archived", false)
         .not("canonical_synopsis", "is", null)
         .is("synopsis_quality", null)
-        .order("updated_at", { ascending: false })
       if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
       if (excludeSkipped) q = q.eq("synopsis_interest_skipped", false)
       return q
@@ -1164,11 +1180,16 @@ export async function getSynopsisQueueWorks(opts: {
     // Sem limite explícito → pagina (a contagem da aba não pode parar em 1000).
     let data: Record<string, unknown>[]
     if (opts.limit != null) {
-      const res = await baseQ().limit(opts.limit)
+      const res = await baseQ().order("updated_at", { ascending: false }).limit(opts.limit)
       if (res.error) throw new Error(`Falha listando obras sem Interesse manual: ${res.error.message}`)
       data = (res.data ?? []) as Record<string, unknown>[]
     } else {
-      data = await fetchAllRows<Record<string, unknown>>((from, to) => baseQ().range(from, to), "Falha listando obras sem Interesse manual")
+      data = (
+        await fetchAllRows<Record<string, unknown>>(baseQ, {
+          orderBy: ["id"],
+          label: "Falha listando obras sem Interesse manual",
+        })
+      ).sort(byUpdatedAtDesc)
     }
     data = data.filter((w) => matchesPersonalStatus(w.id as string))
     await hydrateJustifications(data.map((w) => w.id as string))
@@ -1185,7 +1206,6 @@ export async function getSynopsisQueueWorks(opts: {
       .select(SYNOPSIS_QUEUE_SELECT)
       .eq("is_archived", false)
       .not("canonical_synopsis", "is", null)
-      .order("updated_at", { ascending: false })
     if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
     if (synQ.length > 0) q = q.in("synopsis_quality", synQ)
     if (excludeSkipped) q = q.eq("synopsis_interest_skipped", false)
@@ -1193,11 +1213,13 @@ export async function getSynopsisQueueWorks(opts: {
   }
   let rows: Record<string, unknown>[]
   if (opts.limit != null) {
-    const res = await baseQ().limit(opts.limit)
+    const res = await baseQ().order("updated_at", { ascending: false }).limit(opts.limit)
     if (res.error) throw new Error(`Falha listando fila de Interesse: ${res.error.message}`)
     rows = (res.data ?? []) as Record<string, unknown>[]
   } else {
-    rows = await fetchAllRows<Record<string, unknown>>((from, to) => baseQ().range(from, to), "Falha listando fila de Interesse")
+    rows = (
+      await fetchAllRows<Record<string, unknown>>(baseQ, { orderBy: ["id"], label: "Falha listando fila de Interesse" })
+    ).sort(byUpdatedAtDesc)
   }
 
   const displayed: Record<string, unknown>[] = []
@@ -1221,9 +1243,9 @@ export async function getSynopsisPredictionVersions(): Promise<string[]> {
   const supabase = createAdminClient()
   const interest = await getInterestReader()
   const rows = await fetchAllRows<{ prompt_version: string | null }>(
-    (from, to) =>
-      interest.scope(supabase.from("synopsis_quality_predictions").select("prompt_version")).range(from, to),
-    "Falha lendo versões de previsão",
+    () =>
+      interest.scope(supabase.from("synopsis_quality_predictions").select("prompt_version")),
+    { orderBy: ["id"], label: "Falha lendo versões de previsão" },
   )
   const versions = new Set<string>()
   for (const r of rows ?? []) if (r.prompt_version) versions.add(r.prompt_version)
@@ -1701,17 +1723,15 @@ export async function getAlignedWorkSplit(
   // select cru passa a mentir em silêncio no dia em que passarem — e o sintoma seria
   // "sumiu do topo", que ninguém investiga.
   const rows = await fetchAllRows<Record<string, unknown>>(
-    (from, to) =>
+    () =>
       supabase
         .from("works")
         .select(
           "id, title, is_adult, total_chapters, publication_status_id, work_covers(url, is_primary, position), calculated_scores!inner(personal_fit, personal_fit_percentile, expected_score, chance_score, chance_is_stub)",
         )
         .eq("is_archived", false)
-        .not("calculated_scores.personal_fit", "is", null)
-        .order("id", { ascending: true })
-        .range(from, to),
-    "getAlignedWorkSplit",
+        .not("calculated_scores.personal_fit", "is", null),
+    { orderBy: [{ column: "id", ascending: true }], label: "getAlignedWorkSplit" },
   )
 
   const works = rows

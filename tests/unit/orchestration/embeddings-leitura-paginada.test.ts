@@ -37,10 +37,12 @@ describe("refresh de embeddings lê em páginas", () => {
   it("as duas tabelas são lidas com paginação", () => {
     for (const tabela of ["works", "work_embeddings"]) {
       const trecho = CODIGO.slice(CODIGO.indexOf(`.from("${tabela}")`))
+      // Desde o G-ORD o `.range()` é aplicado pelo `fetchAllRows`, e o chamador declara a
+      // ordem total em `orderBy` — é esse o sinal de que a leitura pagina.
       expect(
         trecho.slice(0, 400),
-        `a leitura de ${tabela} precisa de .range() — sem ele o PostgREST corta em 1000 sem avisar`,
-      ).toContain(".range(")
+        `a leitura de ${tabela} precisa passar pelo paginador com \`orderBy\` — sem ele o PostgREST corta em 1000 sem avisar`,
+      ).toContain("orderBy:")
     }
   })
 

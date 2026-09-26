@@ -309,9 +309,9 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
     // adulto de hoje somam 1.614 vínculos, acima do corte de 1000. Truncado, obras ficariam
     // sem recomputar o flag 18+ e nada acusaria.
     const wt = await fetchAllRows<{ work_id: string }>(
-      (from, to) =>
-        supabase.from("work_tags").select("work_id").in("tag_id", adultTagIds).range(from, to),
-      "enrichNewTags.adultWorkTags",
+      () =>
+        supabase.from("work_tags").select("work_id").in("tag_id", adultTagIds),
+      { orderBy: ["work_id", "tag_id"], label: "enrichNewTags.adultWorkTags" },
     )
     const workIds = [...new Set(wt.map((r) => r.work_id))]
     for (const workId of workIds) await recomputeAdultAuto(supabase, workId)

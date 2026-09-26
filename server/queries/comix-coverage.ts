@@ -40,18 +40,16 @@ const loadComixCoverage = cache(async (): Promise<ComixCoverageLists> => {
   const supabase = createAdminClient()
   const [works, comixRows] = await Promise.all([
     fetchAllRows<{ id: string; title: string | null }>(
-      (from, to) =>
-        supabase.from("works").select("id, title").eq("is_archived", false).order("title").range(from, to),
-      "loadComixCoverage.works",
+      () => supabase.from("works").select("id, title").eq("is_archived", false),
+      { orderBy: ["title"], label: "loadComixCoverage.works" },
     ),
     fetchAllRows<{ work_id: string; external_id: string | null; is_rejected: boolean }>(
-      (from, to) =>
+      () =>
         supabase
           .from("work_external_ids")
           .select("work_id, external_id, is_rejected")
-          .eq("source", "comix")
-          .range(from, to),
-      "loadComixCoverage.comix",
+          .eq("source", "comix"),
+      { orderBy: ["id"], label: "loadComixCoverage.comix" },
     ),
   ])
 

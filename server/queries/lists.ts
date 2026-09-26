@@ -101,18 +101,9 @@ async function fetchListItems(
 ): Promise<Array<{ list_id: string; work_id: string }>> {
   if (listIds.length === 0) return []
   return fetchAllRows<{ list_id: string; work_id: string }>(
-    (from, to) =>
-      supabase
-        .from("work_list_items")
-        .select("list_id, work_id")
-        .in("list_id", listIds)
-        .order("list_id", { ascending: true })
-        .order("position", { ascending: true })
-        .range(from, to) as unknown as PromiseLike<{
-        data: Array<{ list_id: string; work_id: string }> | null
-        error: { message: string } | null
-      }>,
-    "work_list_items",
+    () => supabase.from("work_list_items").select("list_id, work_id").in("list_id", listIds),
+    // `position` não é único (a PK é `list_id, work_id`): `work_id` desempata.
+    { orderBy: ["list_id", "position", "work_id"], label: "work_list_items" },
   )
 }
 
@@ -814,20 +805,19 @@ export async function getWorksLiteForPicker(): Promise<WorkLiteForPicker[]> {
   // nuvem — 1.010 obras ativas e esta query devolvia 1.000, ou seja 10 obras sumiam do
   // picker de adicionar à lista e do escolhedor de capas, sem erro e sem log.
   const esconderAdulto = await getHideAdultContent()
-  const montar = (from: number, to: number) => {
+  const montar = () => {
     let q = supabase
       .from("works")
       .select("id, title, calculated_scores(expected_score), work_covers(url, is_primary, position)")
       .eq("is_archived", false)
-      .order("title", { ascending: true })
-      .range(from, to)
     // Quem oculta 18+ não vê obras adultas nem no picker de adicionar à lista.
     if (esconderAdulto) q = q.eq("is_adult", false)
     return q
   }
   let data: unknown[] = []
   try {
-    data = await fetchAllRows<unknown>(montar, "getWorksLiteForPicker")
+    // `title` já é total em `works`: NOT NULL + índice único `works_title_lower_idx`.
+    data = await fetchAllRows<unknown>(montar, { orderBy: ["title"], label: "getWorksLiteForPicker" })
   } catch (e) {
     console.error("[lists] erro lendo catálogo lite:", (e as Error).message)
     return []

@@ -131,8 +131,8 @@ export async function setTagAdult(tagId: string, level: AdultLevel): Promise<{ o
     // A tag mais usada do catálogo tem 894 vínculos — abaixo do corte de 1000, mas é o
     // número de HOJE, e truncar aqui deixaria obras sem recomputar o flag 18+.
     const wt = await fetchAllRows<{ work_id: string }>(
-      (from, to) => supabase.from("work_tags").select("work_id").eq("tag_id", tagId).range(from, to),
-      "setTagAdultIndicator.work_tags",
+      () => supabase.from("work_tags").select("work_id").eq("tag_id", tagId),
+      { orderBy: ["work_id", "tag_id"], label: "setTagAdultIndicator.work_tags" },
     )
     const workIds = [...new Set(wt.map((r) => r.work_id))]
     for (const w of workIds) await recomputeAdultAuto(supabase, w)
@@ -334,9 +334,9 @@ export async function approveGenreProposal(id: string): Promise<{ ok: boolean; e
   const { data: tag } = await supabase.from("tags").select("id").eq("slug", prop.slug as string).maybeSingle()
   if (tag) {
     const wt = await fetchAllRows<{ work_id: string }>(
-      (from, to) =>
-        supabase.from("work_tags").select("work_id").eq("tag_id", tag.id as string).range(from, to),
-      "approveGenreProposal.work_tags",
+      () =>
+        supabase.from("work_tags").select("work_id").eq("tag_id", tag.id as string),
+      { orderBy: ["work_id", "tag_id"], label: "approveGenreProposal.work_tags" },
     )
     const rows = [...new Set(wt.map((r) => r.work_id))].map((work_id) => ({
       work_id,

@@ -79,7 +79,10 @@ interface Leitura {
 function temTeto(l: Leitura, src: string, i: number): boolean {
   const antes = src.slice(Math.max(0, i - 700), i)
   return (
-    /fetchAllRows(Parallel)?\s*\(/.test(antes) || // paginador compartilhado
+    // paginador compartilhado — com ou sem genérico (`fetchAllRows<T>(`); desde o G-ORD o
+    // `.range()` mora DENTRO do helper, e o chamador declara `orderBy`.
+    /\bfetchAllRows(Parallel)?\b/.test(antes) ||
+    /\borderBy:/.test(l.trecho) ||
     /\.range\(/.test(l.trecho) || // paginação à mão
     /count:\s*"exact"[\s\S]{0,80}head:\s*true/.test(l.trecho) || // conta no servidor, 0 linhas
     /\.single\(\)|\.maybeSingle\(\)/.test(l.trecho) || // uma linha

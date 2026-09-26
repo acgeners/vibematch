@@ -50,8 +50,8 @@ export async function getWorksWithoutTags(
   } else {
     const tagRows = await fetchAllRowsParallel<{ work_id: string }>(
       () => sb.from("work_tags").select("work_id", { count: "exact", head: true }),
-      (from, to) => sb.from("work_tags").select("work_id").range(from, to),
-      "work_tags",
+      () => sb.from("work_tags").select("work_id"),
+      { orderBy: ["work_id", "tag_id"], label: "work_tags" },
     )
     for (const r of tagRows) tagCount.set(r.work_id, (tagCount.get(r.work_id) ?? 0) + 1)
   }
@@ -71,10 +71,10 @@ export async function getWorksWithoutTags(
   }
   // 🔴 PAGINADA: `works_owner` tem 1.019 linhas (2026-08-18) e o PostgREST corta em 1000 sem
   // erro — a fila perderia obras em silêncio, que é o oposto do que uma FILA existe pra fazer.
-  const worksData = await fetchAllRows<Record<string, unknown>>(
-    (from, to) => montaWorksQ().range(from, to),
-    "worksQueue.works_owner",
-  )
+  const worksData = await fetchAllRows<Record<string, unknown>>(montaWorksQ, {
+    orderBy: ["id"],
+    label: "worksQueue.works_owner",
+  })
 
   type Row = {
     id: string

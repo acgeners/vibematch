@@ -32,14 +32,13 @@ export async function countPendingCanonicalSynopses(): Promise<number> {
   // massa (backfill que zera `canonical_synopsis`) põe o universo acima do corte
   // justo quando a contagem mais importa. Hoje são 0 obras — é rede, não sintoma.
   const data = await fetchAllRows<{ id: string; work_synopses?: Array<{ text: string | null }> }>(
-    (from, to) =>
+    () =>
       supabase
         .from("works")
         .select("id, work_synopses(text)")
         .is("canonical_synopsis", null)
-        .eq("is_archived", false)
-        .range(from, to),
-    "countPendingCanonicalSynopses",
+        .eq("is_archived", false),
+    { orderBy: ["id"], label: "countPendingCanonicalSynopses" },
   )
   let pending = 0
   for (const w of data ?? []) {
@@ -67,15 +66,14 @@ export async function countPendingReviewSummaries(): Promise<number> {
   const supabase = createAdminClient()
   // Pagina pelo mesmo motivo de `countPendingCanonicalSynopses` (hoje são 8 obras).
   const data = await fetchAllRows<{ id: string; work_reviews?: Array<{ count: number }> }>(
-    (from, to) =>
+    () =>
       supabase
         .from("works")
         .select("id, work_reviews(count)")
         .is("review_summary", null)
         .eq("is_archived", false)
-        .gte("work_reviews.text_length", 40)
-        .range(from, to),
-    "countPendingReviewSummaries",
+        .gte("work_reviews.text_length", 40),
+    { orderBy: ["id"], label: "countPendingReviewSummaries" },
   )
   let pending = 0
   for (const w of data ?? []) {

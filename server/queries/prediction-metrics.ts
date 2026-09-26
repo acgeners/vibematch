@@ -182,15 +182,14 @@ export async function getModelMetricsDashboard(): Promise<ModelMetricsDashboard>
   let error: { message: string } | null = null
   try {
     data = await fetchAllRows<unknown>(
-      (from, to) =>
+      () =>
         supabase
           .from("prediction_snapshots")
           .select(
             "work_id, captured_at, predicted_score, predicted_is_stub, calc_score, decision_score, actual_user_score, formula_version, resolved_at, training_sample_size, ranking_snapshot_id, superseded",
           )
-          .is("discarded_at", null)
-          .range(from, to),
-      "getModelMetricsDashboard.snapshots",
+          .is("discarded_at", null),
+      { orderBy: ["id"], label: "getModelMetricsDashboard.snapshots" },
     )
   } catch (e) {
     error = { message: (e as Error).message }

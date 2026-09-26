@@ -52,15 +52,14 @@ const getSuggestionIndex = unstable_cache(
     // Pagina: `.select()` corta em 1000 linhas sem avisar, e a cauda do catálogo
     // sumiria da busca em silêncio — o bug que este PR existe pra matar.
     return fetchAllRows<IndexRow>(
-      (from, to) =>
+      () =>
         supabase
           .from("works")
           .select(
             "id, title, original_title, alternative_titles, is_adult, total_chapters, year, publication_status_id",
           )
-          .eq("is_archived", false)
-          .range(from, to),
-      "getSuggestionIndex",
+          .eq("is_archived", false),
+      { orderBy: ["id"], label: "getSuggestionIndex" },
     )
   },
   ["work-suggestion-index-v1"],

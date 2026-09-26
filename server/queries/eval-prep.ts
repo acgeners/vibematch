@@ -58,13 +58,12 @@ export async function loadEvalPrep(
       for (const chunk of chunks(ids, CHUNK)) {
         acc.push(
           ...(await fetchAllRows<WorkPrepRow>(
-            (from, to) =>
+            () =>
               supabase
                 .from("works")
                 .select("id, tags_inferred_at, review_digest_at, review_summary_at")
-                .in("id", chunk)
-                .range(from, to),
-            "evalPrep.works",
+                .in("id", chunk),
+            { orderBy: ["id"], label: "evalPrep.works" },
           )),
         )
       }
@@ -75,14 +74,13 @@ export async function loadEvalPrep(
       for (const chunk of chunks(ids, CHUNK)) {
         acc.push(
           ...(await fetchAllRows<ExtIdRow>(
-            (from, to) =>
+            () =>
               supabase
                 .from("work_external_ids")
                 .select("work_id, source, external_id, is_rejected")
                 .in("work_id", chunk)
-                .in("source", MAIN_REVIEW_SOURCES as unknown as string[])
-                .range(from, to),
-            "evalPrep.externalIds",
+                .in("source", MAIN_REVIEW_SOURCES as unknown as string[]),
+            { orderBy: ["id"], label: "evalPrep.externalIds" },
           )),
         )
       }

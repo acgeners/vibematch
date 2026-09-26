@@ -333,9 +333,9 @@ export async function getRanking(
   // 🔴 PAGINADA: é uma linha por obra (1019 em 2026-08-18) e o PostgREST corta em 1000 sem
   // erro — as obras cortadas ficavam sem sinopse no hover, com a lista inteira parecendo certa.
   const primarySynopsisPromise = fetchAllRows<{ work_id: string; text: string | null }>(
-    (from, to) =>
-      supabase.from("work_synopses").select("work_id, text").eq("is_primary", true).range(from, to),
-    "getRanking.primarySynopsis",
+    () =>
+      supabase.from("work_synopses").select("work_id, text").eq("is_primary", true),
+    { orderBy: ["id"], label: "getRanking.primarySynopsis" },
   ).then((rows) => {
     const map = new Map<string, string>()
     for (const r of rows) {
@@ -453,13 +453,12 @@ export async function getRanking(
   ] = await Promise.all([
     filters.genreAll?.length
       ? fetchAllRows<{ work_id: string }>(
-          (from, to) =>
+          () =>
             supabase
               .from("work_genres")
               .select("work_id, genres!inner(name)")
-              .in("genres.name", filters.genreAll!)
-              .range(from, to),
-          "getRanking.genreAll",
+              .in("genres.name", filters.genreAll!),
+          { orderBy: ["work_id", "genre_id"], label: "getRanking.genreAll" },
         ).then((rows) => {
           const countByWork: Record<string, number> = {}
           for (const r of rows) {
@@ -486,13 +485,12 @@ export async function getRanking(
       : Promise.resolve(null),
     filters.tagSlugsAll?.length
       ? fetchAllRows<{ work_id: string }>(
-          (from, to) =>
+          () =>
             supabase
               .from("work_tags")
               .select("work_id, tags!inner(slug)")
-              .in("tags.slug", filters.tagSlugsAll!)
-              .range(from, to),
-          "getRanking.tagSlugsAll",
+              .in("tags.slug", filters.tagSlugsAll!),
+          { orderBy: ["work_id", "tag_id"], label: "getRanking.tagSlugsAll" },
         ).then((rows) => {
           const countByWork: Record<string, number> = {}
           for (const r of rows) {
@@ -505,26 +503,24 @@ export async function getRanking(
       : Promise.resolve(null),
     tagAnySlugs?.length
       ? fetchAllRows<{ work_id: string }>(
-          (from, to) =>
+          () =>
             supabase
               .from("work_tags")
               .select("work_id, tags!inner(slug)")
-              .in("tags.slug", tagAnySlugs!)
-              .range(from, to),
-          "getRanking.tagAnySlugs",
+              .in("tags.slug", tagAnySlugs!),
+          { orderBy: ["work_id", "tag_id"], label: "getRanking.tagAnySlugs" },
         ).then((rows) => [...new Set(rows.map((r) => r.work_id))])
       : Promise.resolve(null),
     filters.tagSlugsExclude?.length
       ? // ⚠️ EXCLUSÃO: truncar aqui é o pior sentido dos três — obra com a tag evitada some
         // da lista de exclusão e volta a APARECER, que é o oposto do que a pessoa pediu.
         fetchAllRows<{ work_id: string }>(
-          (from, to) =>
+          () =>
             supabase
               .from("work_tags")
               .select("work_id, tags!inner(slug)")
-              .in("tags.slug", filters.tagSlugsExclude!)
-              .range(from, to),
-          "getRanking.tagSlugsExclude",
+              .in("tags.slug", filters.tagSlugsExclude!),
+          { orderBy: ["work_id", "tag_id"], label: "getRanking.tagSlugsExclude" },
         ).then((rows) => [...new Set(rows.map((r) => r.work_id))])
       : Promise.resolve(null),
     // Resolve a busca por título para IDs. PostgREST não faz ilike sobre text[]
@@ -546,12 +542,11 @@ export async function getRanking(
             original_title: string | null
             alternative_titles: string[] | null
           }>(
-            (from, to) =>
+            () =>
               supabase
                 .from("works")
-                .select("id, title, original_title, alternative_titles")
-                .range(from, to),
-            "getRanking:search",
+                .select("id, title, original_title, alternative_titles"),
+            { orderBy: ["id"], label: "getRanking:search" },
           )
           return rows.filter((w) => workMatchesQuery(w, tokens)).map((w) => w.id)
         })()
@@ -697,10 +692,8 @@ export async function getRanking(
         // `fetchAllRows` (serial) basta: 1.010 linhas são 2 páginas, não as 6 idas que
         // motivavam a ressalva de latência.
         type Linha = NonNullable<Awaited<ReturnType<typeof buildWorksQuery>>["data"]>[number]
-        const rows = await fetchAllRows<Linha>(
-          (from, to) => buildWorksQuery().order("title").range(from, to),
-          "getRanking.works",
-        )
+        // `title` já é total em `works`: NOT NULL + índice único `works_title_lower_idx`.
+        const rows = await fetchAllRows<Linha>(buildWorksQuery, { orderBy: ["title"], label: "getRanking.works" })
         return { data: rows, error: null }
       })()
 

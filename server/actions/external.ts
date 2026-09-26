@@ -52,14 +52,10 @@ export async function listTagCatalog(): Promise<TagCatalogItem[]> {
   // existente não sendo reconhecida e entrando de novo como nova, acumulando duplicata.
   let data: Array<{ id: string; name: string; slug: string; tag_group_id: string | null }>
   try {
-    data = await fetchAllRows(
-      (from, to) =>
-        supabase
-          .from("tags")
-          .select("id, name, slug, tag_group_id")
-          .order("name")
-          .range(from, to),
-      "listTagCatalog",
+    data = await fetchAllRows<{ id: string; name: string; slug: string; tag_group_id: string | null }>(
+      () => supabase.from("tags").select("id, name, slug, tag_group_id"),
+      // `name` não tem restrição de unicidade (só `slug`): `id` desempata.
+      { orderBy: ["name", "id"], label: "listTagCatalog" },
     )
   } catch (e) {
     console.error("[listTagCatalog] supabase query failed", (e as Error).message)

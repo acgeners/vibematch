@@ -74,15 +74,14 @@ export async function getReviewDigestQueue(): Promise<DigestQueueResult> {
   const sb = createAdminClient()
 
   const rows = await fetchAllRows<WorkRow>(
-    (from, to) =>
+    () =>
       sb
         .from("works")
         .select(
           "id, title, publication_status_id, is_adult, review_digest, review_digest_version, work_covers(url, is_primary, position)",
         )
-        .eq("is_archived", false)
-        .range(from, to),
-    "getReviewDigestQueue",
+        .eq("is_archived", false),
+    { orderBy: ["id"], label: "getReviewDigestQueue" },
   )
 
   const pendingRows = rows.filter(

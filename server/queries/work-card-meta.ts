@@ -68,8 +68,8 @@ export async function getWorkTagReviewCounts(ids: string[]): Promise<Map<string,
     Promise.all(chunk(ids, CHUNK).map(async (c) => {
       const rows = await fetchAllRowsParallel<{ work_id: string }>(
         () => sb.from("work_tags").select("work_id", { count: "exact", head: true }).in("work_id", c),
-        (from, to) => sb.from("work_tags").select("work_id").in("work_id", c).range(from, to),
-        "work_tags",
+        () => sb.from("work_tags").select("work_id").in("work_id", c),
+        { orderBy: ["work_id", "tag_id"], label: "work_tags" },
       )
       for (const r of rows) {
         const e = out.get(r.work_id)
@@ -79,8 +79,8 @@ export async function getWorkTagReviewCounts(ids: string[]): Promise<Map<string,
     Promise.all(chunk(ids, CHUNK).map(async (c) => {
       const rows = await fetchAllRowsParallel<{ work_id: string; text_length: number | null }>(
         () => sb.from("work_reviews").select("work_id", { count: "exact", head: true }).in("work_id", c),
-        (from, to) => sb.from("work_reviews").select("work_id, text_length").in("work_id", c).range(from, to),
-        "work_reviews",
+        () => sb.from("work_reviews").select("work_id, text_length").in("work_id", c),
+        { orderBy: ["id"], label: "work_reviews" },
       )
       for (const r of rows) {
         if (isUsefulReviewLength(r.text_length)) {
@@ -92,8 +92,8 @@ export async function getWorkTagReviewCounts(ids: string[]): Promise<Map<string,
     Promise.all(chunk(ids, CHUNK).map(async (c) => {
       const rows = await fetchAllRowsParallel<{ work_id: string; text: string | null }>(
         () => sb.from("work_external_reviews_manual").select("work_id", { count: "exact", head: true }).in("work_id", c),
-        (from, to) => sb.from("work_external_reviews_manual").select("work_id, text").in("work_id", c).range(from, to),
-        "work_external_reviews_manual",
+        () => sb.from("work_external_reviews_manual").select("work_id, text").in("work_id", c),
+        { orderBy: ["id"], label: "work_external_reviews_manual" },
       )
       for (const r of rows) {
         if (isUsefulReviewText(r.text)) {

@@ -142,16 +142,15 @@ async function loadArtTagsForWork(
   // Quantas obras têm cada uma — é o número que diz se a tag PODE ser aprendida por um
   // modelo de 200 rótulos, ou se ela só serve como evidência para o olho humano.
   const contagem = await fetchAllRows<Record<string, unknown>>(
-    (from, to) =>
+    () =>
       sb
         .from("work_tags")
         .select("tags!inner(slug)")
         .in(
           "tags.slug",
           hits.map((h) => h.slug),
-        )
-        .range(from, to),
-    "loadArtTagsForWork.contagem",
+        ),
+    { orderBy: ["work_id", "tag_id"], label: "loadArtTagsForWork.contagem" },
   )
   const porSlug = new Map<string, number>()
   for (const row of contagem) {

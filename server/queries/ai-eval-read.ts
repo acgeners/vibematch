@@ -30,13 +30,12 @@ export async function getReadAckSets(): Promise<Map<ReadQueue, Set<string>>> {
   const supabase = createAdminClient()
   try {
     const rows = await fetchAllRows<{ work_id: string; queue: string }>(
-      (from, to) =>
+      () =>
         supabase
           .from("ai_eval_read_acks")
           .select("work_id, queue")
-          .eq("user_id", userId)
-          .range(from, to),
-      "getReadAckSets",
+          .eq("user_id", userId),
+      { orderBy: ["user_id", "work_id", "queue"], label: "getReadAckSets" },
     )
     for (const r of rows) {
       const set = map.get(r.queue as ReadQueue)
@@ -106,14 +105,13 @@ export async function getEvalReadSummary(
 async function getAttributesMemberIds(): Promise<string[]> {
   const supabase = createAdminClient()
   const rows = await fetchAllRows<{ id: string }>(
-    (from, to) =>
+    () =>
       supabase
         .from("works")
         .select("id")
         .in("ai_eval_status", ["pending", "review_pending"])
-        .eq("is_archived", false)
-        .range(from, to),
-    "getAttributesMemberIds",
+        .eq("is_archived", false),
+    { orderBy: ["id"], label: "getAttributesMemberIds" },
   )
   return rows.map((r) => r.id)
 }

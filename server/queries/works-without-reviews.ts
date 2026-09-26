@@ -54,15 +54,15 @@ export async function getWorksWithoutReviews(
     const [fetchedRows, manualRows] = await Promise.all([
       fetchAllRowsParallel<{ work_id: string; text_length: number | null; fetched_at: string | null }>(
         () => sb.from("work_reviews").select("work_id", { count: "exact", head: true }),
-        (from, to) => sb.from("work_reviews").select("work_id, text_length, fetched_at").range(from, to),
-        "work_reviews",
+        () => sb.from("work_reviews").select("work_id, text_length, fetched_at"),
+        { orderBy: ["id"], label: "work_reviews" },
       ),
       // reviews EXTERNAS adicionadas à mão — também alimentam digest/avaliação, então
       // contam pra faixa min/máx. Sem `text_length` na tabela: regra por texto (≥40).
       fetchAllRowsParallel<{ work_id: string; text: string | null }>(
         () => sb.from("work_external_reviews_manual").select("work_id", { count: "exact", head: true }),
-        (from, to) => sb.from("work_external_reviews_manual").select("work_id, text").range(from, to),
-        "work_external_reviews_manual",
+        () => sb.from("work_external_reviews_manual").select("work_id, text"),
+        { orderBy: ["id"], label: "work_external_reviews_manual" },
       ),
     ])
     for (const r of fetchedRows) {
@@ -90,10 +90,10 @@ export async function getWorksWithoutReviews(
   }
   // 🔴 PAGINADA: `works_owner` tem 1.019 linhas (2026-08-18) e o PostgREST corta em 1000 sem
   // erro — a fila perderia obras em silêncio, que é o oposto do que uma FILA existe pra fazer.
-  const worksData = await fetchAllRows<Record<string, unknown>>(
-    (from, to) => montaWorksQ().range(from, to),
-    "worksQueue.works_owner",
-  )
+  const worksData = await fetchAllRows<Record<string, unknown>>(montaWorksQ, {
+    orderBy: ["id"],
+    label: "worksQueue.works_owner",
+  })
 
   type Row = {
     id: string
