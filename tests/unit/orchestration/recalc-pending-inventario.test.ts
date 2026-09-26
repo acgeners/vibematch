@@ -62,6 +62,15 @@ const INVENTARIO: Record<string, boolean> = {
   // marcar por "não sei"; e como o próprio `submitAiReview` já marca, uma cascata que
   // falhe ANTES deste passo não perde o recálculo.
   generateAllWorkData: true,
+
+  // ── Entraram em 2026-09-25 com a 2ª metade do fix do E2 ────────────────────
+  // Os três forçavam `recalculateScoresNow()` no resolver do Comix. O do meio era o
+  // pior caso do projeto: dentro de um `for` sobre o LOTE, ou seja até N recálculos
+  // do catálogo por lote. Todos declaram `platform_ratings` — é o que o enrich move
+  // dentro do que o recalc lê (sinopse e capa não são entradas do cálculo).
+  comixEnrich: true, // após `enrichComixDataForWork`, por obra (after() de createWork)
+  comixHidsPending: true, // UMA marcação depois do laço do mop-up pós-lote
+  comixResilient: true, // fase 0 GRATUITA da cascata — antes do checkpoint de custo
 }
 
 /**
