@@ -469,19 +469,22 @@ export async function getRanking(
             .map(([id]) => id)
         })
       : Promise.resolve(null),
+    // 🔴 Paginadas: Romance sozinho tem 1.026 vínculos em `work_genres`, acima do corte de 1000
+    // do PostgREST. Sem paginar, `/catalog?genres=Romance` mostrava 991 obras em vez de ~1.017
+    // (medido em produção em 2026-09-26) — e na EXCLUSÃO o truncado é o pior sentido: a obra do
+    // gênero excluído volta a aparecer.
     genreAnyNames?.length
-      ? supabase
-          .from("work_genres")
-          .select("work_id, genres!inner(name)")
-          .in("genres.name", genreAnyNames)
-          .then(({ data }) => [...new Set((data ?? []).map((r) => r.work_id))])
+      ? fetchAllRows<{ work_id: string }>(
+          () => supabase.from("work_genres").select("work_id, genres!inner(name)").in("genres.name", genreAnyNames),
+          { orderBy: ["work_id", "genre_id"], label: "getRanking.genreAny" },
+        ).then((rows) => [...new Set(rows.map((r) => r.work_id))])
       : Promise.resolve(null),
     filters.genreExclude?.length
-      ? supabase
-          .from("work_genres")
-          .select("work_id, genres!inner(name)")
-          .in("genres.name", filters.genreExclude)
-          .then(({ data }) => [...new Set((data ?? []).map((r) => r.work_id))])
+      ? fetchAllRows<{ work_id: string }>(
+          () =>
+            supabase.from("work_genres").select("work_id, genres!inner(name)").in("genres.name", filters.genreExclude!),
+          { orderBy: ["work_id", "genre_id"], label: "getRanking.genreExclude" },
+        ).then((rows) => [...new Set(rows.map((r) => r.work_id))])
       : Promise.resolve(null),
     filters.tagSlugsAll?.length
       ? fetchAllRows<{ work_id: string }>(

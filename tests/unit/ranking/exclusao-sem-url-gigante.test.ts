@@ -205,3 +205,20 @@ describe("guarda: nenhum `not id in` com lista montada em runtime", () => {
     expect(achados).toEqual([])
   })
 })
+
+describe("leituras de gênero ANY/EXCLUDE leem TODOS os vínculos (corte de 1000)", () => {
+  beforeEach(semear)
+  // No falso, Romance tem 1.010 vínculos — acima do corte de 1000, como o Romance real (1.026).
+  const romance = TODAS.slice(0, 1010)
+  const fantasy = TODAS.slice(1010)
+
+  it("gênero ANY com mais de 1000 vínculos devolve o conjunto completo (era truncado)", async () => {
+    const entries = await getRanking({ genres: ["Romance"] })
+    expect(entries).toHaveLength(romance.length)
+  })
+
+  it("gênero EXCLUDE com mais de 1000 vínculos não deixa obra excluída reaparecer", async () => {
+    const entries = await getRanking({ genreExclude: ["Romance"] })
+    expect(new Set(ids(entries))).toEqual(new Set(fantasy))
+  })
+})
