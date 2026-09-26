@@ -23,17 +23,16 @@ export interface AdultAuditItem {
 export async function getAdultAuditQueue(): Promise<AdultAuditItem[]> {
   const supabase = createAdminClient()
   const data = await fetchAllRows<Record<string, unknown>>(
-    (from, to) =>
+    () =>
       supabase
         .from("works")
         .select(
           "id, title, work_tags(tags(name, adult_indicator)), category_scores(criterion_slug, score)",
         )
         .eq("adult_reason", "ai_review_uncertain")
-        .is("adult_override", null)
-        .order("title", { ascending: true })
-        .range(from, to),
-    "getAdultAuditQueue",
+        .is("adult_override", null),
+    // `title` já é total em `works`: NOT NULL + índice único `works_title_lower_idx`.
+    { orderBy: ["title"], label: "getAdultAuditQueue" },
   )
 
   const rows = data as unknown as Array<{

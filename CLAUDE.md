@@ -4612,12 +4612,21 @@ obrigatório** do `pageAll` — não default, porque o que tem default é o que 
 script **pular trabalho em silêncio** — e ali um `on conflict` não protege, porque a linha
 nunca chega a ser tentada. O que apareceu (linhas re-tentadas) é o lado barato.
 
-❗ **IMPORTANTE, não bloqueador — o padrão é mais largo:** a mesma forma aparece em dezenas de
-scripts e ~20 arquivos do app, incluindo **`lib/supabase/paginate.ts`** (`fetchAllRows`, **32
-consumidores**), cujo docstring cobre o corte de 1.000 e **não menciona estabilidade de ordem**.
-Só morde acima de uma página, e o catálogo passou de 1.000. Fica para investigação causal
-separada, medindo por consumidor — corrigir em bloco sem saber quais leituras passam de uma
-página troca um risco conhecido por um refactor não medido.
+✅ **No app, o paginador EXIGE a ordem desde 2026-09-26** (G-ORD). `fetchAllRows` e
+`fetchAllRowsParallel` recebem a query SEM `.order()`/`.range()` e um `orderBy` obrigatório
+(tupla não vazia no tipo); o helper aplica a ordem, na sequência declarada, antes do `.range()`.
+Havia **80 chamadas, 71 delas sem ordem total** — ~30 já passavam de uma página em tela de
+usuário ou cálculo (`/catalog`, slug→obra, filtros do `/ranking`, régua σ, percentis de cor,
+filas de Interesse/Veredito, marcação 18+, embeddings).
+
+🔴 **A ordem tem que ser TOTAL: conter uma chave única REAL.** `created_at`, `updated_at`,
+`position` e `tags.name` não são únicos no schema — entram só com o `id` desempatando.
+`works.title` é a exceção com garantia (`NOT NULL` + `works_title_lower_idx`). Quem confere é
+`tests/unit/orchestration/paginacao-ordem-total.test.ts`, pela AST, contra um mapa de chaves
+únicas tirado do schema; tabela nova no paginador exige declarar a chave lá.
+
+⚠️ **Coluna que MUDA durante a leitura não pagina** — as filas de Interesse ordenavam por
+`updated_at`: hoje paginam por `id` e ordenam por `updated_at` em memória (`byUpdatedAtDesc`).
 
 ### `lote.length` não prova insert — quem prova é o `.select()`
 

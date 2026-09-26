@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import { fetchRecalcWorks, fetchUserRecalcWorks } from "@/server/queries/recalc-works"
-import { fetchAllRows } from "@/lib/supabase/paginate"
 
 /**
  * Um PostgREST de mentira com o comportamento que importa aqui: sem `.order`, cada página é
@@ -55,9 +54,13 @@ const LEITORES = [
 describe.each(LEITORES)("%s — a leitura de works do recálculo", (_nome, ler) => {
   it("contraprova: o falso REPRODUZ o defeito — sem ordem, um UPDATE entre páginas duplica/omite", async () => {
     const { cliente } = clienteFalso(obras, { moverEntrePaginas: true })
-    const semOrdem = (await fetchAllRows<Linha>((from, to) =>
-      cliente.from("works").select().eq("is_archived", false).range(from, to),
-    )) as Linha[]
+    // O helper já não aceita paginar sem ordem, então a contraprova pagina À MÃO, sem `.order()`.
+    const semOrdem: Linha[] = []
+    for (let from = 0; ; from += 1000) {
+      const { data } = await cliente.from("works").select().eq("is_archived", false).range(from, from + 999)
+      semOrdem.push(...data)
+      if (data.length < 1000) break
+    }
     const ids = semOrdem.map((r) => r.id)
     const distintas = new Set(ids)
     // Sem isto o teste abaixo passaria por vacuidade: é o que prova que o cenário morde.

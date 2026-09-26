@@ -38,12 +38,14 @@ describe("contagens de pendência de /curation/settings não truncam em 1000", (
     "leitura #%i (%s) pagina ou conta no servidor",
     (i) => {
       const { tabela, trecho } = leituras[i]
-      const pagina = trecho.includes(".range(")
+      // Desde o G-ORD o `.range()` mora DENTRO do `fetchAllRows`, e o chamador declara a ordem
+      // total em `orderBy` — os dois sinais contam como "pagina".
+      const pagina = trecho.includes(".range(") || /\borderBy:/.test(trecho)
       // `count: "exact", head: true` não traz linha nenhuma — não há o que truncar.
       const contaNoServidor = /count:\s*"exact"/.test(trecho) && /head:\s*true/.test(trecho)
       expect(
         pagina || contaNoServidor,
-        `a leitura de \`${tabela}\` precisa de .range() (paginada) ou de um count exato com head:true — ` +
+        `a leitura de \`${tabela}\` precisa paginar (fetchAllRows com orderBy, ou .range()) ou de um count exato com head:true — ` +
           `sem isso o PostgREST corta em 1000 linhas e a contagem mente sem erro`,
       ).toBe(true)
     },

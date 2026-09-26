@@ -27,15 +27,8 @@ export const RECALC_WORKS_SELECT = `id, publication_status_id, total_chapters, i
  */
 export function fetchRecalcWorks(supabase: Pick<SupabaseClient, "from">, page = 1000): Promise<unknown[]> {
   return fetchAllRows<unknown>(
-    (from: number, to: number) =>
-      supabase
-        .from("works")
-        .select(RECALC_WORKS_SELECT)
-        .eq("is_archived", false)
-        .order("id", { ascending: true })
-        .range(from, to),
-    "recalculateAll.works",
-    page,
+    () => supabase.from("works").select(RECALC_WORKS_SELECT).eq("is_archived", false),
+    { orderBy: [{ column: "id", ascending: true }], label: "recalculateAll.works", page },
   )
 }
 
@@ -57,14 +50,7 @@ export const USER_RECALC_WORKS_SELECT = `id, publication_status_id, total_chapte
  */
 export function fetchUserRecalcWorks(supabase: Pick<SupabaseClient, "from">, page = 1000): Promise<unknown[]> {
   return fetchAllRows<unknown>(
-    (from: number, to: number) =>
-      supabase
-        .from("works")
-        .select(USER_RECALC_WORKS_SELECT)
-        .eq("is_archived", false)
-        .order("id", { ascending: true })
-        .range(from, to),
-    "user-recalc.works",
-    page,
+    () => supabase.from("works").select(USER_RECALC_WORKS_SELECT).eq("is_archived", false),
+    { orderBy: [{ column: "id", ascending: true }], label: "user-recalc.works", page },
   )
 }

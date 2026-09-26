@@ -178,14 +178,12 @@ async function loadEmbeddingCandidates(workId?: string): Promise<{
       ? fetchOne(() => supabase.from("works").select(WORK_COLS).eq("id", workId), "works")
       : comContexto("Leitura do catálogo", () =>
           fetchAllRows<Record<string, unknown>>(
-            (from, to) =>
+            () =>
               supabase
                 .from("works")
                 .select(WORK_COLS)
-                .eq("is_archived", false)
-                .range(from, to),
-            "loadEmbeddingCandidates(works)",
-            PAGE_SIZE,
+                .eq("is_archived", false),
+            { orderBy: ["id"], label: "loadEmbeddingCandidates(works)", page: PAGE_SIZE },
           ),
         ),
     workId
@@ -195,9 +193,8 @@ async function loadEmbeddingCandidates(workId?: string): Promise<{
         )
       : comContexto("Leitura dos embeddings já salvos", () =>
           fetchAllRows<ExistingHashRow>(
-            (from, to) => supabase.from("work_embeddings").select(EXISTING_COLS).range(from, to),
-            "loadEmbeddingCandidates(work_embeddings)",
-            PAGE_SIZE,
+            () => supabase.from("work_embeddings").select(EXISTING_COLS),
+            { orderBy: ["work_id"], label: "loadEmbeddingCandidates(work_embeddings)", page: PAGE_SIZE },
           ),
         ),
   ])

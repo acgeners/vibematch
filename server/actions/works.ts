@@ -1027,8 +1027,8 @@ export async function findDuplicateWorkByTitle(
     // Pagina: `.limit(1000)` estava a 94 obras de cortar em silêncio (906 hoje),
     // e o corte faria a duplicata passar batido — cria obra repetida.
     const allData = await fetchAllRows<Record<string, unknown>>(
-      (from, to) => supabase.from("works").select(DUPLICATE_WORK_SELECT).range(from, to),
-      "findDuplicateWorkByTitle",
+      () => supabase.from("works").select(DUPLICATE_WORK_SELECT),
+      { orderBy: ["id"], label: "findDuplicateWorkByTitle" },
     )
     const aliasMatch = allData
       .map((work) => ({ work, matchingName: findMatchingWorkName(work, incomingNames) }))
@@ -1184,12 +1184,11 @@ async function persistNewWork(
     original_title: string | null
     alternative_titles: string[] | null
   }>(
-    (from, to) =>
+    () =>
       supabase
         .from("works")
-        .select("id, title, original_title, alternative_titles")
-        .range(from, to),
-    "createWork:duplicate",
+        .select("id, title, original_title, alternative_titles"),
+    { orderBy: ["id"], label: "createWork:duplicate" },
   )
 
   const duplicate = existingWorks

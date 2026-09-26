@@ -127,30 +127,23 @@ export async function getSourceGapQueue(
   // mapa de vínculos, TODAS as fontes dela viram lacuna e ela aparece no topo da fila
   // como se estivesse órfã.
   const [worksRaw, idRows] = await Promise.all([
+    // O tipo da linha vem do genérico `WorkRow`: o supabase-js infere embed to-one
+    // (`calculated_scores`) como ARRAY, e em runtime vem objeto.
     fetchAllRows<WorkRow>(
-      (from, to) => {
+      () => {
         // Dado PESSOAL do dono (personal_status_id, user_score) vem do espelho via
         // `works_owner` — `works` já não tem essas colunas.
         let q = sb.from("works_owner").select(selectCols).eq("is_archived", false)
         if (filters.pubStatusIds?.length) q = q.in("publication_status_id", filters.pubStatusIds)
         if (filters.personalStatusIds?.length) q = q.in("personal_status_id", filters.personalStatusIds)
-        // O cast é necessário e é o mesmo que `getWorksWithoutTags` faz: o supabase-js
-        // infere embed to-one (`calculated_scores`) como ARRAY, e em runtime vem objeto.
         return q
-          .order("id")
-          .range(from, to)
-          .then(({ data, error }) => ({ data: (data ?? []) as unknown as WorkRow[], error }))
       },
-      "getSourceGapQueue.works",
+      { orderBy: ["id"], label: "getSourceGapQueue.works" },
     ),
     fetchAllRows<ExternalIdRow>(
-      (from, to) =>
-        sb
-          .from("work_external_ids")
-          .select("work_id, source, external_id, is_rejected")
-          .order("work_id")
-          .range(from, to),
-      "getSourceGapQueue.externalIds",
+      () => sb.from("work_external_ids").select("work_id, source, external_id, is_rejected"),
+      // `work_id` sozinho não é único (uma linha por fonte): o UNIQUE é `(work_id, source)`.
+      { orderBy: ["work_id", "source"], label: "getSourceGapQueue.externalIds" },
     ),
   ])
 
@@ -191,8 +184,8 @@ export async function getSourceGapQueue(
   const adultIds = new Set(
     (
       await fetchAllRows<{ id: string }>(
-        (from, to) => sb.from("works").select("id").eq("is_adult", true).order("id").range(from, to),
-        "getSourceGapQueue.adult",
+        () => sb.from("works").select("id").eq("is_adult", true),
+        { orderBy: ["id"], label: "getSourceGapQueue.adult" },
       )
     ).map((r) => r.id),
   )

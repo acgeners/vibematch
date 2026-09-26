@@ -72,9 +72,9 @@ async function getSearchMatchIds(supabase: any, searchTerm: string | undefined):
     original_title: string | null
     alternative_titles: string[] | null
   }>(
-    (from, to) =>
-      supabase.from("works").select("id, title, original_title, alternative_titles").range(from, to),
-    "getSearchMatchIds",
+    () =>
+      supabase.from("works").select("id, title, original_title, alternative_titles"),
+    { orderBy: ["id"], label: "getSearchMatchIds" },
   )
 
   return rows.filter((work) => workMatchesQuery(work, tokens)).map((work) => work.id)
@@ -136,13 +136,12 @@ export async function resolveWorksByTitles(titles: string[]): Promise<TitleResol
     original_title: string | null
     alternative_titles: string[] | null
   }>(
-    (from, to) =>
+    () =>
       supabase
         .from("works")
         .select("id, title, original_title, alternative_titles")
-        .eq("is_archived", false)
-        .range(from, to),
-    "resolveWorksByTitles",
+        .eq("is_archived", false),
+    { orderBy: ["id"], label: "resolveWorksByTitles" },
   )
   const data = works0
   const error = null as { message: string } | null
@@ -270,13 +269,12 @@ export async function getWorks(
     getSearchMatchIds(supabase, searchTerm),
     filters.genres?.length
       ? fetchAllRows<{ work_id: string }>(
-          (from, to) =>
+          () =>
             supabase
               .from("work_genres")
               .select("work_id, genres!inner(name)")
-              .in("genres.name", filters.genres!)
-              .range(from, to),
-          "getWorks.genreMatchIds",
+              .in("genres.name", filters.genres!),
+          { orderBy: ["work_id", "genre_id"], label: "getWorks.genreMatchIds" },
         ).then((rows) => [...new Set(rows.map((row) => row.work_id))])
       : Promise.resolve(null),
     filters.tagSlugs?.length
@@ -284,13 +282,12 @@ export async function getWorks(
         // vínculos), mas o filtro é `.in(<N slugs>)`: DUAS já somam mais. Truncado, obras
         // perdiam vínculo e caíam do "casa com TODAS as tags" — filtro devolvendo menos, sem erro.
         fetchAllRows<{ work_id: string }>(
-          (from, to) =>
+          () =>
             supabase
               .from("work_tags")
               .select("work_id, tags!inner(slug)")
-              .in("tags.slug", filters.tagSlugs!)
-              .range(from, to),
-          "getWorks.tagMatchIds",
+              .in("tags.slug", filters.tagSlugs!),
+          { orderBy: ["work_id", "tag_id"], label: "getWorks.tagMatchIds" },
         ).then((rows) => {
           const countByWork: Record<string, number> = {}
           for (const r of rows) {
@@ -316,7 +313,7 @@ export async function getWorks(
     // 1009 ativas e o PostgREST corta em 1000 sem erro. Ninguém editou o arquivo — o número
     // é que mudou.
     const lightData = await fetchAllRows<Record<string, unknown>>(
-      (from, to) =>
+      () =>
         applyWorkFilters(
           supabase
             .from("works")
@@ -327,8 +324,8 @@ export async function getWorks(
           searchMatchIds,
           genreMatchIds,
           tagMatchIds,
-        ).range(from, to),
-      "getWorks.lightQuery",
+        ),
+      { orderBy: ["id"], label: "getWorks.lightQuery" },
     )
 
     type LightRow = {
@@ -551,8 +548,8 @@ const getSlugToIdMap = unstable_cache(
     // Pagina: `.select()` corta em 1000 linhas sem avisar. Acima disso, obras na
     // cauda sumiriam do índice slug→id → 404 ao navegar/renomear (gotcha nº1).
     const rows = await fetchAllRows<{ id: string; title: string | null }>(
-      (from, to) => supabase.from("works").select("id, title").range(from, to),
-      "getSlugToIdMap",
+      () => supabase.from("works").select("id, title"),
+      { orderBy: ["id"], label: "getSlugToIdMap" },
     )
     const map: Record<string, string> = {}
     for (const row of rows) {
@@ -575,8 +572,8 @@ export async function getWorkBySlug(slug: string) {
     // em 1000) — senão a obra da cauda cairia justo aqui, no caminho de 404.
     const supabase = createAdminClient()
     const rows = await fetchAllRows<{ id: string; title: string | null }>(
-      (from, to) => supabase.from("works").select("id, title").range(from, to),
-      "getWorkBySlug.fallback",
+      () => supabase.from("works").select("id, title"),
+      { orderBy: ["id"], label: "getWorkBySlug.fallback" },
     )
     id = rows.find((row) => titleToSlug(row.title ?? "") === slug)?.id
     if (!id) {
@@ -665,8 +662,8 @@ export async function getWorkTitleByIdOrSlug(idOrSlug: string): Promise<string |
   // Pagina (`.select()` corta em 1000): sem isto o título de uma obra na cauda
   // viria null e a aba do navegador cairia no fallback genérico.
   const rows = await fetchAllRows<{ title: string | null; previous_slugs: string[] | null }>(
-    (from, to) => supabase.from("works").select("title, previous_slugs").range(from, to),
-    "getWorkTitleByIdOrSlug",
+    () => supabase.from("works").select("title, previous_slugs"),
+    { orderBy: ["id"], label: "getWorkTitleByIdOrSlug" },
   )
   const canonico = rows.find((row) => titleToSlug(row.title ?? "") === idOrSlug)
   if (canonico) return canonico.title ?? null
@@ -687,8 +684,8 @@ export async function getWorkIdsBySlug(slug: string): Promise<string[]> {
   // a detail page usa esta contagem pra decidir o redirect UUID→slug (só redireciona
   // se o slug for único). Uma obra da cauda perdida daria falso "não-único".
   const rows = await fetchAllRows<{ id: string; title: string | null }>(
-    (from, to) => supabase.from("works").select("id, title").range(from, to),
-    "getWorkIdsBySlug",
+    () => supabase.from("works").select("id, title"),
+    { orderBy: ["id"], label: "getWorkIdsBySlug" },
   )
   return rows
     .filter((row) => titleToSlug(row.title ?? "") === slug)

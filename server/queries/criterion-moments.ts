@@ -56,8 +56,8 @@ export const getCriterionMoments = unstable_cache(
     // cru pararia em 1000 e a média/σ sairiam de ~111 obras — um erro que PRODUZ
     // resultado, sem erro nem log, e que aqui sairia como faixa de filtro errada.
     const rows = await fetchAllRows<ScoreRow>(
-      (from, to) => supabase.from("category_scores").select("criterion_slug, score").range(from, to),
-      "getCriterionMoments",
+      () => supabase.from("category_scores").select("criterion_slug, score"),
+      { orderBy: ["id"], label: "getCriterionMoments" },
     )
 
     const bySlug = new Map<string, number[]>()

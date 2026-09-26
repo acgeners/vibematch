@@ -132,9 +132,9 @@ export async function getAllActiveSynopsisPredictions(): Promise<
   let rows: Array<Record<string, unknown>>
   try {
     rows = await fetchAllRows<Record<string, unknown>>(
-      (from, to) =>
-        interest.scope(supabase.from("synopsis_quality_predictions").select("*")).range(from, to),
-      "getAllActiveSynopsisPredictions",
+      () =>
+        interest.scope(supabase.from("synopsis_quality_predictions").select("*")),
+      { orderBy: ["id"], label: "getAllActiveSynopsisPredictions" },
     )
   } catch (e) {
     console.warn("[synopsis-pred] getAllActiveSynopsisPredictions falhou:", (e as Error).message)
@@ -243,14 +243,13 @@ export async function getSynopsisPredictionAccuracy(
   let data: Array<Record<string, unknown>>
   try {
     data = await fetchAllRows<Record<string, unknown>>(
-      (from, to) =>
+      () =>
         supabase
           .from("synopsis_quality_predictions")
           .select("predicted_quality, works_owner!work_id(synopsis_quality)")
           .eq("stale", false)
-          .eq("prompt_version", version)
-          .range(from, to),
-      "getSynopsisPredictionAccuracy",
+          .eq("prompt_version", version),
+      { orderBy: ["id"], label: "getSynopsisPredictionAccuracy" },
     )
   } catch (e) {
     console.warn("[synopsis-pred] getSynopsisPredictionAccuracy falhou:", (e as Error).message)
@@ -347,12 +346,11 @@ export async function getSynopsisVersionComparison(
   let data: Array<Record<string, unknown>>
   try {
     data = await fetchAllRows<Record<string, unknown>>(
-      (from, to) =>
+      () =>
         supabase
           .from("synopsis_quality_predictions")
-          .select("work_id, predicted_quality, prompt_version, works_owner!work_id(synopsis_quality)")
-          .range(from, to),
-      "getSynopsisVersionComparison",
+          .select("work_id, predicted_quality, prompt_version, works_owner!work_id(synopsis_quality)"),
+      { orderBy: ["id"], label: "getSynopsisVersionComparison" },
     )
   } catch (e) {
     console.warn("[synopsis-pred] getSynopsisVersionComparison falhou:", (e as Error).message)
@@ -475,13 +473,12 @@ export async function getShadowComparisonRows(): Promise<ShadowCompareRow[]> {
   let bRows: Array<Record<string, unknown>>
   try {
     bRows = await fetchAllRows<Record<string, unknown>>(
-      (from, to) =>
+      () =>
         supabase
           .from("synopsis_quality_predictions")
           .select("work_id, predicted_quality, confidence, works_owner!work_id(title, synopsis_quality)")
-          .eq("prompt_version", armBVer)
-          .range(from, to),
-      "getShadowComparisonRows.armB",
+          .eq("prompt_version", armBVer),
+      { orderBy: ["id"], label: "getShadowComparisonRows.armB" },
     )
   } catch (e) {
     console.warn("[shadow] getShadowComparisonRows (arm B) falhou:", (e as Error).message)

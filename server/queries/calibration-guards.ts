@@ -80,14 +80,13 @@ async function checkGuard1(
       .select("ia_model_at_assessment, ia_prompt_version")
       .eq("user_id", userId),
     fetchAllRows<{ model_name: string | null; prompt_version: string | null; created_at: string }>(
-      (from, to) =>
+      () =>
         supabase
           .from("ai_evaluations")
           .select("model_name, prompt_version, created_at")
           .eq("status", "completed")
-          .gte("created_at", new Date(Date.now() - 30 * 864e5).toISOString())
-          .range(from, to),
-      "calibrationGuards.recentEvals",
+          .gte("created_at", new Date(Date.now() - 30 * 864e5).toISOString()),
+      { orderBy: ["id"], label: "calibrationGuards.recentEvals" },
     ),
   ])
 
@@ -134,13 +133,13 @@ async function computeLowCoverage(
 ): Promise<{ unreadIds: string[]; lowCoverageIds: Set<string> }> {
   const [works, links] = await Promise.all([
     fetchAllRows<{ id: string; user_score: number | null }>(
-      (from, to) =>
-        supabase.from("works_owner").select("id, user_score").eq("is_archived", false).range(from, to),
-      "calibrationGuards.works",
+      () =>
+        supabase.from("works_owner").select("id, user_score").eq("is_archived", false),
+      { orderBy: ["id"], label: "calibrationGuards.works" },
     ),
     fetchAllRows<{ work_id: string; genre_id: string }>(
-      (from, to) => supabase.from("work_genres").select("work_id, genre_id").range(from, to),
-      "calibrationGuards.workGenres",
+      () => supabase.from("work_genres").select("work_id, genre_id"),
+      { orderBy: ["work_id", "genre_id"], label: "calibrationGuards.workGenres" },
     ),
   ])
 

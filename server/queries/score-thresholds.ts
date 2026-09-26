@@ -66,13 +66,12 @@ export const getScoreColorThresholds = unstable_cache(
     const [{ data: configRow }, workRows] = await Promise.all([
       supabase.from("formula_config").select("*").limit(1).single(),
       fetchAllRows<Record<string, unknown>>(
-        (from, to) =>
+        () =>
           supabase
             .from("works")
             .select("calculated_scores(expected_score, calc_score), category_scores(criterion_slug, score)")
-            .eq("is_archived", false)
-            .range(from, to),
-        "getScoreColorThresholds.works",
+            .eq("is_archived", false),
+        { orderBy: ["id"], label: "getScoreColorThresholds.works" },
       ),
     ])
 

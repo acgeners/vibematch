@@ -139,16 +139,15 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       publication_status_id: number | null
       total_chapters: number | null
     }>(
-      (from, to) =>
+      () =>
         supabase
           .from("works")
-          .select("id, ai_eval_status, is_archived, publication_status_id, total_chapters")
-          .range(from, to),
-      "getDashboardKpis.works",
+          .select("id, ai_eval_status, is_archived, publication_status_id, total_chapters"),
+      { orderBy: ["id"], label: "getDashboardKpis.works" },
     ),
     fetchAllRows<{ work_id: string; expected_score: number | null }>(
-      (from, to) => supabase.from("calculated_scores").select("work_id, expected_score").range(from, to),
-      "getDashboardKpis.calculated_scores",
+      () => supabase.from("calculated_scores").select("work_id, expected_score"),
+      { orderBy: ["work_id"], label: "getDashboardKpis.calculated_scores" },
     ),
     countRated(),
   ])
@@ -445,21 +444,21 @@ export async function getAiQueueCounts(): Promise<AiQueueCounts> {
     // as contagens da home não batem com as abas de /curation/works.
     const [activeRows, calcRows, synRows, predRows] = await Promise.all([
       fetchAllRows<{ id: string }>(
-        (from, to) => supabase.from("works").select("id").eq("is_archived", false).range(from, to),
-        "getAiQueueCounts.works",
+        () => supabase.from("works").select("id").eq("is_archived", false),
+        { orderBy: ["id"], label: "getAiQueueCounts.works" },
       ),
       fetchAllRows<{ work_id: string; alignment_score: number | null; alignment_stale: boolean | null }>(
-        (from, to) => supabase.from("calculated_scores").select("work_id, alignment_score, alignment_stale").range(from, to),
-        "getAiQueueCounts.calculated_scores",
+        () => supabase.from("calculated_scores").select("work_id, alignment_score, alignment_stale"),
+        { orderBy: ["work_id"], label: "getAiQueueCounts.calculated_scores" },
       ),
       fetchAllRows<{ id: string }>(
-        (from, to) =>
-          supabase.from("works").select("id").eq("is_archived", false).not("canonical_synopsis", "is", null).range(from, to),
-        "getAiQueueCounts.synopsis_works",
+        () =>
+          supabase.from("works").select("id").eq("is_archived", false).not("canonical_synopsis", "is", null),
+        { orderBy: ["id"], label: "getAiQueueCounts.synopsis_works" },
       ),
       fetchAllRows<{ work_id: string }>(
-        (from, to) => supabase.from("synopsis_quality_predictions").select("work_id").range(from, to),
-        "getAiQueueCounts.predictions",
+        () => supabase.from("synopsis_quality_predictions").select("work_id"),
+        { orderBy: ["id"], label: "getAiQueueCounts.predictions" },
       ),
     ])
 
