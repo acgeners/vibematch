@@ -86,7 +86,10 @@ export default function GlobalError({
               {ERROR_COPY.tentarNovamente}
             </button>
             {/* `<a>` e não `<Link>`: o router do App Router faz parte do que pode ter caído
-                junto com o root layout. Navegação de documento sempre funciona. */}
+                junto com o root layout. Navegação de documento sempre funciona.
+                A regra do Next não distingue este caso — trocar por `<Link>` faria a saída
+                de emergência depender justamente do que falhou. */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a
               href="/"
               style={{
