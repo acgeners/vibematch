@@ -211,6 +211,7 @@ async function fetchRows(sinceIso: string | null, operation?: string | null): Pr
       .from("ai_api_calls")
       .select(SELECT_COLS)
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .range(from, from + PAGE_SIZE - 1)
     if (sinceIso) query = query.gte("created_at", sinceIso)
     if (operation) query = query.eq("operation", operation)
@@ -588,6 +589,7 @@ export async function getWorkAiCost(workId: string): Promise<WorkAiCostSummary> 
       .select("operation, cost_total_usd")
       .eq("metadata->>work_id", workId)
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .range(from, from + PAGE_SIZE - 1)
     if (error) {
       console.error("[ai-usage] getWorkAiCost falhou:", error.message)
@@ -716,6 +718,7 @@ export async function getFromScratchBaselineCost(): Promise<FromScratchBaseline>
       .select("operation, cost_total_usd, created_at, work_id:metadata->>work_id")
       .in("operation", FROM_SCRATCH_OPERATIONS as unknown as string[])
       .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
       .range(from, from + PAGE_SIZE - 1)
     if (error) {
       console.error("[ai-usage] getFromScratchBaselineCost falhou:", error.message)

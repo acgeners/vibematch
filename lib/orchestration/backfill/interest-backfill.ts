@@ -799,6 +799,7 @@ export class SupabaseInterestBackfillGateway implements InterestBackfillGateway 
         .from("works")
         .select("id, title, canonical_synopsis, review_digest, work_tags(tags(name)), work_synopses(text, is_primary, position)")
         .eq("is_archived", false)
+        .order("id")
         .range(from, from + pageSize - 1)
       if (error) throw new Error(`listWorks: ${error.message}`)
       for (const row of data ?? []) {
@@ -834,6 +835,7 @@ export class SupabaseInterestBackfillGateway implements InterestBackfillGateway 
         .from("synopsis_quality_predictions")
         .select("work_id, predicted_quality, input_signature, taste_profile_hash, stale")
         .eq("prompt_version", promptVersion)
+        .order("id")
         .range(from, from + pageSize - 1)
       if (error) throw new Error(`listPredictions: ${error.message}`)
       for (const row of data ?? []) {

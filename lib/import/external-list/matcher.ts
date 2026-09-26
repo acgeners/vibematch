@@ -2,6 +2,7 @@
 type AnySupabaseClient = any
 
 import { bestTitleMatchDetailed } from "@/lib/external"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { getPersonalStatusNameById } from "@/lib/constants/status-lookups"
 import type { AmbiguousCandidate, ExternalListEntry, FieldChange } from "./types"
 
@@ -26,28 +27,11 @@ export interface MatchContext {
   externalIndex: Map<string, string>
 }
 
-// Pagina de 1000 em 1000: o select do PostgREST corta em 1000 SEM AVISO, e duas das três
-// leituras daqui já passavam (ou passariam em breve) do teto — work_external_ids tinha
-// 6.933 linhas com o índice truncado em 1000, e o catálogo (966) está a meses de estourar.
+// Pagina de 1000 em 1000 (`fetchAllRows`): o select do PostgREST corta em 1000 SEM AVISO, e
+// duas das três leituras daqui já passavam (ou passariam em breve) do teto — work_external_ids
+// tinha 6.933 linhas com o índice truncado em 1000, e o catálogo (966) está a meses de estourar.
 // Um índice truncado não dá erro: o match por ID falha em silêncio e cai pro título.
-async function fetchAll(
-  supabase: AnySupabaseClient,
-  table: string,
-  select: string,
-  filter?: (q: AnySupabaseClient) => AnySupabaseClient,
-): Promise<Record<string, unknown>[]> {
-  const rows: Record<string, unknown>[] = []
-  for (let from = 0; ; from += 1000) {
-    let q = supabase.from(table).select(select).range(from, from + 999)
-    if (filter) q = filter(q)
-    const { data, error } = await q
-    if (error) throw new Error(`buildMatchContext(${table}): ${error.message}`)
-    const batch = (data ?? []) as Record<string, unknown>[]
-    rows.push(...batch)
-    if (batch.length < 1000) break
-  }
-  return rows
-}
+type Linha = Record<string, unknown>
 
 /**
  * Lado "atual" do diff da importação, PARA UM USUÁRIO: o catálogo compartilhado (títulos,
@@ -63,11 +47,22 @@ export async function buildMatchContext(
   // arquivada continua no índice de match — senão importar uma lista que a contém
   // criaria uma DUPLICATA dela no catálogo.
   const [works, states, extIds] = await Promise.all([
-    fetchAll(supabase, "works", "id, title, original_title, alternative_titles"),
-    fetchAll(supabase, "user_work_state", "work_id, personal_status_id, user_score, chapters_read", (q) =>
-      q.eq("user_id", userId),
+    fetchAllRows<Linha>(() => supabase.from("works").select("id, title, original_title, alternative_titles"), {
+      orderBy: ["id"],
+      label: "buildMatchContext(works)",
+    }),
+    fetchAllRows<Linha>(
+      () =>
+        supabase
+          .from("user_work_state")
+          .select("work_id, personal_status_id, user_score, chapters_read")
+          .eq("user_id", userId),
+      { orderBy: ["user_id", "work_id"], label: "buildMatchContext(user_work_state)" },
     ),
-    fetchAll(supabase, "work_external_ids", "work_id, source, external_id"),
+    fetchAllRows<Linha>(() => supabase.from("work_external_ids").select("work_id, source, external_id"), {
+      orderBy: ["id"],
+      label: "buildMatchContext(work_external_ids)",
+    }),
   ])
 
   const stateByWork = new Map(states.map((s) => [s.work_id as string, s]))

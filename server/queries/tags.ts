@@ -33,6 +33,7 @@ export async function getAllTagsUncached(): Promise<TagOption[]> {
       .from("tags")
       .select("id, slug, name, tag_group_id, tag_subgroup_id")
       .order("name")
+      .order("id")
       .range(offset, offset + PAGE - 1)
     if (error) break
     if (!data || data.length === 0) break

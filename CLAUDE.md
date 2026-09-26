@@ -4628,6 +4628,13 @@ filas de Interesse/Veredito, marcação 18+, embeddings).
 ⚠️ **Coluna que MUDA durante a leitura não pagina** — as filas de Interesse ordenavam por
 `updated_at`: hoje paginam por `id` e ordenam por `updated_at` em memória (`byUpdatedAtDesc`).
 
+🔴 **Fora do paginador, todo `.range()` também precisa de ordem total** — na cadeia, antes do
+`.range()`, contando coluna fixa por `.eq()` como parte da chave. Eram 34 laços à mão (27 sem
+ordem total); três wrappers genéricos com a tabela como PARÂMETRO viraram chamadas diretas ao
+`fetchAllRows`, porque tabela dinâmica não deixa conferir a chave. Conjunto limitado por
+construção pode declarar `// range-limitado: <motivo>` — o número de exceções vai no título do
+caso de teste (hoje 0).
+
 ### `lote.length` não prova insert — quem prova é o `.select()`
 
 🔴 **Com `ignoreDuplicates: true` (ou `on conflict do nothing`) o Postgres descarta em

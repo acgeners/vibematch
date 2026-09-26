@@ -38,6 +38,7 @@ export async function refreshArtSignalForWork(workId: string): Promise<ArtSignal
         .from("work_reviews")
         .select("text")
         .eq("work_id", workId)
+        .order("id")
         .range(from, from + 999)
       if (error) throw new Error(error.message)
       if (!data?.length) break

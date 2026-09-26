@@ -58,6 +58,7 @@ async function fetchCacheEventRows(
       .from("ai_cache_events")
       .select(SELECT_COLS)
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .range(from, from + PAGE_SIZE - 1)
     if (sinceIso) query = query.gte("created_at", sinceIso)
     if (operation) query = query.eq("operation", operation)

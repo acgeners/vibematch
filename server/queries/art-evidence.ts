@@ -68,6 +68,7 @@ export async function getArtEvidenceForWork(
       .from("work_reviews")
       .select("text")
       .eq("work_id", workId)
+      .order("id")
       .range(from, from + 999)
     if (!data?.length) break
     for (const r of data) reviewTexts.push(String((r as { text?: unknown }).text ?? ""))

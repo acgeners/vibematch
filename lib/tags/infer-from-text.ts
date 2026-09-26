@@ -2,6 +2,7 @@ import "server-only"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { ACTIVE_MODELS, SONNET_MODEL } from "@/lib/ai/models"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>
 
@@ -55,19 +56,6 @@ export function buildReviewContext(summary: unknown, digest: unknown): string | 
   return parts.length ? parts.join("\n") : undefined
 }
 
-async function pageAll<T = Record<string, unknown>>(
-  sb: SupabaseAdmin, table: string, columns: string,
-): Promise<T[]> {
-  const out: T[] = []
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb.from(table).select(columns).range(from, from + 999)
-    if (error) throw new Error(`${table}: ${error.message}`)
-    out.push(...((data ?? []) as T[]))
-    if (!data || data.length < 1000) break
-  }
-  return out
-}
-
 function buildSystemPrompt(menuText: string): string {
   return `Você identifica tags de obras (manhwa, manhua, webtoon, light novel) a partir da SINOPSE.
 
@@ -109,14 +97,24 @@ const INFER_TOOL = {
 }
 
 export async function buildTagMenu(sb: SupabaseAdmin): Promise<TagMenu> {
-  const groups = await pageAll<{ id: string; slug: string }>(sb, "tag_group", "id, slug")
+  const groups = await fetchAllRows<{ id: string; slug: string }>(() => sb.from("tag_group").select("id, slug"), {
+    orderBy: ["id"],
+    label: "tag_group",
+  })
   const slugById = new Map(groups.map((g) => [g.id, g.slug]))
-  const subs = await pageAll<{ id: string; name: string; status: string | null }>(sb, "tag_subgroup", "id, name, status")
-  const subName = new Map(subs.filter((s) => s.status !== "rejected").map((s) => [s.id, s.name]))
-  const tags = await pageAll<{ id: string; name: string; tag_group_id: string | null; tag_subgroup_id: string | null }>(
-    sb, "tags", "id, name, tag_group_id, tag_subgroup_id",
+  const subs = await fetchAllRows<{ id: string; name: string; status: string | null }>(
+    () => sb.from("tag_subgroup").select("id, name, status"),
+    { orderBy: ["id"], label: "tag_subgroup" },
   )
-  const wt = await pageAll<{ tag_id: string }>(sb, "work_tags", "tag_id")
+  const subName = new Map(subs.filter((s) => s.status !== "rejected").map((s) => [s.id, s.name]))
+  const tags = await fetchAllRows<{ id: string; name: string; tag_group_id: string | null; tag_subgroup_id: string | null }>(
+    () => sb.from("tags").select("id, name, tag_group_id, tag_subgroup_id"),
+    { orderBy: ["id"], label: "tags" },
+  )
+  const wt = await fetchAllRows<{ tag_id: string }>(() => sb.from("work_tags").select("tag_id"), {
+    orderBy: ["work_id", "tag_id"],
+    label: "work_tags",
+  })
   const use = new Map<string, number>()
   for (const r of wt) use.set(r.tag_id, (use.get(r.tag_id) ?? 0) + 1)
 
