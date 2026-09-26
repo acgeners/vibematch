@@ -39,9 +39,10 @@ const ARGS: Record<string, unknown[]> = {
   unmarkAllSettingsRead: [],
 }
 
-const exports = Object.entries(mod).filter(
-  (e): e is [string, (...a: unknown[]) => Promise<unknown>] => typeof e[1] === "function",
-)
+type Acao = (...a: never[]) => Promise<unknown>
+const exports: Array<[string, Acao]> = Object.entries(mod)
+  .filter(([, v]) => typeof v === "function")
+  .map(([n, v]) => [n, v as Acao])
 
 beforeEach(() => {
   ensurePermission.mockReset()
@@ -57,14 +58,14 @@ describe("settings-read: toda mutação se defende sozinha", () => {
     it(`${nome}: NEGADO sem permissão, e sem tocar no banco`, async () => {
       ensurePermission.mockResolvedValue({ ok: false, error: "Só o Curador do catálogo pode fazer isso." })
 
-      await expect(fn(...(ARGS[nome] ?? []))).rejects.toThrow(/Curador/)
+      await expect(fn(...((ARGS[nome] ?? []) as never[]))).rejects.toThrow(/Curador/)
       // O gate barra antes de qualquer client: se o banco foi tocado, o gate veio tarde.
       expect(createAdminClient).not.toHaveBeenCalled()
     })
 
     it(`${nome}: pede a permissão global_config`, async () => {
       ensurePermission.mockResolvedValue({ ok: false, error: "negado" })
-      await expect(fn(...(ARGS[nome] ?? []))).rejects.toThrow()
+      await expect(fn(...((ARGS[nome] ?? []) as never[]))).rejects.toThrow()
       expect(ensurePermission).toHaveBeenCalledWith("global_config")
     })
   }

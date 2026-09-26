@@ -22,6 +22,7 @@ import "server-only"
 import { randomUUID } from "node:crypto"
 import { runSingleFlight } from "@/lib/ai-cache/single-flight"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { sanitizeErrorMessage } from "@/lib/observability/redact"
 import type { ActionName } from "./contracts"
 
 type AdminClient = ReturnType<typeof createAdminClient>
@@ -127,18 +128,13 @@ export interface JobStore {
 // ---- Sanitização de erro ---------------------------------------------------
 
 /**
- * Mensagem de erro segura p/ persistir em `last_error`: só a message (sem stack),
- * em uma linha, truncada, com redação de padrões óbvios de segredo (api keys,
- * JWT, bearer). NÃO é detecção exaustiva — é uma rede de segurança contra vazar
- * credencial num campo logado.
+ * 🔴 A implementação MUDOU DE CASA, não de comportamento: ela mora em
+ * `lib/observability/redact.ts` porque o `instrumentation.ts` precisa do mesmo padrão de
+ * redação e NÃO pode importar este módulo — aqui entram `server-only` e o client do
+ * Supabase, e um hook de erro que depende de carregar o supabase-js é um hook que quebra
+ * junto com o banco. Re-exportado para não tocar em nenhum consumidor.
  */
-export function sanitizeErrorMessage(err: unknown, maxLen = 500): string {
-  const raw = err instanceof Error ? err.message : String(err)
-  let s = raw.replace(/\s+/g, " ").trim()
-  s = s.replace(/\b(sk-[A-Za-z0-9_-]{8,}|eyJ[A-Za-z0-9._-]{10,}|[Bb]earer\s+[A-Za-z0-9._-]{8,})/g, "[REDACTED]")
-  if (s.length > maxLen) s = `${s.slice(0, maxLen - 1)}…`
-  return s
-}
+export { sanitizeErrorMessage }
 
 // ---- In-memory (fallback + testes) ----------------------------------------
 
