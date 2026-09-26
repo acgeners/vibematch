@@ -596,6 +596,7 @@ export async function listAllDeepDives(limit = 100): Promise<DeepDiveSummary[]> 
       .select("id, work_id, match_score, confidence, read_when, one_liner, created_at")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .range(from, from + 999)
     if (error) {
       console.error("[deep-dive] erro listando deep dives:", error)

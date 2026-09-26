@@ -72,6 +72,8 @@ export async function listNewTags(): Promise<NewTagRow[]> {
       .from("work_tags")
       .select("tag_id")
       .in("tag_id", ids)
+      .order("work_id")
+      .order("tag_id")
       .range(from, from + 999)
     for (const r of data ?? []) counts.set(r.tag_id as string, (counts.get(r.tag_id as string) ?? 0) + 1)
     if (!data || data.length < 1000) break
@@ -185,6 +187,8 @@ export async function listAdultScoreTierBacklog(): Promise<AdultScoreTierBacklog
       .from("work_tags")
       .select("tag_id, works(title)")
       .in("tag_id", ids)
+      .order("work_id")
+      .order("tag_id")
       .range(from, from + 999)
     for (const r of (data ?? []) as Array<{ tag_id: string; works: { title?: string } | null }>) {
       counts.set(r.tag_id, (counts.get(r.tag_id) ?? 0) + 1)

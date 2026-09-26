@@ -32,11 +32,21 @@ const CHAVES_UNICAS: Record<string, string[][]> = {
   works_owner: [["id"]], // view sobre `works` — herda a unicidade de `works.id`
   category_scores: [["id"], ["work_id", "criterion_slug"]],
   calculated_scores: [["id"], ["work_id"]],
+  ai_api_calls: [["id"]],
+  ai_cache_events: [["id"]],
   ai_evaluations: [["id"]],
   ai_eval_read_acks: [["user_id", "work_id", "queue"]],
+  deep_dive_results: [["id"]],
+  genres: [["id"]],
+  pilot_taste_scores: [["user_id", "work_id"]],
+  platform_ratings: [["id"], ["work_id", "platform"]],
   synopsis_quality_predictions: [["id"], ["work_id", "prompt_version"]],
   prediction_snapshots: [["id"], ["dedup_key"]],
+  tag_group: [["id"], ["slug"]],
+  tag_subgroup: [["id"], ["tag_group_id", "slug"]],
   tags: [["id"], ["slug"]],
+  user_calculated_scores: [["user_id", "work_id"]],
+  user_work_state: [["user_id", "work_id"]],
   work_embeddings: [["work_id"]],
   work_external_ids: [["id"], ["work_id", "source"]],
   work_external_reviews_manual: [["id"]],
@@ -194,5 +204,146 @@ describe("sondas: a regra reprova o que deve reprovar", () => {
   it("tabela fora do mapa → falha (chave única precisa ser declarada, não suposta)", () => {
     const r = um(`fetchAllRows(() => sb.from("tabela_nova").select("id"), { orderBy: ["id"] })`)
     expect(r.violacoes.map((v) => v.motivo).join()).toMatch(/sem chave única declarada/)
+  })
+})
+
+// ── `.range()` FORA do paginador ─────────────────────────────────────────────────────────
+
+/** Motivo de exceção: o marcador seguido de uma frase de verdade (≥ 3 palavras), na mesma linha. */
+const EXCECAO = /\/\/\s*range-limitado:[ \t]*(\S+(?:[ \t]+\S+){2,})/
+
+function funcaoQueContem(n: ts.Node): ts.Node {
+  let p: ts.Node | undefined = n.parent
+  while (p && !ts.isFunctionLike(p) && !ts.isSourceFile(p)) p = p.parent
+  return p ?? n.getSourceFile()
+}
+
+/** A cadeia que chega ao `.range()`: o texto da própria expressão e, se ela parte de uma
+ *  variável (`query = query.range(…)`, `q.range(…)`), as atribuições dessa variável na função. */
+function cadeiaDoRange(sf: ts.SourceFile, call: ts.CallExpression): { antes: string; filtros: string } {
+  const receptor = (call.expression as ts.PropertyAccessExpression).expression
+  let base: ts.Expression = receptor
+  while (ts.isCallExpression(base) || ts.isPropertyAccessExpression(base)) {
+    base = ts.isCallExpression(base) ? base.expression : base.expression
+  }
+  const proprio = receptor.getText(sf)
+  if (!ts.isIdentifier(base)) return { antes: proprio, filtros: proprio }
+  const nome = base.text
+  const anteriores: string[] = []
+  const todas: string[] = []
+  const visitar = (n: ts.Node) => {
+    let texto: string | null = null
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === nome && n.initializer) texto = n.initializer.getText(sf)
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(n.left) && n.left.text === nome) {
+      texto = n.right.getText(sf)
+    }
+    if (texto != null) {
+      todas.push(texto)
+      if (n.getStart(sf) < call.getStart(sf)) anteriores.push(texto)
+    }
+    ts.forEachChild(n, visitar)
+  }
+  visitar(funcaoQueContem(call))
+  return { antes: [...anteriores, proprio].join("\n"), filtros: [...todas, proprio].join("\n") }
+}
+
+export function analisarRangesManuais(
+  arquivo: string,
+  src: string,
+): { ranges: number; excecoes: string[]; violacoes: Violacao[] } {
+  const sf = ts.createSourceFile(arquivo, src, ts.ScriptTarget.Latest, true, arquivo.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
+  const linhas = src.split("\n")
+  const violacoes: Violacao[] = []
+  const excecoes: string[] = []
+  let ranges = 0
+  const visitar = (n: ts.Node) => {
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === "range") {
+      ranges++
+      const ln = linha(sf, n.expression.name.getStart(sf))
+      const onde = `${arquivo}:${ln}`
+      // Exceção declarada: nas 3 linhas acima do `.range(` ou na própria linha.
+      const perto = linhas.slice(Math.max(0, ln - 4), ln).join("\n")
+      if (/range-limitado:/.test(perto)) {
+        if (EXCECAO.test(perto)) excecoes.push(onde)
+        else violacoes.push({ onde, motivo: "`range-limitado:` sem motivo (escreva por que o conjunto é limitado)" })
+      } else {
+        const { antes, filtros } = cadeiaDoRange(sf, n)
+        const tabelas = [...new Set([...filtros.matchAll(/\.from\(\s*["'`]([\w_]+)["'`]\s*\)/g)].map((m) => m[1]))]
+        const ordens = [...antes.matchAll(/\.order\(\s*["'`]([\w_]+)["'`]/g)].map((m) => m[1])
+        const fixas = [...filtros.matchAll(/\.eq\(\s*["'`]([\w_]+)["'`]/g)].map((m) => m[1])
+        if (tabelas.length !== 1) {
+          violacoes.push({ onde, motivo: `\`.range()\` com tabela não identificada (${tabelas.join(", ") || "nenhum .from literal"}) — use o paginador ou declare \`range-limitado\`` })
+        } else if (ordens.length === 0) {
+          violacoes.push({ onde, motivo: `\`.range()\` sem \`.order()\` em \`${tabelas[0]}\`` })
+        } else {
+          const chaves = CHAVES_UNICAS[tabelas[0]]
+          const cobertas = new Set([...ordens, ...fixas])
+          if (!chaves) violacoes.push({ onde, motivo: `tabela \`${tabelas[0]}\` sem chave única declarada em CHAVES_UNICAS` })
+          else if (!chaves.some((k) => k.every((c) => cobertas.has(c)))) {
+            violacoes.push({
+              onde,
+              motivo:
+                `ordem PARCIAL em \`${tabelas[0]}\`: [${ordens.join(", ")}] (+ fixas por .eq: ${fixas.join(", ") || "nenhuma"}) ` +
+                `não cobre chave única (${chaves.map((k) => k.join("+")).join(" ou ")})`,
+            })
+          }
+        }
+      }
+    }
+    ts.forEachChild(n, visitar)
+  }
+  visitar(sf)
+  return { ranges, excecoes, violacoes }
+}
+
+const MANUAIS = ARQUIVOS.map((f) => analisarRangesManuais(f, readFileSync(f, "utf8")))
+const TOTAL_RANGES = MANUAIS.reduce((s, r) => s + r.ranges, 0)
+const EXCECOES = MANUAIS.flatMap((r) => r.excecoes)
+
+describe("paginação com ordem TOTAL — `.range()` fora do paginador", () => {
+  it(`há ranges manuais para conferir (hoje ${TOTAL_RANGES}) — senão a varredura mudou de forma`, () => {
+    expect(TOTAL_RANGES).toBeGreaterThanOrEqual(20)
+  })
+
+  it("todo `.range()` fora do paginador tem ordem total na cadeia (ou exceção declarada com motivo)", () => {
+    expect(MANUAIS.flatMap((r) => r.violacoes).map((v) => `${v.onde} — ${v.motivo}`)).toEqual([])
+  })
+
+  it(`exceções \`range-limitado\` declaradas: hoje ${EXCECOES.length} — cada uma com motivo na linha`, () => {
+    // O número vai no TÍTULO para aparecer em toda execução: é assim que a válvula não cresce calada.
+    expect(EXCECOES.length).toBeLessThanOrEqual(3)
+  })
+})
+
+describe("sondas da regra dos `.range()` manuais", () => {
+  const um = (codigo: string) => analisarRangesManuais("sonda.ts", codigo)
+
+  it("1. novo `.range()` sem `.order()` → falha", () => {
+    const r = um(`async function f() { const { data } = await sb.from("works").select("id").range(0, 999) }`)
+    expect(r.violacoes.map((v) => v.motivo).join()).toMatch(/sem `.order\(\)`/)
+  })
+
+  it("2. `.order(\"created_at\")` parcial → falha", () => {
+    const r = um(`async function f() { await sb.from("ai_api_calls").select("*").order("created_at", { ascending: false }).range(0, 999) }`)
+    expect(r.violacoes.map((v) => v.motivo).join()).toMatch(/ordem PARCIAL/)
+  })
+
+  it("3. ordem completa com chave única → passa (inclusive via variável e coluna fixa por .eq)", () => {
+    expect(um(`async function f() { await sb.from("ai_api_calls").select("*").order("created_at").order("id").range(0, 9) }`).violacoes).toEqual([])
+    const viaVariavel = um(
+      `async function f() { let q = sb.from("user_work_state").select("*").eq("user_id", u)\n q = q.order("work_id")\n await q.range(0, 9) }`,
+    )
+    expect(viaVariavel.violacoes).toEqual([])
+  })
+
+  it("4. exceção sem motivo → falha", () => {
+    const r = um(`async function f() {\n  // range-limitado:\n  await sb.from("works").select("id").range(0, 9)\n}`)
+    expect(r.violacoes.map((v) => v.motivo).join()).toMatch(/sem motivo/)
+  })
+
+  it("5. `range-limitado` com motivo real → passa, e é contada", () => {
+    const r = um(`async function f() {\n  // range-limitado: no máximo 8 ids vindos do limite da tela\n  await sb.from("works").select("id").range(0, 9)\n}`)
+    expect(r.violacoes).toEqual([])
+    expect(r.excecoes).toHaveLength(1)
   })
 })

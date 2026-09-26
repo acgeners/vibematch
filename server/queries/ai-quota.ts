@@ -52,6 +52,7 @@ export const getAiSpend24hUsd = cache(async (userId: string): Promise<number> =>
       .select("cost_total_usd")
       .eq("user_id", userId)
       .gte("created_at", since)
+      .order("id")
       .range(from, from + 999)
 
     if (error) {

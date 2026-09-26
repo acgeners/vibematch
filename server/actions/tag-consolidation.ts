@@ -348,6 +348,7 @@ export async function listAllTagsInGroup(groupSlug: string): Promise<UncoveredTa
       .select("id, name, slug")
       .eq("tag_group_id", groupId)
       .order("name", { ascending: true })
+      .order("id")
       .range(offset, offset + PAGE - 1)
     if (error) throw new Error(error.message)
     if (!data || data.length === 0) break

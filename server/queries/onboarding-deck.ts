@@ -1,12 +1,12 @@
 import "server-only"
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { pickDeckWorks } from "@/lib/onboarding/deck-sampler"
 import type { DeckCandidate } from "@/lib/onboarding/deck-sampler"
 import { coverCandidates } from "@/lib/work-derived"
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnySupabaseClient = any
+type Linha = Record<string, unknown>
 
 export interface OnboardingDeckWork {
   id: string
@@ -15,25 +15,6 @@ export interface OnboardingDeckWork {
   synopsis: string
   coverUrls: string[]
   genres: string[]
-}
-
-async function fetchAll(
-  supabase: AnySupabaseClient,
-  table: string,
-  select: string,
-  filter?: (q: AnySupabaseClient) => AnySupabaseClient,
-): Promise<Record<string, unknown>[]> {
-  const rows: Record<string, unknown>[] = []
-  for (let from = 0; ; from += 1000) {
-    let q = supabase.from(table).select(select).range(from, from + 999)
-    if (filter) q = filter(q)
-    const { data, error } = await q
-    if (error) throw new Error(`getOnboardingDeck(${table}): ${error.message}`)
-    const batch = (data ?? []) as Record<string, unknown>[]
-    rows.push(...batch)
-    if (batch.length < 1000) break
-  }
-  return rows
 }
 
 /**
@@ -60,13 +41,26 @@ export async function getOnboardingDeck(opts: {
   const limit = opts.limit ?? 30
 
   const [works, workGenres, genres, ratings, mine] = await Promise.all([
-    fetchAll(supabase, "works", "id, is_adult", (q) =>
-      q.eq("is_archived", false).not("canonical_synopsis", "is", null),
+    fetchAllRows<Linha>(
+      () => supabase.from("works").select("id, is_adult").eq("is_archived", false).not("canonical_synopsis", "is", null),
+      { orderBy: ["id"], label: "getOnboardingDeck(works)" },
     ),
-    fetchAll(supabase, "work_genres", "work_id, genre_id"),
-    fetchAll(supabase, "genres", "id, name"),
-    fetchAll(supabase, "platform_ratings", "work_id, vote_count"),
-    fetchAll(supabase, "user_work_state", "work_id", (q) => q.eq("user_id", opts.userId)),
+    fetchAllRows<Linha>(() => supabase.from("work_genres").select("work_id, genre_id"), {
+      orderBy: ["work_id", "genre_id"],
+      label: "getOnboardingDeck(work_genres)",
+    }),
+    fetchAllRows<Linha>(() => supabase.from("genres").select("id, name"), {
+      orderBy: ["id"],
+      label: "getOnboardingDeck(genres)",
+    }),
+    fetchAllRows<Linha>(() => supabase.from("platform_ratings").select("work_id, vote_count"), {
+      orderBy: ["id"],
+      label: "getOnboardingDeck(platform_ratings)",
+    }),
+    fetchAllRows<Linha>(() => supabase.from("user_work_state").select("work_id").eq("user_id", opts.userId), {
+      orderBy: ["user_id", "work_id"],
+      label: "getOnboardingDeck(user_work_state)",
+    }),
   ])
 
   const genreName = new Map(genres.map((g) => [g.id as string, g.name as string]))

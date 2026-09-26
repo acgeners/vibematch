@@ -69,6 +69,7 @@ export async function getOpeningStructureContext(
       .from("work_reviews")
       .select("source, text")
       .eq("work_id", workId)
+      .order("id")
       .range(from, from + 999)
     if (error) return { error: `Falha carregando reviews: ${error.message}` }
     if (!data?.length) break

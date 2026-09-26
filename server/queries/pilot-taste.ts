@@ -142,6 +142,7 @@ export async function loadArtLabels(
       .select("work_id, like_art_score")
       .eq("user_id", userId)
       .not("like_art_score", "is", null)
+      .order("work_id")
       .range(from, from + 999)
     if (error) throw new Error(`loadArtLabels: ${error.message}`)
     if (!data?.length) break
@@ -231,6 +232,7 @@ export async function getPilotWorks(): Promise<PilotWork[]> {
       .not("user_score", "is", null)
       .eq("is_archived", false)
       .eq("pilot_taste_scores.user_id", ownerId)
+      .order("id")
       .range(from, from + 999)
     if (error) throw new Error(`getPilotWorks: ${error.message}`)
     // cast via unknown: select montado por template string vira ParserError no

@@ -141,6 +141,7 @@ async function redirectWorkTags(
       .from("work_tags")
       .select("work_id")
       .eq("tag_id", toId)
+      .order("work_id")
       .range(offset, offset + 999)
     if (error) throw error
     if (!data || data.length === 0) break
@@ -158,6 +159,7 @@ async function redirectWorkTags(
       .from("work_tags")
       .select("work_id")
       .eq("tag_id", fromId)
+      .order("work_id")
       .range(offset, offset + 999)
     if (error) throw error
     if (!data || data.length === 0) break

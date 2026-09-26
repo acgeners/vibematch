@@ -803,6 +803,7 @@ export async function consolidatePendingReviewSummaries(maxWorks = 10): Promise<
       const { data, error } = await supabase
         .from("work_reviews")
         .select("work_id")
+        .order("id")
         .range(from, from + PAGE - 1)
       if (error) return { error: error.message }
       for (const r of data ?? []) reviewedIds.add(r.work_id as string)

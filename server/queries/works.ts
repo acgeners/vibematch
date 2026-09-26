@@ -471,6 +471,9 @@ export async function getWorks(
     query = query.order(sort.field, { ascending: sort.direction === "asc" })
   }
 
+  // Desempate TOTAL por `id` (G-ORD): título já é único, mas as demais colunas de ordenação
+  // (ano, criação…) empatam, e página com empate é página instável entre requisições.
+  query = query.order("id", { ascending: true })
   query = query.range(from, from + pageSize - 1)
 
   const { data, error, count } = await query
