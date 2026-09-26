@@ -1,6 +1,7 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { ensurePermission } from "@/server/queries/current-user"
 import { getSettingsItemPending } from "@/server/queries/settings-pending"
 import {
   BATCH_READ_SECTIONS,
@@ -16,7 +17,27 @@ import {
  * (via `useRefresh`) re-renderiza os Server Components de /curation/settings (pílulas dos
  * cards + badge do tópico) e o badge da sidebar re-busca no refresh do chrome.
  * As leituras de ack não são cacheadas, então o refresh já reconcilia.
+ *
+ * 🔴 TODA export daqui MUTA e usa `createAdminClient()` (service role, que ignora RLS),
+ * sobre tabelas GLOBAIS (`settings_read_acks` é chaveada por `section`, sem `user_id`).
+ * Até 2026-09-25 nenhuma tinha gate próprio: quem as protegia era o middleware barrar
+ * `/curation`. Gate de ROTA não protege AÇÃO — módulo `"use server"` é superfície HTTP
+ * pública, e um POST direto silenciava (ou ressuscitava) os badges de pendência do
+ * curador. Daí `exigirConfigGlobal()` no topo de cada uma.
+ *
+ * ⚠️ O verbo é `global_config` e não `ensureAdmin()`: é o que estas ações de fato fazem
+ * (configuração global), e `ensurePermission` é o preferido em call site novo — ele diz
+ * o que está protegido, não só quem passa. Hoje os dois coincidem em "curador".
  */
+
+/**
+ * Gate das ações deste módulo. LANÇA, para casar com o contrato do arquivo (todas as
+ * exports aqui lançam em falha; devolver `{ok:false}` faria só esta divergir).
+ */
+async function exigirConfigGlobal(): Promise<void> {
+  const gate = await ensurePermission("global_config")
+  if (!gate.ok) throw new Error(gate.error)
+}
 
 function isBatchSection(section: string): section is BatchReadSection {
   return (BATCH_READ_SECTIONS as readonly string[]).includes(section)
@@ -32,6 +53,7 @@ function isBatchSection(section: string): section is BatchReadSection {
 export async function markSettingsSectionRead(
   section: string,
 ): Promise<{ ok: boolean; ackedCount: number }> {
+  await exigirConfigGlobal()
   if (!isBatchSection(section)) {
     throw new Error(`Seção inválida para marcar como lida: ${section}`)
   }
@@ -47,6 +69,7 @@ export async function markSettingsSectionRead(
 
 /** Desmarca UM card agregado (remove o snapshot) — volta a contar tudo. */
 export async function unmarkSettingsSectionRead(section: string): Promise<{ ok: boolean }> {
+  await exigirConfigGlobal()
   if (!isBatchSection(section)) {
     throw new Error(`Seção inválida para desmarcar: ${section}`)
   }
@@ -58,6 +81,7 @@ export async function unmarkSettingsSectionRead(section: string): Promise<{ ok: 
 
 /** Marca UMA sugestão da auditoria como lida (selo "Lida" do card). Idempotente. */
 export async function markSuggestionRead(suggestionId: string): Promise<{ ok: boolean }> {
+  await exigirConfigGlobal()
   if (!suggestionId) throw new Error("Sugestão inválida ao marcar como lida.")
   const supabase = createAdminClient()
   const { error } = await supabase
@@ -69,6 +93,7 @@ export async function markSuggestionRead(suggestionId: string): Promise<{ ok: bo
 
 /** Desmarca UMA sugestão da auditoria — volta a contar. */
 export async function unmarkSuggestionRead(suggestionId: string): Promise<{ ok: boolean }> {
+  await exigirConfigGlobal()
   if (!suggestionId) throw new Error("Sugestão inválida ao desmarcar.")
   const supabase = createAdminClient()
   const { error } = await supabase
@@ -87,6 +112,7 @@ export async function unmarkSuggestionRead(suggestionId: string): Promise<{ ok: 
  * linhas de histórico; nada mais escreve nela.
  */
 export async function markAllSettingsRead(): Promise<{ ok: boolean; marked: number }> {
+  await exigirConfigGlobal()
   const pending = await getSettingsItemPending()
   const supabase = createAdminClient()
 
@@ -106,6 +132,7 @@ export async function markAllSettingsRead(): Promise<{ ok: boolean; marked: numb
 
 /** Desmarca TUDO (limpa os dois modelos de ack). Volta a contar todas as pendências. */
 export async function unmarkAllSettingsRead(): Promise<{ ok: boolean }> {
+  await exigirConfigGlobal()
   const supabase = createAdminClient()
   // DELETE sem WHERE não é aceito pelo PostgREST; filtro sempre-verdadeiro.
   const [batch] = await Promise.all([

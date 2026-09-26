@@ -207,14 +207,36 @@ export async function setAnthropicBalance(amountUsd: number): Promise<{ error?: 
   return {}
 }
 
+/** Status vazio: o que esta action devolve quando não pode responder. */
+const BALANCE_VAZIO: BalanceStatus = {
+  balanceUsd: null,
+  setAt: null,
+  spentSinceUsd: 0,
+  remainingUsd: null,
+  callsSince: 0,
+}
+
 /**
  * Status do saldo pro chip da sidebar. Wrapper client-callable da query
  * server-only getAnthropicBalanceStatus. Falha silenciosa: nunca derruba o layout.
+ *
+ * 🔴 EXIGE CURADOR, pelo mesmo argumento que já gateia `setAnthropicBalance` acima:
+ * o saldo é da conta Anthropic ÚNICA que banca o app, não um dado pessoal. A ESCRITA
+ * era gateada e a LEITURA não — e o único freio era `{isAdmin && <CurationMenu/>}` em
+ * `components/layout/top-nav.tsx`, que é estado de CLIENTE. Como todo módulo
+ * `"use server"` é superfície HTTP pública, um POST direto nesta action devolvia saldo,
+ * gasto acumulado e nº de chamadas a qualquer visitante.
+ *
+ * ⚠️ Nega devolvendo o status VAZIO, não lançando: o contrato desta action é falha
+ * silenciosa (ela alimenta o chrome e não pode derrubar o layout). O visitante vê o
+ * mesmo que veria se o saldo nunca tivesse sido informado.
  */
 export async function getBalanceSummary(): Promise<BalanceStatus> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return BALANCE_VAZIO
   try {
     return await getAnthropicBalanceStatus()
   } catch {
-    return { balanceUsd: null, setAt: null, spentSinceUsd: 0, remainingUsd: null, callsSince: 0 }
+    return BALANCE_VAZIO
   }
 }

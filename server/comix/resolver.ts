@@ -333,13 +333,23 @@ function toPositiveInt(value: string | undefined | null): number | undefined {
   return Number.isInteger(n) && n > 0 ? n : undefined
 }
 
-/** Grava rating/sinopse/capa do Comix e recalcula só se o rating mudou. Reusado
- *  pelo caminho sidecar e pelo Puppeteer (idempotente, não-destrutivo). */
+/** Grava rating/sinopse/capa do Comix e MARCA a pendência se o rating mudou. Reusado
+ *  pelo caminho sidecar e pelo Puppeteer (idempotente, não-destrutivo).
+ *
+ *  🔴 Marca; não recalcula. Isto chamava `recalculateScoresNow()` (force=true), que lê o
+ *  catálogo inteiro e retreina o Ridge — e é chamado POR OBRA, pelo `after()` de
+ *  `createWork`. Mesma correção do passo `recalculate_scores` da cascata: quem roda o
+ *  recálculo depois são os donos que já existem (`finalizePendingBatch`,
+ *  `maybeTriggerStaleRecalc`, botão "Recalcular notas").
+ *
+ *  ⚠️ `platform_ratings` e não `["*"]`: é o que o enrich de fato move no que o recalc lê
+ *  (sinopse e capa não são entradas do cálculo). Declarar deixa o gate de materialidade
+ *  decidir em vez de marcar por "não sei". */
 async function enrichAndRecalcComix(workId: string): Promise<void> {
   const wrote = await enrichComixDataForWork(workId)
   if (wrote) {
-    const { recalculateScoresNow } = await import("@/server/recalc/queue")
-    await recalculateScoresNow()
+    const { markRecalcPending } = await import("@/server/recalc/queue")
+    await markRecalcPending("comixEnrich", { changed: ["platform_ratings"] })
   }
 }
 
@@ -487,12 +497,19 @@ export async function resolveComixHidsPending(workIds?: string[]): Promise<void>
     if (code !== 0) return
     // Enriquece rating/sinopse/capa do Comix das obras do lote (as recém-criadas são as
     // que o mop-up acabou de resolver) e recalcula só as que ganharam rating.
+    // 🔴 UMA marcação depois do laço, nunca uma por obra. Aqui estava o pior caso do
+    // projeto: `recalculateScoresNow()` DENTRO do `for`, ou seja um lote de N obras
+    // disparava até N recálculos do catálogo inteiro — e este caminho é justamente o
+    // mop-up pós-LOTE, chamado pelo `after()` de `createWorksBatch`. A pendência é um
+    // flag em `formula_config`: N marcações já virariam UMA pendência, mas marcar N
+    // vezes seria N idas ao banco para o mesmo efeito.
+    let algumGravou = false
     for (const id of workIds ?? []) {
-      const wrote = await enrichComixDataForWork(id)
-      if (wrote) {
-        const { recalculateScoresNow } = await import("@/server/recalc/queue")
-        await recalculateScoresNow()
-      }
+      if (await enrichComixDataForWork(id)) algumGravou = true
+    }
+    if (algumGravou) {
+      const { markRecalcPending } = await import("@/server/recalc/queue")
+      await markRecalcPending("comixHidsPending", { changed: ["platform_ratings"] })
     }
   } catch (err) {
     console.error("[resolveComixHidsPending] falha:", err instanceof Error ? err.message : err)
@@ -546,8 +563,11 @@ export async function resolveComixDataResilient(workId: string): Promise<void> {
     }
     const wrote = await enrichComixDataForWork(workId)
     if (wrote) {
-      const { recalculateScoresNow } = await import("@/server/recalc/queue")
-      await recalculateScoresNow()
+      // 🔴 Este roda na FASE 0 GRATUITA da cascata (`generate-all.ts` → antes do
+      // checkpoint de custo). Forçar o recálculo aqui cobrava do catálogo inteiro
+      // ANTES de o curador autorizar qualquer gasto.
+      const { markRecalcPending } = await import("@/server/recalc/queue")
+      await markRecalcPending("comixResilient", { changed: ["platform_ratings"] })
     }
   } catch (err) {
     console.error("[resolveComixDataResilient] falha:", err instanceof Error ? err.message : err)
