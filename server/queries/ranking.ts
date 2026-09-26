@@ -606,6 +606,9 @@ export async function getRanking(
     const wanted = new Set(filters.onlyWorkIds)
     restrictIds = restrictIds ? restrictIds.filter((id) => wanted.has(id)) : filters.onlyWorkIds
   }
+  // Exclusão EM MEMÓRIA, sobre ids — nunca como `not id in (…)` na URL (ver `semExcluidas`).
+  // Com `allowedIds` ela já foi aplicada acima; aqui cobre o grupo de favoritos sozinho.
+  if (restrictIds && excludeIds.size > 0) restrictIds = restrictIds.filter((id) => !excludeIds.has(id))
   if (restrictIds && restrictIds.length === 0) return []
 
   // Todos os filtros ESCALARES (mais o exclude por not-in) numa fábrica, pra reaplicá-los
@@ -619,6 +622,12 @@ export async function getRanking(
   // de 1000 do PostgREST: o catálogo tem 1009 obras ativas em 2026-08-18. Paginá-la mexe no
   // payload mais pesado do app (a mesma projeção já mediu 8,6 MB numa tacada em outro ponto)
   // e precisa de medição de latência PRÓPRIA — `fetchAllRows` seria serial.
+  // Tira do conjunto COMPLETO as obras excluídas por tag/gênero. Equivale ao `not id in (…)`
+  // (id nunca é nulo), sem pôr a lista na URL. O custo é o da leitura sem filtro: as excluídas
+  // vêm e são descartadas aqui.
+  const semExcluidas = <T extends { id: string }>(rows: T[]): T[] =>
+    excludeIds.size > 0 ? rows.filter((r) => !excludeIds.has(r.id)) : rows
+
   const buildWorksQuery = () => {
     let q = supabase
       .from("works")
@@ -643,12 +652,11 @@ export async function getRanking(
     if (filters.adultFilter === "only") q = q.eq("is_adult", true)
     else if (filters.adultFilter === "hide") q = q.eq("is_adult", false)
     else if (hideAdult) q = q.eq("is_adult", false)
-    // Exclude por not-in só quando NÃO há restrição positiva por allowedIds — senão o exclude
-    // já foi removido de allowedIds acima. (Baseado em `allowedIds`, não `restrictIds`: com
-    // onlyWorkIds sozinho o exclude ainda precisa valer.)
-    if (!allowedIds && excludeIds.size > 0) {
-      q = q.not("id", "in", `(${[...excludeIds].join(",")})`)
-    }
+    // 🔴 A exclusão por tag/gênero NÃO entra aqui como `not id in (…)`: a lista ia inteira na
+    // URL de cada página e, acima de ~650 ids (~24 KB), o gateway do Supabase responde 400 — o
+    // `/catalog?tags_exclude=webtoon-webcomic` (904 obras) caía na tela de erro. Ela é aplicada
+    // em memória: em `restrictIds` antes dos lotes, ou sobre o conjunto completo logo depois da
+    // leitura (`semExcluidas`), sempre ANTES de qualquer ordenação ou paginação visível.
     if (publicationStatusIdFilter && publicationStatusIdFilter.length > 0) {
       q = q.in("publication_status_id", publicationStatusIdFilter)
     } else if (publicationStatusIdFilter && publicationStatusIdFilter.length === 0) {
@@ -694,7 +702,7 @@ export async function getRanking(
         type Linha = NonNullable<Awaited<ReturnType<typeof buildWorksQuery>>["data"]>[number]
         // `title` já é total em `works`: NOT NULL + índice único `works_title_lower_idx`.
         const rows = await fetchAllRows<Linha>(buildWorksQuery, { orderBy: ["title"], label: "getRanking.works" })
-        return { data: rows, error: null }
+        return { data: semExcluidas(rows), error: null }
       })()
 
   if (error) throw new Error(error.message)
