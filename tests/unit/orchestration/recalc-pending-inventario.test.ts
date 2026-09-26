@@ -51,6 +51,17 @@ const INVENTARIO: Record<string, boolean> = {
   "external-list-import": false, // rótulos + obras novas
   createWork: false, // é assim que a obra nova ganha a 1ª Nota Prevista
   createWorksBatch: false,
+
+  // ── Entrou em 2026-08-22 com o fix do E2 ───────────────────────────────────
+  // A cascata "Gerar tudo" FORÇAVA `recalculateScoresNow()` — 1 recálculo do catálogo
+  // inteiro POR OBRA, porque ela roda uma vez por obra e não há caller de lote. Agora ela
+  // marca e defere, como `createWork` já fazia 11 linhas acima na mesma função.
+  //
+  // `true` (declara materialidade): a cascata SABE o que mexeu — as 9 notas de atributo,
+  // via `submitAiReview` no passo de avaliação. Declarar deixa o gate decidir em vez de
+  // marcar por "não sei"; e como o próprio `submitAiReview` já marca, uma cascata que
+  // falhe ANTES deste passo não perde o recálculo.
+  generateAllWorkData: true,
 }
 
 /**
