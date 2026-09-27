@@ -32,8 +32,8 @@ export function EditionNoteBadge({ className }: { className?: string }) {
           </Badge>
         </TooltipTrigger>
         <TooltipContent className="max-w-64">
-          Existe uma versão R19/não-censurada desta obra em outra fonte. Isto NÃO significa que os dados
-          cadastrados aqui são explícitos — se forem, a obra também leva o selo 🔞.
+          Esta obra tem uma edição R15 e uma R19. Por isso ela aparece no filtro &quot;Só 18+&quot; e não é
+          ocultada para quem esconde conteúdo adulto.
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

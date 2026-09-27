@@ -5475,6 +5475,29 @@ fila**. Hoje as duas telas chamam `formatTimeAgo`.
    `create_by_name`, que não tem obra, fica invisível depois do reload.
 3. **"Atendi" e "Descartar" são indistinguíveis pro leitor** — os dois só fazem a faixa sumir.
 
+## Obra com edição R15 E R19 aparece nos DOIS filtros 18+
+
+Decisão da curadora (2026-09-26, migration **199**): quem oculta conteúdo adulto **não perde**
+a obra (existe uma edição que dá pra ler), e quem filtra "Só 18+" **a encontra** (existe a R19).
+
+| peça | papel |
+|---|---|
+| tag **`R19 disponível`** (`tags.marks_r19_edition`) | a única tag do fato; "Uncensored Version Available" e "Official English R19 Version Available" são **alias** dela |
+| `works.r19_edition` | derivada por gatilho de `work_tags` — **não grave à mão** |
+| gatilho em `work_synopses` | sinopse gravada com o marcador `[R19 disponível]` (ou `R18`) aplica a tag sozinha |
+| `is_adult` = `COALESCE(adult_override, adult_auto AND NOT r19_edition)` | governa **ocultar**; os ~46 leitores dele não mudaram |
+| ramo `"only"` de `getRanking` = `is_adult OR r19_edition` | governa **só 18+** — é o único lugar que precisou mudar |
+
+🔴 **São duas metades, e cada uma sozinha quebra a regra calada** — sem a 1ª a obra some pra
+quem oculta, sem a 2ª ela some do "Só 18+". Guardado por
+`tests/unit/orchestration/edicao-r19-nos-dois-filtros.test.ts` (2 sondas conferidas).
+
+⚠️ **A decisão MANUAL vence**: `adult_override = true` segue ocultando mesmo com edição R15.
+⚠️ **A nota `adult_content` não muda** — a tag não tem `adult_score_tier`, e a regra da 164
+(marcador de edição não é piso) continua valendo.
+⚠️ **Não confundir com `R19 Version`**, que afirma que a obra CATALOGADA é a edição R19 (piso
+7 + 18+), nem com "R15 but Based on a R19 Novel" (o R19 é do NOVEL — teto 6 na nota).
+
 ## A RAZÃO do limite 18+ tem dono — e quem a estava escrevendo era o modelo
 
 🔴 Duas coisas escreviam a nota de `adult_content` e só uma escrevia a explicação. O fluxo de

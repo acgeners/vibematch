@@ -652,7 +652,9 @@ export async function getRanking(
     //   ausente → cai na Fase 2 do 18+: quem optou por ocultar (hideAdult) não vê
     //            adultas nas listas. Cobre ranking, catálogo, favoritos e o pool de
     //            recomendações — todos passam por aqui.
-    if (filters.adultFilter === "only") q = q.eq("is_adult", true)
+    // "only" inclui obra com as DUAS edições (r19_edition): ela aparece aqui E não é
+    // ocultada por "hide"/hideAdult, porque is_adult já a exclui (mig 199).
+    if (filters.adultFilter === "only") q = q.or("is_adult.eq.true,r19_edition.eq.true")
     else if (filters.adultFilter === "hide") q = q.eq("is_adult", false)
     else if (hideAdult) q = q.eq("is_adult", false)
     // 🔴 A exclusão por tag/gênero NÃO entra aqui como `not id in (…)`: a lista ia inteira na
