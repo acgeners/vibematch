@@ -10,8 +10,6 @@ import { ensureReadingStateWriter, writeReadingState } from "@/server/queries/us
 import { canRateReadingState } from "@/lib/reading-gate"
 import { markRecalcPending } from "@/server/recalc/queue"
 import { recalculateForUser } from "@/server/recalc/user-recalc"
-import { capturePredictionForFirstRating } from "./prediction-ledger"
-import { resolvePredictionsForWork } from "@/lib/server/predictions/resolve-prediction"
 
 const ALLOWED = new Set<number>([2, 4, 6.5, 8, 10])
 
@@ -122,12 +120,8 @@ async function applyTasteDerivedUserScore(
     return
   }
 
-  // Validação prospectiva: primeira nota (null → valor) congela a previsão de-registro antes do
-  // recalc deferido incluir o rótulo. Edição resolve/relabel. Idênticos aos ramos de updateWorkStatus.
-  if (prevUserScore == null) {
-    await capturePredictionForFirstRating(workId, label)
-  }
-  await resolvePredictionsForWork(workId, label)
+  // Medição prospectiva (1ª nota → ledger; edição → relabel): decidida dentro de
+  // `writeReadingState`, que lê a previsão ANTES de gravar — ver label-transition.ts.
 
   if (isOwner) {
     await markRecalcPending("savePilotTaste")

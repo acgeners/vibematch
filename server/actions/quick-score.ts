@@ -10,11 +10,6 @@ import { resolveQuickScoreEffect } from "@/lib/onboarding/quick-score-precedence
 import { canRateReadingState } from "@/lib/reading-gate"
 import { markRecalcPending } from "@/server/recalc/queue"
 import { recalculateForUser } from "@/server/recalc/user-recalc"
-import { capturePredictionForFirstRating } from "./prediction-ledger"
-import {
-  resolvePredictionsForWork,
-  discardPredictionsForWork,
-} from "@/lib/server/predictions/resolve-prediction"
 
 /** As 8 craft pós-leitura — presença de qualquer uma = ficha de craft começada. */
 const CRAFT_SCORE_COLUMNS = [
@@ -97,16 +92,8 @@ export async function saveQuickScore(
   const write = await writeReadingState(gate.userId, [workId], effect.patch)
   if (write.error) return { ok: false, error: write.error }
 
-  // Mesmo pós-processamento dos outros caminhos de rótulo (updateWorkStatus/savePilotTaste):
-  // primeira nota congela a previsão de-registro; edição resolve; remoção descarta a medição.
-  if (effect.labelChange === "first") {
-    await capturePredictionForFirstRating(workId, value as number)
-    await resolvePredictionsForWork(workId, value as number)
-  } else if (effect.labelChange === "updated") {
-    await resolvePredictionsForWork(workId, value as number)
-  } else if (effect.labelChange === "removed") {
-    await discardPredictionsForWork(workId)
-  }
+  // Medição prospectiva (1ª nota / edição / nota apagada): decidida dentro de `writeReadingState`
+  // — ver lib/server/predictions/label-transition.ts.
 
   if (effect.labelChange !== "none") {
     if (gate.isOwner) {

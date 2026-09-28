@@ -30,11 +30,6 @@ import { markRecalcPending, recalculateScoresNow } from "@/server/recalc/queue"
 import { changedInputs } from "@/lib/calculations/recalc-inputs"
 import type { RecalcInput } from "@/lib/calculations/recalc-inputs"
 import { recalculateForUser } from "@/server/recalc/user-recalc"
-import { capturePredictionForFirstRating } from "./prediction-ledger"
-import {
-  resolvePredictionsForWork,
-  markPredictionLabelChanged,
-} from "@/lib/server/predictions/resolve-prediction"
 import { markWorkAlignmentStale } from "@/server/queries/alignment"
 import { duplicateKeys, foldTitle, isWeakDuplicateAlias } from "@/lib/title-match"
 import { normalizeAlternativeTitles } from "@/lib/titles/alternative-titles"
@@ -1765,10 +1760,10 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
 
   const data = parsed.data
   const supabase = createAdminClient()
-  // `works_owner`: `user_score` aqui é a nota ANTERIOR do dono — ela alimenta o ledger de
-  // previsões (`capturePredictionForFirstRating` / `resolvePredictionsForWork`). Lida de
-  // `works` ela morre no `DROP`; lida da view, ela vem do espelho dele e sobrevive. O `title`
-  // é catálogo e passa igual.
+  // `works_owner`: `user_score` aqui é a nota ANTERIOR do dono — hoje só alimenta o diff de
+  // materialidade abaixo. O ledger de previsões NÃO depende mais dela: a transição da nota é
+  // decidida no escritor (`writeReadingState`/`mirrorOwnerState` → label-transition.ts), que lê
+  // a nota anterior de QUEM ESCREVE. O `title` é catálogo e passa igual.
   // As colunas além de `title`/`user_score` existem só pro diff de materialidade
   // do `markRecalcPending` lá embaixo — são a MESMA linha, custo zero de query.
   const { data: existingWork } = await supabase
@@ -1779,7 +1774,6 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
     .eq("id", id)
     .maybeSingle()
   const previousSlug = existingWork?.title ? titleToSlug(existingWork.title) : null
-  const prevUserScore = (existingWork?.user_score as number | null | undefined) ?? null
   const nextSlug = titleToSlug(data.title)
   const titleSlugChanged = Boolean(previousSlug && nextSlug && previousSlug !== nextSlug)
 
@@ -2005,20 +1999,10 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
   // re-rank é manual). No-op se a obra nunca foi rankeada.
   await markWorkAlignmentStale(id)
 
-  // Validação prospectiva: se a obra ganhou a PRIMEIRA nota agora (null → valor),
-  // congela a previsão de-registro (ainda pré-rótulo, pois o recalc é deferido).
-  if (prevUserScore == null && data.user_score != null) {
-    await capturePredictionForFirstRating(id, data.user_score)
-  }
-
-  // P1: resolve snapshots prospectivos (prediction_snapshots) com a nota real.
-  // 1ª nota → resolve (imutável); edição → relabel (preserva a 1ª medição);
-  // remoção → só carimba label_changed_at. Idempotente. Best-effort.
-  if (data.user_score != null) {
-    await resolvePredictionsForWork(id, data.user_score)
-  } else if (prevUserScore != null) {
-    await markPredictionLabelChanged(id)
-  }
+  // Medição prospectiva (1ª nota → ledger + resolução; edição → relabel; nota APAGADA →
+  // descarte) acontece dentro do escritor acima — ver lib/server/predictions/label-transition.ts.
+  // Aqui ela capturava DEPOIS de gravar e, na remoção, só carimbava `label_changed_at`, que
+  // nenhuma métrica filtra: a medição seguia valendo contra um gabarito retirado.
 
   // Editar a obra PODE mudar as features do Ridge global — e na maior parte das
   // vezes não muda: título, sinopse, capa, títulos alternativos, gêneros e
@@ -2514,9 +2498,6 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
       : null
   }
 
-  // Só do DONO: é a nota DELE que o ledger de previsões resolve e que o Ridge treina.
-  const prevUserScore = (sharedRow?.user_score as number | null | undefined) ?? null
-
   // Coerência do progresso, aplicada ao que vai ser GRAVADO (lib/reading/status-coherence.ts).
   // O total é do catálogo, então serve pra todo mundo — `works_owner` só personaliza as colunas
   // pessoais. Ordem importa: as duas correções entram ANTES de `chaptersGrew`/`nextLastReadAt`,
@@ -2624,26 +2605,9 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
   const mirror = await writeReadingState(gate.userId, [id], personalState)
   if (mirror.error) return { error: { _root: [mirror.error] } }
 
-  // O ledger de previsões só tem o que fazer quando a NOTA de fato mudou no banco. Sem leitura
-  // suficiente o bloco de avaliação nem entrou no patch (ver `canRate` acima): a nota gravada
-  // continua a de antes, e resolver/relabelar aqui mediria uma mudança que não aconteceu — o
-  // ramo `markPredictionLabelChanged` chegaria a carimbar "rótulo removido" numa nota intacta.
-  if (canRate) {
-    // Validação prospectiva: primeira nota (null → valor) → congela a previsão
-    // de-registro antes do recalc deferido incluir o rótulo.
-    if (prevUserScore == null && data.user_score != null) {
-      await capturePredictionForFirstRating(id, data.user_score)
-    }
-
-    // P1: resolve snapshots prospectivos (prediction_snapshots) com a nota real.
-    // 1ª nota → resolve (imutável); edição → relabel (preserva a 1ª medição);
-    // remoção → só carimba label_changed_at. Idempotente. Best-effort.
-    if (data.user_score != null) {
-      await resolvePredictionsForWork(id, data.user_score)
-    } else if (prevUserScore != null) {
-      await markPredictionLabelChanged(id)
-    }
-  }
+  // Medição prospectiva: decidida no escritor acima (label-transition.ts). Sem leitura suficiente
+  // o bloco de avaliação nem entra no patch (ver `canRate`), então o escritor não vê `user_score`
+  // e não mede uma mudança que não aconteceu — a mesma garantia que o `if (canRate)` daqui dava.
 
   // Diff, não "houve save". O form do Meu Status grava status, capítulos, a data,
   // as observações e as 8 `post_*` — nenhuma delas é feature nem rótulo. Só três
