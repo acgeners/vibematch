@@ -39,6 +39,12 @@ import { CRITERION_SLUGS, type CriterionSlug } from "@/types/domain"
  * ⚠️ "Não distinguível" não é "zero": o poder deste teste vê ~0,014 para cima. É por isso que
  * a deriva é INSTRUMENTADA (`fantasy_real_count` em `calibration_history`) em vez de suposta.
  *
+ * 🔴 A deriva chegou, e o VALOR do slot é de transição desde 2026-09-28. O SLUG continua sendo
+ * `fantasy`, mas com 48 obras reais o slot virou uma feature de duas escalas (real ≈ 3,6 abaixo
+ * do legado), e a mistura custa cvMAE +0,023 (IC95% [0,003; 0,044]). Enquanto a transição durar,
+ * o cálculo lê `fantasy_nobility` quando ele existe e o `fantasy` real só como fallback — regra e
+ * medição em `fantasy-scoring-transition.ts`, aplicada num ponto só (`buildWork`).
+ *
  * ⚠️ `setting_era` e `angst` são avaliados e exibidos, mas ficam FORA daqui. `fantasy_nobility`
  * e `nobility` também — os dois deixaram de ser critérios de IA na migration 198 e o histórico
  * deles permanece no banco, intocado.

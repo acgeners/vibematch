@@ -66,6 +66,8 @@ import { computeArtForCatalog } from "@/lib/art/model"
 import { parseArtSignal } from "@/lib/art/signal"
 import type { TasteProfilePayload } from "@/lib/ai-recommendation/types"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
+import { applyTransitionalFantasy, resolveTransitionalFantasy } from "@/lib/calculations/fantasy-scoring-transition"
+import type { FantasyScoringSource } from "@/lib/calculations/fantasy-scoring-transition"
 import {
   CRITERION_SLUGS,
   type CategoryScoreMap,
@@ -149,6 +151,11 @@ interface WorkComputed {
    * é zero (obras sem nenhum atributo de origem IA, ou sem bias coletado).
    */
   categoryScoresCalibrated: CategoryScoreMap
+  /**
+   * De onde veio o valor do slot `fantasy` nos dois mapas acima (transição, ver
+   * lib/calculations/fantasy-scoring-transition.ts). Só diagnóstico — não é persistido.
+   */
+  fantasyScoringSource: FantasyScoringSource
   platformRatings: PlatformRating[]
   totalVotes: number
   tags: Array<{ name: string; group: string | null }>
@@ -222,6 +229,11 @@ export function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed
     const v = calibrated[slug as CriterionSlug]
     if (v != null) categoryScoresCalibrated[slug] = v
   }
+  // Transição de `fantasy`: o slot do cálculo lê o legado `fantasy_nobility` quando existe (régua
+  // única no Ridge/IA(n)/criterionFit/chance), e o `fantasy` real fica só como fallback. DEPOIS da
+  // calibração, de propósito: o legado entra cru. Não toca nas linhas de `category_scores`.
+  const fantasyScoring = resolveTransitionalFantasy(raw.category_scores ?? [])
+  applyTransitionalFantasy({ raw: categoryScores, calibrated: categoryScoresCalibrated }, fantasyScoring)
   const platformRatings: PlatformRating[] = (raw.platform_ratings ?? []).map(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (p: any) => ({
@@ -277,6 +289,7 @@ export function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed
     origin: detectOrigin(raw.original_title),
     categoryScores,
     categoryScoresCalibrated,
+    fantasyScoringSource: fantasyScoring.source,
     platformRatings,
     totalVotes: sumVotes(platformRatings),
     tags,
