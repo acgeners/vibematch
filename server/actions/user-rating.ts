@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache"
 import { after } from "next/server"
 import { createUserClient } from "@/lib/supabase/user"
 import { ensureReadingStateWriter, writeReadingState } from "@/server/queries/user-work-state"
-import { discardPredictionsForWork } from "@/lib/server/predictions/resolve-prediction"
 import { markRecalcPending } from "@/server/recalc/queue"
 import { recalculateForUser } from "@/server/recalc/user-recalc"
 
@@ -78,11 +77,10 @@ export async function clearUserRating(
     if (error) return { ok: false, error: `Falha limpando as notas de gosto: ${error.message}` }
   }
 
-  // DESCARTA a medição prospectiva desta obra — não é o mesmo que `markPredictionLabelChanged`
-  // (que `updateWorkStatus` usa e que só carimba auditoria, sem tirar nada das métricas).
-  // Aqui o rótulo foi APAGADO: não existe gabarito, então acerto/erro medidos contra ele são
-  // lixo. As linhas continuam no banco pra auditoria; as métricas as filtram (mig 168).
-  await discardPredictionsForWork(workId)
+  // A medição prospectiva desta obra é DESCARTADA dentro de `writeReadingState` (a nota foi de
+  // valor → NULL): sem gabarito, acerto/erro medidos contra ele são lixo. As linhas continuam no
+  // banco pra auditoria; as métricas as filtram (mig 168). Ver label-transition.ts — é a MESMA
+  // regra para todo caminho que apaga a nota, não só este.
 
   // O modelo perdeu um rótulo: a Nota Prevista precisa ser refeita sem ele.
   if (gate.isOwner) {

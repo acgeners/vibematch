@@ -30,12 +30,14 @@ interface SnapshotResolutionRow {
 export async function resolvePredictionsForWork(
   workId: string,
   userScore: number,
+  /** Dono do rótulo. Omitido ⇒ usuário corrente (legado; sem sessão cai no singleton). */
+  userIdOverride?: string,
 ): Promise<number> {
   if (!workId || userScore == null || Number.isNaN(Number(userScore))) return 0
   const score = Number(userScore)
   try {
     const supabase = createAdminClient()
-    const userId = await getCurrentUserId(supabase)
+    const userId = userIdOverride ?? (await getCurrentUserId(supabase))
 
     const { data, error } = await supabase
       .from("prediction_snapshots")
@@ -156,12 +158,12 @@ export async function markPredictionLabelChanged(workId: string): Promise<number
  * filtram `discarded_at is null` (migration 168). Idempotente: só carimba o que ainda não estava
  * descartado. Best-effort, como o resto do ledger — é telemetria, não pode derrubar o delete.
  */
-export async function discardPredictionsForWork(workId: string): Promise<number> {
+export async function discardPredictionsForWork(workId: string, userIdOverride?: string): Promise<number> {
   if (!workId) return 0
   const now = new Date().toISOString()
   try {
     const supabase = createAdminClient()
-    const userId = await getCurrentUserId(supabase)
+    const userId = userIdOverride ?? (await getCurrentUserId(supabase))
 
     const { error, count } = await supabase
       .from("prediction_snapshots")

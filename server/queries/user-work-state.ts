@@ -3,6 +3,8 @@ import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createUserClient } from "@/lib/supabase/user"
 import { getSessionUserId, getOwnerUserId, ensureSignedIn, ensurePermission } from "./current-user"
+import { writeWithLabelTransitions } from "@/lib/server/predictions/label-transition"
+import { createLabelTransitionDeps } from "@/lib/server/predictions/label-transition-io"
 import type { SynopsisQuality, SynopsisQualitySource } from "@/types/domain"
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -421,12 +423,29 @@ export async function writeReadingState(
     updated_at: now,
   }))
 
-  const { error } = await supabase
-    .from("user_work_state")
-    .upsert(rows, { onConflict: "user_id,work_id" })
+  // A nota passa por AQUI em todo caminho de sessão (form, status, nota rápida, ficha de gosto,
+  // criar obra, import de lista). É o ponto único que captura a previsão PRÉ-nota — ver
+  // lib/server/predictions/label-transition.ts. Patch sem `user_score` passa direto.
+  const { result } = await writeWithLabelTransitions({
+    userId,
+    workIds: ids,
+    nextScore: nextLabel(patch),
+    source: "writeReadingState",
+    deps: createLabelTransitionDeps({ userId, stateClient: supabase, ledgerClient: supabase }),
+    write: async () => {
+      const { error } = await supabase
+        .from("user_work_state")
+        .upsert(rows, { onConflict: "user_id,work_id" })
+      if (error) return { error: `Falha salvando o seu estado: ${error.message}` }
+      return { error: null }
+    },
+  })
+  return result
+}
 
-  if (error) return { error: `Falha salvando o seu estado: ${error.message}` }
-  return { error: null }
+/** `undefined` = o patch não toca a nota; `null` = a nota está sendo APAGADA. */
+function nextLabel(patch: PersonalStatePatch): number | null | undefined {
+  return Object.prototype.hasOwnProperty.call(patch, "user_score") ? (patch.user_score ?? null) : undefined
 }
 
 /**
@@ -456,21 +475,32 @@ export async function mirrorOwnerState(
   const supabase = createAdminClient()
   const now = new Date().toISOString()
 
-  // Em blocos: o upsert de 800+ linhas de uma vez estoura o payload do PostgREST.
-  for (let i = 0; i < ids.length; i += 500) {
-    const rows = ids.slice(i, i + 500).map((workId) => ({
-      user_id: ownerId,
-      work_id: workId,
-      ...patch,
-      updated_at: now,
-    }))
-    const { error } = await supabase
-      .from("user_work_state")
-      .upsert(rows, { onConflict: "user_id,work_id" })
-    if (error) return { error: `Falha espelhando o estado do dono: ${error.message}` }
-  }
-
-  return { error: null }
+  // Mesmo ponto único de `writeReadingState`, pelo caminho SEM sessão (service role, `ownerId`
+  // explícito): a previsão é lida antes de a nota ser gravada, o ledger depois.
+  const { result } = await writeWithLabelTransitions({
+    userId: ownerId,
+    workIds: ids,
+    nextScore: nextLabel(patch),
+    source: "mirrorOwnerState",
+    deps: createLabelTransitionDeps({ userId: ownerId, stateClient: supabase, ledgerClient: supabase }),
+    write: async () => {
+      // Em blocos: o upsert de 800+ linhas de uma vez estoura o payload do PostgREST.
+      for (let i = 0; i < ids.length; i += 500) {
+        const rows = ids.slice(i, i + 500).map((workId) => ({
+          user_id: ownerId,
+          work_id: workId,
+          ...patch,
+          updated_at: now,
+        }))
+        const { error } = await supabase
+          .from("user_work_state")
+          .upsert(rows, { onConflict: "user_id,work_id" })
+        if (error) return { error: `Falha espelhando o estado do dono: ${error.message}` }
+      }
+      return { error: null }
+    },
+  })
+  return result
 }
 
 /**
