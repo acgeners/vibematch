@@ -6,6 +6,9 @@ import { modelRejectsSampling } from "./models"
 import { computeCostUsd } from "./pricing"
 import type { UsageTokens } from "./pricing"
 import { getSessionUserId } from "@/server/queries/current-user"
+import { isLocalSupabaseUrl } from "@/lib/db-target"
+import { OVERRIDE_ENV, decidePaidCloudCall, normalizeOverride, probeGit } from "./code-provenance"
+import type { CodeProvenance } from "./code-provenance"
 import { classifyAiError } from "@/lib/ai-observability/classify-error"
 import { AI_OPERATIONS } from "@/lib/ai-observability/types"
 import type {
@@ -75,9 +78,11 @@ function extractUsage(message: Anthropic.Messages.Message): UsageTokens {
 
 function buildMetadataBag(
   meta: LogMeta,
-  extra?: { errorCategory?: AiErrorCategory | null },
+  extra?: { errorCategory?: AiErrorCategory | null; code?: CodeProvenance | null },
 ): Record<string, unknown> | null {
   const bag: Record<string, unknown> = { ...(meta.metadata ?? {}) }
+  // De qual código veio a chamada (lib/ai/code-provenance.ts). Chave nova: nada a sobrescrever.
+  if (extra?.code) bag.code = extra.code
   if (meta.workId) bag.work_id = meta.workId
   if (meta.runId) bag.run_id = meta.runId
   if (meta.attempt !== null && meta.attempt !== undefined) bag.attempt = meta.attempt
@@ -100,6 +105,7 @@ async function persistLog(args: {
   errorCategory?: AiErrorCategory | null
   stopReason?: string | null
   requestId?: string | null
+  code?: CodeProvenance | null
 }): Promise<string | null> {
   try {
     const cost = computeCostUsd(args.model, args.usage)
@@ -131,7 +137,7 @@ async function persistLog(args: {
         // AQUI, no ponto único por onde toda chamada passa, em vez de confiar em ~30 call
         // sites lembrarem. Sem sessão (fila/cascata) segue NULL: é gasto do sistema.
         user_id: args.meta.userId ?? (await getSessionUserId()),
-        metadata: buildMetadataBag(args.meta, { errorCategory: args.errorCategory }),
+        metadata: buildMetadataBag(args.meta, { errorCategory: args.errorCategory, code: args.code }),
       })
       .select("id")
       .single()
@@ -178,11 +184,48 @@ function sanitizeParamsForModel(
   return { ...rest, thinking: rest.thinking ?? { type: "disabled" } }
 }
 
+/** Chamada paga recusada pela guarda de código canônico, ANTES do provider (nada foi cobrado). */
+export class PaidCallBlockedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "PaidCallBlockedError"
+  }
+}
+
+/**
+ * Guarda de código canônico (regra e motivo em lib/ai/code-provenance.ts): fora do Fly e com o
+ * banco na NUVEM, só paga a partir de checkout limpo contido em `origin/main`, salvo override
+ * explícito com motivo. Lança `PaidCallBlockedError`; devolve a proveniência para o log.
+ */
+export function assertPaidCallAllowed(): CodeProvenance {
+  const onFly = Boolean(process.env.FLY_APP_NAME)
+  const localDb = isLocalSupabaseUrl()
+  const override = normalizeOverride(process.env[OVERRIDE_ENV])
+  const decision = decidePaidCloudCall({
+    onFly,
+    localDb,
+    git: !onFly && !localDb ? probeGit() : null,
+    override,
+  })
+  if (!decision.allow) throw new PaidCallBlockedError(decision.message)
+  if (decision.basis === "override") {
+    const p = decision.provenance
+    console.warn(
+      `[ai-guard] chamada paga NÃO CANÔNICA liberada por ${OVERRIDE_ENV} ("${p.override_reason}") — ` +
+        `${p.branch ?? "(detached)"} @ ${p.sha?.slice(0, 7) ?? "?"} · dirty=${p.dirty} · in_origin_main=${p.in_origin_main}`,
+    )
+  }
+  return decision.provenance
+}
+
 export async function createLoggedMessage(
   client: Anthropic,
   params: Anthropic.Messages.MessageCreateParamsNonStreaming,
   meta: LogMeta,
 ): Promise<LoggedMessageResult> {
+  // 🔴 PRIMEIRA coisa, e FORA do try: se a guarda recusa, nada é chamado nem cobrado, e o catch
+  // abaixo (que loga e relança erro de PROVIDER) nem é alcançado.
+  const code = assertPaidCallAllowed()
   const start = Date.now()
   const modelStr = typeof params.model === "string" ? params.model : String(params.model)
 
@@ -208,6 +251,7 @@ export async function createLoggedMessage(
       status: "success",
       stopReason: message.stop_reason ?? null,
       requestId: message.id ?? null,
+      code,
     })
     return { message, apiCallId, usage }
   } catch (err) {
@@ -232,6 +276,7 @@ export async function createLoggedMessage(
       status: "error",
       errorMessage,
       errorCategory,
+      code,
     })
     throw err
   }
