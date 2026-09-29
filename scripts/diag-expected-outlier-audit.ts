@@ -76,7 +76,6 @@ async function main() {
   const res = computeRecalc({ works, weights, config, tasteProfile, declaredTagPrefs, includeQuality: false, aiQualityByWork: new Map(), fast: true })
   const coefs = res.expectedPredictor.model.coefficients
   const intercept = res.expectedPredictor.model.intercept
-  const blendW = res.calcBlendWeight
 
   const trainWorks = works.filter((w: any) => w.userScore != null)
   const numImputer = new MedianImputer().fit(trainWorks.map(buildNumericRow))
@@ -87,7 +86,7 @@ async function main() {
   const scaledVec = (w: any) =>
     hstack(numScaler.transform(numImputer.transform([buildNumericRow(w)])), catEncoder.transform(catImputer.transform([buildCatRow(w)])))[0]
 
-  console.log(`catálogo=${works.length} · rotuladas=${trainWorks.length} · blendW=${blendW.toFixed(3)} · limiar outlier=±${OUTLIER_SIGMA}σ · dominância=${DOMINANCE}pt`)
+  console.log(`catálogo=${works.length} · rotuladas=${trainWorks.length} · limiar outlier=±${OUTLIER_SIGMA}σ · dominância=${DOMINANCE}pt`)
 
   // ---- 1) OUTLIERS DE INPUT (|scaled| > Nσ) em obras NÃO rotuladas ----
   // (rotuladas o Ridge ajusta de perto; o risco de nota "estranha" é nas não-lidas)

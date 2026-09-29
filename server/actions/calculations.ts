@@ -175,9 +175,9 @@ interface WorkComputed {
   chaptersNormalized: number
   platformAvg: number | null
   calcScore: number
-  /** Nota.Calc sem o nudge de observação — parceiro do blend expected⊕calc. */
+  /** Nota.Calc sem o nudge de observação. Só diagnóstico — não entra em nota nenhuma. */
   calcScoreNoObs: number
-  /** Nota Prevista (single Ridge + blend com Nota.Calc). */
+  /** Nota Prevista = saída do Ridge (+ obs). `calc` NÃO entra (aposentado em 2026-09-29). */
   expectedScore: number | null
   /** Stage 1 puro (baseline a partir do perfil). */
   expectedBaseline: number | null
@@ -365,8 +365,6 @@ function computeHonestExpectedCvMae(
   baseWeights: ScoreWeight[],
   scoreWeightsAuto: boolean,
   includeQuality: boolean,
-  /** Peso do blend expected⊕calc — mede o score ENTREGUE, não o Ridge puro. */
-  blendWeight = 1,
   k = 5,
   seed = 42,
   /** Tags declaradas (exógenas) — mescladas no perfil de cada fold sem leak. */
@@ -468,11 +466,8 @@ function computeHonestExpectedCvMae(
     if (predictor.isStub) continue
     const preds = predictor.predict(testWorks.map(buildInput))
     for (let i = 0; i < testWorks.length; i++) {
-      // Mesmo blend que o score entregue: w·ridge + (1-w)·calcNoObs. Mede a
-      // precisão do que o usuário vê, não só do Ridge. (Usar o blendWeight global
-      // dentro do fold tem otimismo desprezível — é 1 escalar numa curva chata.)
-      const blended = blendWeight * preds[i].expected + (1 - blendWeight) * testWorks[i].calcScoreNoObs
-      absSum += Math.abs(blended - (testWorks[i].userScore as number))
+      // O score entregue É o Ridge (calc aposentado da Prevista), então a CV mede ele.
+      absSum += Math.abs(preds[i].expected - (testWorks[i].userScore as number))
       count++
     }
   }
@@ -642,7 +637,7 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   const {
     rows, pseudoVotesNotaM, pseudoVotesBlend, gptMean, gptClampHits, gptClampHitRate,
     gptNegativeActivations, negativeActivationRate, inferenceSnapshot, newMaeCalc, newRmseCalc,
-    maeExpected, rmseExpected, maeExpectedBaseline, cvMaeExpected, calcBlendWeight, expectedPredictor,
+    maeExpected, rmseExpected, maeExpectedBaseline, cvMaeExpected, expectedPredictor,
     cvSig, oofBucketBreakdown,
   } = computeRecalc({ works, weights, config, tasteProfile, declaredTagPrefs, includeQuality, aiQualityByWork, effectiveInterestByWork })
 
@@ -750,8 +745,8 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
         : {
             featureNames: expectedPredictor.featureNames,
             coefficients: expectedPredictor.model.coefficients,
-            // Peso do blend expected⊕calc aplicado ao score entregue (1 = sem blend).
-            calcBlendWeight,
+            // `calcBlendWeight` deixou de ser gravado: a Prevista é o Ridge puro (sem blend
+            // com calc). Linhas antigas o mantêm no JSON, e nada o lê.
             // Assinatura dos inputs da nested-CV (quick-win Q): pula o recompute
             // de ~550ms quando as obras rotuladas não mudaram entre recalcs.
             cvSig: cvSig ?? undefined,
@@ -929,7 +924,7 @@ function stableMap(o: Record<string, unknown> | null | undefined): string {
 /**
  * Assinatura FIEL dos inputs da nested-CV honesta (computeHonestExpectedCvMae).
  * A MAE honesta depende SÓ das obras ROTULADAS (ordem + label + features que a CV
- * usa) + pesos-base + flag auto + blend + tags declaradas. Edição de obra NÃO
+ * usa) + pesos-base + flag auto + tags declaradas. Edição de obra NÃO
  * rotulada (a comum) não muda nada disso ⇒ assinatura idêntica ⇒ reusa a MAE
  * persistida e pula os ~550ms da nested-CV. Quando uma obra rotulada (ou os votos
  * globais, via platformAvg) muda, a assinatura muda e a CV recomputa.
@@ -938,12 +933,10 @@ function cvInputSignature(
   trainSet: WorkComputed[],
   weights: ScoreWeight[],
   scoreWeightsAuto: boolean,
-  calcBlendWeight: number,
   declared: DeclaredTagPref[],
 ): string {
   const head = [
     `auto:${scoreWeightsAuto}`,
-    `blend:${calcBlendWeight.toFixed(4)}`,
     `w:${weights.map((w) => `${w.slug}=${w.weight}`).sort().join("|")}`,
     `decl:${JSON.stringify(declared)}`,
   ]
@@ -1094,9 +1087,9 @@ export function computeRecalc(input: RecalcComputeInput) {
       observationAdjustment: w.observationAdjustment,
       pseudoVotesBlend,
     })
-    // Mesma Nota.Calc sem o nudge manual de observação — parceiro do blend
-    // expected⊕calc, pra o obs ser aplicado UMA vez no fim (não duplicado: o
-    // calc embute obs internamente e o expected_score reaplica via applyObsAdjustment).
+    // Mesma Nota.Calc sem o nudge manual de observação. Era o parceiro do blend com a
+    // Prevista (aposentado em 2026-09-29); segue calculada porque diagnósticos a usam como
+    // referência. Não entra em nenhuma nota.
     w.calcScoreNoObs = calculateNotaCalc({
       iaEvalNormalized: w.iaEvalNormalized,
       platformAvg: w.platformAvg,
@@ -1145,7 +1138,7 @@ export function computeRecalc(input: RecalcComputeInput) {
 
   // ---------- 3) Conjunto de treino (obras com user_score) ----------
   // O ramo legado (Nota.Pr/Nota.Final/stacker/kNN) foi removido — a Nota Prevista
-  // é o expected_score (single Ridge + blend com Nota.Calc). Mantemos só trainSet
+  // é o expected_score (single Ridge; o blend com Nota.Calc foi aposentado). Mantemos só trainSet
   // e trainTargets, que alimentam o expected.
   const trainSet = works.filter((w) => w.userScore != null)
   const trainTargets = trainSet.map((w) => w.userScore as number)
@@ -1161,40 +1154,24 @@ export function computeRecalc(input: RecalcComputeInput) {
   const expectedPredictor = trainExpectedPredictor(expectedTrainInputs, trainTargets, includeQuality)
   const expectedPredictions = expectedPredictor.predict(expectedAllInputs)
 
-  // ---------- Blend expected⊕calc ----------
-  // O calc_score determinístico é parceiro de ensemble do Ridge: ancora as obras
-  // (reduz variância e dá robustez fora-da-distribuição). Mediu-se ~0.596→0.584
-  // de MAE honesta com o ótimo em ~0.7-0.75. O peso é fitado em OOF do expected
-  // (sem leak: sem OOF o Ridge memoriza o treino e o peso sairia enviesado pro
-  // Ridge) por busca 1-D minimizando MAE de w·ridgeOOF + (1-w)·calcNoObs. w=1
-  // (sem blend) quando OOF indisponível (treino < 30 ou stub).
-  let calcBlendWeight = 1
+  // ---------- Nota Prevista = Ridge puro (calc aposentado da Prevista) ----------
+  // Até 2026-09-29 havia aqui um blend `w·Ridge + (1−w)·calcNoObs`, com `w` escolhido por
+  // busca em grade no OOF a cada recalc. Aposentado por medição (231 rotuladas): `w` já
+  // estava em 1,0 na nuvem, e o blend avaliado honestamente PIORAVA o MAE (+0,008, IC95%
+  // [+0,001; +0,016]; `calc` tem R² 0,965 nos inputs do Ridge e corr 0,066 com o resíduo
+  // dele). O que o blend ainda fazia era instabilidade: `w` oscilava entre recalcs
+  // (0,95 ↔ 1,0) e `w = 0,9` movia centenas de posições sem ganho medido.
+  // `calc_score` segue calculado e persistido (exibição, ledger/snapshots) — só deixou de
+  // entrar na Nota Prevista. As predições OOF continuam: alimentam o MAE por faixa abaixo.
   let oofPreds: number[] | null = null
   if (!expectedPredictor.isStub && trainSet.length >= 30) {
     oofPreds = expectedOutOfFoldPredictions(expectedTrainInputs, trainTargets, includeQuality)
-    if (oofPreds) {
-      let bestW = 1
-      let bestMae = Infinity
-      for (let wgrid = 0; wgrid <= 1.0001; wgrid += 0.05) {
-        let sum = 0
-        for (let i = 0; i < trainSet.length; i++) {
-          const blended = wgrid * oofPreds[i] + (1 - wgrid) * trainSet[i].calcScoreNoObs
-          sum += Math.abs(blended - (trainSet[i].userScore as number))
-        }
-        const mae = sum / trainSet.length
-        if (mae < bestMae) {
-          bestMae = mae
-          bestW = wgrid
-        }
-      }
-      calcBlendWeight = bestW
-    }
   }
 
   // MAE por faixa OUT-OF-FOLD (honesto) — resíduos das predições OOF por faixa de
   // tipicidade (distância ao centróide) e de votos, no lugar do MAE in-sample que
   // o painel mostrava (otimista por construção: o expected_score é treinado NA
-  // própria obra). Reusa `computeBucketBreakdown` passando a predição OOF blendada
+  // própria obra). Reusa `computeBucketBreakdown` passando a predição OOF do Ridge
   // no campo `expectedScore`. `overallMae` OOF é a referência pra "faixas fora do
   // padrão". Só quando há OOF (treino ≥ 30 e não-stub); senão null → painel cai no
   // in-sample. É diagnóstico: não toca em nenhum score.
@@ -1202,7 +1179,7 @@ export function computeRecalc(input: RecalcComputeInput) {
   if (oofPreds) {
     const distances = expectedPredictor.predictWithDistance(expectedTrainInputs).distances
     const oofInputs: BucketInput[] = trainSet.map((w, i) => {
-      const blended = calcBlendWeight * (oofPreds as number[])[i] + (1 - calcBlendWeight) * w.calcScoreNoObs
+      const oof = (oofPreds as number[])[i]
       return {
         workId: w.id,
         userScore: w.userScore as number,
@@ -1211,7 +1188,7 @@ export function computeRecalc(input: RecalcComputeInput) {
         finalScore: null,
         totalVotes: w.totalVotes,
         predictionDistance: Number.isFinite(distances[i]) ? distances[i] : null,
-        expectedScore: Number.isFinite(blended) ? blended : null,
+        expectedScore: Number.isFinite(oof) ? oof : null,
       }
     })
     const covered = oofInputs.filter((it) => it.expectedScore != null)
@@ -1240,15 +1217,14 @@ export function computeRecalc(input: RecalcComputeInput) {
       w.expectedIsStub = expectedPredictor.isStub
       continue
     }
-    // Blend com o calc determinístico (sem obs), depois aplica obs UMA vez.
-    const blendedNoObs = calcBlendWeight * p.expected + (1 - calcBlendWeight) * w.calcScoreNoObs
-    // observation_adjustment é um nudge manual DETERMINÍSTICO (±0.30) somado sobre
-    // a Nota Esperada — não é feature do Ridge (ver lib/calculations/expected.ts).
-    w.expectedScore = applyObsAdjustment(blendedNoObs, w.observationAdjustment)
-    // Dobra o blend no baseline pra manter o invariante baseline + qualityAdj ==
-    // expected (pré-obs) no waterfall. Em Free qualityAdj=0 → baseline = blendedNoObs.
-    // O coef cru do Ridge fica preservado em formula_config.expected_ridge_coefficients.
-    w.expectedBaseline = blendedNoObs - p.qualityAdj
+    // Nota Prevista = saída do Ridge. `calc` NÃO entra (ver o bloco "calc aposentado"
+    // acima). observation_adjustment é um nudge manual DETERMINÍSTICO (±0.30) somado
+    // UMA vez sobre ela — não é feature do Ridge (ver lib/calculations/expected.ts).
+    w.expectedScore = applyObsAdjustment(p.expected, w.observationAdjustment)
+    // Invariante do waterfall: baseline + qualityAdj == expected (pré-obs). Em Free
+    // qualityAdj=0 → baseline = p.expected. O coef cru do Ridge fica preservado em
+    // formula_config.expected_ridge_coefficients.
+    w.expectedBaseline = p.expected - p.qualityAdj
     w.expectedQualityAdj = p.qualityAdj
     w.expectedIsStub = expectedPredictor.isStub
   }
@@ -1478,7 +1454,7 @@ export function computeRecalc(input: RecalcComputeInput) {
   // (a) decidir reuso e (b) persistir pro próximo recalc. Custo ~ms.
   const cvSig =
     !expectedPredictor.isStub && !includeQuality
-      ? cvInputSignature(trainSet, weights, config.score_weights_auto ?? false, calcBlendWeight, declaredTagPrefs)
+      ? cvInputSignature(trainSet, weights, config.score_weights_auto ?? false, declaredTagPrefs)
       : null
   if (!fast && !expectedPredictor.isStub && !includeQuality) {
     const prevSig = config.expected_ridge_coefficients?.cvSig
@@ -1495,7 +1471,6 @@ export function computeRecalc(input: RecalcComputeInput) {
           weights,
           config.score_weights_auto ?? false,
           includeQuality,
-          calcBlendWeight,
           5,
           42,
           declaredTagPrefs,
@@ -1517,7 +1492,7 @@ export function computeRecalc(input: RecalcComputeInput) {
   return {
     rows, pseudoVotesNotaM, pseudoVotesBlend, gptMean, gptClampHits, gptClampHitRate,
     gptNegativeActivations, negativeActivationRate, inferenceSnapshot, newMaeCalc, newRmseCalc,
-    maeExpected, rmseExpected, maeExpectedBaseline, cvMaeExpected, calcBlendWeight, expectedPredictor,
+    maeExpected, rmseExpected, maeExpectedBaseline, cvMaeExpected, expectedPredictor,
     cvSig, oofBucketBreakdown,
   }
 }
