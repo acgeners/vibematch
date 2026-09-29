@@ -46,3 +46,110 @@ export function coerceToolPayload(
   }
   return { value: obj, coerced }
 }
+
+// ── Diagnóstico de payload RECUSADO ─────────────────────────────────────────────────────────
+
+/**
+ * Teto do payload guardado quando a resposta é recusada, em CODE POINTS. Medido: o maior
+ * payload recusado real (v31) tem 4.209 caracteres, e a saída inteira da avaliação é limitada
+ * a `max_tokens: 4500` (~18 mil caracteres no pior caso). 16 mil guarda todo caso observado
+ * com folga de 3,8× sem deixar uma resposta patológica virar dezenas de KB — e isso importa
+ * porque `/curation/ai-usage` lê a `metadata` INTEIRA de cada chamada do período.
+ */
+export const PAYLOAD_RECUSADO_MAX_CODE_POINTS = 16_000
+const MOTIVO_MAX_CODE_POINTS = 2_000
+
+/** Por que a resposta paga foi descartada. Erro de provider/rede NÃO entra aqui: esse já é
+ *  `status: error` na própria linha, e nunca chega ao parse. */
+export type ClassePayloadRecusado = "schema" | "sem_tool" | "pos_processamento"
+
+export interface PayloadRecusado {
+  versao: 1
+  classe: ClassePayloadRecusado
+  motivo: string
+  /** Campo de 1º nível → tipo recebido (`array`, `string`, `number`, `null`…). */
+  campos: Record<string, string>
+  /** Campo de 1º nível que chegou como texto com cara de JSON e não parseia → erro do parse.
+   *  É o que separa "JSON interno quebrado" de "o modelo mandou prosa". */
+  json_invalido?: Record<string, string>
+  /** O input CRU da tool, serializado ANTES de qualquer coerção — o que o modelo mandou. */
+  bruto: string
+  truncado: boolean
+  /** Tamanho do serializado inteiro, em code points (antes do corte). */
+  tamanho: number
+}
+
+/**
+ * Corta por CODE POINT, nunca por unidade UTF-16: `.slice(0, n)` parte um emoji ao meio e a
+ * metade órfã derruba a escrita inteira no Postgres (ver `lib/text/pg-safe-text.ts`).
+ */
+export function truncarPorCodePoint(texto: string, max: number): { texto: string; truncado: boolean; tamanho: number } {
+  let tamanho = 0
+  let corte = -1
+  for (let i = 0; i < texto.length; i++) {
+    if (tamanho === max) corte = i
+    const c = texto.charCodeAt(i)
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const n = texto.charCodeAt(i + 1)
+      if (n >= 0xdc00 && n <= 0xdfff) i++
+    }
+    tamanho++
+  }
+  if (tamanho <= max) return { texto, truncado: false, tamanho }
+  return { texto: texto.slice(0, corte), truncado: true, tamanho }
+}
+
+function tipoDe(v: unknown): string {
+  if (v === null) return "null"
+  if (Array.isArray(v)) return "array"
+  return typeof v
+}
+
+/** Mensagem do `JSON.parse` para texto que PARECE estrutura; `null` se parseia ou não parece. */
+function erroDeJson(v: unknown): string | null {
+  if (typeof v !== "string") return null
+  const t = v.trim()
+  if (!(t.startsWith("{") || t.startsWith("["))) return null
+  try {
+    JSON.parse(t)
+    return null
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err)
+  }
+}
+
+/**
+ * Descreve a resposta recusada para ela sobreviver ao descarte. Sem isto a única pista era a
+ * mensagem do Zod com 120 caracteres de preview — medido na v31: 7 das 9 recusas ficaram sem
+ * causa observável. Puro: quem chama decide onde gravar.
+ */
+export function descreverPayloadRecusado(
+  input: unknown,
+  motivo: string,
+  classe: ClassePayloadRecusado,
+): PayloadRecusado {
+  const objeto = input !== null && typeof input === "object" && !Array.isArray(input)
+  const campos: Record<string, string> = objeto
+    ? Object.fromEntries(Object.entries(input as Record<string, unknown>).map(([k, v]) => [k, tipoDe(v)]))
+    : { "(input)": tipoDe(input) }
+
+  const json_invalido: Record<string, string> = {}
+  const entradas: Array<[string, unknown]> = objeto ? Object.entries(input as Record<string, unknown>) : [["(input)", input]]
+  for (const [k, v] of entradas) {
+    const erro = erroDeJson(v)
+    if (erro) json_invalido[k] = erro
+  }
+
+  const serializado = typeof input === "string" ? input : (JSON.stringify(input) ?? String(input))
+  const bruto = truncarPorCodePoint(serializado, PAYLOAD_RECUSADO_MAX_CODE_POINTS)
+  return {
+    versao: 1,
+    classe,
+    motivo: truncarPorCodePoint(motivo, MOTIVO_MAX_CODE_POINTS).texto,
+    campos,
+    ...(Object.keys(json_invalido).length > 0 ? { json_invalido } : {}),
+    bruto: bruto.texto,
+    truncado: bruto.truncado,
+    tamanho: bruto.tamanho,
+  }
+}
