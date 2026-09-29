@@ -11,9 +11,10 @@ export { realinharFaixaCitada } from "@/lib/criteria/justification"
 import { aplicarLimiteAdulto } from "@/lib/ai-evaluation/adult-content-apply"
 import { exigirCriteriosNoBanco } from "@/lib/ai-evaluation/criteria-guard"
 import { normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
-import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
+import { anotarPayloadRecusado, createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { SONNET_MODEL } from "@/lib/ai/models"
-import { coerceToolPayload } from "@/lib/ai/tool-payload"
+import { coerceToolPayload, descreverPayloadRecusado } from "@/lib/ai/tool-payload"
+import type { ClassePayloadRecusado } from "@/lib/ai/tool-payload"
 import { fetchCoverForModelWithStatus, isImageRelatedModelError } from "@/lib/server/covers/fetch-cover-for-model"
 import { recordCacheEventAsync } from "@/server/queries/ai-cache"
 import { buildCacheKey } from "@/lib/ai-cache"
@@ -1348,6 +1349,24 @@ async function readDbCache(
 // o resultado em `cacheKey` (V2). NÃO faz lookup de cache — quem chama já fez.
 // ============================================================================
 
+/**
+ * Guarda a resposta RECUSADA na linha de `ai_api_calls` da tentativa. É só diagnóstico: nada
+ * aqui pode mudar a decisão (aceitar/recusar) nem quantas tentativas acontecem — por isso
+ * descrever E gravar ficam dentro do mesmo `try`, e o erro morre num warn.
+ */
+async function registrarRecusa(
+  apiCallId: string | null,
+  input: unknown,
+  motivo: string,
+  classe: ClassePayloadRecusado,
+): Promise<void> {
+  try {
+    await anotarPayloadRecusado(apiCallId, descreverPayloadRecusado(input, motivo, classe))
+  } catch (err) {
+    console.warn("[AI] diagnóstico da resposta recusada falhou:", err instanceof Error ? err.message : err)
+  }
+}
+
 async function runEvaluationProvider(
   req: AiEvaluationRequest,
   cacheKey: string,
@@ -1405,6 +1424,7 @@ async function runEvaluationProvider(
       : [{ type: "text", text: promptText }]
 
     let message: Anthropic.Messages.Message
+    let apiCallId: string | null = null
     try {
       const logged = await createLoggedMessage(
         client,
@@ -1445,6 +1465,7 @@ async function runEvaluationProvider(
         },
       )
       message = logged.message
+      apiCallId = logged.apiCallId
     } catch (err) {
       // Só retenta sem imagem quando o erro é COMPROVADAMENTE da imagem (400 +
       // image/media_type/base64). NÃO retenta para rate limit, auth, timeout geral,
@@ -1463,11 +1484,15 @@ async function runEvaluationProvider(
     )
 
     if (!toolUseBlock) {
-      lastError = new Error(
+      const semTool = new Error(
         message.stop_reason === "max_tokens"
           ? "Resposta da IA foi cortada por limite de tokens."
           : "Resposta da IA não usou a tool submit_evaluation."
       )
+      lastError = semTool
+      // Sem tool não há payload: guarda os blocos que vieram (o texto, e só o TIPO dos demais).
+      const blocos = message.content.map((b) => (b.type === "text" ? { type: b.type, text: b.text } : { type: b.type }))
+      await registrarRecusa(apiCallId, blocos, semTool.message, "sem_tool")
       continue
     }
 
@@ -1483,11 +1508,15 @@ async function runEvaluationProvider(
 
     const parsed = evaluationToolPayloadSchema.safeParse(toolInput)
     if (!parsed.success) {
-      lastError = new Error(
+      const recusa = new Error(
         `Payload da tool não atende ao schema: ${parsed.error.issues
           .map((i) => `${i.path.join(".")}: ${i.message}`)
           .join("; ")}${previewRejectedValue(toolInput)}`
       )
+      lastError = recusa
+      // A resposta foi paga e vai ser descartada: guarda o que o modelo mandou (o input CRU,
+      // antes da coerção), senão a causa da recusa se perde junto.
+      await registrarRecusa(apiCallId, toolUseBlock.input, recusa.message, "schema")
       continue
     }
 
@@ -1498,6 +1527,7 @@ async function runEvaluationProvider(
       return final
     } catch (err) {
       lastError = err
+      await registrarRecusa(apiCallId, toolUseBlock.input, err instanceof Error ? err.message : String(err), "pos_processamento")
     }
   }
 

@@ -2,6 +2,7 @@ import "server-only"
 import Anthropic from "@anthropic-ai/sdk"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { deepStripLoneSurrogates } from "@/lib/ai/sanitize"
+import { pgSafeDeep } from "@/lib/text/pg-safe-text"
 import { modelRejectsSampling } from "./models"
 import { computeCostUsd } from "./pricing"
 import type { UsageTokens } from "./pricing"
@@ -150,6 +151,39 @@ async function persistLog(args: {
   } catch (err) {
     console.warn("[ai-log] insert exception:", err instanceof Error ? err.message : err)
     return null
+  }
+}
+
+/**
+ * Anota na linha de `ai_api_calls` da tentativa que a resposta — paga e completa — foi
+ * RECUSADA por nós (schema, ausência da tool ou pós-processamento), em
+ * `metadata.payload_recusado`. A linha segue `status: success`: o provider respondeu; quem
+ * reprovou foi o nosso parse. Erro de provider nunca chega aqui — ele é lançado antes, e a
+ * própria linha já nasce `status: error`.
+ *
+ * A metadata que já existe (attempt, logical_request_id, code, work_id…) é PRESERVADA: é ela
+ * que correlaciona a tentativa recusada com a seguinte.
+ *
+ * Fail-soft: é diagnóstico. Falhar aqui não pode trocar o erro real da avaliação por outro,
+ * nem mudar quantas tentativas acontecem.
+ */
+export async function anotarPayloadRecusado(apiCallId: string | null, detalhe: unknown): Promise<void> {
+  if (!apiCallId) {
+    console.warn("[ai-log] payload recusado sem linha de ai_api_calls para anotar (o insert do log falhou).")
+    return
+  }
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase.from("ai_api_calls").select("metadata").eq("id", apiCallId).single()
+    if (error) throw new Error(error.message)
+    const atual = (data?.metadata ?? {}) as Record<string, unknown>
+    const { error: upErr } = await supabase
+      .from("ai_api_calls")
+      .update({ metadata: { ...atual, payload_recusado: pgSafeDeep(detalhe) } })
+      .eq("id", apiCallId)
+    if (upErr) throw new Error(upErr.message)
+  } catch (err) {
+    console.warn("[ai-log] anotar payload recusado falhou:", err instanceof Error ? err.message : err)
   }
 }
 
