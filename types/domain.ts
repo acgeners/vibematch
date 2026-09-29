@@ -468,7 +468,10 @@ export interface FormulaConfig {
     coefficients: number[]
     stage2FeatureNames?: string[]
     stage2Coefficients?: number[] | null
-    /** Peso do blend expected⊕calc (1 = sem blend). */
+    /**
+     * LEGADO: peso do antigo blend expected⊕calc. Não é mais gravado desde 2026-09-29 (a Nota
+     * Prevista é o Ridge puro) e nada o lê; fica no tipo porque linhas antigas ainda o têm.
+     */
     calcBlendWeight?: number
     /** Assinatura dos inputs da nested-CV honesta — pula o recompute quando idêntica. */
     cvSig?: string

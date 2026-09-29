@@ -81,11 +81,10 @@ async function main() {
     includeQuality: false, aiQualityByWork: new Map(), fast: true,
   })
   const predictor = res.expectedPredictor
-  const blendW = res.calcBlendWeight
   const coefs = predictor.model.coefficients
   const intercept = predictor.model.intercept
 
-  console.log(`\ncatálogo=${works.length} · rotuladas=${works.filter((w) => w.userScore != null).length} · blendW(Ridge)=${blendW} · (1-blendW)(Calc)=${(1 - blendW).toFixed(2)} · α=${predictor.model.alpha} · stub=${predictor.isStub}`)
+  console.log(`\ncatálogo=${works.length} · rotuladas=${works.filter((w) => w.userScore != null).length} · Prevista = Ridge puro (blend com calc aposentado) · α=${predictor.model.alpha} · stub=${predictor.isStub}`)
 
   // Refit do pré-processamento IDÊNTICO ao trainExpectedPredictor (mesmas train rows).
   const trainWorks = works.filter((w) => w.userScore != null)
@@ -128,14 +127,14 @@ async function main() {
   const ridgeB = intercept + contribB.reduce((s, v) => s + v, 0)
   const clamp = (v: number) => Math.max(0, Math.min(10, v))
   const applyObs = (e: number, obs: number) => clamp(e + Math.min(Math.max(obs, -0.3), 0.3))
-  const finalA = applyObs(blendW * clamp(ridgeA) + (1 - blendW) * A.calcScoreNoObs, A.observationAdjustment)
-  const finalB = applyObs(blendW * clamp(ridgeB) + (1 - blendW) * B.calcScoreNoObs, B.observationAdjustment)
+  const finalA = applyObs(clamp(ridgeA), A.observationAdjustment)
+  const finalB = applyObs(clamp(ridgeB), B.observationAdjustment)
 
   console.log(`\n===== HEADLINE =====`)
   console.log(`                          A Life for a Lie   Secret Lady`)
   console.log(`  expected_score (real)        ${fmt(A.expectedScore, 3)}         ${fmt(B.expectedScore, 3)}`)
   console.log(`  expected_score (replicado)   ${fmt(finalA, 3)}         ${fmt(finalB, 3)}   ← auto-check`)
-  console.log(`  Ridge puro (pré-blend/clamp) ${fmt(ridgeA, 3)}         ${fmt(ridgeB, 3)}`)
+  console.log(`  Ridge puro (pré-clamp)      ${fmt(ridgeA, 3)}         ${fmt(ridgeB, 3)}`)
   console.log(`  Nota.Calc (calcScoreNoObs)   ${fmt(A.calcScoreNoObs, 3)}         ${fmt(B.calcScoreNoObs, 3)}`)
   console.log(`  obs adjustment               ${fmt(A.observationAdjustment, 3)}         ${fmt(B.observationAdjustment, 3)}`)
   console.log(`  intercept do Ridge = ${fmt(intercept, 3)}`)

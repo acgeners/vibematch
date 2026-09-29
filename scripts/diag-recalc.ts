@@ -115,7 +115,7 @@ async function main() {
   console.log("\n===== 2) TIMING (1 recalc completo, em memória, sem I/O de escrita) =====")
   console.log(`  computeRecalc fast=false (com nested-CV honesta): ${tFull} ms`)
   console.log(`  computeRecalc fast=true  (sem nested-CV):          ${tFast} ms`)
-  console.log(`  obras=${rawWorks.length} · rotuladas=${rawWorks.filter((r) => r.user_score != null).length} · calcBlendWeight=${baseline.calcBlendWeight} · gptMean=${baseline.gptMean.toFixed(4)}`)
+  console.log(`  obras=${rawWorks.length} · rotuladas=${rawWorks.filter((r) => r.user_score != null).length} · gptMean=${baseline.gptMean.toFixed(4)}`)
 
   // ---------- 3) BLAST RADIUS (leave-one-out) ----------
   // Ranking-proxy: ordena por (expected_score desc, tag_overlap_net desc). Mede a
@@ -165,7 +165,6 @@ async function main() {
 
     return {
       label,
-      blendJump: res.calcBlendWeight !== baseline.calcBlendWeight ? `${baseline.calcBlendWeight}→${res.calcBlendWeight}` : "—",
       gptMeanDelta: Math.abs(res.gptMean - baseline.gptMean),
       medExp: pctl(dExp, 0.5), p90Exp: pctl(dExp, 0.9), maxExp: Math.max(0, ...dExp),
       nExp01: dExp.filter((d) => d >= 0.01).length, nExp05: dExp.filter((d) => d >= 0.05).length, nExp10: dExp.filter((d) => d >= 0.1).length,
@@ -204,8 +203,7 @@ async function main() {
     console.log(`  Δexpected nas OUTRAS obras:  mediana(med|Δ|)=${med(agg((x) => x.medExp)).toFixed(4)}  pior p90=${Math.max(...agg((x) => x.p90Exp)).toFixed(4)}  pior max=${Math.max(...agg((x) => x.maxExp)).toFixed(4)}`)
     console.log(`  obras movidas ≥0.01: med=${med(agg((x) => x.nExp01))} · ≥0.05: med=${med(agg((x) => x.nExp05))} · ≥0.1: med=${med(agg((x) => x.nExp10))} (de ${rawWorks.length - 1})`)
     console.log(`  RANKING (outras): med(obras c/ rank mudado ≥1)=${med(agg((x) => x.moved1))} · ≥5 posições=${med(agg((x) => x.moved5))} · pior maxMove=${Math.max(...agg((x) => x.maxMove))} · pior top-20 churn=${Math.max(...agg((x) => x.top20churn))}`)
-    const jumps = rows.filter((x) => x.blendJump !== "—")
-    console.log(`  calcBlendWeight pulou em ${jumps.length}/${rows.length} edições${jumps.length ? " (" + jumps.map((x) => x.blendJump).join(", ") + ")" : ""} · pior |ΔgptMean|=${Math.max(...agg((x) => x.gptMeanDelta)).toExponential(2)} · pior Δtag_overlap nas outras=${Math.max(...agg((x) => x.maxTag)).toFixed(4)}`)
+    console.log(`  pior |ΔgptMean|=${Math.max(...agg((x) => x.gptMeanDelta)).toExponential(2)} · pior Δtag_overlap nas outras=${Math.max(...agg((x) => x.maxTag)).toFixed(4)}`)
   }
 
   console.log("\n(diagnóstico read-only concluído — 0 escrita, 0 LLM)")
