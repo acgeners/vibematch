@@ -77,6 +77,9 @@ export interface PayloadRecusado {
   truncado: boolean
   /** Tamanho do serializado inteiro, em code points (antes do corte). */
   tamanho: number
+  /** Presente quando a recuperação de payload (`tool-payload-recovery.ts`) salvou esta resposta
+   *  sem retentativa: as formas aplicadas. O `bruto` continua sendo o ORIGINAL recusado. */
+  recuperado?: string[]
 }
 
 /**

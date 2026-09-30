@@ -15,6 +15,7 @@ import { anotarPayloadRecusado, createLoggedMessage, getAnthropicClient } from "
 import { SONNET_MODEL } from "@/lib/ai/models"
 import { coerceToolPayload, descreverPayloadRecusado } from "@/lib/ai/tool-payload"
 import type { ClassePayloadRecusado } from "@/lib/ai/tool-payload"
+import { recoverEvaluationToolPayload } from "@/lib/ai-evaluation/tool-payload-recovery"
 import { fetchCoverForModelWithStatus, isImageRelatedModelError } from "@/lib/server/covers/fetch-cover-for-model"
 import { recordCacheEventAsync } from "@/server/queries/ai-cache"
 import { buildCacheKey } from "@/lib/ai-cache"
@@ -1258,7 +1259,7 @@ function canonicalInputHashV2(req: AiEvaluationRequest): string {
 }
 
 // Expostos para testes (mesmo padrão de coerceToolPayload).
-export { buildUserPrompt, canonicalInputHash, canonicalInputHashV2 }
+export { buildUserPrompt, canonicalInputHash, canonicalInputHashV2, evaluationToolPayloadSchema }
 
 function readCache(hash: string): AiEvaluationResponse | null {
   const entry = evaluationCache.get(hash)
@@ -1359,9 +1360,11 @@ async function registrarRecusa(
   input: unknown,
   motivo: string,
   classe: ClassePayloadRecusado,
+  recuperado?: readonly string[],
 ): Promise<void> {
   try {
-    await anotarPayloadRecusado(apiCallId, descreverPayloadRecusado(input, motivo, classe))
+    const detalhe = descreverPayloadRecusado(input, motivo, classe)
+    await anotarPayloadRecusado(apiCallId, recuperado?.length ? { ...detalhe, recuperado: [...recuperado] } : detalhe)
   } catch (err) {
     console.warn("[AI] diagnóstico da resposta recusada falhou:", err instanceof Error ? err.message : err)
   }
@@ -1506,28 +1509,53 @@ async function runEvaluationProvider(
       )
     }
 
-    const parsed = evaluationToolPayloadSchema.safeParse(toolInput)
+    let parsed = evaluationToolPayloadSchema.safeParse(toolInput)
+    // Resposta recusada pelo schema e SALVA pela recuperação: o diagnóstico da resposta original
+    // ainda é gravado (o modelo respondeu mal, e isso não pode sumir só porque deu para salvar),
+    // mas uma vez só por tentativa — depois do pós-processamento, que decide a classe final.
+    let recuperacao: { motivo: string; formas: string[] } | null = null
     if (!parsed.success) {
       const recusa = new Error(
         `Payload da tool não atende ao schema: ${parsed.error.issues
           .map((i) => `${i.path.join(".")}: ${i.message}`)
           .join("; ")}${previewRejectedValue(toolInput)}`
       )
-      lastError = recusa
-      // A resposta foi paga e vai ser descartada: guarda o que o modelo mandou (o input CRU,
-      // antes da coerção), senão a causa da recusa se perde junto.
-      await registrarRecusa(apiCallId, toolUseBlock.input, recusa.message, "schema")
-      continue
+      // Só depois de o schema reprovar, e o resultado volta pelo MESMO schema: payload válido
+      // nunca passa pela recuperação, e recuperar não dispensa validar. Ver o arquivo para as
+      // duas formas aceitas — ambas observadas na v31 e ambas fail-closed na ambiguidade.
+      const { value: recuperado, recovered } = recoverEvaluationToolPayload(toolInput, CRITERION_SLUGS)
+      const reparsed = recovered.length > 0 ? evaluationToolPayloadSchema.safeParse(recuperado) : null
+      if (!reparsed?.success) {
+        lastError = recusa
+        // A resposta foi paga e vai ser descartada: guarda o que o modelo mandou (o input CRU,
+        // antes da coerção), senão a causa da recusa se perde junto.
+        await registrarRecusa(apiCallId, toolUseBlock.input, recusa.message, "schema")
+        continue
+      }
+      console.warn(
+        `[AI] Payload da tool recuperado (${recovered.join(", ")}) sem retentativa (modelo=${modelToUse}, prompt=${PROMPT_VERSION}, work=${req.workId ?? "?"}).`
+      )
+      parsed = reparsed
+      recuperacao = { motivo: recusa.message, formas: recovered }
     }
 
     try {
       const built = buildResponseFromToolPayload(parsed.data, req.title, modelToUse, cacheKey)
       const final = postProcessEvaluation(built, req, prepared)
+      if (recuperacao) {
+        await registrarRecusa(apiCallId, toolUseBlock.input, recuperacao.motivo, "schema", recuperacao.formas)
+      }
       writeCache(cacheKey, final)
       return final
     } catch (err) {
       lastError = err
-      await registrarRecusa(apiCallId, toolUseBlock.input, err instanceof Error ? err.message : String(err), "pos_processamento")
+      await registrarRecusa(
+        apiCallId,
+        toolUseBlock.input,
+        err instanceof Error ? err.message : String(err),
+        "pos_processamento",
+        recuperacao?.formas,
+      )
     }
   }
 

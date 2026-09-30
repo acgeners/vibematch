@@ -59,6 +59,20 @@ const fixture = JSON.parse(
 ) as { casos: Caso[] }
 const real = (nome: string) => JSON.parse(fixture.casos.find((c) => c.caso === nome)!.bruto) as Record<string, unknown>
 
+/**
+ * Variante IRRECUPERÁVEL de um payload real. Desde a recuperação de payload
+ * (`tool-payload-recovery.ts`) os dois reais são salvos SEM retentativa — isso é guardado em
+ * `recuperacao-sem-retentativa.test.ts`. O caminho que ESTE arquivo guarda (recusa ⇒ diagnóstico
+ * ⇒ retry) precisa de uma resposta que continue recusada: a mutação é mínima e só tira o payload
+ * do conjunto que a recuperação aceita (confidence fora de [0, 1]; uma aspa ímpar).
+ */
+const irrecuperavel = (nome: string) => {
+  const p = real(nome)
+  if (nome === "confidence_vazou_no_summary") p.summary = (p.summary as string).replace(/0\.75$/, "1.5")
+  else p.scores = (p.scores as string).replace('"healing"', '"healing')
+  return p
+}
+
 const valido = () => ({
   summary: "Resumo válido.",
   confidence: 0.8,
@@ -108,9 +122,9 @@ beforeEach(() => {
 })
 
 describe("A · recusa gera diagnóstico, na linha da PRÓPRIA tentativa", () => {
-  it("caso real 1 (vazamento): anota a 1ª linha como `schema`, e a 2ª tentativa válida vale", async () => {
+  it("caso 1 (vazamento, irrecuperável): anota a 1ª linha como `schema`, e a 2ª tentativa válida vale", async () => {
     spies.createLoggedMessage
-      .mockResolvedValueOnce(comTool(real("confidence_vazou_no_summary"), "call-A0"))
+      .mockResolvedValueOnce(comTool(irrecuperavel("confidence_vazou_no_summary"), "call-A0"))
       .mockResolvedValueOnce(comTool(valido(), "call-A1"))
     const r = await requestAiEvaluation(pedido())
 
@@ -184,8 +198,8 @@ describe("B · resposta válida não gera diagnóstico", () => {
 describe("C · as tentativas continuam correlacionáveis", () => {
   it("as duas chamadas dividem o logical_request_id, com attempt 0 e 1, e cada recusa aponta a SUA linha", async () => {
     spies.createLoggedMessage
-      .mockResolvedValueOnce(comTool(real("confidence_vazou_no_summary"), "call-F0"))
-      .mockResolvedValueOnce(comTool(real("scores_com_aspas_cruas"), "call-F1"))
+      .mockResolvedValueOnce(comTool(irrecuperavel("confidence_vazou_no_summary"), "call-F0"))
+      .mockResolvedValueOnce(comTool(irrecuperavel("scores_com_aspas_cruas"), "call-F1"))
     await expect(requestAiEvaluation(pedido())).rejects.toThrow()
 
     expect([metaDaChamada(0).attempt, metaDaChamada(1).attempt]).toEqual([0, 1])
@@ -196,7 +210,7 @@ describe("C · as tentativas continuam correlacionáveis", () => {
 
   it("sem id de log (o insert falhou): a anotação recebe null e o laço segue igual", async () => {
     spies.createLoggedMessage
-      .mockResolvedValueOnce(comTool(real("confidence_vazou_no_summary"), null))
+      .mockResolvedValueOnce(comTool(irrecuperavel("confidence_vazou_no_summary"), null))
       .mockResolvedValueOnce(comTool(valido(), "call-G1"))
     await requestAiEvaluation(pedido())
     expect(anotacao(0)[0]).toBeNull()
@@ -215,7 +229,7 @@ describe("G · erro de provider NÃO vira payload recusado", () => {
 
 describe("H/I · o diagnóstico não muda a decisão nem o número de tentativas", () => {
   it("as duas recusadas: falha com a MESMA mensagem de antes, em 2 chamadas", async () => {
-    spies.createLoggedMessage.mockResolvedValue(comTool(real("scores_com_aspas_cruas"), "call-H"))
+    spies.createLoggedMessage.mockResolvedValue(comTool(irrecuperavel("scores_com_aspas_cruas"), "call-H"))
     await expect(requestAiEvaluation(pedido())).rejects.toThrow(
       /^Erro ao interpretar resposta da IA: Payload da tool não atende ao schema: scores: .* Nenhuma avaliação foi salva\.$/,
     )
@@ -230,7 +244,7 @@ describe("H/I · o diagnóstico não muda a decisão nem o número de tentativas
       throw new Error("banco fora")
     })
     spies.createLoggedMessage
-      .mockResolvedValueOnce(comTool(real("confidence_vazou_no_summary"), "call-I0"))
+      .mockResolvedValueOnce(comTool(irrecuperavel("confidence_vazou_no_summary"), "call-I0"))
       .mockResolvedValueOnce(comTool(valido(), "call-I1"))
     const r = await requestAiEvaluation(pedido())
     expect(r.summary).toBe("Resumo válido.")
