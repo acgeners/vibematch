@@ -202,8 +202,10 @@ describe("o SYSTEM_PROMPT descreve o producer alvo", () => {
     expect(SYSTEM_PROMPT).toContain("O QUE MOVE A HISTÓRIA, não presença de combate")
   })
 
-  it("a versão é v30 — v29 já nomeia outro prompt na história do projeto", () => {
-    expect(PROMPT_VERSION).toBe("v30")
+  it("a versão é v32 — o SYSTEM_PROMPT do alvo-11 é o mesmo; a v32 acrescenta Arte no prompt de usuário e na tool", () => {
+    // v29 nomeia outro prompt e v31 nomeia as 25 avaliações experimentais de 2026-09-27: nenhuma
+    // das duas pode ser reusada. A região alvo-11 conferida acima segue byte-idêntica.
+    expect(PROMPT_VERSION).toBe("v32")
   })
 })
 

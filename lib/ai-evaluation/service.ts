@@ -16,6 +16,13 @@ import { SONNET_MODEL } from "@/lib/ai/models"
 import { coerceToolPayload, descreverPayloadRecusado } from "@/lib/ai/tool-payload"
 import type { ClassePayloadRecusado } from "@/lib/ai/tool-payload"
 import { recoverEvaluationToolPayload } from "@/lib/ai-evaluation/tool-payload-recovery"
+import { deduplicateReviews } from "@/lib/ai-evaluation/review-dedup"
+import { ART_TOOL_PROPERTY, INSTRUCAO_ARTE, normalizarArte } from "@/lib/ai-evaluation/art-signal"
+import type { ArtAvaliacao } from "@/lib/ai-evaluation/art-signal"
+import { FORMATO_ATUAL, FORMATO_TEXTUAL } from "@/lib/ai-evaluation/evidence-format"
+import type { FormatoEvidencia } from "@/lib/ai-evaluation/evidence-format"
+import { selecionarApendiceArte } from "@/lib/ai-evaluation/art-appendix"
+import type { ArtAppendixItem } from "@/lib/ai-evaluation/art-appendix"
 import { fetchCoverForModelWithStatus, isImageRelatedModelError } from "@/lib/server/covers/fetch-cover-for-model"
 import { recordCacheEventAsync } from "@/server/queries/ai-cache"
 import { buildCacheKey } from "@/lib/ai-cache"
@@ -59,6 +66,17 @@ export interface AiEvaluationRequest {
   /** Backwards-compatible. Para chamadas novas, prefira sourcedReviews. */
   reviews?: string[]
   sourcedReviews?: SourcedReview[]
+  /**
+   * Apêndice de evidência de ARTE (trechos `A1…An` do pool que não estão nas reviews acima) — só a
+   * variante com Arte o desenha (a produção, v32); a `VARIANTE_V30` ignora o campo.
+   */
+  artAppendix?: ArtAppendixItem[]
+  /**
+   * O pool COMPLETO de reviews da obra (fresco ∪ persistido) de onde o apêndice de Arte é escolhido.
+   * `requestAiEvaluation` o converte em `artAppendix` UMA vez, antes da chave de cache e do prompt,
+   * e o descarta — ele é grande e não entra no hash; o apêndice escolhido entra.
+   */
+  artEvidencePool?: SourcedReview[]
   externalContext?: string[]
   /** Notas e votos da obra em plataformas externas aceitas (AniList, MAL, MU, etc.). Sinal de recepção/popularidade — não autoridade temática. */
   platformRatings?: PlatformRating[]
@@ -133,6 +151,10 @@ export interface AiEvaluationResponse {
   inputHash: string
   /** True quando veio do cache (memória ou DB). */
   fromCache?: "memory" | "db"
+  /** Arte (`art4`, v32) — validada fora dos 11; ausente só na `VARIANTE_V30`. */
+  art?: ArtAvaliacao
+  /** O apêndice de Arte que foi ao prompt (ids, fontes, trechos) — proveniência das citações `A…`. */
+  artAppendix?: ArtAppendixItem[]
 }
 
 export const MODEL = SONNET_MODEL
@@ -175,7 +197,40 @@ export const CONCISE_OUTPUT: boolean = true
 // resposta dele com 5,0: incoerência por construção, a classe de defeito que estamos
 // removendo. Afeta 18 obras (romance ≤ 3).
 //
-export const PROMPT_VERSION = CONCISE_OUTPUT ? "v30" : "v18"
+// v32 (2026-10-01): ARTE na MESMA chamada dos 11. O SYSTEM_PROMPT é o da v30, byte a byte; o que
+// muda é o prompt de USUÁRIO e a tool:
+//   · Arte `art4` (`art-signal.ts`): campo `art` obrigatório na tool, validado FORA do Zod dos 11;
+//   · fronteira TEXTUAL em torno da evidência externa (`evidence-format.ts`);
+//   · apêndice de até 10 trechos de arte do pool que não estão nas ≤30 reviews (`art-appendix.ts`);
+//   · força da evidência calculada por código (não muda rótulo, não entra em scoring);
+//   · recuperação dos formatos de payload observados nos gates de Arte (`tool-payload-recovery.ts`).
+// `v32`, NÃO `v31`: a v31 já nomeia as 25 avaliações experimentais de 2026-09-27.
+// Validação: gates de 2026-10-01 (`Auditoria/piloto-arte-abc/`); decisão de produto de seguir com
+// Arte na chamada canônica, com o eixo de MUDANÇA marcado como experimental.
+export const PROMPT_VERSION = CONCISE_OUTPUT ? "v32" : "v18"
+
+/**
+ * Variante do evaluator: tool, moldura da evidência e Arte. A produção usa `PRODUCTION_VARIANT`
+ * (v32); `VARIANTE_V30` existe só para o prompt v30 continuar REPRODUZÍVEL (golden e auditoria).
+ */
+export interface EvaluatorVariant {
+  id: string
+  promptVersion: string
+  /** Moldura da evidência externa: crua (produção) ou a fronteira TEXTUAL do reteste D. */
+  boundary: "none" | "textual"
+  /** Pede o objeto `art` (`art4`) na mesma tool. */
+  art: boolean
+}
+
+/** O producer canônico: v32 = v30 + Arte + fronteira textual + apêndice de Arte. */
+export const PRODUCTION_VARIANT: EvaluatorVariant = { id: "producao", promptVersion: PROMPT_VERSION, boundary: "textual", art: true }
+
+/** O producer v30 — fora de produção; mantido para o prompt antigo ser reproduzível em teste. */
+export const VARIANTE_V30: EvaluatorVariant = { id: "v30", promptVersion: "v30", boundary: "none", art: false }
+
+export function formatoDaVariante(variant: EvaluatorVariant): FormatoEvidencia {
+  return variant.boundary === "textual" ? FORMATO_TEXTUAL : FORMATO_ATUAL
+}
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
@@ -191,7 +246,8 @@ export const CURRENT_PROMPT_VERSION_NUM = parsePromptVersion(PROMPT_VERSION) ?? 
 // de cache canônica V2 (dual-read) — se a forma do payload mudar, o cache antigo
 // não é reaproveitado por engano. Bump manual quando EVALUATION_TOOL muda.
 // eval-2 (2026-07-07): removido o campo `review_usage` da tool.
-export const EVAL_OUTPUT_SCHEMA_VERSION = "eval-2"
+// eval-3 (2026-10-01): a tool ganhou o objeto `art` (v32).
+export const EVAL_OUTPUT_SCHEMA_VERSION = "eval-3"
 
 const MAX_REVIEW_WORDS = 200
 
@@ -491,8 +547,34 @@ const EVALUATION_TOOL = {
   },
 } satisfies Anthropic.Messages.Tool
 
+/**
+ * Marcação ESTRUTURAL da tool dentro do texto do `summary` — o modelo escrevendo o fechamento do
+ * próprio parâmetro e abrindo o seguinte (`…</parameter>\n<parameter name="confidence">0.75`), ou o
+ * nome de um campo como tag. Medido: 5 dos 6 recusados do piloto de Arte e o payload real da v31
+ * (`b41b8b`); um deles abriu `<parameter name="art">`.
+ *
+ * 🔴 Sem esta guarda, quando `confidence` TAMBÉM vem no payload, a resposta passava no schema e o
+ * `summary` era salvo com a marcação dentro. Agora é rejeição de schema: diagnóstico e retry como
+ * qualquer outra, e a recuperação do caso conhecido (confidence AUSENTE) continua valendo, porque
+ * ela limpa o summary antes da 2ª validação.
+ *
+ * Específica de propósito, e só com as formas OBSERVADAS (piloto de Arte, 27/09: `</summary>`,
+ * `</parameter>`, `<parameter name="…">`): fechamento de tag da tool ou de um campo dela, abertura
+ * com `name=`, e `antml:`. Passam `<3`, `a < b`, `<b>negrito</b>`, `<br>` e até `<parameter>` solto
+ * numa frase — sem `name=` nem barra de fechamento ele não é sintaxe de chamada.
+ */
+const MARCA_ESTRUTURAL_DA_TOOL =
+  /<\/\s*(?:parameter|invoke|function_calls)\s*>|<\s*(?:parameter|invoke)\s+name\s*=|<\/\s*(?:summary|confidence|scores|reviewsRejectedReason|art)\s*>|antml:/i
+
+export function summaryTemMarcaDaTool(summary: string): boolean {
+  return MARCA_ESTRUTURAL_DA_TOOL.test(summary)
+}
+
 const evaluationToolPayloadSchema = z.object({
-  summary: z.string().min(1),
+  summary: z
+    .string()
+    .min(1)
+    .refine((t) => !summaryTemMarcaDaTool(t), { message: "summary contém marcação estrutural da tool (<parameter…>)" }),
   confidence: z.number().min(0).max(1),
   scores: z.array(
     z.object({
@@ -503,6 +585,21 @@ const evaluationToolPayloadSchema = z.object({
   ),
   reviewsRejectedReason: z.string().optional(),
 })
+
+/** A tool de cada variante. Sem Arte é EXATAMENTE `EVALUATION_TOOL` (o mesmo objeto). */
+export function evaluationToolFor(variant: EvaluatorVariant): Anthropic.Messages.Tool {
+  if (!variant.art) return EVALUATION_TOOL
+  return {
+    ...EVALUATION_TOOL,
+    input_schema: {
+      ...EVALUATION_TOOL.input_schema,
+      properties: { ...EVALUATION_TOOL.input_schema.properties, art: ART_TOOL_PROPERTY },
+      // `art` obrigatório NA TOOL (para o modelo sempre emitir) e FORA do Zod dos 11: Arte errada
+      // nunca reprova a resposta.
+      required: [...EVALUATION_TOOL.input_schema.required, "art"],
+    },
+  } as Anthropic.Messages.Tool
+}
 
 // `coerceToolPayload` foi extraído pra `@/lib/ai/tool-payload` (util puro,
 // parametrizável por campo) pra ser reusado também pelo fluxo de recomendação.
@@ -524,44 +621,6 @@ type EvaluationToolPayload = z.infer<typeof evaluationToolPayloadSchema>
 // Review preparation (dedup + sentence-aware truncation + stable IDs)
 // ============================================================================
 
-function reviewTextFingerprint(text: string): Set<string> {
-  return new Set(
-    text
-      .toLowerCase()
-      .normalize("NFKD")
-      .replace(/[̀-ͯ]/g, "")
-      .replace(/[^a-z0-9]+/g, " ")
-      .split(" ")
-      .filter((w) => w.length >= 4)
-  )
-}
-
-function jaccardReviews(a: Set<string>, b: Set<string>): number {
-  if (a.size === 0 || b.size === 0) return 0
-  const intersection = [...a].filter((w) => b.has(w)).length
-  return intersection / new Set([...a, ...b]).size
-}
-
-function deduplicateReviews<T extends { text: string }>(reviews: T[]): T[] {
-  const fingerprints: Array<Set<string>> = []
-  const shortKeys = new Set<string>()
-  return reviews.filter((r) => {
-    const fp = reviewTextFingerprint(r.text)
-    if (fp.size < 4) {
-      const key = r.text.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 60)
-      if (shortKeys.has(key)) return false
-      shortKeys.add(key)
-      fingerprints.push(fp)
-      return true
-    }
-    const isDup = fingerprints.some((existing) => jaccardReviews(fp, existing) >= 0.75)
-    if (!isDup) {
-      fingerprints.push(fp)
-      return true
-    }
-    return false
-  })
-}
 
 function countWords(value: string): number {
   return value.trim().split(/\s+/).filter(Boolean).length
@@ -648,7 +707,13 @@ function prepareReviews(req: AiEvaluationRequest): PreparedReviews {
 // User prompt
 // ============================================================================
 
-function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): string {
+function buildUserPrompt(
+  req: AiEvaluationRequest,
+  prepared: PreparedReviews,
+  variant: EvaluatorVariant = PRODUCTION_VARIANT,
+): string {
+  // A moldura da evidência sai da variante, num ponto só. Produção = `FORMATO_ATUAL` (byte-idêntico).
+  const f = formatoDaVariante(variant)
   const adultBounds = computeAdultContentBounds({
     tags: normalizeTags(req.tags),
     genres: req.genres,
@@ -656,9 +721,17 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
     synopsis: req.synopsis,
   })
   const lines: string[] = [
-    `Título oficial da obra a avaliar: "${req.title}"`,
+    `Título oficial da obra a avaliar: ${f.titulo(req.title)}`,
     "(use SOMENTE este título nas suas respostas)",
   ]
+
+  // Instrução de fronteira (só a variante textual tem): UMA vez, antes da 1ª evidência externa.
+  let fronteiraEmitida = false
+  const antesDaEvidencia = () => {
+    if (fronteiraEmitida || !f.instrucaoFronteira) return
+    lines.push(`\n${f.instrucaoFronteira}`)
+    fronteiraEmitida = true
+  }
 
   if (req.coverUrl) {
     lines.push(
@@ -688,6 +761,7 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
 
   const additionalSynopses = (req.additionalSynopses ?? []).filter((s) => s.text?.trim())
   if (additionalSynopses.length) {
+    antesDaEvidencia()
     lines.push(
       `\nSinopses adicionais salvas na obra (complementam a sinopse acima; as marcadas como MANUAL foram escritas/editadas pelo usuário e têm autoridade alta — em conflito com fontes externas, prevalecem):`
     )
@@ -695,7 +769,7 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
       const label = s.isManual
         ? "MANUAL — escrita/editada pelo usuário"
         : `fonte: ${s.source ?? "desconhecida"}`
-      lines.push(`[S${index + 1}] (${label}) ${s.text.trim()}`)
+      lines.push(f.sinopseAdicional(index + 1, label, s.text.trim()))
     })
   }
 
@@ -713,11 +787,12 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
   }
 
   if (req.externalContext?.length) {
+    antesDaEvidencia()
     lines.push(
       `\nContexto externo aceito para complementar a avaliação (sinopses/metadados de fontes com título compatível):`
     )
     req.externalContext.forEach((context, index) => {
-      lines.push(`[C${index + 1}] ${context}`)
+      lines.push(f.contexto(index + 1, context))
     })
   }
 
@@ -739,12 +814,13 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
 
   const validSimilar = (req.similarWorks ?? []).filter((s) => s.title.trim().length > 0)
   if (validSimilar.length) {
+    antesDaEvidencia()
     const items = validSimilar.map((s, index) => {
       const sourcesLabel = s.sources.length > 1 ? `${s.sources.length} fontes` : `1 fonte`
-      const parts: string[] = [`"${s.title}"`]
-      if (s.genres.length) parts.push(`gêneros: ${s.genres.slice(0, 5).join(", ")}`)
-      if (s.tags?.length) parts.push(`tags: ${s.tags.slice(0, 5).join(", ")}`)
-      return `[S${index + 1}] ${parts.join(" — ")} (consenso: ${sourcesLabel})`
+      const detalhes: string[] = []
+      if (s.genres.length) detalhes.push(`gêneros: ${s.genres.slice(0, 5).join(", ")}`)
+      if (s.tags?.length) detalhes.push(`tags: ${s.tags.slice(0, 5).join(", ")}`)
+      return f.obraSimilar(index + 1, s.title, detalhes, sourcesLabel)
     })
     lines.push(
       `\nObras frequentemente recomendadas a quem gostou desta (sinal estrutural de cluster temático — NÃO copie eventos de plot destas obras; use apenas como dica sobre tom, ritmo e temas predominantes):\n${items.join("\n")}`
@@ -772,6 +848,7 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
   }
 
   if (prepared.sourcedReviews?.length) {
+    antesDaEvidencia()
     const withIds = prepared.sourcedReviews.map((r, i) => ({ r, id: prepared.ids[i] }))
     const manual = withIds.filter((x) => x.r.isManual)
     const external = withIds.filter((x) => !x.r.isManual)
@@ -781,8 +858,7 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
         `\nReviews fornecidas por você sobre esta obra (evidência DIRETA e confiável — descrevem a obra avaliada; NÃO precisa verificar se é a mesma obra):`
       )
       manual.forEach(({ r, id }) => {
-        const ratingLabel = r.userRating != null ? ` (nota do usuário: ${r.userRating}/10)` : ""
-        lines.push(`[${id}]${ratingLabel}\n${truncateReviewByWords(r.text)}`)
+        lines.push(f.reviewManual(id, r.userRating ?? null, truncateReviewByWords(r.text)))
       })
     }
 
@@ -792,9 +868,12 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
       )
       external.forEach(({ r, id }) => {
         const matchPct = Math.round(r.matchScore * 100)
-        const ratingLabel = r.userRating != null ? `, nota do usuário: ${r.userRating}/10` : ""
         lines.push(
-          `[${id}] (fonte: ${r.source}, match com o título: ${matchPct}%${ratingLabel}, título-fonte: "${r.sourceTitle}")\n${truncateReviewByWords(r.text)}`
+          f.reviewExterna(
+            id,
+            { fonte: r.source, matchPct, nota: r.userRating ?? null, tituloFonte: r.sourceTitle },
+            truncateReviewByWords(r.text),
+          )
         )
       })
       lines.push(
@@ -806,9 +885,10 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
       `Instrução obrigatória: para cada nota, pese o CONSENSO dessas reviews (sinais recorrentes/convergentes) junto com sinopse/tags/gêneros — NÃO ancore nenhuma nota numa review isolada. Ao mencioná-las na justificativa, use linguagem genérica de consenso ("segundo os leitores…", "há consenso de que…"); NUNCA cite reviews individuais nem IDs.`
     )
   } else if (prepared.legacyReviews?.length) {
+    antesDaEvidencia()
     lines.push(
       `\nReviews de usuários externas:\n${prepared.legacyReviews
-        .map((review, index) => `[${prepared.ids[index]}] ${truncateReviewByWords(review)}`)
+        .map((review, index) => f.reviewLegada(prepared.ids[index], truncateReviewByWords(review)))
         .join("\n")}`
     )
     lines.push(
@@ -819,7 +899,7 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
   }
 
   lines.push(
-    `\nAvalie a obra "${req.title}" com base nas rubricas do sistema. Use todos os gêneros e todas as tags fornecidas. Use o CONSENSO das reviews externas compatíveis como evidência auxiliar, referindo-se a elas de forma genérica (nunca a uma review isolada ou ID). Use apenas evidências presentes nos dados fornecidos; não invente eventos de plot. Retorne todos os ${CRITERION_SLUGS.length} critérios pela tool "submit_evaluation". No "summary", refira-se à obra apenas como "${req.title}".`
+    `\nAvalie a obra ${f.titulo(req.title)} com base nas rubricas do sistema. Use todos os gêneros e todas as tags fornecidas. Use o CONSENSO das reviews externas compatíveis como evidência auxiliar, referindo-se a elas de forma genérica (nunca a uma review isolada ou ID). Use apenas evidências presentes nos dados fornecidos; não invente eventos de plot. Retorne todos os ${CRITERION_SLUGS.length} critérios pela tool "submit_evaluation". No "summary", refira-se à obra apenas como ${f.titulo(req.title)}.`
   )
 
   if (CONCISE_OUTPUT) {
@@ -828,7 +908,52 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
     )
   }
 
+  // Arte: blocos ANEXADOS ao fim, só na variante com Arte — nada acima deles muda. O apêndice só
+  // aparece quando há trechos; sem ele, a Arte é avaliada só pelas reviews principais.
+  if (variant.art && req.artAppendix?.length) {
+    lines.push(`\n${INSTRUCAO_APENDICE_ARTE}`)
+    for (const item of req.artAppendix) lines.push(f.trechoDeArte(item.id, item.source, item.trecho))
+  }
+  if (variant.art) lines.push(`\n${INSTRUCAO_ARTE}`)
+
   return lines.join("\n")
+}
+
+/**
+ * Cabeçalho do apêndice de Arte. Diz o que os trechos SÃO (outras reviews, escolhidas por falarem da
+ * arte) e o que NÃO fazer com eles (pontuar os 11): o apêndice existe para a Arte, e usá-lo nos
+ * critérios seria o canal por onde ele perturbaria as notas.
+ */
+export const INSTRUCAO_APENDICE_ARTE =
+  'TRECHOS ADICIONAIS SOBRE ARTE — os blocos A1, A2… são trechos de OUTRAS reviews desta obra (não repetem R1, R2…), escolhidos só por falarem da arte. Use-os APENAS no objeto "art": cada um conta como uma review distinta e pode entrar em judging_reviews e nas citações com o seu id (A1, A2…). NÃO os use para pontuar os critérios acima.'
+
+/**
+ * Os textos contra os quais as citações de Arte são conferidas: as reviews como enviadas e, na
+ * variante com apêndice, os trechos `A…` como enviados (com o mesmo escape da fronteira).
+ */
+export function evidenciaDeArteComoEnviada(
+  req: AiEvaluationRequest,
+  prepared: PreparedReviews,
+  variant: EvaluatorVariant,
+): Array<{ id: string; text: string }> {
+  const f = formatoDaVariante(variant)
+  const apendice = variant.art ? (req.artAppendix ?? []).map((a) => ({ id: a.id, text: f.textoExterno(a.trecho) })) : []
+  return [...reviewsComoEnviadas(prepared, variant), ...apendice]
+}
+
+/**
+ * As reviews exatamente como o MODELO as recebeu (id + texto truncado e com a moldura da variante) —
+ * a régua contra a qual as citações de Arte são conferidas.
+ */
+export function reviewsComoEnviadas(
+  prepared: PreparedReviews,
+  variant: EvaluatorVariant = PRODUCTION_VARIANT,
+): Array<{ id: string; text: string }> {
+  const f = formatoDaVariante(variant)
+  if (prepared.sourcedReviews?.length) {
+    return prepared.sourcedReviews.map((r, i) => ({ id: prepared.ids[i], text: f.textoExterno(truncateReviewByWords(r.text)) }))
+  }
+  return (prepared.legacyReviews ?? []).map((t, i) => ({ id: prepared.ids[i], text: f.textoExterno(truncateReviewByWords(t)) }))
 }
 
 // ============================================================================
@@ -871,7 +996,8 @@ function buildResponseFromToolPayload(
   payload: EvaluationToolPayload,
   title: string,
   modelName: string,
-  inputHash: string
+  inputHash: string,
+  promptVersion: string = PROMPT_VERSION,
 ): AiEvaluationResponse {
   const scoreMap: Record<string, { score: number; justification: string }> = {}
   for (const s of payload.scores) {
@@ -889,7 +1015,7 @@ function buildResponseFromToolPayload(
 
   return {
     modelName,
-    promptVersion: PROMPT_VERSION,
+    promptVersion,
     summary: payload.summary || `Avaliação de "${title}" concluída.`,
     confidence: Math.max(0, Math.min(1, payload.confidence)),
     reviewsUsed: 0,
@@ -1213,6 +1339,9 @@ function canonicalInputHash(req: AiEvaluationRequest): string {
     reviews: req.reviews ?? [],
     coverUrl: req.coverUrl ?? null,
     contentRatings: [...(req.contentRatings ?? [])].map((r) => r.toLowerCase().trim()).sort(),
+    // O apêndice de Arte é input do prompt: entra no hash quando existe (cache servido com outro
+    // apêndice seria uma resposta construída sobre outra evidência).
+    ...(req.artAppendix?.length ? { artAppendix: canonicalArtAppendix(req) } : {}),
   }
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex")
 }
@@ -1254,12 +1383,30 @@ function canonicalInputHashV2(req: AiEvaluationRequest): string {
       reviews: req.reviews ?? [],
       coverUrl: req.coverUrl ?? null,
       contentRatings: [...(req.contentRatings ?? [])].map((r) => r.toLowerCase().trim()).sort(),
+      ...(req.artAppendix?.length ? { artAppendix: canonicalArtAppendix(req) } : {}),
     },
   })
 }
 
+/** O apêndice como entra na chave: id, fonte e o trecho exato enviado. */
+function canonicalArtAppendix(req: AiEvaluationRequest) {
+  return (req.artAppendix ?? []).map((a) => ({ id: a.id, source: a.source, trecho: a.trecho }))
+}
+
+/**
+ * Converte o pool de evidência (`artEvidencePool`) no apêndice de Arte, UMA vez, antes da chave de
+ * cache e do prompt — e tira o pool do request. Só na variante com Arte; sem pool, sem apêndice
+ * (a Arte é avaliada só com as reviews principais). Quem já passou `artAppendix` é respeitado.
+ */
+export function comApendiceDeArte(req: AiEvaluationRequest, variant: EvaluatorVariant = PRODUCTION_VARIANT): AiEvaluationRequest {
+  const { artEvidencePool, ...resto } = req
+  if (!variant.art || resto.artAppendix || !artEvidencePool?.length) return resto
+  const enviadas = prepareReviews(resto).sourcedReviews ?? []
+  return { ...resto, artAppendix: selecionarApendiceArte(artEvidencePool, enviadas).itens }
+}
+
 // Expostos para testes (mesmo padrão de coerceToolPayload).
-export { buildUserPrompt, canonicalInputHash, canonicalInputHashV2, evaluationToolPayloadSchema }
+export { buildUserPrompt, canonicalInputHash, canonicalInputHashV2, evaluationToolPayloadSchema, prepareReviews }
 
 function readCache(hash: string): AiEvaluationResponse | null {
   const entry = evaluationCache.get(hash)
@@ -1349,6 +1496,89 @@ async function readDbCache(
 // requestAiEvaluation para rodar sob single-flight (dedup em processo). Persiste
 // o resultado em `cacheKey` (V2). NÃO faz lookup de cache — quem chama já fez.
 // ============================================================================
+
+/**
+ * O resultado de interpretar UMA resposta da tool. Dono único do caminho coerção → schema →
+ * recuperação → montagem → pós-processamento → Arte: o laço de produção (e qualquer harness de
+ * auditoria) passa por AQUI, sem uma 2ª cópia do parse.
+ * Puro (sem IO): diagnóstico, avisos e cache ficam com quem chama.
+ */
+export type InterpretacaoDaTool =
+  | {
+      tipo: "aceita"
+      resposta: AiEvaluationResponse
+      coerced: string[]
+      recuperacao: { motivo: string; formas: string[] } | null
+    }
+  | {
+      tipo: "recusada"
+      classe: "schema" | "pos_processamento"
+      erro: unknown
+      coerced: string[]
+      recuperacao: { motivo: string; formas: string[] } | null
+    }
+
+export function interpretarRespostaDaTool(
+  rawInput: unknown,
+  req: AiEvaluationRequest,
+  prepared: PreparedReviews,
+  modelName: string,
+  inputHash: string,
+  variant: EvaluatorVariant = PRODUCTION_VARIANT,
+): InterpretacaoDaTool {
+  // Duplo-encode (campo estruturado vindo como string de JSON) é recuperável — ver `coerceToolPayload`.
+  const { value: toolInput, coerced } = coerceToolPayload(rawInput)
+
+  let parsed = evaluationToolPayloadSchema.safeParse(toolInput)
+  let recuperacao: { motivo: string; formas: string[] } | null = null
+  // O payload de onde sai a Arte: o recuperado, quando houve recuperação (o `art` pode ter vindo
+  // de dentro do summary).
+  let payloadFinal: unknown = toolInput
+  if (!parsed.success) {
+    const recusa = new Error(
+      `Payload da tool não atende ao schema: ${parsed.error.issues
+        .map((i) => `${i.path.join(".")}: ${i.message}`)
+        .join("; ")}${previewRejectedValue(toolInput)}`
+    )
+    // Só depois de o schema reprovar, e o resultado volta pelo MESMO schema: payload válido
+    // nunca passa pela recuperação, e recuperar não dispensa validar. Ver o arquivo para as
+    // formas aceitas — todas observadas, todas fail-closed na ambiguidade. `art` vazado só é
+    // recuperável na variante que o pede.
+    const { value: recuperado, recovered } = recoverEvaluationToolPayload(toolInput, CRITERION_SLUGS, {
+      allowArt: variant.art,
+    })
+    const reparsed = recovered.length > 0 ? evaluationToolPayloadSchema.safeParse(recuperado) : null
+    if (!reparsed?.success) return { tipo: "recusada", classe: "schema", erro: recusa, coerced, recuperacao: null }
+    parsed = reparsed
+    payloadFinal = recuperado
+    recuperacao = { motivo: recusa.message, formas: recovered }
+  }
+
+  let final: AiEvaluationResponse
+  try {
+    const built = buildResponseFromToolPayload(parsed.data, req.title, modelName, inputHash, variant.promptVersion)
+    final = postProcessEvaluation(built, req, prepared)
+  } catch (err) {
+    return { tipo: "recusada", classe: "pos_processamento", erro: err, coerced, recuperacao }
+  }
+
+  // Arte, só na variante com Arte — FORA do try dos 11 e com rede própria: nada nela consegue
+  // transformar uma resposta aceita em recusa nem disparar retry.
+  if (variant.art) {
+    const artBruto = (payloadFinal as Record<string, unknown> | null)?.art ?? null
+    let art: ArtAvaliacao
+    try {
+      art = normalizarArte(artBruto, evidenciaDeArteComoEnviada(req, prepared, variant))
+    } catch (err) {
+      art = normalizarArte(null, [])
+      art.rebaixamentos.push(`erro ao montar a régua de citações: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    final.art = art
+    final.artAppendix = req.artAppendix ?? []
+    final.rawResponse = { ...(final.rawResponse as Record<string, unknown>), art, art_bruto: artBruto }
+  }
+  return { tipo: "aceita", resposta: final, coerced, recuperacao }
+}
 
 /**
  * Guarda a resposta RECUSADA na linha de `ai_api_calls` da tentativa. É só diagnóstico: nada
@@ -1447,7 +1677,7 @@ async function runEvaluationProvider(
               cache_control: { type: "ephemeral" },
             },
           ],
-          tools: [EVALUATION_TOOL],
+          tools: [evaluationToolFor(PRODUCTION_VARIANT)],
           tool_choice: { type: "tool", name: EVALUATION_TOOL.name },
           messages: [{ role: "user", content: messageContent }],
         },
@@ -1499,64 +1729,45 @@ async function runEvaluationProvider(
       continue
     }
 
-    // Duplo-encode (campo estruturado vindo como string de JSON) é recuperável —
-    // ver `coerceToolPayload`. O warn NÃO é decorativo: sem ele a recuperação vira
-    // silenciosa e a gente perde o sinal de que o modelo/prompt regrediu.
-    const { value: toolInput, coerced } = coerceToolPayload(toolUseBlock.input)
+    // O warn NÃO é decorativo: sem ele a recuperação vira silenciosa e a gente perde o sinal de que
+    // o modelo/prompt regrediu.
+    const interp = interpretarRespostaDaTool(toolUseBlock.input, req, prepared, modelToUse, cacheKey)
+    const coerced = interp.coerced
     if (coerced.length > 0) {
       console.warn(
         `[AI] Payload da tool veio com JSON duplo-encodado em ${coerced.join(", ")} — recuperado (modelo=${modelToUse}, prompt=${PROMPT_VERSION}, work=${req.workId ?? "?"}).`
       )
     }
 
-    let parsed = evaluationToolPayloadSchema.safeParse(toolInput)
     // Resposta recusada pelo schema e SALVA pela recuperação: o diagnóstico da resposta original
     // ainda é gravado (o modelo respondeu mal, e isso não pode sumir só porque deu para salvar),
     // mas uma vez só por tentativa — depois do pós-processamento, que decide a classe final.
-    let recuperacao: { motivo: string; formas: string[] } | null = null
-    if (!parsed.success) {
-      const recusa = new Error(
-        `Payload da tool não atende ao schema: ${parsed.error.issues
-          .map((i) => `${i.path.join(".")}: ${i.message}`)
-          .join("; ")}${previewRejectedValue(toolInput)}`
-      )
-      // Só depois de o schema reprovar, e o resultado volta pelo MESMO schema: payload válido
-      // nunca passa pela recuperação, e recuperar não dispensa validar. Ver o arquivo para as
-      // duas formas aceitas — ambas observadas na v31 e ambas fail-closed na ambiguidade.
-      const { value: recuperado, recovered } = recoverEvaluationToolPayload(toolInput, CRITERION_SLUGS)
-      const reparsed = recovered.length > 0 ? evaluationToolPayloadSchema.safeParse(recuperado) : null
-      if (!reparsed?.success) {
-        lastError = recusa
-        // A resposta foi paga e vai ser descartada: guarda o que o modelo mandou (o input CRU,
-        // antes da coerção), senão a causa da recusa se perde junto.
-        await registrarRecusa(apiCallId, toolUseBlock.input, recusa.message, "schema")
-        continue
-      }
+    const recuperacao = interp.recuperacao
+    if (recuperacao) {
       console.warn(
-        `[AI] Payload da tool recuperado (${recovered.join(", ")}) sem retentativa (modelo=${modelToUse}, prompt=${PROMPT_VERSION}, work=${req.workId ?? "?"}).`
+        `[AI] Payload da tool recuperado (${recuperacao.formas.join(", ")}) sem retentativa (modelo=${modelToUse}, prompt=${PROMPT_VERSION}, work=${req.workId ?? "?"}).`
       )
-      parsed = reparsed
-      recuperacao = { motivo: recusa.message, formas: recovered }
     }
 
-    try {
-      const built = buildResponseFromToolPayload(parsed.data, req.title, modelToUse, cacheKey)
-      const final = postProcessEvaluation(built, req, prepared)
-      if (recuperacao) {
-        await registrarRecusa(apiCallId, toolUseBlock.input, recuperacao.motivo, "schema", recuperacao.formas)
-      }
-      writeCache(cacheKey, final)
-      return final
-    } catch (err) {
-      lastError = err
+    if (interp.tipo === "recusada") {
+      lastError = interp.erro
+      // A resposta foi paga e vai ser descartada: guarda o que o modelo mandou (o input CRU,
+      // antes da coerção), senão a causa da recusa se perde junto.
       await registrarRecusa(
         apiCallId,
         toolUseBlock.input,
-        err instanceof Error ? err.message : String(err),
-        "pos_processamento",
+        interp.erro instanceof Error ? interp.erro.message : String(interp.erro),
+        interp.classe,
         recuperacao?.formas,
       )
+      continue
     }
+
+    if (recuperacao) {
+      await registrarRecusa(apiCallId, toolUseBlock.input, recuperacao.motivo, "schema", recuperacao.formas)
+    }
+    writeCache(cacheKey, interp.resposta)
+    return interp.resposta
   }
 
   console.error("[AI] Erro ao interpretar resposta:", lastError)
@@ -1571,8 +1782,10 @@ async function runEvaluationProvider(
 // ============================================================================
 
 export async function requestAiEvaluation(
-  req: AiEvaluationRequest
+  reqEntrada: AiEvaluationRequest
 ): Promise<AiEvaluationResponse> {
+  // O apêndice de Arte sai do pool UMA vez, aqui, e o mesmo `req` alimenta chave, prompt e validação.
+  const req = comApendiceDeArte(reqEntrada)
   // 🔴 ANTES de qualquer gasto — e antes do cache, que devolveria os MESMOS slugs e bateria na
   // mesma FK. As notas são gravadas depois da chamada ao provider (`server/actions/ai.ts`), então
   // `CRITERION_SLUGS` divergir do banco alvo custa a chamada inteira e descarta a resposta já

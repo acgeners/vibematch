@@ -39,10 +39,11 @@ function pipeline(input: unknown) {
 }
 
 describe("antes: o código de hoje RECUSA os dois payloads reais", () => {
-  it("caso 1 — reprovado por `confidence` ausente (vazou para dentro do summary)", () => {
+  it("caso 1 — reprovado por `confidence` ausente E pela marcação da tool dentro do summary", () => {
     const { antes } = pipeline(VAZOU())
     expect(antes.success).toBe(false)
-    expect(antes.error!.issues.map((i) => i.path.join("."))).toEqual(["confidence"])
+    // `summary` entra desde a guarda de marcação (art4): o vazamento é sintaxe de chamada, não texto.
+    expect(antes.error!.issues.map((i) => i.path.join(".")).sort()).toEqual(["confidence", "summary"])
   })
 
   it("caso 2 — reprovado por `scores` string: a coerção não desembrulha JSON inválido", () => {
@@ -91,10 +92,11 @@ describe("caso 1 — confidence vazado no fim do summary", () => {
   ]
 
   it("a chave confidence JÁ existe e é válida: a regra NÃO decide entre os dois valores", () => {
-    // ⚠️ Este payload já passa no schema HOJE (o summary é só uma string), então em produção ele
-    // nem chega à recuperação — e seria salvo com o vazamento no summary. Isso é anterior a este
-    // arquivo e fica registrado aqui; o que se trava é que a recuperação não escolhe um lado.
+    // Até a guarda de marcação este payload PASSAVA no schema e seria salvo com o vazamento no
+    // summary. Hoje o schema o recusa (fail-closed ⇒ retry), e a recuperação continua sem escolher
+    // um lado entre os dois valores.
     const payload = mutar(`${head()}${LEAK}0.75`, { confidence: 0.4 })
+    expect(evaluationToolPayloadSchema.safeParse(payload).success).toBe(false)
     const { value, recovered } = recoverEvaluationToolPayload(payload, CRITERION_SLUGS)
     expect(recovered).toEqual([])
     expect(value).toBe(payload)

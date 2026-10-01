@@ -24,6 +24,7 @@ import { isSameSynopsis } from "@/lib/synopsis-text"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { ACTIVE_MODELS, SONNET_MODEL } from "@/lib/ai/models"
 import { pgSafeDeep, pgSafeText } from "@/lib/text/pg-safe-text"
+import { linhaDeArte } from "@/lib/ai-evaluation/art-persistence"
 import { ensureAdmin } from "@/server/queries/current-user"
 
 const OPUS_MODEL_ID = ACTIVE_MODELS.opus
@@ -438,6 +439,9 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
       contentRatings,
       coverUrl,
       model: resolveModelOverride(opts.model),
+      // O pool inteiro (fresco ∪ persistido): o service escolhe dele o apêndice de Arte — até 10
+      // trechos que NÃO estão nas reviews acima. As reviews dos 11 não mudam.
+      artEvidencePool: promptPool,
     })
     const claudeMs = Date.now() - claudeStart
     console.log(
@@ -506,6 +510,16 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
         .update(completedPatch)
         .eq("id", evaluation.id)
       if (retryError) throw new Error(`falha ao concluir a avaliação: ${retryError.message}`)
+    }
+
+    // Arte (v32): uma linha por avaliação, presa a ela por FK. FAIL-SOFT de propósito — Arte nunca
+    // derruba os 11, que já estão gravados acima. Sem a migration 201 aplicada, o insert falha e vira
+    // só este log. A Arte não tem revisão própria: aceitar/pular os 11 não mexe nesta linha.
+    if (response.art) {
+      const { error: artError } = await supabase
+        .from("ai_evaluation_art")
+        .insert(pgSafeDeep(linhaDeArte({ aiEvaluationId: evaluation.id, workId, art: response.art, apendice: response.artAppendix ?? [] })))
+      if (artError) console.error(`[ai-eval] Arte não gravada (os 11 seguem gravados): ${artError.message}`)
     }
 
     const { data: completedEvaluation, error: completedError } = await supabase

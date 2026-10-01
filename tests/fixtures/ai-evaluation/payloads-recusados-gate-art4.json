@@ -1,0 +1,181 @@
+{
+ "origem": {
+  "arquivo": ".pilot/gate-art4-2026-10-01T02-18-55-273Z.ndjson",
+  "sha256": "19434498d544569fef1ec7a1f4d3ac18b84dcf9426c980d181eba597da87e8d0",
+  "gate": "art4, 2026-10-01T02:18Z, 32 chamadas, sem retry",
+  "nota": "toolInputBruto copiado do NDJSON sem alteração; nenhum segredo, só a saída do modelo"
+ },
+ "casos": [
+  {
+   "caso": "B-E01",
+   "forma": "payload_no_summary_aberto",
+   "braco": "B",
+   "variante": "v32-art4",
+   "celula": "E01",
+   "workId": "fd0571d0-d8df-4f3f-9d31-e2e651c98f70",
+   "stopReason": "tool_use",
+   "messageId": "msg_011CfaiVqqvgyFtHRKGck4vA",
+   "classeOriginal": "schema",
+   "motivoOriginal": "Error: Payload da tool não atende ao schema: summary: summary contém marcação estrutural da tool (<parameter…>); confidence: Invalid input: expected number, received undefined; scores: Invalid input: expected array, received undefined",
+   "toolInputBruto": {
+    "summary": "\"The Reason Why Raeliana Ended up at the Duke's Mansion\" é um isekai romântico de ambientação europeia com mistério e intriga política, centrado na parceria crescente entre Raeliana e o Duque Noah. É um clássico do gênero rofan, elogiado pelo início forte e personagens cativantes, embora os leitores apontem queda de ritmo na parte intermediária.</parameter>\n<parameter name=\"confidence\">0.82</parameter>\n<parameter name=\"scores\">[\n{\"criterion\":\"romance\",\"score\":7.5,\"justification\":\"Faixa 7-8 (Core Romance): o romance entre Raeliana e Noah é recorrente e se desenvolve ao longo de toda a obra, com tags como Slow Romance, Fake Couple Becomes Genuine e Bickering Love confirmando desenvolvimento gradual e contínuo. Há consenso entre os leitores de que o banter e a progressão do casal são pontos centrais da experiência, mesmo com críticas de que a trama secundária se torna repetitiva em torno disso.\"},\n{\"criterion\":\"couple_dynamics\",\"score\":8,\"justification\":\"Faixa 7-8 (Saudável): apesar da premissa de noivado falso, a dinâmica evolui para parceria saudável, com comunicação direta e ausência de mal-entendidos prolongados, como destacado pelo consenso dos leitores ('healthy dynamic', 'talk problems through'). Tags de ciúme e posse do ML são descritas como não-tóxicas dentro de um tom romântico.\"},\n{\"criterion\":\"fantasy\",\"score\":5,\"justification\":\"Faixa 4-6: elementos sobrenaturais existem (reencarnação, isekai, menção a demônios/monstros e uma 'deusa' que orquestra o mundo) mas funcionam mais como mecanismo de premissa do que presença contínua e estrutural na trama, que é dominada por intriga política e romance. Reviews não destacam magia como elemento recorrente da experiência.\"},\n{\"criterion\":\"setting_era\",\"score\":1.5,\"justification\":\"Faixa 0-3: ambientação de fantasia europeia pré-moderna (nobreza, duques, cortes), reforçada pela tag European Ambience e pelo contexto social/político de corte nobre. Direção claramente histórica/de época fictícia, sem contraponto contemporâneo.\"},\n{\"criterion\":\"action_adventure\",\"score\":4.5,\"justification\":\"Faixa 4-6: a trama é movida majoritariamente por diálogo, intriga política e investigação de mistério (quem tentou matar Raeliana), com progressão externa real mas sem deslocamento ou perigo físico constante. Reviews mencionam long filler e estagnação da trama intermediária, reforçando o caráter intermediário sem ação predominante.\"},\n{\"criterion\":\"adult_content\",\"score\":2,\"justification\":\"Faixa 0-3 (Clean): sinopse, tags e reviews não indicam qualquer cena sexual ou nudez; o foco é romance emocional e intriga, com no máximo tensão romântica leve e tom 'wholesome' citado pelos leitores.\"},\n{\"criterion\":\"protagonist\",\"score\":7.5,\"justification\":\"Faixa 7-8: Raeliana tem centralidade alta e agência real nas primeiras fases, mudando ativamente seu destino com conhecimento prévio e ação direta (inclusive uso de arma), mas o consenso dos leitores aponta que ela se torna mais passiva/reativa na parte intermediária, o que impede nota máxima. Ainda assim, tags como Smart/Strong/Rich Female Lead e os comentários sobre comportamento 'cunning, resourceful' confirmam protagonismo representativo forte ao longo da obra.\"},\n{\"criterion\":\"humor\",\"score\":6.5,\"justification\":\"Faixa 4-6/7: há consenso recorrente entre os leitores sobre humor e banter divertido entre o casal e personagens secundários ('great humor', 'banter... always amusing to read'), presente de forma significativa mas não dominando o tom geral, que é majoritariamente romântico/dramático. Gênero Comedy também corrobora presença relevante.\"},\n{\"criterion\":\"drama\",\"score\":6,\"justification\":\"Faixa 4-6: há conflitos emocionais recorrentes (tentativas de assassinato, esquemas de rivais, manipulação por antagonistas), mas os próprios leitores descrevem resoluções rápidas e indolores para boa parte dos conflitos, sugerindo que o drama é presente mas não estrutura toda a experiência de forma contínua e pesada.\"},\n{\"criterion\":\"tragedy\",\"score\":2.5,\"justification\":\"Faixa 0-3: não há evidência clara de perdas irreversíveis ou mortes de personagens centrais ocorrendo no desenvolvimento principal; os conflitos descritos (tentativas de assassinato, esquemas) são majoritariamente resolvidos sem consequências trágicas permanentes para os protagonistas.\"},\n{\"criterion\":\"angst\",\"score\":4,\"justification\":\"Faixa 4-6: há sofrimento pontual (ameaças, manipulação por antagonistas, mistério da morte original) mas os leitores indicam que os problemas tendem a ser resolvidos com certa facilidade e sem acúmulo duradouro de angústia, com tom geral descrito como 'light-hearted' e 'comfy'.\"}\n]",
+    "art": {
+     "judging_reviews": [
+      {
+       "review_id": "R7",
+       "stance": "competent"
+      },
+      {
+       "review_id": "R20",
+       "stance": "mixed"
+      },
+      {
+       "review_id": "R18",
+       "stance": "competent"
+      },
+      {
+       "review_id": "R22",
+       "stance": "positive"
+      }
+     ],
+     "quality_signal": "AVERAGE",
+     "quality_evidence": [
+      {
+       "review_id": "R7",
+       "excerpt": "the art was 7/10"
+      },
+      {
+       "review_id": "R18",
+       "excerpt": "The art is pretty (a little inconsistent sometimes but overall good)"
+      },
+      {
+       "review_id": "R20",
+       "excerpt": "When drawn with detail, all of the characters are attractive and enjoyable to look at. And when drawn more simply, the characters are often adorable. But at times, the artist fell off the tightrope of simplistic art and drew panels which looked simple or amateurish"
+      }
+     ],
+     "change_signal": "NO_CLEAR_SIGNAL",
+     "change_evidence": [],
+     "justification": "As poucas reviews que julgam a arte oscilam entre elogios moderados e descrições de qualidade mediana/inconsistente, sem predominância clara de um lado, configurando um quadro de mediania (competente) mais do que claramente acima ou abaixo da média."
+    }
+   }
+  },
+  {
+   "caso": "B-E03",
+   "forma": "payload_e_art_no_summary_fechado",
+   "braco": "B",
+   "variante": "v32-art4",
+   "celula": "E03",
+   "workId": "5e8cc7a4-22d2-4340-a847-c7fb29fb18e1",
+   "stopReason": "tool_use",
+   "messageId": "msg_011CfaibcZt96fi3KWueCuSi",
+   "classeOriginal": "schema",
+   "motivoOriginal": "Error: Payload da tool não atende ao schema: summary: summary contém marcação estrutural da tool (<parameter…>); confidence: Invalid input: expected number, received undefined; scores: Invalid input: expected array, received undefined",
+   "toolInputBruto": {
+    "summary": "\"Villains Are Destined to Die\" acompanha Penelope, transmigrada para a villainess de um otome game em hard mode, em uma jornada de sobrevivência marcada por manipulação, abuso familiar e romance reverse harem que converge para um único interesse amoroso. É uma obra de forte tensão psicológica e dramática, com elementos de fantasia estrutural (mundo de jogo) e protagonista extremamente proativa e calculista.</summary>\n<parameter name=\"confidence\">0.82</parameter>\n<parameter name=\"scores\">[{\"criterion\":\"romance\",\"score\":7,\"justification\":\"Faixa 7-8 (Core Romance): romance reverse harem com slow burn que converge para um interesse amoroso central, recorrente ao longo da obra; leitores concordam que o relacionamento final se desenvolve organicamente apesar do foco inicial em sobrevivência.\"},{\"criterion\":\"couple_dynamics\",\"score\":7,\"justification\":\"Faixa 7-8 (Saudável): segundo os leitores, a dinâmica entre Penelope e o interesse amoroso final é de apoio mútuo e compreensão apesar de ambos carregarem traumas, com ele descrito como leal e disposto a deixá-la ir; conflitos existem mas não são destrutivos entre o casal central.\"},{\"criterion\":\"fantasy\",\"score\":7,\"justification\":\"Faixa 7-8 (Estrutural): o mundo de jogo com mecânicas (affection meters, diálogos pré-selecionados, quests) opera continuamente como fenômeno sobrenatural de escopo ontológico específico, confirmado por tags de Fantasy World e Game Elements e pelo consenso dos leitores sobre a imersão nas mecânicas do jogo.\"},{\"criterion\":\"setting_era\",\"score\":2,\"justification\":\"Faixa 0-3 (Histórico/pré-moderno): ambientação de fantasia europeia com nobreza, duques e realeza, sem tecnologia moderna — mundo ficcional claramente inspirado em período pré-moderno.\"},{\"criterion\":\"action_adventure\",\"score\":6,\"justification\":\"Faixa 4-6 (Intermediário): a trama é movida por objetivos de sobrevivência, quests do jogo e perigo constante de morte, mas grande parte da experiência também envolve diálogo estratégico e navegação social dentro da corte; leitores mencionam tensão constante e cenas de ação relevantes.\"},{\"criterion\":\"adult_content\",\"score\":2,\"justification\":\"Faixa 0-3 (Clean): não há indícios de conteúdo sexual explícito ou mesmo sugestivo nas tags, sinopse ou reviews; consenso descreve romance sem beijos ou avanços físicos significativos.\"},{\"criterion\":\"protagonist\",\"score\":9,\"justification\":\"Faixa 9-10 (Estruturante): Penelope é o centro absoluto da narrativa com agência real que reorganiza seu destino e as relações ao redor, usando conhecimento prévio do jogo para desafiar o enquadramento de morte certa; leitores destacam sua inteligência, autoconsciência e capacidade de não ser mera vítima dos eventos.\"},{\"criterion\":\"humor\",\"score\":2,\"justification\":\"Faixa 0-3 (Ausente): tom predominantemente sério, tenso e psicológico segundo tags (Dark Ambience, Thriller, Psychological) e consenso dos leitores que descrevem a obra como emocionalmente pesada, sem menções a humor relevante.\"},{\"criterion\":\"drama\",\"score\":8,\"justification\":\"Faixa 7-8 (Recorrente): conflito emocional constante com família abusiva, manipulação e luta por sobrevivência permeia toda a obra, com catarse em momentos de confronto; consenso dos leitores descreve a experiência como \"rollercoaster emocional\" recorrente.\"},{\"criterion\":\"tragedy\",\"score\":5,\"justification\":\"Faixa 4-6 (Secundária): há sofrimento sério e perdas no desenvolvimento (como mencionado por leitores em relação a personagens como o escravo adquirido e arcos de personagens secundários), mas sem evidência clara de perda irreversível estrutural que reconfigure toda a narrativa.\"},{\"criterion\":\"angst\",\"score\":8,\"justification\":\"Faixa 7-8 (Acúmulo supera alívio): consenso dos leitores descreve sofrimento psicológico contínuo, vida constantemente ameaçada e emoções reprimidas por necessidade de sobrevivência, com alívio limitado e tardio; múltiplas reviews mencionam frustração e sofrimento acumulado ao longo da leitura.\"}]</parameter>\n<parameter name=\"art\">{\"judging_reviews\":[{\"review_id\":\"R13\",\"stance\":\"positive\"},{\"review_id\":\"R27\",\"stance\":\"positive\"},{\"review_id\":\"R21\",\"stance\":\"positive\"},{\"review_id\":\"R16\",\"stance\":\"positive\"},{\"review_id\":\"R29\",\"stance\":\"positive\"}],\"quality_signal\":\"ABOVE_AVERAGE\",\"quality_evidence\":[{\"review_id\":\"R13\",\"excerpt\":\"ART: 10/10 The coloring is... perfect!\"},{\"review_id\":\"R27\",\"excerpt\":\"ART | 10 | I'm no artist, but this is stunning. It's colored beautifully and has great pannels.\"},{\"review_id\":\"R29\",\"excerpt\":\"The art style is gorgeous. I am a sucker for pretty characters.\"}],\"change_signal\":\"NO_CLEAR_SIGNAL\",\"change_evidence\":[],\"justification\":\"A maioria das reviews que julgam a arte elogia fortemente a coloração, os painéis e o estilo visual, sem críticas relevantes à execução artística em si.\"}</parameter>\n</invoke>\n"
+   }
+  },
+  {
+   "caso": "A-E04",
+   "forma": "payload_no_summary_aberto",
+   "braco": "A",
+   "variante": "producao",
+   "celula": "E04",
+   "workId": "29d38599-10d6-4a52-aeee-5739bd7dabff",
+   "stopReason": "tool_use",
+   "messageId": "msg_011Cfaid4TdcvBNii9PbA8cz",
+   "classeOriginal": "schema",
+   "motivoOriginal": "Error: Payload da tool não atende ao schema: summary: summary contém marcação estrutural da tool (<parameter…>); confidence: Invalid input: expected number, received undefined; scores: Invalid input: expected array, received undefined",
+   "toolInputBruto": {
+    "summary": "\"Light and Shadow\" é um romance histórico/político com protagonista feminina forte, que acompanha o desenvolvimento gradual de um casamento arranjado até o amor genuíno, em meio a intrigas de corte e traições. A obra equilibra momentos de ação, drama político e tragédia pontual, com forte consenso dos leitores sobre a qualidade da protagonista e o arco \"enemies/strangers to lovers\".</parameter>\n<parameter name=\"confidence\">0.78</parameter>\n<parameter name=\"scores\">[\n{\"criterion\":\"romance\",\"score\":7.5,\"justification\":\"Faixa 7-8 (Core Romance): tags como Enemies Become Lovers, Fake Couple Becomes Genuine, Slow Romance e Unexpected Feelings indicam romance central com desenvolvimento gradual ao longo da obra. Há consenso entre leitores de que o romance é foco principal, embora alguns critiquem seu ritmo (rushed em partes, slow em outras), confirmando presença recorrente e não apenas pontual.\"},\n{\"criterion\":\"couple_dynamics\",\"score\":6,\"justification\":\"Faixa 4-6 (Conflituosa/ambivalente): a dinâmica começa de forma abusiva (agressão sexual inicial amplamente citada pelos leitores) mas evolui para parceria e apoio mútuo conforme o desenvolvimento, segundo consenso dos leitores que descrevem 'power couple' e suporte mútuo posterior. A conduta mista entre início problemático e evolução saudável justifica a faixa intermediária, não o piso 0-3 que seria reservado a abuso contínuo sem reparação.\"},\n{\"criterion\":\"fantasy\",\"score\":1,\"justification\":\"Faixa 0-3: não há elementos mágicos, criaturas ou fenômenos sobrenaturais atuantes na sinopse, tags ou reviews — o mundo é uma monarquia fictícia sem magia, com conflitos puramente políticos e militares.\"},\n{\"criterion\":\"setting_era\",\"score\":1,\"justification\":\"Faixa 0-3: tags de Historical Setting, Nobility/Aristocracy e a ambientação de reinos, duques e cortes situam a obra claramente no polo histórico/pré-moderno, confirmado pelas reviews que a classificam como 'manhwa histórico'.\"},\n{\"criterion\":\"action_adventure\",\"score\":6.5,\"justification\":\"Faixa 4-6 a 7-8 (ambíguo, optando pela faixa inferior com valor alto): há intrigas políticas, rebelião, batalhas e a protagonista atuando como guerreira, com reviews mencionando 'muita ação' e cenas de combate recorrentes, mas também trechos descritos como lentos e focados em convivência doméstica/corte. O equilíbrio entre progressão por eventos externos (guerra, identidade revelada, batalhas) e passagens mais contemplativas justifica banda 6-6.5.\"},\n{\"criterion\":\"adult_content\",\"score\":4,\"justification\":\"Faixa 4-6 (Suggestive): leitores descrevem uma cena inicial de conteúdo sexual não consensual implícito mas sem detalhamento explícito recorrente ('slight smut only towards the beginning', sem cenas explícitas depois), sugerindo insinuação e uma cena inicial sem exposição gráfica contínua.\"},\n{\"criterion\":\"protagonist\",\"score\":8,\"justification\":\"Faixa 7-8 (Protagonismo forte): consenso esmagador dos leitores aponta Edna como personagem central, astuta, decidida e com agência real — ela manipula sua própria identidade, lidera estrategicamente e eventualmente revela sua verdadeira origem real, alterando o curso da trama dentro do enquadramento do reino. Tags como Cunning, Smart, Strong Female Lead reforçam centralidade e agência sustentadas.\"},\n{\"criterion\":\"humor\",\"score\":2,\"justification\":\"Faixa 0-3: nem sinopse, tags nem reviews mencionam humor relevante; o tom predominante descrito é sério, dramático e político, sem indícios de construção cômica recorrente.\"},\n{\"criterion\":\"drama\",\"score\":7,\"justification\":\"Faixa 7-8: traições, manipulação política, mudança de personalidade, luto e conflitos de identidade são recorrentes ao longo da obra, com reviews mencionando montanha-russa emocional e tensão sustentada entre os protagonistas e a corte.\"},\n{\"criterion\":\"tragedy\",\"score\":5,\"justification\":\"Faixa 4-6: há morte de familiar e eventos de luto mencionados nas tags (Dead Family Member, Mourning) e reviews citam uma morte secundária com impacto emocional mas descrita como 'desnecessária' e pouco explorada, sugerindo perdas presentes porém não estruturantes do desenvolvimento principal.\"},\n{\"criterion\":\"angst\",\"score\":5,\"justification\":\"Faixa 4-6: leitores descrevem a leitura como relativamente leve e de 'baixa angústia', com alívio cômico-fluffy funcionando bem ao longo da trama, apesar do início pesado; o suporte mútuo entre os protagonistas é citado como eficaz em neutralizar o sofrimento inicial.\"}\n]"
+   }
+  },
+  {
+   "caso": "A-E08",
+   "forma": "scores_com_linha_de_comentario",
+   "braco": "A",
+   "variante": "producao",
+   "celula": "E08",
+   "workId": "5e6c6bbc-b061-4cae-8eb5-49562ad84d75",
+   "stopReason": "tool_use",
+   "messageId": "msg_011CfaiqHsNN3GHYehMkWDfa",
+   "classeOriginal": "schema",
+   "motivoOriginal": "Error: Payload da tool não atende ao schema: scores: Invalid input: expected array, received string · scores recebido como string: \"[ {\"criterion\":\"romance\",\"score\":8,\"justification\":\"Faixa 7-8 (Core Romance): romance é o eixo estrutural da obra, com t…\"",
+   "toolInputBruto": {
+    "summary": "Ao Haru Ride é um shoujo romântico clássico centrado no reencontro entre Futaba e Kou, marcado por triângulos amorosos, mal-entendidos prolongados e forte carga emocional. A obra prioriza drama e angústia sobre humor ou fantasia, com protagonismo relevante de Futaba dentro de um enquadramento social/escolar realista.",
+    "confidence": 0.85,
+    "scores": "[\n{\"criterion\":\"romance\",\"score\":8,\"justification\":\"Faixa 7-8 (Core Romance): romance é o eixo estrutural da obra, com tags de Love Confession, Slow Romance, Childhood Love, First Love e múltiplos triângulos; consenso das reviews descreve a obra como centrada na relação Futaba-Kou com desenvolvimento contínuo ao longo de dezenas de capítulos.\"},\n{\"criterion\":\"couple_dynamics\",\"score\":5,\"justification\":\"Faixa 4-6 (Conflituosa/ambivalente): há consenso entre leitores de que o casal principal vive mal-entendidos prolongados, indecisão e momentos em que Kou magoa Futaba, com relacionamentos paralelos tensos e manipuladores entrando no caminho. A dinâmica é marcada por idas e vindas emocionais, não puramente destrutiva nem plenamente saudável.\"},\n{\"criterion\":\"fantasy\",\"score\":0,\"justification\":\"Faixa 0-3: não há nenhum elemento mágico ou sobrenatural; é slice of life escolar realista, sem qualquer tag ou menção a fantasia.\"},\n{\"criterion\":\"setting_era\",\"score\":9,\"justification\":\"Faixa 9-10: ambientação contemporânea em colégio japonês comum, sem deslocamento temporal, confirmada pelas tags de High School/School e pela sinopse.\"},\n{\"criterion\":\"action_adventure\",\"score\":1,\"justification\":\"Faixa 0-3: a narrativa é movida por convivência escolar, conversas e dinâmicas de relacionamento, sem deslocamento, perigo ou objetivos externos — consistente com slice of life/drama romântico escolar.\"},\n{\"criterion\":\"adult_content\",\"score\":1,\"justification\":\"Faixa 0-3 (Clean): sinopse, tags e reviews não indicam nenhuma cena sexual ou sexualização relevante; o foco é emocional/romântico adolescente.\"},\n{\"criterion\":\"protagonist\",\"score\":7,\"justification\":\"Faixa 7-8: Futaba é central e toma decisões que reorganizam sua trajetória social e romântica (mudar sua postura na escola, buscar Kou, lidar com triângulos), dentro do enquadramento realista da vida escolar; reviews destacam como as escolhas dos personagens movem a trama.\"},\n{\"criterion\":\"humor\",\"score\":4,\"justification\":\"Faixa 4-6: gênero Comedy e personagens com traços cômicos (tsundere, carefree) sugerem alívio cômico recorrente, mas reviews e tom predominante enfatizam drama e angústia como registro principal, não comédia dominante.\"},\n<!--drama-->\n{\"criterion\":\"drama\",\"score\":8,\"justification\":\"Faixa 7-8: consenso forte entre leitores aponta conflitos emocionais recorrentes (triângulos amorosos, mal-entendidos, traumas de personagens) que se estendem por grande parte da obra, com catarse ao final; tags de Mourning, Tragic Past e Personality Change reforçam isso.\"},\n{\"criterion\":\"tragedy\",\"score\":4,\"justification\":\"Faixa 4-6: há menção a doença (tag Cancer) e perdas familiares que parecem situar-se no desenvolvimento, mas as evidências disponíveis não detalham mortes centrais na trama principal entre os protagonistas — o peso trágico é secundário ao drama romântico predominante.\"},\n{\"criterion\":\"angst\",\"score\":7,\"justification\":\"Faixa 7-8: consenso entre leitores descreve acúmulo de sofrimento, frustração e tensão emocional prolongada (mal-entendidos, indecisão de Kou, interferências de terceiros) que supera o alívio na maior parte da leitura, embora haja resolução mais catártica ao final.\"}\n]"
+   }
+  },
+  {
+   "caso": "B-E12",
+   "forma": "scores_aspas_cruas_multilinha",
+   "braco": "B",
+   "variante": "v32-art4",
+   "celula": "E12",
+   "workId": "7434f0f2-b159-436e-a7f8-ff4e9467391e",
+   "stopReason": "tool_use",
+   "messageId": "msg_011Cfaj47h4FxbZpvUP737ry",
+   "classeOriginal": "schema",
+   "motivoOriginal": "Error: Payload da tool não atende ao schema: scores: Invalid input: expected array, received string · scores recebido como string: \"[ {\"criterion\":\"romance\",\"score\":7,\"justification\":\"Faixa 7-8 (Core Romance): o romance entre Ilyana e Magnus é o eixo c…\"",
+   "toolInputBruto": {
+    "summary": "\"The Villainess Tames the Beast\" é um drama psicológico sombrio sobre uma leitora transmigrada que tenta desfazer o trauma causado por sua versão original a um \"animal de estimação humano\", mergulhando em manipulação, vingança e dependência mútua. A obra é marcada por tensão romântica tóxica, agência moral ambígua da protagonista e forte carga emocional ao longo do desenvolvimento.",
+    "confidence": 0.78,
+    "scores": "[\n{\"criterion\":\"romance\",\"score\":7,\"justification\":\"Faixa 7-8 (Core Romance): o romance entre Ilyana e Magnus é o eixo central e recorrente da trama, com desenvolvimento contínuo (ciúme, fuga, reencontro, revelações), mesmo sendo lento e tóxico. Há consenso entre leitores de que é uma 'dark romance' que evolui lentamente até um final romântico, mesmo com críticas à artificialidade do sentimento.\"},\n{\"criterion\":\"couple_dynamics\",\"score\":2,\"justification\":\"Faixa 0-3 (Destrutiva): tags de Stockholm Syndrome, Master-Slave Relationship, Dysfunctional Relationship e Taming, somadas ao consenso de leitores descrevendo abuso mútuo, manipulação, sequestro e dependência doentia, indicam dano ativo e não plenamente consensual dentro do vínculo central. Há quem goste da intensidade, mas a maioria descreve a relação como tóxica e prejudicial para ambos.\"},\n{\"criterion\":\"fantasy\",\"score\":6,\"justification\":\"Faixa 4-6: embora haja magia, feitiçaria e \"spirit beasts\" no mundo (poderes ligados ao background e à premissa de ser isekai/book world), os elementos sobrenaturais parecem mais pontuais que estruturantes conforme reviews, focando mais no drama psicológico do que em um sistema mágico ativo e contínuo.\"},\n{\"criterion\":\"setting_era\",\"score\":2,\"justification\":\"Faixa 0-3: ambientação de fantasia europeia com nobreza, realeza e um mundo de \"livro\" (Book World/Isekai) clássico de romance de villainess, claramente histórica/pré-moderna em direção, sem elementos contemporâneos.\"},\n{\"criterion\":\"action_adventure\",\"score\":4,\"justification\":\"Faixa 4-6: a trama avança por decisões, fugas, sequestros e revelações, mas o cerne da experiência, segundo os leitores, é o drama psicológico e os diálogos entre os protagonistas, não deslocamento ou aventura externa constante.\"},\n{\"criterion\":\"adult_content\",\"score\":8,\"justification\":\"Faixa 7-8 (piso definido pela regra obrigatória ≥7): a obra é rotulada como 'Adult' e tem tags como Leash, mas pelo menos uma review afirma explicitamente que não há cenas de sexo mostradas ('no smut here'), sugerindo nudez/contexto sexual sem explicitação total.\"},\n{\"criterion\":\"protagonist\",\"score\":7,\"justification\":\"Faixa 7-8: Ilyana domina a narrativa com decisões que reorganizam o rumo da trama (tentar libertar Magnus, lidar com consequências de seu passado), e os leitores destacam fortemente sua personalidade e dilemas mesmo com críticas à sua \"estupidez\" ou falta de autopreservação, o que confirma centralidade e agência representativas.\"},\n{\"criterion\":\"humor\",\"score\":1,\"justification\":\"Faixa 0-3: não há nenhuma menção a humor ou comédia nas reviews ou sinopse; o tom é descrito de forma consistente como sombrio, angustiante e psicológico.\"},\n{\"criterion\":\"drama\",\"score\":9,\"justification\":\"Faixa 9-10: há consenso esmagador entre os leitores de que o conflito emocional entre os protagonistas é constante, central e doloroso ao longo de toda a obra, envolvendo manipulação, vingança e trauma recorrente.\"},\n{\"criterion\":\"tragedy\",\"score\":6,\"justification\":\"Faixa 4-6: no desenvolvimento há sofrimento sério e reversível (tortura, sequestro, quase-morte), mas sem confirmação clara de perda irreversível definitiva central à trama principal (o final é descrito como feliz), então fica na faixa secundária alta.\"},\n{\"criterion\":\"angst\",\"score\":9,\"justification\":\"Faixa 9-10: segundo o consenso dos leitores, o sofrimento se acumula por boa parte da obra sem alívio eficaz (ciclos de fuga e retorno, manipulação mútua, \"stockholm syndrome\"), com resolução/alívio chegando só perto do final.\"}\n]",
+    "art": {
+     "judging_reviews": [
+      {
+       "review_id": "R1",
+       "stance": "positive"
+      },
+      {
+       "review_id": "R4",
+       "stance": "positive"
+      },
+      {
+       "review_id": "R8",
+       "stance": "positive"
+      },
+      {
+       "review_id": "R14",
+       "stance": "positive"
+      },
+      {
+       "review_id": "R15",
+       "stance": "positive"
+      },
+      {
+       "review_id": "R18",
+       "stance": "mixed"
+      },
+      {
+       "review_id": "R19",
+       "stance": "positive"
+      },
+      {
+       "review_id": "R11",
+       "stance": "negative"
+      }
+     ],
+     "quality_signal": "ABOVE_AVERAGE",
+     "quality_evidence": [
+      {
+       "review_id": "R1",
+       "excerpt": "I absolutely loved the darkness of the artstyle - it fit the tone perfectly"
+      },
+      {
+       "review_id": "R8",
+       "excerpt": "The art is incredibly immersive and pleasing to the eyes"
+      },
+      {
+       "review_id": "R15",
+       "excerpt": "The art is also super good. It embodies a dark sinister atmosphere that perfectly reflects the ML's psyche"
+      }
+     ],
+     "change_signal": "NO_CLEAR_SIGNAL",
+     "change_evidence": [],
+     "justification": "A maioria das reviews que julgam a arte a elogia fortemente, destacando o estilo sombrio e imersivo como ponto forte; apenas uma review isolada critica a anatomia."
+    }
+   }
+  }
+ ]
+}

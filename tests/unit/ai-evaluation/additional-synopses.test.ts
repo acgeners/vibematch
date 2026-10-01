@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { buildUserPrompt, canonicalInputHash, canonicalInputHashV2 } from "@/lib/ai-evaluation/service"
+import { buildUserPrompt, canonicalInputHash, canonicalInputHashV2, VARIANTE_V30 } from "@/lib/ai-evaluation/service"
 import type { AiEvaluationRequest } from "@/lib/ai-evaluation/service"
 import { splitSynopsesForEvaluation } from "@/lib/work-derived"
 
@@ -49,21 +49,28 @@ describe("splitSynopsesForEvaluation", () => {
 })
 
 describe("buildUserPrompt com sinopses adicionais", () => {
-  it("inclui os blocos [S] rotulando manuais com autoridade alta e as demais pela fonte", () => {
-    const prompt = buildUserPrompt(
-      {
-        ...baseReq,
-        additionalSynopses: [
-          { text: "Versão manual escrita pela curadora.", source: "manual", isManual: true },
-          { text: "Sinopse vinda do AniList.", source: "anilist", isManual: false },
-        ],
-      },
-      NO_REVIEWS
-    )
+  const comAdicionais = {
+    ...baseReq,
+    additionalSynopses: [
+      { text: "Versão manual escrita pela curadora.", source: "manual", isManual: true },
+      { text: "Sinopse vinda do AniList.", source: "anilist", isManual: false },
+    ],
+  }
 
+  it("v30: inclui os blocos [S] rotulando manuais com autoridade alta e as demais pela fonte", () => {
+    const prompt = buildUserPrompt(comAdicionais, NO_REVIEWS, VARIANTE_V30)
     expect(prompt).toContain("Sinopses adicionais salvas na obra")
     expect(prompt).toContain("[S1] (MANUAL — escrita/editada pelo usuário) Versão manual escrita pela curadora.")
     expect(prompt).toContain("[S2] (fonte: anilist) Sinopse vinda do AniList.")
+  })
+
+  it("v32 (produção): o MESMO rótulo, dentro da fronteira textual", () => {
+    const prompt = buildUserPrompt(comAdicionais, NO_REVIEWS)
+    expect(prompt).toContain("Sinopses adicionais salvas na obra")
+    expect(prompt).toContain(
+      '===== INÍCIO DADO EXTERNO S1 · tipo: "sinopse_adicional" · origem: "MANUAL — escrita/editada pelo usuário" =====\nVersão manual escrita pela curadora.\n===== FIM DADO EXTERNO S1 =====',
+    )
+    expect(prompt).toContain('origem: "fonte: anilist" =====\nSinopse vinda do AniList.')
   })
 
   it("não emite o bloco quando não há adicionais (prompt idêntico ao anterior)", () => {
