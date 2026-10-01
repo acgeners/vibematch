@@ -47,8 +47,13 @@ describe("PROMPT_VERSION acompanha o texto do prompt", () => {
    * ⚠️ A região "CRITÉRIOS … COMPATIBILIZAÇÃO" é BYTE-IDÊNTICA ao artefato aprovado
    * `SYSTEM_PROMPT-v29+alvo11-c1.txt`; quem prova isso é `producer-alvo-11.test.ts`. O hash
    * abaixo cobre o prompt INTEIRO, inclusive as regras que ficaram de fora daquela região.
+   *
+   * 🔴 v30 → **v32** (2026-10-01), pulando a v31 (nomeia as 25 avaliações experimentais de 27/09).
+   * O SYSTEM_PROMPT NÃO mudou — o hash abaixo é o da v30. O que mudou foi o contrato FORA dele: Arte
+   * na tool e no prompt de usuário, fronteira textual, apêndice de Arte. Por isso a v32 tem travas
+   * PRÓPRIAS logo abaixo, uma por peça: mexer em qualquer uma exige bump, como no SYSTEM_PROMPT.
    */
-  const PINNED_VERSION = "v30"
+  const PINNED_VERSION = "v32"
   const PINNED_SHA256 = "6f9e4378b5406b68539d9226c53f393ab19d6aa2a55c053ad273eeed2e4a0580"
 
   it("está fixada na versão que este hash descreve", () => {
@@ -63,7 +68,31 @@ describe("PROMPT_VERSION acompanha o texto do prompt", () => {
     ).toBe(PINNED_SHA256)
   })
 
+  /**
+   * O contrato da v32 fora do SYSTEM_PROMPT. A tool de produção tem o MESMO hash da tool do braço B
+   * dos gates de Arte de 2026-10-01 — é a tool testada, byte a byte.
+   */
+  it("v32: tool, instrução de Arte, cabeçalho do apêndice e fronteira textual batem com o congelado", async () => {
+    const { evaluationToolFor, INSTRUCAO_APENDICE_ARTE, PRODUCTION_VARIANT } = await import("@/lib/ai-evaluation/service")
+    const { INSTRUCAO_ARTE } = await import("@/lib/ai-evaluation/art-signal")
+    const { INSTRUCAO_FRONTEIRA_TEXTUAL } = await import("@/lib/ai-evaluation/evidence-format")
+    const sha = (s: string) => createHash("sha256").update(s).digest("hex")
+    expect({
+      tool: sha(JSON.stringify(evaluationToolFor(PRODUCTION_VARIANT))),
+      arte: sha(INSTRUCAO_ARTE),
+      apendice: sha(INSTRUCAO_APENDICE_ARTE),
+      fronteira: sha(INSTRUCAO_FRONTEIRA_TEXTUAL),
+    }).toEqual({
+      tool: "1cf60517e8f963f5be509b73458c239af2bf0d1944be50b1c949c4833dcb770d",
+      arte: "ed3218f5fd9c438aae0c53cb4ece1a30ff571ec349344c94e2c979eabdf507a8",
+      apendice: "824354f0c0b7cb56ca739779e2419d5f8c00dcfa93985311ec076da603c5254c",
+      fronteira: "0baea6f496bce1ea3faef9188ce9825a948a3b4edc59671473be8284cb9c26ef",
+    })
+  })
+
   it("não reusa um número de versão já gasto no log de chamadas", () => {
+    // v31: 25 avaliações experimentais de 2026-09-27 (não canônicas).
+    expect(PROMPT_VERSION).not.toBe("v31")
     // `ai_api_calls` tem 65 chamadas de `ai_evaluation` rotuladas "v24" (2026-07-29) —
     // todas de obras do gold set, da investigação que comparou as rubricas v23/v24 contra
     // o julgamento da curadora. `ai_evaluations` gravou v22 nelas porque versão de RUBRICA

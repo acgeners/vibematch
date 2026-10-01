@@ -348,3 +348,85 @@ export function parseArtSignal(raw: unknown): ArtSignal | null {
   }
   return out as unknown as ArtSignal
 }
+
+// ── Seleção de EVIDÊNCIA para a avaliação de Arte por IA (apêndice art4) ──────────────────────
+//
+// ⚠️ Não alimenta `extractArtSignal` nem o `art_signal` persistido (sem bump de
+// `ART_SIGNAL_VERSION`). É RECUPERAÇÃO de candidatas, não julgamento: decide quais trechos o
+// modelo vê no apêndice de Arte; quem julga continua sendo o modelo.
+//
+// Calibrada (2026-10-01, `Auditoria/piloto-arte-abc/CRITERIO-ADAPTATIVO-EVIDENCIA-ARTE.md`) contra
+// a leitura humana das 16 obras do gate: nas listas explícitas, precisão 0,95 e recall 0,90 para
+// "julga a arte"; por obra, a contagem humana cai entre `julga` e `mencao` em 15 de 16. Regex NÃO
+// mede semântica — o número só vale como ordem de grandeza e como filtro de alta precisão.
+
+/** Termo de arte, mais largo que `ART_TERM` (painéis, cores, anatomia, "drawn"). */
+const EVIDENCIA_TERMO =
+  /\b(art|arts|artwork|art ?style|artstyle|drawings?|drawn|illustrations?|visuals?|colou?ring|colou?rs|panels?|anatomy|arte|desenhos?|traços?)\b/gi
+/** Avaliação perto do termo (≤90 chars): adjetivo de qualidade, positivo, negativo ou mediano. */
+const EVIDENCIA_AVALIACAO =
+  /\b(gorgeous|beautiful|beautifully|stunning|amazing|lovely|pretty|masterpiece|detailed|expressive|polished|vibrant|breathtaking|crisp|clean|great|good|nice|decent|fine|okay|ok|solid|average|so-?so|meh|mediocre|ugly|bad|poor|terrible|awful|weird|stiff|sloppy|rushed|generic|bland|amateur\w*|inconsistent|cheap|simple|plain|unique|cute|incredible|phenomenal|stellar|spectacular|wonderful|fantastic|awesome|excellent|perfect|immersive|not (?:the )?(?:best|great|good|my cup)|could (?:be|have been) better|strong point|weak point|not a strong|isn'?t (?:amazing|perfect|great)|bonit[ao]|lind[ao]|bel[ao]s?|bo[am]|ruim|fe[ia]o?|fraca|mediano)\b/i
+/** Nota numérica de arte ("Art: 8/10", "ART | 10 |"). */
+const EVIDENCIA_NOTA = /\b(art|artwork|arte)\s*(?:[:|-]|\bis\b|\bwas\b)?\s*\|?\s*\d+(?:[.,]\d+)?\s*(?:\/\s*10|out of 10|\|)/i
+/** Trajetória perto do termo. */
+const EVIDENCIA_MUDANCA =
+  /\b(improv\w*|got better|gets better|getting better|evolv\w*|evolution|chang\w*|worse|declin\w*|deteriorat\w*|went downhill|got lazy|later chapters|after (?:chapter|ch\.?|season)|season \d|early chapters|first (?:few )?chapters|in the beginning|at the start|at first|melhor[ao]u|piorou|mudou)\b/i
+/** "drawn together", "drawn to": atração, não desenho. */
+const DRAWN_FIGURADO = /^\s+(together|to|towards|into|in)\b/i
+const EVIDENCIA_JANELA = 90
+const EVIDENCIA_TRECHO = 140
+
+export interface EvidenciaDeArte {
+  /** Algum termo de arte. Menção não é julgamento. */
+  mencao: boolean
+  /** Termo de arte com avaliação de qualidade perto, ou nota numérica de arte. */
+  julga: boolean
+  /** Termo de arte com vocabulário de trajetória perto. */
+  mudanca: boolean
+  /** O texto em torno das menções (±140 chars, janelas fundidas, cortadas em espaço). */
+  trecho: string
+}
+
+export function classificarEvidenciaDeArte(texto: string): EvidenciaDeArte {
+  const t = String(texto ?? "")
+  let mencao = false
+  let julga = false
+  let mudanca = false
+  const janelas: Array<[number, number]> = []
+  EVIDENCIA_TERMO.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = EVIDENCIA_TERMO.exec(t)) !== null) {
+    const fim = m.index + m[0].length
+    if (/^drawn$/i.test(m[1]) && DRAWN_FIGURADO.test(t.slice(fim, fim + 12))) continue
+    mencao = true
+    const jan = t.slice(Math.max(0, m.index - EVIDENCIA_JANELA), Math.min(t.length, fim + EVIDENCIA_JANELA))
+    if (EVIDENCIA_AVALIACAO.test(jan)) julga = true
+    if (EVIDENCIA_MUDANCA.test(jan)) mudanca = true
+    janelas.push([Math.max(0, m.index - EVIDENCIA_TRECHO), Math.min(t.length, fim + EVIDENCIA_TRECHO)])
+  }
+  if (EVIDENCIA_NOTA.test(t)) {
+    mencao = true
+    julga = true
+    const n = EVIDENCIA_NOTA.exec(t)!
+    janelas.push([Math.max(0, n.index - EVIDENCIA_TRECHO), Math.min(t.length, n.index + n[0].length + EVIDENCIA_TRECHO)])
+  }
+  // Funde janelas que se tocam e corta nos espaços, para o trecho não começar no meio da palavra.
+  janelas.sort((a, b) => a[0] - b[0])
+  const fundidas: Array<[number, number]> = []
+  for (const j of janelas) {
+    const ult = fundidas[fundidas.length - 1]
+    if (ult && j[0] <= ult[1]) ult[1] = Math.max(ult[1], j[1])
+    else fundidas.push([j[0], j[1]])
+  }
+  const trecho = fundidas
+    .map(([a, b]) => {
+      let ini = a
+      let fim = b
+      if (ini > 0) { const s = t.indexOf(" ", ini); ini = s === -1 || s >= fim ? ini : s + 1 }
+      if (fim < t.length) { const s = t.lastIndexOf(" ", fim); fim = s <= ini ? fim : s }
+      return t.slice(ini, fim).trim()
+    })
+    .filter(Boolean)
+    .join(" … ")
+  return { mencao, julga, mudanca, trecho }
+}

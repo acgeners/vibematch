@@ -5017,6 +5017,42 @@ gastar, 4 sondas) e `preparar-e-avaliar-card.test.tsx` (RENDER — a régua pode
 card continuar dizendo "Avaliar"; 3 sondas). O gate de fontes foi exercitado ponta a ponta no app
 (popup de custo → bloqueio em ~1s, zero chamada paga).
 
+## Arte na MESMA chamada dos 11 (v32)
+
+A avaliação de IA (`requestAiEvaluation`) devolve os 11 critérios **e** a Arte numa chamada só. Nenhuma
+segunda chamada, nenhum pipeline pago separado. Donos: `lib/ai-evaluation/art-signal.ts` (contrato e
+validador), `art-appendix.ts` (apêndice), `art-persistence.ts` (linha de `ai_evaluation_art`, migration 201).
+
+🔴 **Arte nunca derruba os 11.** `art` é obrigatório na TOOL e validado FORA do Zod dos 11: Arte
+ausente ou malformada vira `status = "invalid"`, sem evidência vira `"abstained"`, e em nenhum dos
+casos a resposta é recusada nem há retry. Retry continua sendo só por problema dos 11.
+
+**Qualidade** é categórica (ABOVE/AVERAGE/BELOW/INCONCLUSIVE, sem 0–10), e o validador só REBAIXA: ≥3
+reviews distintas julgando a arte, ABOVE/BELOW com ≥60% da posição, AVERAGE com `competent` como
+maior grupo, citação literal válida. A **força** (LOW 3–4 · MEDIUM 5–9 · HIGH ≥10 com ≥70%) é calculada
+por código e só comunica robustez — não muda rótulo.
+
+🔴 **Mudança/consistência é EXPERIMENTAL** (`ART_CHANGE_EXPERIMENTAL`, coluna `change_experimental`):
+é coletada para acumular dado e NÃO entra em scoring, Nota Prevista, ranking, filtro, recomendação nem
+penalização. Nos gates ela oscilou entre rodadas idênticas.
+
+**Apêndice:** até 10 trechos de arte do pool da obra que NÃO estão nas ≤30 reviews dos 11. As 30 não
+mudam. O pool entra como `artEvidencePool`, vira `artAppendix` uma vez (antes da chave de cache) e
+o apêndice escolhido entra no hash.
+
+**Persistência:** uma linha por avaliação, presa a `ai_evaluations` por FK (cascade), gravada em
+modo FAIL-SOFT depois das notas (`triggerAiEvaluation`). Aceitar/pular os 11 não toca a linha. 🔴 Sem
+linha = **Arte não avaliada** (avaliação antiga, ou fluxo de cadastro `works.ts`, que não grava Arte) —
+nunca `abstained`.
+
+⚠️ **`works.art_signal`/`art_estimate`/`art_percentile` continuam como estão** (filtro, mood). A Arte
+por IA `rated` é o sinal principal candidato; o determinístico fica como fallback e diagnóstico.
+**Nunca combine os dois num número.**
+
+⚠️ `VARIANTE_V30` existe só para o prompt v30 continuar reproduzível em teste; a produção é
+`PRODUCTION_VARIANT` (v32). O SYSTEM_PROMPT da v32 é o da v30, byte a byte; a v32 tem travas
+próprias para tool, instrução de Arte, apêndice e fronteira (`prompt-version-pin.test.ts`).
+
 ## AI evaluation flow
 
 Two distinct paths both ultimately call `requestAiEvaluation()` in `lib/ai-evaluation/service.ts`:
