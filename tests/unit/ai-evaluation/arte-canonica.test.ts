@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 vi.mock("server-only", () => ({}))
 
 const spies = vi.hoisted(() => ({ createLoggedMessage: vi.fn(), anotar: vi.fn(async () => {}) }))
-vi.mock("@/lib/ai-evaluation/criteria-guard", () => ({ exigirCriteriosNoBanco: async () => {} }))
+vi.mock("@/lib/ai-evaluation/criteria-guard", () => ({ exigirCriteriosNoBanco: async () => {}, exigirVersaoCanonica: async () => {} }))
 vi.mock("@/lib/ai/anthropic-client", () => ({
   createLoggedMessage: spies.createLoggedMessage,
   anotarPayloadRecusado: spies.anotar,

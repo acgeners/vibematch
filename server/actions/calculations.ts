@@ -59,7 +59,8 @@ import {
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { SCORING_CRITERION_SLUGS } from "@/lib/calculations/scoring-features"
 import { readFantasyDrift, scoringCriteriaSignature } from "@/server/queries/fantasy-drift"
-import { conferirContratoDoCalculo, mensagemDeContratoQuebrado } from "@/lib/calculations/scoring-contract"
+import { SCORING_CONTRACT, conferirContratoDoCalculo, mensagemDeContratoQuebrado } from "@/lib/calculations/scoring-contract"
+import { exigirContratoDeScoring } from "@/server/queries/canonical-contract"
 import type { DeclaredTagPref } from "@/server/queries/tag-preferences"
 import { loadArtLabels } from "@/server/queries/pilot-taste"
 import { computeArtForCatalog } from "@/lib/art/model"
@@ -498,6 +499,10 @@ export type RecalculateExecutionContext = "next-runtime" | "headless"
 export async function recalculateAll(ctx: RecalculateExecutionContext = "next-runtime") {
   const headless = ctx === "headless"
   const supabase = createAdminClient()
+  // 🔴 Contrato canônico (migration 202), ANTES de ler o catálogo: se o banco impõe um scoring que
+  // não é o deste código, nada é calculado nem gravado (e `recalc_pending` fica de pé). O trigger
+  // recusaria a escrita de qualquer jeito — aqui o checkout defasado descobre isso sem custo.
+  await exigirContratoDeScoring(supabase)
 
   // Offset de atributos (Fase 1.5) — carregado uma vez e aplicado on-read.
   const userId = await getCurrentUserId(supabase)
@@ -1433,6 +1438,9 @@ export function computeRecalc(input: RecalcComputeInput) {
     tag_overlap_net: w.netName,
     formula_version: config.formula_version,
     calculated_at: new Date().toISOString(),
+    // O contrato com que esta linha foi calculada — o banco recusa resultado de scoring sem ele
+    // (migration 202). Vai também para o espelho per-user (`mirrorOwnerScores`).
+    scoring_contract: SCORING_CONTRACT,
   }))
 
   // Agregar diagnósticos antes do persist

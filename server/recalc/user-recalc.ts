@@ -7,6 +7,7 @@ import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getOwnerUserId } from "@/server/queries/current-user"
+import { exigirContratoDeScoring } from "@/server/queries/canonical-contract"
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // O MODELO DE CADA UM — Fatia 2b
@@ -58,6 +59,8 @@ export async function recalculateForUser(userId: string): Promise<UserRecalcResu
   }
 
   const supabase = createAdminClient()
+  // Contrato canônico (migration 202): mesmo preflight do `recalculateAll`, antes de ler e gravar.
+  await exigirContratoDeScoring(supabase)
 
   const [worksRes, weightsRes, configRes, labels, biasMap, declaredTagPrefs, tasteProfile] =
     await Promise.all([

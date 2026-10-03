@@ -12,6 +12,7 @@
     "smoke": "node scripts/smoke.mjs",
     "smoke:logado": "bash scripts/smoke-logado.sh",
     "contracts": "node --env-file=.env.local --env-file=.env.analysis scripts/contratos-postgrest.mjs",
+    "test:db-contract": "node scripts/contrato-canonico-db.mjs",
     "clean": "rm -rf .next .turbo",
     "clean:all": "rm -rf .next .turbo node_modules",
     "lint": "eslint",

@@ -18,7 +18,7 @@ const spies = vi.hoisted(() => ({
   quebrarPosProcessamento: false,
 }))
 
-vi.mock("@/lib/ai-evaluation/criteria-guard", () => ({ exigirCriteriosNoBanco: async () => {} }))
+vi.mock("@/lib/ai-evaluation/criteria-guard", () => ({ exigirCriteriosNoBanco: async () => {}, exigirVersaoCanonica: async () => {} }))
 vi.mock("@/lib/ai/anthropic-client", () => ({
   createLoggedMessage: spies.createLoggedMessage,
   anotarPayloadRecusado: spies.anotar,

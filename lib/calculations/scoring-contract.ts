@@ -70,3 +70,26 @@ export function mensagemDeContratoQuebrado(c: ContratoDoCalculo): string {
     `aplique a migration e o recálculo volta sozinho no gatilho seguinte.`
   )
 }
+
+/**
+ * O CONTRATO DE SCORING que este código implementa — o nome que o banco confere antes de aceitar
+ * resultado de recalc (`canonical_contract.scoring_contracts`, migration 202).
+ *
+ * `s9-fantasy-b-v1` =
+ *   · os 9 de `SCORING_CRITERION_SLUGS` (`setting_era` e `angst` FORA);
+ *   · Strategy B de `fantasy` (`fantasy-scoring-transition.ts`): o slot lê o legado
+ *     `fantasy_nobility` quando existe e o `fantasy` real só como fallback;
+ *   · v1 da combinação acima.
+ *
+ * 🔴 POR QUE EXISTE: o contrato de slugs logo acima compara CONJUNTOS — e em 02–03/10/2026 um
+ * checkout sem a Strategy B passou por ele (o slot `fantasy` existe nos dois códigos; o que muda é
+ * o VALOR que vai nele) e regravou a Nota Prevista do catálogo inteiro. Este nome muda quando a
+ * SEMÂNTICA do scoring muda, e o banco recusa quem declara outro (ou nenhum).
+ *
+ * ⚠️ BUMP obrigatório, na MESMA mudança, quando mudarem: a lista de slugs do cálculo, a regra do
+ * slot `fantasy`, ou qualquer coisa que faça o mesmo dado de entrada produzir outro resultado de
+ * scoring. Junto vai uma migration atualizando `canonical_contract` (as duas versões na lista
+ * durante a janela deploy × migration). `tests/unit/orchestration/contrato-canonico-pin.test.ts`
+ * fixa este nome ao que ele descreve e à migration.
+ */
+export const SCORING_CONTRACT = "s9-fantasy-b-v1" as const

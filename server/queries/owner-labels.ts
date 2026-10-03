@@ -194,6 +194,10 @@ export async function mirrorOwnerScores(
     for (const col of PERSONAL_SCORE_COLUMNS) {
       if (row[col] !== undefined) out[col] = row[col]
     }
+    // O contrato de scoring (migration 202) viaja só quando a linha o TRAZ: o recalc o carimba em
+    // cada linha, o Veredito (que também passa por aqui, só com `alignment_*`) não — e carimbar
+    // ali afirmaria um cálculo de scoring que não aconteceu.
+    if (row.scoring_contract !== undefined) out.scoring_contract = row.scoring_contract
     return out
   })
 

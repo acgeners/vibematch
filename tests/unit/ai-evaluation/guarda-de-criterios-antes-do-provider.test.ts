@@ -26,6 +26,7 @@ const { guarda, createLoggedMessage, getAnthropicClient } = spies
 
 vi.mock("@/lib/ai-evaluation/criteria-guard", () => ({
   exigirCriteriosNoBanco: () => spies.guarda(),
+  exigirVersaoCanonica: async () => {},
 }))
 vi.mock("@/lib/ai/anthropic-client", () => ({
   createLoggedMessage: spies.createLoggedMessage,

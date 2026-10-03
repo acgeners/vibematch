@@ -4728,6 +4728,41 @@ avaliação separada; quem as lê como tal afirma uma medição que não houve.
 
 `sync-constants` also backfills `work_tags` from the legacy `works.genres` text array using the `genre` tag group.
 
+## O contrato canônico mora no BANCO (migration 202)
+
+🔴 **Quem pode gravar avaliação de IA e resultado de scoring na nuvem é decidido pelo banco, não
+pelo checkout.** Em 26–27/09 e de novo em 02–03/10/2026, um `next dev` local numa branch defasada
+gravou avaliações `v31` (versão que nunca existiu no `main`) e rodou recalcs que regravaram a Nota
+Prevista do catálogo sem a Strategy B de `fantasy`. As guardas da época moravam todas no código
+local, e um checkout mais antigo que a guarda não a tem.
+
+| peça | onde | o que faz |
+|---|---|---|
+| fonte da verdade | `canonical_contract` (1 linha) | versões de prompt e contratos de scoring permitidos + `enforce` |
+| barreira final | triggers da 202 | recusam `prompt_version` fora da lista (só ao GRAVAR/ALTERAR — histórico intacto) e resultado de scoring sem `scoring_contract` permitido |
+| preflight | `exigirVersaoCanonica` (`criteria-guard.ts`) · `exigirContratoDeScoring` (`server/queries/canonical-contract.ts`) | recusam ANTES do provider e ANTES de ler/gravar o catálogo |
+
+O comportamento dos triggers é conferido por `npm run test:db-contract` (Postgres do stack local,
+numa transação que termina em ROLLBACK — nada persiste; sem o stack, falha).
+
+⚠️ **Trocar `PROMPT_VERSION` ou `SCORING_CONTRACT` (`lib/calculations/scoring-contract.ts`) exige
+migration atualizando `canonical_contract` no MESMO PR**, com os dois valores na lista durante a
+janela entre migration e deploy. `tests/unit/orchestration/contrato-canonico-pin.test.ts` reprova a
+divergência — e fixa o que `s9-fantasy-b-v1` descreve (os 9 slugs, Strategy B): mudar a semântica do
+scoring sem trocar o NOME do contrato também reprova.
+
+🔴 **Scoring se grava por UPSERT com `scoring_contract`, nunca por UPDATE solto.** O writer antigo é
+barrado porque o Postgres dispara o `BEFORE INSERT` sobre a linha PROPOSTA antes do `ON CONFLICT`;
+o UPDATE puro de colunas de scoring é recusado por uma marca de transação que só o INSERT validado
+cria. ⚠️ A variante "copiar para outra coluna e zerar a de entrada" foi testada e QUEBRA o writer
+novo (o zerar contamina o `EXCLUDED`) — não reintroduzir.
+
+⚠️ **`enforce` nasce `false` e nenhuma migration o liga** (o pin reprova): ligar é passo operacional
+na nuvem, DEPOIS do deploy do código que envia `scoring_contract` — antes disso o recalc de produção
+pararia. O `db:pull` desliga o `enforce` na réplica local, e contrato ausente (banco anterior à 202)
+não impõe nada. ⚠️ Limite aceito: um checkout anterior ao preflight ainda paga UMA chamada ao
+provider antes de o banco recusar a persistência.
+
 ## Scoring pipeline
 
 > **History (read this first):** the original pipeline had four named scores — Nota.IA → Nota.Calc → Nota.Pr → Nota.Final. The `Nota.Pr` + `Nota.Final` stage was **retired** and replaced by a single **Nota Prevista** (`expected_score`). `lib/calculations/final.ts`/`stacker.ts` were deleted and the `final_score`/`predicted_score` columns dropped in migration 099 (2026-06-14); `lib/calculations/prediction.ts` (dead code, no callers) has since been removed too. The user-facing score is now **Nota Prevista**; **Nota.Calc** survives only as a separate, legacy value (it no longer feeds the Nota Prevista — see stage 3).
