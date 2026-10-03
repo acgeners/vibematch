@@ -121,3 +121,33 @@ export async function exigirCriteriosNoBanco(): Promise<void> {
 
   throw new Error(`${partes.join(" ")} ${comum}`)
 }
+
+/**
+ * Confere que o banco ALVO aceita a VERSÃO DE PROMPT deste código — **antes** de gastar.
+ *
+ * 🔴 **O incidente (02–03/10/2026, e antes dele 26–27/09):** um checkout local defasado gravou na
+ * nuvem avaliações `prompt_version = 'v31'`, uma versão que nunca existiu no `main`. Nada
+ * acusou: os slugs eram os mesmos, então `exigirCriteriosNoBanco` passou, e a guarda de código
+ * canônico (`lib/ai/code-provenance.ts`) não existia naquele checkout. Desde a migration 202 a
+ * versão canônica mora no banco (`canonical_contract.eval_prompt_versions`) e um trigger em
+ * `ai_evaluations` recusa a versão fora da lista quando `enforce = true`.
+ *
+ * Esta é a metade de CÓDIGO: o trigger só recusa na PERSISTÊNCIA, depois de o provider cobrar.
+ * Aqui o checkout atualizado que ficou defasado descobre isso sem pagar nada. ⚠️ Um checkout
+ * MAIS ANTIGO que esta função não a tem e ainda paga UMA chamada antes de o banco recusar — o
+ * dado não entra, mas o gasto acontece. Fechar isso exigiria um proxy central de provider.
+ *
+ * ⚠️ A versão chega por PARÂMETRO (`PROMPT_VERSION` de `service.ts`), porque `service.ts` importa
+ * este módulo — importá-la daqui seria circular.
+ *
+ * ⚠️ Mesmo boundary e mesma régua da função acima: entry point (`requestAiEvaluation`), antes do
+ * cache e do provider, falha FECHADA em erro de leitura. Contrato ausente (banco antes da 202,
+ * ou o local depois do `db:pull`) não impõe nada — ver `lib/canonical-contract.ts`.
+ */
+export async function exigirVersaoCanonica(promptVersion: string): Promise<void> {
+  const { createAdminClient } = await import("@/lib/supabase/admin")
+  const { lerContratoCanonico } = await import("@/server/queries/canonical-contract")
+  const { decidirContratoCanonico } = await import("@/lib/canonical-contract")
+  const decisao = decidirContratoCanonico("avaliacao", await lerContratoCanonico(createAdminClient()), promptVersion)
+  if (!decisao.permitido) throw new Error(`${decisao.mensagem} (alvo: ${supabaseTargetLabel()})`)
+}

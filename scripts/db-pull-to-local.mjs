@@ -383,6 +383,16 @@ if (problems.length) {
   process.exit(1)
 }
 
+// ── 9. desarma o contrato canônico no LOCAL ──────────────────────────────────────────────
+// A cópia traz `canonical_contract` com o `enforce` da NUVEM (migration 202). Herdado, ele trava o
+// banco local para qualquer branch cujo producer/scoring não seja o canônico — e o local existe
+// justamente para experimentar. Depois da conferência (que compara a cópia fiel) e não antes:
+// o que se confere é a nuvem; o que se desarma é a réplica. Banco anterior à 202 não tem a tabela.
+if (psql(LOCAL, `select to_regclass('public.canonical_contract') is not null`) === "t") {
+  psql(LOCAL, `update public.canonical_contract set enforce = false where enforce`)
+  console.log(`\n→ contrato canônico desarmado no local (enforce = ${psql(LOCAL, `select enforce from public.canonical_contract where id = 1`) || "sem linha"})`)
+}
+
 // Cada pull deixa ~113 MB. Guardamos 3 (PULL_KEEP): além de servirem pro dev local, estes dumps
 // são hoje o ÚNICO backup do projeto que inclui schema, policies e functions — o NDJSON do
 // `backup-db.mjs` não inclui. A política mora em `lib/backups-retencao.mjs`; até 2026-08-10 cada

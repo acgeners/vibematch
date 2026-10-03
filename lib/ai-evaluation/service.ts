@@ -9,7 +9,7 @@ import { bandForScore } from "@/lib/criteria/justification"
 // e `scripts/backfill-faixa-citada.ts` a importa daqui.
 export { realinharFaixaCitada } from "@/lib/criteria/justification"
 import { aplicarLimiteAdulto } from "@/lib/ai-evaluation/adult-content-apply"
-import { exigirCriteriosNoBanco } from "@/lib/ai-evaluation/criteria-guard"
+import { exigirCriteriosNoBanco, exigirVersaoCanonica } from "@/lib/ai-evaluation/criteria-guard"
 import { normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { anotarPayloadRecusado, createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { SONNET_MODEL } from "@/lib/ai/models"
@@ -1792,6 +1792,9 @@ export async function requestAiEvaluation(
   // comprada. Medido em 2026-09-21: US$0,0647 debitados e a avaliação salva vazia. Ver
   // `criteria-guard.ts` para por que esta guarda falha FECHADA.
   await exigirCriteriosNoBanco()
+  // Contrato canônico (migration 202): a versão deste producer tem de estar entre as que o banco
+  // aceita. Mesmo motivo de morar aqui — antes do cache e do provider.
+  await exigirVersaoCanonica(PROMPT_VERSION)
 
   // Observabilidade (Plano 1): 1 id por SOLICITAÇÃO lógica, compartilhado por
   // todas as tentativas físicas. workload = experiment quando há override de
