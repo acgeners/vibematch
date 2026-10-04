@@ -1,7 +1,7 @@
 import "server-only"
 
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getCurrentUserId } from "@/server/queries/current-user"
+import { getCurrentUserId, getOwnerUserId } from "@/server/queries/current-user"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 import { getVerdictScale } from "@/server/queries/verdict-scale"
 import { buildRankingTiers } from "@/lib/ranking/build-tiers"
@@ -266,19 +266,33 @@ const RANKING_SNAPSHOT_FETCH_LIMIT = 400
  * Best-effort: NUNCA lança pro caller (é chamado via `after()` no render do
  * /ranking). No-op silencioso se a migration 105/135 não estiver aplicada.
  *
+ * 🔴 SÓ GRAVA PARA O DONO, e o `userId` vem EXPLÍCITO do render. Até 2026-10-04 esta função
+ * resolvia o usuário com `getCurrentUserId()` DENTRO do `after()` — e num Server Component o
+ * Next proíbe `cookies()` ali (erro E843). `getSessionUserId` engolia o erro, devolvia null, e o
+ * fallback caía no DONO: toda visita (anônima, curadora, outra conta) gravava até 200 linhas no
+ * ledger dele. Medido: uma visita anônima gravou 200. Ausência de sessão nunca autoriza escrita.
+ *
+ * ⚠️ Dono, e não "quem está logado": as notas lidas abaixo (`works_owner` + `calculated_scores`)
+ * são as DELE. Gravar sob outra conta afirmaria que ela viu uma previsão que nunca foi a dela.
+ *
+ * @param userId sessão resolvida no RENDER (fora do `after()`); null = anônimo ⇒ não grava.
  * @param orderedWorkIds ids na ORDEM exibida (índice 0 = rank 1).
  * @param filtersKey descritor estável do conjunto de filtros aplicado.
  */
 export async function recordRankingSnapshots(args: {
+  userId: string | null
   orderedWorkIds: string[]
   filtersKey: string
   moodKey?: string | null
 }): Promise<number> {
+  const userId = args.userId
+  if (!userId) return 0
   if (args.orderedWorkIds.length === 0) return 0
   try {
     const supabase = createAdminClient()
-    const [userId, bandWidth, configRes] = await Promise.all([
-      getCurrentUserId(supabase),
+    // Antes de qualquer leitura: quem não é o dono não paga nem a leitura das notas.
+    if (userId !== (await getOwnerUserId(supabase))) return 0
+    const [bandWidth, configRes] = await Promise.all([
       getTierBandWidth(),
       supabase
         .from("formula_config")

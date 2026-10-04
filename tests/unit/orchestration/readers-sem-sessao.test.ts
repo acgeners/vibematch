@@ -114,7 +114,7 @@ const JUSTIFICADOS: Record<string, string> = {
   "server/actions/calculations.ts":
     "recalculateAll: fila global do DONO, roda sem sessão em background (CLAUDE.md)",
   "lib/server/predictions/record-prediction.ts":
-    "ledger de previsões: escrita em after()/cascata, sem sessão por definição; mede o modelo do dono",
+    "ledger de previsões: o único getCurrentUserId restante é recordRecommendationSnapshots, chamado DENTRO da action (sessão disponível). recordRankingSnapshots NÃO usa mais — roda em after() de Server Component, onde cookies() é proibido e o fallback gravava no dono; hoje recebe o userId do render e só grava para o dono (ranking-snapshot-so-dono.test.ts)",
   "lib/server/predictions/resolve-prediction.ts": "idem record-prediction (resolve/relabel do ledger)",
   "server/queries/deep-dive.ts":
     "único uso restante é getBiasMap na GERAÇÃO do dive (write path, dentro da action paga)",

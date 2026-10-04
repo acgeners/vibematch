@@ -1,6 +1,6 @@
 import { getRanking, type RankingFilters, type RankingSortBy, type SortLevel } from "@/server/queries/ranking"
 import { sanitizeInterestSelection } from "@/lib/interest-sentinels"
-import { canConsumeAi } from "@/server/queries/current-user"
+import { canConsumeAi, getSessionUserId } from "@/server/queries/current-user"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
 import { getCriterionMomentsSafe } from "@/server/queries/criterion-moments"
@@ -327,8 +327,12 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // e é no-op silencioso enquanto a migration 105/135 não estiver aplicada. O
   // ranking_snapshot_id é determinístico por (dia, filtros, mood) → dedup evita
   // escrita repetida. NÃO altera nenhum score.
+  // 🔴 A sessão é lida AQUI, no render: dentro do `after()` de um Server Component o Next
+  // proíbe `cookies()`, e a função caía no dono — toda visita gravava no ledger dele.
+  const snapshotUserId = await getSessionUserId()
   after(() =>
     recordRankingSnapshots({
+      userId: snapshotUserId,
       orderedWorkIds: entries.map((e) => e.workId),
       filtersKey: JSON.stringify(filters),
       moodKey: moodId ?? null,
