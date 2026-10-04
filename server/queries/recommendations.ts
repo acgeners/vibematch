@@ -1162,6 +1162,13 @@ export async function getSynopsisQueueWorks(opts: {
     }
   }
 
+  // Contagem lê só o `id`: o badge da barra roda isto em TODA página, e a projeção completa
+  // (título + capas + nota) custava 233 KB por carga (medido em 2026-10-04) para virar um
+  // `.length`. ⚠️ Exceção: o filtro de DELTA compara o ♥ da LINHA (`synopsis_quality` +
+  // `synopsis_quality_source`) com a previsão — com ele ativo, a projeção fica a completa.
+  // String não-literal (`: string`) pelo mesmo motivo de `getAlignmentQueueWorks`.
+  const selectCols: string = opts.countOnly && predDeltas.length === 0 ? "id" : SYNOPSIS_QUEUE_SELECT
+
   // Triagem manual: lista obras com sinopse canônica e SEM Interesse manual
   // (synopsis_quality IS NULL), independente do estado de previsão. As previsões
   // carregadas acima ainda alimentam a exibição (sugestão IA no card).
@@ -1169,7 +1176,7 @@ export async function getSynopsisQueueWorks(opts: {
     const baseQ = () => {
       let q = supabase
         .from("works_owner")
-        .select(SYNOPSIS_QUEUE_SELECT)
+        .select(selectCols)
         .eq("is_archived", false)
         .not("canonical_synopsis", "is", null)
         .is("synopsis_quality", null)
@@ -1182,7 +1189,7 @@ export async function getSynopsisQueueWorks(opts: {
     if (opts.limit != null) {
       const res = await baseQ().order("updated_at", { ascending: false }).limit(opts.limit)
       if (res.error) throw new Error(`Falha listando obras sem Interesse manual: ${res.error.message}`)
-      data = (res.data ?? []) as Record<string, unknown>[]
+      data = (res.data ?? []) as unknown as Record<string, unknown>[]
     } else {
       data = (
         await fetchAllRows<Record<string, unknown>>(baseQ, {
@@ -1203,7 +1210,7 @@ export async function getSynopsisQueueWorks(opts: {
   const baseQ = () => {
     let q = supabase
       .from("works_owner")
-      .select(SYNOPSIS_QUEUE_SELECT)
+      .select(selectCols)
       .eq("is_archived", false)
       .not("canonical_synopsis", "is", null)
     if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
@@ -1215,7 +1222,7 @@ export async function getSynopsisQueueWorks(opts: {
   if (opts.limit != null) {
     const res = await baseQ().order("updated_at", { ascending: false }).limit(opts.limit)
     if (res.error) throw new Error(`Falha listando fila de Interesse: ${res.error.message}`)
-    rows = (res.data ?? []) as Record<string, unknown>[]
+    rows = (res.data ?? []) as unknown as Record<string, unknown>[]
   } else {
     rows = (
       await fetchAllRows<Record<string, unknown>>(baseQ, { orderBy: ["id"], label: "Falha listando fila de Interesse" })
