@@ -51,19 +51,42 @@ export interface SynopsisQualityPredictionRow {
   predictedAt: string
 }
 
-function mapRow(row: Record<string, unknown>): SynopsisQualityPredictionRow {
+/**
+ * A previsão ATIVA como o ranking a consome: o que `getAllActiveSynopsisPredictions` lê.
+ *
+ * ⚠️ O tipo é o contrato da projeção: ele tem exatamente as colunas de
+ * `ACTIVE_PREDICTION_COLUMNS` — `work_id` (agrupar), `prompt_version` + `predicted_at`
+ * (escolher a ativa) e os três campos que o ranking copia. Campo novo no consumidor que não
+ * esteja aqui não compila, em vez de chegar `undefined` em silêncio.
+ */
+export type ActiveSynopsisPrediction = Pick<
+  SynopsisQualityPredictionRow,
+  "workId" | "predictedQuality" | "confidence" | "promptVersion" | "stale" | "predictedAt"
+>
+
+const ACTIVE_PREDICTION_COLUMNS =
+  "work_id, predicted_quality, confidence, prompt_version, stale, predicted_at"
+
+/** Conversões de uma linha — dono único, compartilhado com `mapRow`. */
+function mapActiveFields(row: Record<string, unknown>): ActiveSynopsisPrediction {
   return {
-    id: row.id as string,
     workId: row.work_id as string,
     predictedQuality: row.predicted_quality as SynopsisQuality,
-    justification: (row.justification as string | null) ?? null,
     confidence: row.confidence != null ? Number(row.confidence) : null,
-    tasteProfileVersion: (row.taste_profile_version as number | null) ?? null,
-    tasteProfileHash: row.taste_profile_hash as string,
-    modelName: row.model_name as string,
     promptVersion: row.prompt_version as string,
     stale: Boolean(row.stale),
     predictedAt: row.predicted_at as string,
+  }
+}
+
+function mapRow(row: Record<string, unknown>): SynopsisQualityPredictionRow {
+  return {
+    ...mapActiveFields(row),
+    id: row.id as string,
+    justification: (row.justification as string | null) ?? null,
+    tasteProfileVersion: (row.taste_profile_version as number | null) ?? null,
+    tasteProfileHash: row.taste_profile_hash as string,
+    modelName: row.model_name as string,
   }
 }
 
@@ -122,18 +145,22 @@ export async function getSynopsisPredictionsByWorkIds(
  * PAGINA: a tabela tem VÁRIAS linhas por obra (versões de prompt/perfil, histórico)
  * e já passou de 1000 no total — um .select() sem range corta em 1000 (cap do
  * PostgREST) e derrubava silenciosamente a previsão de ~260 obras no ranking.
+ *
+ * Projeção explícita, nunca `*`: com `*` vinha a `justification` (texto longo) das ~2.400
+ * linhas, que o ranking nunca lê — medido em 2026-10-04: 1.020 KB por carga do `/catalog` e
+ * do `/ranking` logados. Ver `ActiveSynopsisPrediction`.
  */
 export async function getAllActiveSynopsisPredictions(): Promise<
-  Map<string, SynopsisQualityPredictionRow>
+  Map<string, ActiveSynopsisPrediction>
 > {
-  const out = new Map<string, SynopsisQualityPredictionRow>()
+  const out = new Map<string, ActiveSynopsisPrediction>()
   const supabase = createAdminClient()
   const interest = await getInterestReader()
   let rows: Array<Record<string, unknown>>
   try {
     rows = await fetchAllRows<Record<string, unknown>>(
       () =>
-        interest.scope(supabase.from("synopsis_quality_predictions").select("*")),
+        interest.scope(supabase.from("synopsis_quality_predictions").select(ACTIVE_PREDICTION_COLUMNS)),
       { orderBy: ["id"], label: "getAllActiveSynopsisPredictions" },
     )
   } catch (e) {
@@ -149,7 +176,7 @@ export async function getAllActiveSynopsisPredictions(): Promise<
   }
   for (const [id, grouped] of byWork) {
     const active = pickActiveRaw(grouped)
-    if (active) out.set(id, mapRow(active))
+    if (active) out.set(id, mapActiveFields(active))
   }
   return out
 }
