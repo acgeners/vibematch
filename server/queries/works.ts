@@ -662,6 +662,24 @@ export async function getWorkTitleByIdOrSlug(idOrSlug: string): Promise<string |
       .maybeSingle()
     return (data?.title as string | null) ?? null
   }
+  /**
+   * Slug ATUAL: o mesmo índice cacheado que o corpo da página usa (`getWorkBySlug`) + o
+   * título por id. Sem isto, cada resolução varria `works(title, previous_slugs)` inteira — e o
+   * prefetch de produção dispara este metadata para CADA link de obra visível: medido em
+   * 2026-10-05, 7 varreduras por carga da home anônima (120 KB) e 11 na logada (189 KB); sem
+   * JavaScript (sem prefetch), zero.
+   *
+   * ⚠️ O resultado é CONFERIDO contra a linha: o índice pode estar velho (o `revalidateTag`
+   * "max" serve o stale uma vez depois de um rename). Se o título da linha não gera mais este
+   * slug, cai na varredura abaixo, que decide como sempre decidiu — slug atual primeiro, depois
+   * `previous_slugs`. Alias e slug inexistente também caem lá: o índice só tem slugs atuais.
+   */
+  const indexedId = (await getSlugToIdMap())[idOrSlug]
+  if (indexedId) {
+    const { data } = await supabase.from("works").select("title").eq("id", indexedId).maybeSingle()
+    const title = (data?.title as string | null) ?? null
+    if (title != null && titleToSlug(title) === idOrSlug) return title
+  }
   // Pagina (`.select()` corta em 1000): sem isto o título de uma obra na cauda
   // viria null e a aba do navegador cairia no fallback genérico.
   const rows = await fetchAllRows<{ title: string | null; previous_slugs: string[] | null }>(
