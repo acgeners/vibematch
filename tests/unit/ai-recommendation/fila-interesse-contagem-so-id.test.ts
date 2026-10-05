@@ -86,7 +86,9 @@ function fakeDb() {
 const statusPessoal: Record<string, number | null> = {}
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => fakeDb() }))
 vi.mock("@/server/queries/user-interest", () => ({ getInterestReader: async () => ({ scope: <T,>(q: T) => q }) }))
-vi.mock("@/server/queries/user-work-state", () => ({
+vi.mock("@/server/queries/user-work-state", async (importOriginal) => ({
+  // O módulo real fornece o resto (EMPTY_PERSONAL_STATE, que a fila usa no leitor neutro).
+  ...(await importOriginal<typeof import("@/server/queries/user-work-state")>()),
   getPersonalStateReader: async () => ({
     userId: "u",
     get: (id: string) => ({ personalStatusId: statusPessoal[id] ?? null, lastReadAt: null }),
