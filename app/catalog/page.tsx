@@ -151,7 +151,9 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
     criterionPrefs,
     isAdmin,
   ] = await Promise.all([
-    getRanking(filters),
+    // Daqui só saem o total e a ordem dos ids — a página visível é hidratada por
+    // `getWorksByIds` logo abaixo. Ver `RankingOptions`.
+    getRanking(filters, { mode: "ordering-only" }),
     getAllGenres(),
     getAllTags(),
     getStatusOptions(),
