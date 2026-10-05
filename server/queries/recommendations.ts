@@ -8,7 +8,8 @@ import { coverCandidates, pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFr
 import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { getCurrentUserId, getSessionUserId } from "@/server/queries/current-user"
-import { getPersonalStateReader } from "@/server/queries/user-work-state"
+import { getPersonalStateReader, EMPTY_PERSONAL_STATE } from "@/server/queries/user-work-state"
+import type { PersonalStateReader } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import {
   isFullyReadPersonalStatus,
@@ -546,6 +547,23 @@ export interface AlignmentQueueWork {
 }
 
 /**
+ * Leitor do estado pessoal de uma fila — carregado SÓ quando o resultado depende dele.
+ *
+ * Nas duas filas (Veredito e Interesse) o estado pessoal entra em dois lugares: o filtro de
+ * status pessoal, que só age com `personalStatusIds` preenchido, e os campos exibidos de cada
+ * obra, que o modo contagem não monta. Contagem sem filtro pessoal, portanto, não lê
+ * `user_work_state`. Medido em 2026-10-04: a action da barra lia a tabela inteira da pessoa
+ * DUAS vezes por carga (~54 KB cada), uma por fila — o `cache()` do React não deduplica ali.
+ * O leitor neutro devolve o mesmo `EMPTY_PERSONAL_STATE` que o visitante já recebe.
+ */
+const SEM_ESTADO_PESSOAL: PersonalStateReader = { userId: null, get: () => EMPTY_PERSONAL_STATE }
+
+function leitorPessoalDaFila(opts: { countOnly?: boolean; personalStatusIds?: number[] }): Promise<PersonalStateReader> {
+  const dependeDoEstado = !opts.countOnly || (opts.personalStatusIds?.length ?? 0) > 0
+  return dependeDoEstado ? getPersonalStateReader() : Promise.resolve(SEM_ESTADO_PESSOAL)
+}
+
+/**
  * Fila de Veredito IA pra aba /my-ai-scores?tab=ia-rk. Dois estados:
  *   - "stale": tem alignment_score mas alignment_stale=true (re-rank velho)
  *   - "unranked": ainda não tem alignment_score (nunca passou pelo re-rank)
@@ -574,7 +592,7 @@ export async function getAlignmentQueueWorks(opts: {
   // último — um assinante veria obras que ELE já rankeou como "não avaliadas".
   // Status de leitura é a mesma história: `works_owner.personal_status_id` é
   // sempre o do DONO — vem de `getPersonalStateReader()` e filtra em JS.
-  const [reader, personalReader] = await Promise.all([getScoresReader(), getPersonalStateReader()])
+  const [reader, personalReader] = await Promise.all([getScoresReader(), leitorPessoalDaFila(opts)])
   // String não-literal (`: string`) de propósito: um ternário de literais no
   // `.select()` faz o parser de tipos do supabase-js estourar (ParserError). As
   // linhas já são lidas via `Record<string, unknown>` abaixo, então o `any` aqui
@@ -984,7 +1002,7 @@ export async function getSynopsisQueueWorks(opts: {
   // getAlignmentQueueWorks/getUntrackedWorks).
   const [excludeSkipped, personalReader] = await Promise.all([
     hasSynopsisInterestSkippedColumn(supabase),
-    getPersonalStateReader(),
+    leitorPessoalDaFila(opts),
   ])
 
   // Carrega TODAS as previsões — fonte da verdade do estado de cada obra. A tabela
