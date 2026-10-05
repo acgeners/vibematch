@@ -7,6 +7,7 @@ import { SETTINGS_GROUPS } from "@/app/curation/settings/sections"
 import { maybeTriggerStaleRecalc } from "@/server/recalc/queue"
 import { getComixStatus } from "@/lib/external/comix-gate"
 import type { ComixHealthState } from "@/lib/external/comix-gate"
+import { createClient } from "@/lib/supabase/server"
 
 export interface SidebarBadgeCounts {
   /** Obras NÃO-LIDAS na fila de atributos de /curation/works ("Curadoria da Obra"). */
@@ -67,6 +68,14 @@ export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
     lastEditAt: null,
   }))
 
+  // Visitante não vê nenhum destes contadores (o AccountChip exige sessão e o resto é de
+  // curador), mas pagava as filas inteiras em TODA página: medido em 2026-10-05, 118 KB por
+  // página anônima. O gatilho do recálculo acima continua valendo para todos.
+  if (!(await temSessaoNoCookie())) {
+    const recalc = await recalcStatePromise
+    return { curadoria: 0, recQueue: 0, settings: 0, requests: 0, settingsByGroup: {}, recalcPending: recalc.pending, comixHealth }
+  }
+
   const [curadoria, recQueue, settingsUnread, recalc, requests] = await Promise.all([
     getCuradoriaBadgeUnreadCount().catch((err) => {
       console.warn(
@@ -101,6 +110,26 @@ export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
     settingsByGroup: settingsUnread.byGroup,
     recalcPending: recalc.pending,
     comixHealth,
+  }
+}
+
+/**
+ * Há sessão no cookie? Gate para PULAR TRABALHO, nunca autorização.
+ *
+ * `getSession()` lê o cookie sem ir à rede (só renova token vencido, e o middleware já renova
+ * a cada requisição). `getSessionUserId()` validaria em `/auth/v1/user` — e como o `cache()`
+ * do React não deduplica dentro de server action, seria uma chamada de Auth a mais por
+ * navegação logada. Aqui não precisa: os dados por usuário continuam lendo a sessão
+ * VERIFICADA lá dentro; um cookie forjado só devolve o comportamento antigo (calcular).
+ * Falha → "sem sessão": zeros, nenhuma consulta das filas.
+ */
+async function temSessaoNoCookie(): Promise<boolean> {
+  try {
+    const supabase = await createClient()
+    const { data } = await supabase.auth.getSession()
+    return data.session != null
+  } catch {
+    return false
   }
 }
 
