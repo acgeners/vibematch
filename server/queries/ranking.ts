@@ -298,6 +298,48 @@ export interface RankingFilters {
   sortLevels?: SortLevel[]
 }
 
+/**
+ * `"ordering-only"`: o MESMO pipeline (filtros, ordenação, desempates, topN), sem trazer o que
+ * só serve para desenhar a linha. Para quem precisa apenas do total e da sequência de `workId`
+ * — hoje só o /catalog, que hidrata a página visível depois, por `getWorksByIds`.
+ *
+ * Medido em 2026-10-05 no /catalog: a consulta principal custava 1.227 KB (1.044 obras) e as
+ * sinopses primárias de todo o catálogo, outros 305 KB — nenhum dos dois decide a ordem. O que
+ * fica de fora é só exibição: `canonical_synopsis`/sinopse primária (`synopsis`), a
+ * justificativa e a data do Veredito, o resto do payload dele, capas e os campos do badge de
+ * hiato. 🔴 A `confidence` do payload FICA: ela pesa a Prioridade (`computeDecisionScore`), que
+ * ordena por "decision".
+ */
+export interface RankingOptions {
+  mode?: "full" | "ordering-only"
+}
+
+/** O que o modo `"ordering-only"` garante preencher. O resto da entry não é carregado. */
+export type RankingOrderEntry = Pick<RankingEntry, "workId" | "rank">
+
+const RANKING_WORKS_SELECT = `
+  id, title, publication_status_id, ai_eval_status,
+  hiatus_kind, hiatus_kind_confidence, publication_status_note,
+  total_chapters, is_archived, is_adult,
+  canonical_synopsis, year, updated_at,
+  calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, chance_score, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, art_percentile, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
+  category_scores(criterion_slug, score),
+  work_covers(url, is_primary, position)
+`
+
+/**
+ * Tudo que filtra, ordena ou desempata — e nada que só desenha. Do payload do Veredito vem só a
+ * `confidence` (JSON path), que é o único pedaço dele que a Prioridade lê; o `.map()` o recompõe
+ * antes do overlay. ⚠️ Campo novo que entre em filtro/ordenação/desempate tem que entrar AQUI
+ * também — `catalogo-so-ordem.test.ts` compara a sequência dos dois modos e reprova a diferença.
+ */
+const RANKING_WORKS_SELECT_ORDERING_ONLY = `
+  id, title, publication_status_id, ai_eval_status,
+  total_chapters, is_archived, is_adult, year, updated_at,
+  calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, chance_score, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, art_percentile, alignment_score, alignment_confidence:alignment_payload->confidence, alignment_stale),
+  category_scores(criterion_slug, score)
+`
+
 const getRankingStatusRows = unstable_cache(
   async () => {
     const admin = createAdminClient()
@@ -318,9 +360,16 @@ const getRankingStatusRows = unstable_cache(
   { revalidate: 300 }
 )
 
+export async function getRanking(filters?: RankingFilters): Promise<RankingEntry[]>
 export async function getRanking(
-  filters: RankingFilters = {}
+  filters: RankingFilters,
+  opts: { mode: "ordering-only" },
+): Promise<RankingOrderEntry[]>
+export async function getRanking(
+  filters: RankingFilters = {},
+  opts: RankingOptions = {},
 ): Promise<RankingEntry[]> {
+  const orderingOnly = opts.mode === "ordering-only"
   const supabase = createAdminClient()
   // Previsões de Interesse Sinopse (tabela pequena) — carregadas em paralelo com
   // o resto. Consumidas ao montar as entries; a previsão é independente dos
@@ -332,18 +381,21 @@ export async function getRanking(
   // texto completo) no JSON aninhado da query principal (~0.9MB → 0.4MB, dedup).
   // 🔴 PAGINADA: é uma linha por obra (1019 em 2026-08-18) e o PostgREST corta em 1000 sem
   // erro — as obras cortadas ficavam sem sinopse no hover, com a lista inteira parecendo certa.
-  const primarySynopsisPromise = fetchAllRows<{ work_id: string; text: string | null }>(
-    () =>
-      supabase.from("work_synopses").select("work_id, text").eq("is_primary", true),
-    { orderBy: ["id"], label: "getRanking.primarySynopsis" },
-  ).then((rows) => {
-    const map = new Map<string, string>()
-    for (const r of rows) {
-      const t = r.text?.trim()
-      if (t) map.set(r.work_id, t)
-    }
-    return map
-  })
+  // Só alimenta `entry.synopsis` — no modo "ordering-only" ninguém a lê.
+  const primarySynopsisPromise = orderingOnly
+    ? Promise.resolve(new Map<string, string>())
+    : fetchAllRows<{ work_id: string; text: string | null }>(
+        () =>
+          supabase.from("work_synopses").select("work_id, text").eq("is_primary", true),
+        { orderBy: ["id"], label: "getRanking.primarySynopsis" },
+      ).then((rows) => {
+        const map = new Map<string, string>()
+        for (const r of rows) {
+          const t = r.text?.trim()
+          if (t) map.set(r.work_id, t)
+        }
+        return map
+      })
   const { personalStatusRows, publicationStatusRows } = await getRankingStatusRows()
   const personalStatusOptions = (personalStatusRows ?? []) as Array<{
     id: number
@@ -634,15 +686,9 @@ export async function getRanking(
   const buildWorksQuery = () => {
     let q = supabase
       .from("works")
-      .select(`
-        id, title, publication_status_id, ai_eval_status,
-        hiatus_kind, hiatus_kind_confidence, publication_status_note,
-        total_chapters, is_archived, is_adult,
-        canonical_synopsis, year, updated_at,
-        calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, chance_score, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, art_percentile, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
-        category_scores(criterion_slug, score),
-        work_covers(url, is_primary, position)
-      `)
+      // `string`: dois literais em união fazem o parser de tipos do supabase-js devolver
+      // ParserError. A linha é lida como genérica (`LinhaWorks`) mais abaixo.
+      .select((orderingOnly ? RANKING_WORKS_SELECT_ORDERING_ONLY : RANKING_WORKS_SELECT) as string)
     if (!filters.includeArchived) q = q.eq("is_archived", false)
     // Conteúdo 18+ (works.is_adult). O filtro POR-RANKING (?adult=) tem prioridade
     // sobre a preferência global:
@@ -692,9 +738,17 @@ export async function getRanking(
     return q
   }
 
+  // A forma da linha depende do modo (dois `select`), então ela é tratada como genérica aqui —
+  // quem a lê é o `.map()` abaixo, campo a campo.
+  type LinhaWorks = { id: string } & Record<string, unknown>
   const { data, error } = restrictIds
-    ? await selectByIdsInChunks(restrictIds, (chunk) =>
-        buildWorksQuery().in("id", chunk).limit(2000),
+    ? await selectByIdsInChunks<LinhaWorks>(
+        restrictIds,
+        (chunk) =>
+          buildWorksQuery().in("id", chunk).limit(2000) as unknown as PromiseLike<{
+            data: LinhaWorks[] | null
+            error: { message: string } | null
+          }>,
       )
     : await (async () => {
         // 🔴 O `.limit(2000)` era teto EXPLÍCITO que o PostgREST NÃO honra: ele corta em 1000
@@ -704,9 +758,8 @@ export async function getRanking(
         // tratava a paginação como dívida futura; o penhasco já tinha sido cruzado.
         // `fetchAllRows` (serial) basta: 1.010 linhas são 2 páginas, não as 6 idas que
         // motivavam a ressalva de latência.
-        type Linha = NonNullable<Awaited<ReturnType<typeof buildWorksQuery>>["data"]>[number]
         // `title` já é total em `works`: NOT NULL + índice único `works_title_lower_idx`.
-        const rows = await fetchAllRows<Linha>(buildWorksQuery, { orderBy: ["title"], label: "getRanking.works" })
+        const rows = await fetchAllRows<LinhaWorks>(buildWorksQuery, { orderBy: ["title"], label: "getRanking.works" })
         return { data: semExcluidas(rows), error: null }
       })()
 
@@ -746,6 +799,18 @@ export async function getRanking(
       scores[cs.criterion_slug] = cs.score
     }
     const synopsisPred = synopsisPredictions.get(w.id) ?? null
+
+    // "ordering-only" trouxe só a `confidence` do payload. Recompõe-o ANTES do overlay, com o
+    // nome de sempre: assim o overlay o trata como trata o payload inteiro — passa para o dono,
+    // vira null para o anônimo, é trocado pelo da outra conta — e o alias nunca sobra para
+    // vazar a confiança do dono na Prioridade de outra pessoa.
+    if (orderingOnly && w.calculated_scores && "alignment_confidence" in w.calculated_scores) {
+      const { alignment_confidence, ...rest } = w.calculated_scores
+      w.calculated_scores = {
+        ...rest,
+        alignment_payload: alignment_confidence == null ? null : { confidence: alignment_confidence },
+      }
+    }
 
     // A linha de scores de QUEM OLHA. Os campos de catálogo (platform_avg, total_votes) passam
     // intactos; os pessoais (Nota Prevista, Chance, Alinhamento) viram os dela — ou null.
