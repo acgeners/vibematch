@@ -79,10 +79,13 @@ export async function getWorksWithoutReviews(
   // Seleciona E FILTRA dado PESSOAL do DONO (personal_status_id, synopsis_quality) → lê do
   // espelho via a view `works_owner`, não da linha compartilhada de `works` (que vai perder
   // essas colunas). Os filtros/`.in()` continuam valendo: a view expõe os mesmos nomes.
+  // `countOnly` só lê o `id` (o recorte é a faixa, sobre a contagem da RPC; status já vai no
+  // SQL). A projeção inteira — `canonical_synopsis` incluso — custava 755 KB por recarga das
+  // contagens das abas (medido em 2026-10-05) para ser descartada logo abaixo.
   const montaWorksQ = () => {
     let q = sb
       .from("works_owner")
-      .select("id, title, ai_eval_status, canonical_synopsis, publication_status_id, personal_status_id, synopsis_quality, hiatus_kind, hiatus_kind_confidence, publication_status_note, work_covers(url, is_primary, position), calculated_scores(expected_score)")
+      .select(opts.countOnly ? "id" : "id, title, ai_eval_status, canonical_synopsis, publication_status_id, personal_status_id, synopsis_quality, hiatus_kind, hiatus_kind_confidence, publication_status_note, work_covers(url, is_primary, position), calculated_scores(expected_score)")
       .eq("is_archived", false)
     if (filters.pubStatusIds && filters.pubStatusIds.length > 0) q = q.in("publication_status_id", filters.pubStatusIds)
     if (filters.personalStatusIds && filters.personalStatusIds.length > 0) q = q.in("personal_status_id", filters.personalStatusIds)

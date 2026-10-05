@@ -684,7 +684,7 @@ const getCuradoriaTabCounts = unstable_cache(
       // qualidade de sinopse): nenhum deles diz nada sobre digest pendente. Fica
       // fora de `args` de propósito — entrar ali só faria o cache fragmentar por
       // combinação de filtro sem mudar o número.
-      getReviewDigestQueue(),
+      getReviewDigestQueue({ countOnly: true }),
       // Mesma razão pra fila de Fontes: lacuna de vínculo externo não tem relação com
       // status pessoal nem com interesse. O número global é o tamanho da fila; quando a
       // aba está aberta, o `activeCount` o sobrescreve pelo que está na tela.
