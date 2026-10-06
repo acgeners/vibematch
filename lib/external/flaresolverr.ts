@@ -28,10 +28,14 @@ const FLARESOLVERR_TIMEOUT_MS = 5000
 // ⚠️ É por PROCESSO. Com duas máquinas do app de pé, o FlareSolverr pode receber duas.
 export const FLARESOLVERR_MAX_CONCURRENCY = 1
 
-// Abaixo disto não vale abrir página: a resposta mais rápida já medida do FlareSolverr na Fly
-// foi ~2,2 s. Com SESSÃO isso importa ainda mais — o maxTimeout dela é 60 s, e uma página
-// aberta com meio segundo de prazo trabalharia até um minuto para ninguém, segurando o slot.
-const MIN_PAGE_BUDGET_MS = 2000
+// Abaixo disto não vale abrir página. É o prazo que SOBRA ao chamador depois da espera na fila
+// (o orçamento dele é por página: fila + página). Medido: um `maxTimeout` de 1 s só voltou em
+// 5,0 s — subir e fechar o Chrome custa ~4 s antes de qualquer página carregar —, e as páginas
+// que terminam na Fly levam 2,9–8 s. Com 2 s (o valor anterior) uma página foi aberta com 2,08 s
+// e estourou: Chrome lançado para ninguém, segurando o slot. Desistir aqui é LOCAL à chamada:
+// nenhuma página abre e o circuito não é tocado. Com SESSÃO pesa mais ainda — o maxTimeout dela
+// é 60 s, e uma página aberta com pouco prazo trabalharia até um minuto para ninguém.
+const MIN_PAGE_BUDGET_MS = 5000
 
 // Quanto esperar a RESPOSTA do FlareSolverr além do maxTimeout pedido. Medido na Fly: páginas
 // que estouraram os 60 s voltaram em 69,6 s, 76,2 s e 76,5 s (o Chrome demora a fechar). O slot
@@ -161,7 +165,9 @@ async function postFlareSolverr(
       cache: "no-store",
       signal: controller.signal,
     })
-    const parsed: unknown = res.ok ? await res.json() : null
+    // No erro o corpo também é lido: o FlareSolverr devolve TODO erro como HTTP 500, e é a
+    // mensagem que separa timeout da página de falha do serviço (ver `isFlareSolverrPageTimeout`).
+    const parsed: unknown = res.ok ? await res.json() : await res.json().catch(() => null)
     return { ok: res.ok, status: res.status, json: async () => parsed }
   } finally {
     clearTimeout(timer)
@@ -345,6 +351,46 @@ async function flareSolverrFetchExclusive(
   return raceDeadline(page, remaining)
 }
 
+// O FlareSolverr 3.5.0 devolve TODO erro como HTTP 500 + JSON `{status:"error", message:"Error: …"}`
+// (flaresolverr_service.controller_v1_endpoint). O estouro do `maxTimeout` da página é a exceção de
+// `_resolve_challenge`, com o prazo em segundos — conferido contra o serviço real em 06/10/2026:
+//   {"status": "error", "message": "Error: Error solving the challenge. Timeout after 1.0 seconds.", …}
+// Falha do serviço chega no MESMO envelope com outra mensagem (a de 05/10 foi "…session not created:
+// cannot connect to chrome…"). Só a frase exata de timeout é reconhecida: mensagem nova ou corpo
+// ilegível continuam abrindo o circuito, como antes.
+const FS_PAGE_TIMEOUT_MESSAGE = /^Error: Error solving the challenge\. Timeout after \d+(?:\.\d+)? seconds\.$/
+
+/** A resposta de erro é o estouro do `maxTimeout` DESTA página — não queda do FlareSolverr. */
+export function isFlareSolverrPageTimeout(body: unknown): boolean {
+  if (typeof body !== "object" || body === null) return false
+  const { status, message } = body as { status?: unknown; message?: unknown }
+  return status === "error" && typeof message === "string" && FS_PAGE_TIMEOUT_MESSAGE.test(message)
+}
+
+/**
+ * Resposta HTTP de erro do FlareSolverr. O timeout de UMA página volta como timeout (null, sem
+ * circuito): até o PR #534 o nosso abort chegava antes da resposta e esse 500 nunca era lido;
+ * com o `maxTimeout` acompanhando o prazo do chamador ele passou a chegar — e abria o circuito por
+ * 60 s para TODAS as fontes do bypass (medido na Fly: o ComicK pulou as bases 3 e 4 e deu 502).
+ * Qualquer outro erro segue sendo tratado como falha do serviço.
+ */
+async function failedResponse(
+  res: { status: number; json: () => Promise<unknown> },
+  url: string,
+  maxTimeout: number,
+  context: string,
+): Promise<null> {
+  if (isFlareSolverrPageTimeout(await res.json())) {
+    console.warn(
+      `[flareSolverr] página passou do maxTimeout (${maxTimeout} ms) — timeout da página, não queda do serviço; circuito segue fechado (${hostOf(url)})`,
+    )
+    return null
+  }
+  logFlareSolverrFailure(`HTTP ${res.status} ${context}`)
+  circuitOpenUntil = Date.now() + CIRCUIT_TTL_MS
+  return null
+}
+
 /** Uma página no FlareSolverr, esperando a resposta até `maxTimeout` + a folga de fechamento. */
 async function requestPage(
   url: string,
@@ -357,11 +403,7 @@ async function requestPage(
     if (session) body.session = session
 
     let res = await postFlareSolverr(body, abortMs)
-    if (!res.ok) {
-      logFlareSolverrFailure(`HTTP ${res.status} — container caído ou misconfigurado?`)
-      circuitOpenUntil = Date.now() + CIRCUIT_TTL_MS
-      return null
-    }
+    if (!res.ok) return failedResponse(res, url, maxTimeout, "— container caído ou misconfigurado?")
     let json = await res.json()
 
     // Sessão ainda não existe nesse FlareSolverr (1º uso ou o container reiniciou e
@@ -369,11 +411,7 @@ async function requestPage(
     if (session && json?.status === "error" && /session/i.test(String(json?.message ?? ""))) {
       await flareSolverrCreateSession(session, abortMs)
       res = await postFlareSolverr(body, abortMs)
-      if (!res.ok) {
-        logFlareSolverrFailure(`HTTP ${res.status} — após criar sessão`)
-        circuitOpenUntil = Date.now() + CIRCUIT_TTL_MS
-        return null
-      }
+      if (!res.ok) return failedResponse(res, url, maxTimeout, "— após criar sessão")
       json = await res.json()
     }
 
