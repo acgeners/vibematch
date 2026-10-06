@@ -14,7 +14,6 @@ primary_region = "gru"
   # Não pode sair dos headers: atrás do proxy o servidor enxerga 0.0.0.0:3000 (ver lib/site-url.ts).
   SITE_URL = "https://satoria.fly.dev"
   FLARESOLVERR_URL = "http://vibematch-flaresolverr.flycast:8191/v1"
-  COMIX_FS_SESSION = "comix"
   COMIX_CF_ABORT_MS = "25000"
   # Descoberta automática do slug do Mangago na avaliação (`resolveMangagoForEvalContext`,
   # atrás desta flag, fail-soft, persiste só em banda AUTO). Estava `true` no `.env.local`

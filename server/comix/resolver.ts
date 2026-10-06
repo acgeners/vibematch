@@ -472,8 +472,9 @@ export async function resolveComixHidForWork(workId: string): Promise<void> {
     // permanentemente cega não movia nenhum indicador.
     if (code === 3) recordComixFailure("search_blind")
     if (code !== 0) return
-    // Reaquece a Comix (bounded) se a sessão do FlareSolverr estiver fria/expirada,
-    // pra o enrich não falhar à toa logo após achar o hid.
+    // Espera a Comix responder (bounded: canário + backoff) antes do enrich, pra ele não
+    // falhar à toa numa indisponibilidade transitória logo após achar o hid. Não há sessão
+    // do FlareSolverr para aquecer desde 06/10/2026 — cada chamada abre o próprio Chrome.
     await ensureComixReady()
     // Achou o hid → grava rating/sinopse/capa do Comix; recalcula só se o rating mudou
     // (pra a bayesiana e a Nota Prevista refletirem a fonte). A sinopse/capa entram como
@@ -516,8 +517,8 @@ export async function resolveComixHidsPending(workIds?: string[]): Promise<void>
   }
 }
 
-// Backoff (ms) entre tentativas de reaquecer a Comix. ~6 tentativas cobrem ~3 min
-// — o suficiente pra uma expiração de sessão do FlareSolverr voltar sozinha.
+// Backoff (ms) entre tentativas de ver a Comix de pé. ~6 tentativas cobrem ~3 min — o
+// suficiente pra uma falha transitória da fonte ou do bypass passar sozinha.
 const COMIX_WARM_BACKOFF_MS = [3_000, 8_000, 20_000, 45_000, 90_000]
 
 function sleep(ms: number): Promise<void> {

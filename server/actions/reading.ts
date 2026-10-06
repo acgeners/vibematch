@@ -22,8 +22,8 @@ import {
  * 🔴 **Não é ajuste de performance — é o que faz o timeout de 25s do agregador
  * significar alguma coisa.** As fontes de capítulo passam por um bypass de
  * Cloudflare ESTREITO: o sidecar atende 3 por vez (`MAX_CONCURRENCY`) e o
- * FlareSolverr atende **1 por vez por sessão nomeada** (a fila do `withSessionLock`,
- * que existe pra não corromper resultado entre buscas). Num `Promise.all` sobre a
+ * FlareSolverr atende **1 página por vez por processo** (a fila única de
+ * `flaresolverr.ts`, compartilhada via `globalThis`). Num `Promise.all` sobre a
  * lista inteira, o cronômetro de TODAS as obras começa junto enquanto o bypass as
  * atende em fila — então o "teto por fonte" vira orçamento de relógio pro LOTE, e
  * tudo que não couber nele falha de uma vez.

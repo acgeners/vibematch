@@ -7,7 +7,7 @@
  *
  * Foi assim que "Verificar atualizações" reprovou 29 de 38 obras: as 38 saíram
  * de uma vez, o bypass de Cloudflare atende 3 por vez (sidecar) ou 1 por vez
- * (FlareSolverr, sessão nomeada serializada), e dos 74 renders que completaram
+ * (FlareSolverr, fila única de páginas), e dos 74 renders que completaram
  * apenas 27 chegaram dentro dos 25s — os demais encontraram o timeout já
  * disparado. Com teto, cada item só começa a contar quando de fato começa, e o
  * timeout volta a significar o que o nome diz.

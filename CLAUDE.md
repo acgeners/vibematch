@@ -5365,7 +5365,7 @@ propósito; ali o caminho é o diálogo por obra.
 
 🔴 **Duas falhas latentes se somaram, e cada uma escondia a outra.** O sidecar quebrou em 29/07 e ninguém soube, porque o plain fetch ainda funcionava; quando o plain fetch caiu, o sidecar quebrado virou o caminho. **Camada de fallback que ninguém exercita apodrece em silêncio** — o log do sidecar tinha a resposta há 13 dias.
 
-⚠️ **O pior caso está coberto, medido:** 1ª obra de cada janela de 15min paga a sonda (13,2s) + solve frio do FlareSolverr (12,4s) = 25,8s ⇒ estoura a 1ª passada, e a **2ª passada dirigida recupera em 4,2s** (`acquire-reviews.ts`). Não vale encurtar a sonda — a complexidade não paga um caso que o mecanismo existente já resolve.
+⚠️ **O pior caso esteve coberto, medido em 08/2026:** 1ª obra de cada janela de 15min paga a sonda (13,2s) + solve frio do FlareSolverr (12,4s) = 25,8s ⇒ estoura a 1ª passada, e a **2ª passada dirigida recuperava em 4,2s** (`acquire-reviews.ts`). 🔴 **Essa recuperação dependia da sessão nomeada `comix`, removida em 06/10/2026:** o solve abandonado aquecia o Chrome da sessão, e a 2ª passada o reaproveitava. Hoje nenhuma fonte usa sessão — cada chamada abre e fecha o próprio Chrome, numa fila de uma página por vez por processo. Medido em 06/10, a Comix não mostrou desafio (local nem Fly); se voltar a mostrar, a 2ª passada paga o solve de novo e a cadeia estoura — o gatilho para trazer a sessão de volta (com 2 GB) está em `lib/external/comix.ts`.
 
 🔴 **A DESCOBERTA DE HID está morta nos TRÊS caminhos — e só o acervo atual salva.** Medido em
 2026-08-11: `searchComix` (API) gateada por token · `/resolve` do sidecar `no_xhr` (a SPA não

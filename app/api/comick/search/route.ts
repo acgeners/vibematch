@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { fetchHtmlWithCfFallback, isFlareSolverrEnabled } from "@/lib/external/flaresolverr"
+import { COMICK_API_CF_ABORT_MS } from "@/lib/external/comick"
 
 const COMICK_BASES = [
   "https://api.comick.dev",
@@ -34,7 +35,7 @@ async function fetchJson(url: URL) {
       // segue pro fallback
     }
     if (!isFlareSolverrEnabled()) continue
-    const fallback = await fetchHtmlWithCfFallback(target, HEADERS)
+    const fallback = await fetchHtmlWithCfFallback(target, HEADERS, COMICK_API_CF_ABORT_MS)
     if (!fallback) continue
     const preMatch = fallback.html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i)
     const raw = (preMatch?.[1] ?? fallback.html).trim()

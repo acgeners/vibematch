@@ -4,6 +4,12 @@ import { fetchHtmlWithCfFallback, isCfBypassUnavailable } from "./flaresolverr"
 
 const AP_BASE = "https://www.anime-planet.com"
 
+// Orçamento de cada página do AnimePlanet no bypass (fila do FlareSolverr + página). O padrão
+// de 5s cabia no Mac (2,9 s medidos) e não cabe na Fly: lá a página leva ~8,0 s com a CPU
+// livre (medido em 06/10/2026, máquina de 1 vCPU, sem sessão) — 5 s cortava TODA chamada.
+// 15 s ≈ 1,9× o medido, e a folga também paga a espera na fila única de páginas.
+export const ANIMEPLANET_CF_ABORT_MS = 15_000
+
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -122,6 +128,47 @@ function slugifyTitle(title: string): string {
     .replace(/-{2,}/g, "-")
 }
 
+export interface AnimePlanetSearchCard {
+  slug: string
+  /** Nome da obra, já decodificado. */
+  title: string
+  /** O que serve à extração de capa/sinopse/ano: o tooltip decodificado (formato atual) mais o
+   *  miolo do cartão até a âncora seguinte — nunca o title da PRÓXIMA âncora. */
+  chunk: string
+}
+
+/**
+ * Cartões de uma página de LISTA/busca do AnimePlanet, sem depender da ordem dos atributos.
+ *
+ * O AP serviu dois formatos: `href` ANTES de `title`, com o NOME no title (o que o regex antigo
+ * esperava), e — o atual, conferido em 06/10/2026 — `title` ANTES de `href`, com o title trazendo
+ * o HTML ESCAPADO do tooltip (nome no <h5>, sinopse no <p>, anos no iconYear). Com o regex antigo
+ * a busca "Solo Leveling" trazia 0 dos 4 cartões, e só o fallback de slug direto devolvia algo —
+ * o que esconde o defeito sempre que o título da obra vira exatamente o slug do AP.
+ *
+ * Âncora sem `title` não é cartão (navegação, filtros) e fica de fora, como antes.
+ */
+export function parseAnimePlanetSearchCards(html: string): AnimePlanetSearchCard[] {
+  const anchors = [...html.matchAll(/<a\s[^>]*href="\/manga\/([a-z0-9][a-z0-9-]*)"[^>]*>/g)]
+  const cards: AnimePlanetSearchCard[] = []
+  anchors.forEach((anchor, i) => {
+    const titleAttr = anchor[0].match(/\stitle="([^"]*)"/)?.[1]
+    if (titleAttr == null) return
+    const start = (anchor.index ?? 0) + anchor[0].length
+    const next = anchors[i + 1]?.index ?? html.length
+    let body = html.slice(start, next)
+    const stop = body.search(/<\/ul>|<\/section>/)
+    if (stop >= 0) body = body.slice(0, stop)
+
+    const tooltip = decodeHtmlAttribute(titleAttr) ?? ""
+    const isTooltip = /<h5[\s>]/i.test(tooltip)
+    const title = isTooltip ? cleanHtml(tooltip.match(/<h5[^>]*>([\s\S]*?)<\/h5>/i)?.[1]) : cleanHtml(titleAttr)
+    if (!title) return
+    cards.push({ slug: anchor[1], title, chunk: isTooltip ? `${tooltip}${body}` : body })
+  })
+  return cards
+}
+
 function directSlugCandidates(title: string): string[] {
   const slug = slugifyTitle(title)
   const withoutLeadingArticle = slug.replace(/^(?:the|a|an)-/, "")
@@ -130,7 +177,7 @@ function directSlugCandidates(title: string): string[] {
 
 async function fetchDirectSearchResult(search: string): Promise<ExternalSearchResult | null> {
   for (const slug of directSlugCandidates(search)) {
-    const result = await fetchHtmlWithCfFallback(`${AP_BASE}/manga/${slug}`, HEADERS)
+    const result = await fetchHtmlWithCfFallback(`${AP_BASE}/manga/${slug}`, HEADERS, ANIMEPLANET_CF_ABORT_MS)
     if (!result) continue
     const parsed = parseDetailPageAsSearchResult(result.html, slug)
     if (!parsed) continue
@@ -142,7 +189,7 @@ async function fetchDirectSearchResult(search: string): Promise<ExternalSearchRe
 
 async function findSlug(title: string): Promise<string | null> {
   const url = `${AP_BASE}/manga/all?name=${encodeURIComponent(title)}`
-  const result = await fetchHtmlWithCfFallback(url, HEADERS)
+  const result = await fetchHtmlWithCfFallback(url, HEADERS, ANIMEPLANET_CF_ABORT_MS)
   if (!result) {
     const direct = await fetchDirectSearchResult(title)
     return direct?.id.split(":")[1] ?? null
@@ -155,11 +202,8 @@ async function findSlug(title: string): Promise<string | null> {
     return directMatch[1]
   }
 
-  // Capture slug + title attribute to filter "(Novel)" entries by display name
-  const slugRegex = /href="\/manga\/([a-z0-9][a-z0-9-]*)"[^>]*title="([^"]*)"/g
-  let match: RegExpExecArray | null
-  while ((match = slugRegex.exec(result.html)) !== null) {
-    const [, slug, title] = match
+  // Slug + nome do cartão, pra filtrar entradas "(Novel)" pelo nome exibido.
+  for (const { slug, title } of parseAnimePlanetSearchCards(result.html)) {
     if (META.has(slug) || hasExcludedSlugSuffix(slug) || hasExcludedTitleSuffix(title)) continue
     return slug
   }
@@ -174,7 +218,8 @@ export async function searchAnimePlanet(search: string): Promise<ExternalSearchR
   try {
     const result = await fetchHtmlWithCfFallback(
       `${AP_BASE}/manga/all?name=${encodeURIComponent(search)}`,
-      HEADERS
+      HEADERS,
+      ANIMEPLANET_CF_ABORT_MS,
     )
     if (!result) {
       const direct = await fetchDirectSearchResult(search)
@@ -202,12 +247,9 @@ export async function searchAnimePlanet(search: string): Promise<ExternalSearchR
       }
     }
 
-    const cardRegex = /href="\/manga\/([a-z0-9][a-z0-9-]*)"[^>]*title="([^"]*)"([\s\S]*?)(?=href="\/manga\/[a-z0-9][a-z0-9-]*"|<\/ul>|<\/section>|$)/g
-
-    let match: RegExpExecArray | null
-    while ((match = cardRegex.exec(html)) !== null && results.length < 8) {
-      const [, slug, rawTitle, chunk] = match
-      if (META.has(slug) || hasExcludedSlugSuffix(slug) || hasExcludedTitleSuffix(rawTitle) || seen.has(slug)) continue
+    for (const { slug, title, chunk } of parseAnimePlanetSearchCards(html)) {
+      if (results.length >= 8) break
+      if (META.has(slug) || hasExcludedSlugSuffix(slug) || hasExcludedTitleSuffix(title) || seen.has(slug)) continue
       seen.add(slug)
 
       const dataSrc = chunk.match(/data-src="([^"]+)"/)?.[1]
@@ -220,7 +262,6 @@ export async function searchAnimePlanet(search: string): Promise<ExternalSearchR
             : undefined
       const synopsis = cleanHtml(chunk.match(/<p[^>]*>([\s\S]*?)<\/p>/)?.[1])
       const statusText = cleanHtml(chunk.match(/(?:Status|Release):?<\/[^>]+>\s*<[^>]+>([^<]+)/i)?.[1])
-      const title = decodeHtml(rawTitle) ?? rawTitle
       const genres = [...chunk.matchAll(/\/manga\/(?:tags|genres)\/[^"]+"[^>]*>([^<]+)/g)]
         .map((genre) => decodeHtml(genre[1]))
         .filter((genre): genre is string => Boolean(genre))
@@ -408,7 +449,7 @@ export async function fetchAnimePlanetReviews(slug: string, limit = Infinity): P
   if (isCfBypassUnavailable()) return []
   try {
     const url = `${AP_BASE}/manga/${slug}/reviews`
-    const result = await fetchHtmlWithCfFallback(url, HEADERS)
+    const result = await fetchHtmlWithCfFallback(url, HEADERS, ANIMEPLANET_CF_ABORT_MS)
     if (!result) {
       console.warn(`[fetchAnimePlanetReviews] AP slug="${slug}": fetch falhou (CF/FlareSolverr não resolveu) ${url}`)
       return []
@@ -466,7 +507,8 @@ export async function fetchAnimePlanetRecommendations(slug: string): Promise<str
   try {
     const result = await fetchHtmlWithCfFallback(
       `${AP_BASE}/manga/${slug}/recommendations`,
-      HEADERS
+      HEADERS,
+      ANIMEPLANET_CF_ABORT_MS,
     )
     if (!result) return []
 
@@ -500,7 +542,7 @@ export async function fetchAnimePlanetByTitle(title: string, knownSlug?: string)
     const slug = knownSlug ?? await findSlug(title)
     if (!slug) return null
 
-    const result = await fetchHtmlWithCfFallback(`${AP_BASE}/manga/${slug}`, HEADERS)
+    const result = await fetchHtmlWithCfFallback(`${AP_BASE}/manga/${slug}`, HEADERS, ANIMEPLANET_CF_ABORT_MS)
     if (!result) return null
     return parseAnimePlanetDetailHtml(result.html)
   } catch {

@@ -15,6 +15,28 @@ const ENDPOINT = process.env.FLARESOLVERR_URL?.trim() || ""
 // (container fora), e o fetch ficaria pendurado até o teto externo (8s). Menor
 // que o withTimeout do orquestrador pra o catch disparar e abrir o circuito.
 const FLARESOLVERR_TIMEOUT_MS = 5000
+
+// Teto de páginas Chromium SIMULTÂNEAS que este processo manda ao FlareSolverr.
+//
+// Cada `request.get` sem sessão abre um Chrome novo lá, e cada `sessions.create` abre outro
+// que fica vivo. Medido na Fly (máquina de 1 GB, 06/10/2026): ociosa e sem sessões sobram
+// ~650 MB; UMA página por vez já leva a ~320 MB; com as duas sessões persistentes (comix,
+// mangago) a folga começa em ~340 MB — duas páginas pesadas juntas esgotam a máquina. Foi o
+// que a derrubou em 05/10: a "Buscar fontes" dispara as variantes de título em paralelo
+// (medido no FlareSolverr local: 19 páginas, pico de 6 simultâneas, +1,07 GB).
+//
+// ⚠️ É por PROCESSO. Com duas máquinas do app de pé, o FlareSolverr pode receber duas.
+export const FLARESOLVERR_MAX_CONCURRENCY = 1
+
+// Abaixo disto não vale abrir página: a resposta mais rápida já medida do FlareSolverr na Fly
+// foi ~2,2 s. Com SESSÃO isso importa ainda mais — o maxTimeout dela é 60 s, e uma página
+// aberta com meio segundo de prazo trabalharia até um minuto para ninguém, segurando o slot.
+const MIN_PAGE_BUDGET_MS = 2000
+
+// Quanto esperar a RESPOSTA do FlareSolverr além do maxTimeout pedido. Medido na Fly: páginas
+// que estouraram os 60 s voltaram em 69,6 s, 76,2 s e 76,5 s (o Chrome demora a fechar). O slot
+// fica preso até a resposta chegar — é o Chrome lá que ocupa memória, não a nossa espera.
+const FLARESOLVERR_RESPONSE_GRACE_MS = 20_000
 // Circuit breaker: ao falhar, marca indisponível por um tempo pra não pagar o
 // timeout em CADA chamada (enriquecimento em lote chama comix dezenas de vezes).
 // Reabre sozinho depois do TTL (se o container voltar, volta a usar).
@@ -122,15 +144,28 @@ function logFlareSolverrFailure(reason: string) {
   flareSolverrFailureLogged = true
 }
 
-/** POST cru ao endpoint do FlareSolverr (request.get / sessions.*). */
-function postFlareSolverr(body: Record<string, unknown>, abortMs: number): Promise<Response> {
-  return fetch(ENDPOINT, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    cache: "no-store",
-    signal: AbortSignal.timeout(abortMs),
-  })
+/** POST cru ao endpoint do FlareSolverr (request.get / sessions.*). O abort cobre também a
+ *  leitura do corpo, por isso devolve o JSON já lido. `AbortController` + `setTimeout` (e não
+ *  `AbortSignal.timeout`) para o relógio ser controlável nos testes. */
+async function postFlareSolverr(
+  body: Record<string, unknown>,
+  abortMs: number,
+): Promise<{ ok: boolean; status: number; json: () => Promise<any> }> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), abortMs)
+  try {
+    const res = await fetch(ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+      signal: controller.signal,
+    })
+    const parsed: unknown = res.ok ? await res.json() : null
+    return { ok: res.ok, status: res.status, json: async () => parsed }
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /** Cria (best-effort) uma sessão nomeada. Tolerante a "already exists": o que
@@ -152,8 +187,11 @@ async function flareSolverrCreateSession(session: string, abortMs: number): Prom
 //
 // Serializa por sessão: a vantagem da sessão nomeada (não repagar o solve frio do
 // Cloudflare, ~11s) só é válida com uso exclusivo. Troca corrupção silenciosa por
-// fila. Chamadas SEM sessão não entram na fila — o FlareSolverr cria uma sessão
+// fila. Chamadas SEM sessão não entram nesta trava — o FlareSolverr cria uma sessão
 // efêmera por request, que já é isolada.
+//
+// ⚠️ Com FLARESOLVERR_MAX_CONCURRENCY = 1 a fila de slots já serializa tudo; esta trava
+// continua porque é ELA que garante a aba exclusiva da sessão se o limite subir.
 //
 // (O sidecar `comix-render` usa um BrowserContext por request e é imune por
 // construção — quando ele substituir o FS de vez, esta fila sai junto.)
@@ -171,37 +209,151 @@ function withSessionLock<T>(session: string | undefined, run: () => Promise<T>):
   return next
 }
 
+// Fila ÚNICA de páginas (ver FLARESOLVERR_MAX_CONCURRENCY). FIFO e com prazo: quem chega
+// espera a vez até o prazo DO CHAMADOR; vencido, sai da fila sem ter aberto página nenhuma.
+//
+// 🔴 O estado mora em `globalThis`, não no módulo. O build de produção empacota este arquivo
+// DUAS vezes, com ids de módulo diferentes (medido em 06/10/2026: uma cópia para as rotas
+// `app/api/animeplanet` e `app/api/comick/*`, outra para as páginas e server actions). Estado de
+// módulo daria uma fila por cópia — "limite 1" viraria 2 por processo, calado. `Symbol.for` é a
+// mesma chave para as duas cópias; o processo é a menor unidade que todas enxergam.
+interface SlotWaiter {
+  grant: () => void
+  timer: ReturnType<typeof setTimeout>
+}
+interface PageQueue {
+  inUse: number
+  waiting: SlotWaiter[]
+}
+const PAGE_QUEUE_KEY = Symbol.for("satoria.flaresolverr.pageQueue")
+
+function pageQueue(): PageQueue {
+  const holder = globalThis as typeof globalThis & { [PAGE_QUEUE_KEY]?: PageQueue }
+  holder[PAGE_QUEUE_KEY] ??= { inUse: 0, waiting: [] }
+  return holder[PAGE_QUEUE_KEY]
+}
+
+function acquireFlareSolverrSlot(deadline: number): Promise<boolean> {
+  const queue = pageQueue()
+  if (queue.inUse < FLARESOLVERR_MAX_CONCURRENCY && queue.waiting.length === 0) {
+    queue.inUse++
+    return Promise.resolve(true)
+  }
+  const wait = deadline - Date.now()
+  if (wait <= 0) return Promise.resolve(false)
+  return new Promise((resolve) => {
+    const waiter: SlotWaiter = {
+      grant: () => resolve(true),
+      timer: setTimeout(() => {
+        const i = queue.waiting.indexOf(waiter)
+        if (i >= 0) queue.waiting.splice(i, 1)
+        resolve(false)
+      }, wait),
+    }
+    queue.waiting.push(waiter)
+  })
+}
+
+/** Devolve o slot. Havendo fila, ele passa DIRETO ao próximo — sem janela pra alguém furar. */
+function releaseFlareSolverrSlot(): void {
+  const queue = pageQueue()
+  const next = queue.waiting.shift()
+  if (next) {
+    clearTimeout(next.timer)
+    next.grant()
+    return
+  }
+  queue.inUse = Math.max(0, queue.inUse - 1)
+}
+
+/** Estado da fila (do PROCESSO) — para teste e diagnóstico. Slot preso aparece aqui como
+ *  `inUse > 0` sem nenhuma página em andamento. */
+export function flareSolverrSlotState(): { inUse: number; queued: number } {
+  const queue = pageQueue()
+  return { inUse: queue.inUse, queued: queue.waiting.length }
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
+/** `work` ou `null` quando `ms` vencer antes — o que vencer primeiro. Não cancela `work`. */
+function raceDeadline<T>(work: Promise<T | null>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms)
+  })
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer))
+}
+
 export function flareSolverrFetch(
   url: string,
   timeoutMs = 60000,
+  // Orçamento do CHAMADOR, contado daqui: cobre a espera na fila E a página. Quem chama nunca
+  // espera mais que isto (o mesmo teto de antes da fila), e o que não conseguiu vez dentro
+  // dele desiste SEM abrir página — senão a fila mandaria ao FlareSolverr trabalho que
+  // ninguém mais espera, que é exatamente como ele travou em 05/10.
   abortMs = FLARESOLVERR_TIMEOUT_MS,
   session?: string,
 ): Promise<{ html: string; finalUrl: string } | null> {
-  return withSessionLock(session, () => flareSolverrFetchExclusive(url, timeoutMs, abortMs, session))
+  const deadline = Date.now() + abortMs
+  return withSessionLock(session, () => flareSolverrFetchExclusive(url, timeoutMs, deadline, session))
 }
 
 /** Corpo real. Só roda com a sessão travada (ver `withSessionLock`). */
 async function flareSolverrFetchExclusive(
   url: string,
-  timeoutMs = 60000,
-  // Teto de espera da NOSSA conexão com o FlareSolverr. Default curto (5s) detecta
-  // container caído rápido; chamadas que sabem que vão pagar um solve frio de
-  // Cloudflare (ex.: scrape de página) passam um valor maior pra não cortar antes
-  // do desafio terminar. Não confundir com `timeoutMs` (orçamento do Chrome
-  // headless DENTRO do FlareSolverr).
-  abortMs = FLARESOLVERR_TIMEOUT_MS,
+  // Orçamento do Chrome headless DENTRO do FlareSolverr (o `maxTimeout` dele).
+  timeoutMs: number,
+  // Prazo absoluto do chamador (ver `flareSolverrFetch`).
+  deadline: number,
   // Sessão nomeada: reusa o MESMO Chrome (com o cf_clearance vivo DENTRO do browser)
   // entre chamadas. Essencial p/ hosts onde TODA request é desafiada (comix pós-2026-06):
   // a 1ª call paga o solve frio (~11s), as seguintes na mesma sessão saem em <1s. O
   // clearance não é replayável por fetch externo (a CF o amarra ao fingerprint do
   // browser), então a sessão é o único jeito de amortizar o solve.
-  session?: string
+  session?: string,
 ): Promise<{ html: string; finalUrl: string } | null> {
   if (!ENDPOINT) return null
   // Circuito aberto (container falhou recentemente) → falha na hora, sem esperar.
   if (Date.now() < circuitOpenUntil) return null
+
+  if (!(await acquireFlareSolverrSlot(deadline))) {
+    console.warn(`[flareSolverr] fila: prazo venceu esperando vez — nenhuma página aberta (${hostOf(url)})`)
+    return null
+  }
+  const remaining = deadline - Date.now()
+  // O circuito pode ter aberto enquanto esperávamos a vez.
+  if (remaining < MIN_PAGE_BUDGET_MS || Date.now() < circuitOpenUntil) {
+    releaseFlareSolverrSlot()
+    return null
+  }
+
+  // Sem sessão, nada se aproveita depois que o chamador desistiu: pedimos ao FlareSolverr que
+  // pare junto. COM sessão o teto de antes fica — um solve que termina depois do prazo ainda
+  // deixa a sessão quente pra próxima chamada (é o que a 2ª passada dirigida aproveita).
+  const maxTimeout = session ? timeoutMs : Math.min(timeoutMs, remaining)
+  // O slot só volta quando o FlareSolverr RESPONDE: abandonar a espera aqui não fecha o Chrome
+  // lá, e liberar antes deixaria a próxima página abrir com esta ainda em memória.
+  const page = requestPage(url, maxTimeout, session)
+    .catch(() => null)
+    .finally(releaseFlareSolverrSlot)
+  return raceDeadline(page, remaining)
+}
+
+/** Uma página no FlareSolverr, esperando a resposta até `maxTimeout` + a folga de fechamento. */
+async function requestPage(
+  url: string,
+  maxTimeout: number,
+  session?: string,
+): Promise<{ html: string; finalUrl: string } | null> {
+  const abortMs = maxTimeout + FLARESOLVERR_RESPONSE_GRACE_MS
   try {
-    const body: Record<string, unknown> = { cmd: "request.get", url, maxTimeout: timeoutMs }
+    const body: Record<string, unknown> = { cmd: "request.get", url, maxTimeout }
     if (session) body.session = session
 
     let res = await postFlareSolverr(body, abortMs)
@@ -234,9 +386,9 @@ async function flareSolverrFetchExclusive(
     circuitOpenUntil = 0 // sucesso → fecha o circuito
     return { html, finalUrl }
   } catch (err) {
-    // Timeout do NOSSO abort (AbortSignal.timeout) = container vivo mas lento
-    // (solve de CF em andamento), não caído → NÃO abre o circuito, só este call
-    // falha; as outras fontes/sessões seguem tentando.
+    // Timeout do NOSSO abort (maxTimeout + folga, sem resposta) = container vivo mas
+    // lento, não caído → NÃO abre o circuito, só este call falha; as outras
+    // fontes/sessões seguem tentando.
     const isTimeout =
       err instanceof Error &&
       (err.name === "TimeoutError" || err.name === "AbortError" || /aborted due to timeout/i.test(err.message))
@@ -260,8 +412,8 @@ async function flareSolverrFetchExclusive(
 export async function fetchHtmlWithCfFallback(
   url: string,
   headers: Record<string, string> = {},
-  // Repassado ao FlareSolverr como teto de espera da conexão. Default 5s; suba pra
-  // páginas que pagam solve frio de Cloudflare (ver flareSolverrFetch).
+  // Orçamento do bypass para esta página: fila do FlareSolverr + a página em si (ver
+  // flareSolverrFetch). Default 5s; cada fonte declara o seu, medido na Fly.
   abortMs?: number,
   // Sessão nomeada do FlareSolverr p/ amortizar o solve entre calls do mesmo host
   // (ver flareSolverrFetch). Só vale o fallback; o plain fetch direto não usa sessão.
