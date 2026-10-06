@@ -248,7 +248,7 @@ describe("fila de páginas do FlareSolverr — prazo do chamador", () => {
     expect(fs.flareSolverrSlotState()).toEqual({ inUse: 0, queued: 0 })
   })
 
-  it("ganhar a vez com menos de 2 s de prazo não abre página (e devolve o slot)", async () => {
+  it("ganhar a vez com prazo abaixo do piso não abre página (e devolve o slot)", async () => {
     const net = simulate()
     const fs = await loadFresh()
 
