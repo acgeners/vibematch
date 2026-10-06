@@ -249,18 +249,23 @@ export async function getTopPicksForToday(
   // Passou batido na 2b porque eu religei o "Acompanhando" e os KPIs, mas não este.
   const [personal, scores] = await Promise.all([getPersonalStateReader(), getScoresReader()])
 
-  const { data, error } = await supabase
-    .from("works")
-    .select(`
-      id, title, is_archived, publication_status_id, is_adult, total_chapters,
-      ${HIATUS_SELECT_COLUMNS},
-      calculated_scores(expected_score, platform_avg),
-      work_covers(url, is_primary, position)
-    `)
-    .eq("is_archived", false)
-    .limit(2000)
-
-  if (error) throw new Error(error.message)
+  // 🔴 PAGINADA: o `.limit(2000)` de antes não valia — o PostgREST corta em 1000 sem erro. Medido
+  // em 2026-10-05: 1.044 obras ativas, 1.000 chegavam, e as 44 de fora eram TODAS das 100
+  // atualizadas mais recentemente (sem `ORDER BY` vem a ordem física, e a linha atualizada vai
+  // pro fim). Ou seja, a prateleira ignorava justamente a obra que você acabou de editar.
+  const data = await fetchAllRows<Row>(
+    () =>
+      supabase
+        .from("works")
+        .select(`
+          id, title, is_archived, publication_status_id, is_adult, total_chapters,
+          ${HIATUS_SELECT_COLUMNS},
+          calculated_scores(expected_score, platform_avg),
+          work_covers(url, is_primary, position)
+        `)
+        .eq("is_archived", false),
+    { orderBy: ["id"], label: "getTopPicksForToday" },
+  )
 
   type Row = {
     id: string
@@ -275,7 +280,7 @@ export async function getTopPicksForToday(
     work_covers?: CoverRow[] | null
   }
 
-  const candidatas = ((data ?? []) as unknown as Row[])
+  const candidatas = data
     .map((w) => {
       const state = personal.get(w.id)
       const calc = scores.overlay(w.id, w.calculated_scores)
