@@ -10,9 +10,9 @@ import { normalizeAlternativeTitles } from "@/lib/titles/alternative-titles"
 // (headers reais: `cf-mitigated: challenge`, `server: cloudflare`). Um fetch
 // direto volta 403. Por isso reusamos a mesma máquina do Comix/AnimePlanet:
 // `fetchHtmlWithCfFallback` tenta o fetch direto e, ao detectar o desafio,
-// roteia pelo FlareSolverr (headless Chrome). Usamos uma SESSÃO nomeada
-// ("mangago") pra amortizar o solve frio (~11s na 1ª call, <1s nas seguintes)
-// e um `abortMs` alto (o default de 5s cortaria o solve frio no meio).
+// roteia pelo FlareSolverr (headless Chrome), com um `abortMs` alto (o default
+// de 5s cortaria um solve frio no meio). SEM sessão nomeada desde 06/10/2026: ver
+// o comentário de `CF_ABORT_MS`.
 //
 // Estrutura de URL (fonte: extensão Tachiyomi/Mihon oficial do Mangago):
 //   Busca:   /r/l_search/?name={query}&page={n}   → lista com links /read-manga/{slug}/
@@ -36,10 +36,13 @@ import { normalizeAlternativeTitles } from "@/lib/titles/alternative-titles"
 
 const BASE = "https://www.mangago.me"
 
-// Sessão FlareSolverr dedicada — reusa o MESMO Chrome quente entre calls do host.
-const FS_SESSION = "mangago"
-// Teto de espera da conexão com o FlareSolverr. Sobe pro mesmo patamar do Comix
-// porque a 1ª call paga o solve frio de Cloudflare (~11s).
+// A sessão nomeada ("mangago") saiu em 06/10/2026: na Fly ela não trazia NADA — o Mangago
+// recusa o IP de saída do FlareSolverr (`iad`) com ou sem sessão (busca, reviews e até o
+// detalhe voltam "not found", medido), e o detalhe que a produção usa vem por fetch direto.
+// Ela só prendia memória numa máquina de 1 GB. Cada chamada agora abre e fecha o próprio Chrome.
+//
+// Teto de espera do bypass (fila + página). Mesmo patamar do Comix: uma página que pague
+// solve frio de Cloudflare leva ~11 s.
 const CF_ABORT_MS = 25000
 
 const HEADERS = {
@@ -334,7 +337,7 @@ export async function searchMangago(query: string): Promise<ExternalSearchResult
   if (isCfBypassUnavailable()) return []
   try {
     const url = `${BASE}/r/l_search/?name=${encodeURIComponent(query)}&page=1`
-    const result = await fetchHtmlWithCfFallback(url, HEADERS, CF_ABORT_MS, FS_SESSION)
+    const result = await fetchHtmlWithCfFallback(url, HEADERS, CF_ABORT_MS)
     if (!result) return []
     return parseSearchResults(result.html)
   } catch {
@@ -476,10 +479,11 @@ export function parseMangagoDetailHtml(html: string): MangagoDetail | null {
   }
 }
 
-// Teto da tentativa EXTRA (ver `fetchMangagoById`). Curto de propósito: ela só existe
-// pro caso em que a 1ª pagou o solve frio de Cloudflare e estourou o CF_ABORT_MS — aí a
-// sessão do FlareSolverr já ficou quente e a 2ª responde em <1s. Se nem assim vier,
-// insistir com outros 25s só faria o usuário esperar pra receber o mesmo `null`.
+// Teto da tentativa EXTRA (ver `fetchMangagoById`). Curto de propósito: ela foi desenhada
+// pro caso em que a 1ª pagou o solve frio de Cloudflare e estourou o CF_ABORT_MS, com a
+// sessão do FlareSolverr ficando quente para a 2ª. ⚠️ SEM sessão (desde 06/10/2026) essa
+// premissa não vale mais: a 2ª abre um Chrome novo. Ficou por ser barata e opt-in; em
+// produção o detalhe do Mangago vem por fetch direto e raramente chega aqui.
 const RETRY_ABORT_MS = 6000
 const RETRY_BACKOFF_MS = 600
 
@@ -491,7 +495,8 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  * `retry` liga UMA tentativa extra e é opt-in de propósito. A falha aqui costuma ser
  * transitória: o circuito do FlareSolverr só abre em ECONNREFUSED (container fora), então
  * um solve de Cloudflare que estourou o abort chega como `null` sem segunda chance — e é
- * justo o caso que a 2ª tentativa resolve, com a sessão já quente. Só o caminho INTERATIVO
+ * justo o caso que a 2ª tentativa foi desenhada para resolver (premissa de sessão quente que
+ * deixou de valer em 06/10/2026 — ver RETRY_ABORT_MS). Só o caminho INTERATIVO
  * (seleção de fontes, com o usuário parado na tela) pede o retry; o hydrate em lote roda
  * sob um `withTimeout` de 30s e um retry embutido ali apenas queimaria o orçamento dele
  * antes de devolver o mesmo `null`.
@@ -506,7 +511,7 @@ export async function fetchMangagoById(
     // Circuito aberto = container fora (ECONNREFUSED). Retentar só pagaria latência.
     if (isCfBypassUnavailable()) return null
     try {
-      const result = await fetchHtmlWithCfFallback(url, HEADERS, budgets[i], FS_SESSION)
+      const result = await fetchHtmlWithCfFallback(url, HEADERS, budgets[i])
       const detail = result ? parseMangagoDetailHtml(result.html) : null
       if (detail) return detail
     } catch {
@@ -597,7 +602,7 @@ export function parseMangagoChapters(html: string): MangagoChapters | null {
 export async function fetchMangagoChapters(slug: string): Promise<MangagoChapters | null> {
   if (isCfBypassUnavailable()) return null
   try {
-    const result = await fetchHtmlWithCfFallback(`${BASE}/read-manga/${slug}/`, HEADERS, CF_ABORT_MS, FS_SESSION)
+    const result = await fetchHtmlWithCfFallback(`${BASE}/read-manga/${slug}/`, HEADERS, CF_ABORT_MS)
     if (!result) return null
     return parseMangagoChapters(result.html)
   } catch {
@@ -634,7 +639,7 @@ function extractTopics(html: string, seen: Set<string>, out: Array<{ id: string;
 /**
  * Reviews do Mangago = posts de opinião dos usuários ("topics"), que na prática
  * funcionam como mini-reviews ("great beginning, bad ending", "the fight scenes
- * still get me hype"). Multi-hop pela sessão FlareSolverr quente:
+ * still get me hype"). Multi-hop pelo FlareSolverr, uma página por vez (fila única):
  *   1. `/home/manga/discussion/{slug}/?page=N` → lista paginada de tópicos
  *      (id + título; 11/página). Varre até juntar `limit` ids ou acabar.
  *   2. `/home/mangatopic/{id}/` → o texto completo do 1º post vem no
@@ -659,7 +664,7 @@ export async function fetchMangagoReviews(slug: string, limit = 40): Promise<str
         page === 1
           ? `${BASE}/home/manga/discussion/${slug}/`
           : `${BASE}/home/manga/discussion/${slug}/?page=${page}&sort=date`
-      const list = await fetchHtmlWithCfFallback(url, HEADERS, CF_ABORT_MS, FS_SESSION)
+      const list = await fetchHtmlWithCfFallback(url, HEADERS, CF_ABORT_MS)
       if (!list) break
       const added = extractTopics(list.html, seen, topics, limit)
       if (added === 0) break // página sem tópicos novos → acabou
@@ -670,7 +675,7 @@ export async function fetchMangagoReviews(slug: string, limit = 40): Promise<str
     const reviews: string[] = []
     for (const { id, title } of topics) {
       if (isCfBypassUnavailable()) break
-      const topic = await fetchHtmlWithCfFallback(`${BASE}/home/mangatopic/${id}/`, HEADERS, CF_ABORT_MS, FS_SESSION)
+      const topic = await fetchHtmlWithCfFallback(`${BASE}/home/mangatopic/${id}/`, HEADERS, CF_ABORT_MS)
       if (!topic) continue
       const body = cleanHtml(decodeAttr(metaContent(topic.html, "description")))
       // Corpo do post é a opinião plena; cai pro título quando o tópico não tem corpo.

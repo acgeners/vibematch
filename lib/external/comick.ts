@@ -1,6 +1,7 @@
 import type { PublicationStatus } from "@/types/domain"
 import type { ExternalSearchResult } from "./types"
 import { fetchHtmlWithCfFallback, isFlareSolverrEnabled } from "./flaresolverr"
+import { withTimeout } from "./with-timeout"
 
 const COMICK_BASES = [
   // api.comick.dev é o endpoint vivo (out 2026 em diante). api.comick.io
@@ -19,6 +20,13 @@ const HEADERS = {
   Referer: "https://comick.io/",
   Origin: "https://comick.io",
 }
+
+// Orçamento de cada chamada à API JSON no bypass (fila do FlareSolverr + página). O padrão de
+// 5 s ficava a 0,6 s do medido na Fly (~4,4 s com a CPU livre, 06/10/2026) — qualquer variação
+// derrubava a chamada. 10 s ≈ 2,3× o medido; a folga também paga a espera na fila única.
+// ⚠️ É POR BASE: `fetchJson` tenta até 4 bases em série, então o pior caso de uma chamada que
+// falha em todas é 4× isto — quem limita o total é o teto da orquestração.
+export const COMICK_API_CF_ABORT_MS = 10_000
 
 function mapStatus(status: number | undefined): PublicationStatus {
   switch (status) {
@@ -90,7 +98,7 @@ async function fetchJson(pathname: string, search = "") {
       failures.push(`${base} direct=${directReason ?? "?"} (FlareSolverr disabled)`)
       continue
     }
-    const fallback = await fetchHtmlWithCfFallback(url.toString(), HEADERS)
+    const fallback = await fetchHtmlWithCfFallback(url.toString(), HEADERS, COMICK_API_CF_ABORT_MS)
     if (!fallback) {
       failures.push(`${base} direct=${directReason ?? "?"} flaresolverr=no-response`)
       continue
@@ -285,10 +293,11 @@ function stripHtmlToText(value: string): string {
 }
 
 /** Reviews curadas (com nota /10) do JSON de detalhe. Prefixa a nota no formato
- *  que `extractUserRating` reconhece pra o sampler de reviews aproveitar. */
-async function fetchComicKReviewsFromDetail(hid: string): Promise<string[]> {
+ *  que `extractUserRating` reconhece pra o sampler de reviews aproveitar.
+ *  `null` = a API não respondeu (≠ `[]`, obra sem reviews). */
+async function fetchComicKReviewsFromDetail(hid: string): Promise<string[] | null> {
   const data = await fetchJson(`/comic/${hid}`)
-  if (!data) return []
+  if (!data) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const comic: any = (data as any)?.comic ?? data
   const reviews: unknown[] = Array.isArray(comic?.reviews) ? comic.reviews : []
@@ -317,19 +326,28 @@ const COMMENT_CONTENT_RE = /class="comment-content[^"]*">([\s\S]*?)<\/div>/g
 // derrubando os comentários. Damos um teto maior SÓ aqui. O clearance do
 // Cloudflare persiste por IP+UA, então só a 1ª obra paga o frio; as seguintes
 // entram quentes (~3s) dentro desse mesmo teto.
-const COMICK_COMMENTS_CF_ABORT_MS = 16000
+//
+// Era 16 s e a página levou 15,9 s na Fly com a CPU livre (06/10/2026: SPA de ~900 KB, 38
+// comentários) — na borda. 25 s ≈ 1,6× o medido. É POR BASE (são duas, em série).
+export const COMICK_COMMENTS_CF_ABORT_MS = 25_000
 
 /** Comentários da obra raspados da página web. Filtra por tamanho mínimo (corta
- *  reação curta/emoji) e dedupa por prefixo. Best-effort: sem FlareSolverr ou com
- *  Cloudflare ativo, devolve []. */
+ *  reação curta/emoji) e dedupa por prefixo. `null` = nenhuma base carregou (sem
+ *  FlareSolverr, Cloudflare ativo, timeout) — ≠ `[]`, página carregada sem comentário. */
 async function fetchComicKComments(
   hid: string,
-  opts: { minLength?: number; cap?: number } = {}
-): Promise<string[]> {
+  // `deadline`: prazo absoluto de quem chama. Cada base recebe só o que SOBROU dele, e a camada
+  // do FlareSolverr não abre página quando não sobra o bastante.
+  opts: { minLength?: number; cap?: number; deadline?: number } = {}
+): Promise<string[] | null> {
   const minLength = opts.minLength ?? 40
   const cap = opts.cap ?? 20
   for (const base of COMICK_WEB_BASES) {
-    const fallback = await fetchHtmlWithCfFallback(`${base}/comic/${hid}`, WEB_HEADERS, COMICK_COMMENTS_CF_ABORT_MS)
+    const budget = opts.deadline == null
+      ? COMICK_COMMENTS_CF_ABORT_MS
+      : Math.min(COMICK_COMMENTS_CF_ABORT_MS, opts.deadline - Date.now())
+    if (budget <= 0) break
+    const fallback = await fetchHtmlWithCfFallback(`${base}/comic/${hid}`, WEB_HEADERS, budget)
     if (!fallback) continue
     const comments: string[] = []
     const seen = new Set<string>()
@@ -347,7 +365,7 @@ async function fetchComicKComments(
     // Página carregou (mesmo sem comentários) → não tenta o próximo domínio.
     return comments
   }
-  return []
+  return null
 }
 
 /**
@@ -362,9 +380,50 @@ async function fetchComicKComments(
  * quente da hidratação → ~2s) e só os comentários, no frontend, pagam o solve frio.
  */
 export async function fetchComicKReviews(hid: string): Promise<string[]> {
-  const reviews = await fetchComicKReviewsFromDetail(hid).catch(() => [])
-  const comments = await fetchComicKComments(hid).catch(() => [])
-  return [...reviews, ...comments]
+  const reviews = await fetchComicKReviewsFromDetail(hid).catch(() => null)
+  const comments = await fetchComicKComments(hid).catch(() => null)
+  return [...(reviews ?? []), ...(comments ?? [])]
+}
+
+/** Orçamento da coleta INTEIRA (API + comentários): um passo de cada, no caminho feliz. */
+export const COMICK_REVIEWS_BUDGET_MS = COMICK_API_CF_ABORT_MS + COMICK_COMMENTS_CF_ABORT_MS
+
+export interface ComicKReviewsCollected {
+  reviews: string[]
+  /** Presente quando UMA das duas partes falhou e a outra entregou. Sem ele, a coleta
+   *  terminou inteira — inclusive com zero itens, que é resposta legítima. */
+  partialFailure?: string
+}
+
+/**
+ * A mesma coleta de `fetchComicKReviews`, para a orquestração das reviews — com a diferença
+ * que importa lá: uma parte que falha NÃO leva a outra junto.
+ *
+ * Antes a orquestração embrulhava as duas partes num teto só e, quando os comentários
+ * (página pesada) estouravam, descartava a fonte inteira — inclusive as reviews da API, que já
+ * tinham chegado. Aqui os comentários correm só no orçamento que SOBROU, e o parcial volta
+ * marcado. As duas partes falharem é falha de verdade: lança, em vez de virar "0 reviews".
+ */
+export async function collectComicKReviews(hid: string): Promise<ComicKReviewsCollected> {
+  const deadline = Date.now() + COMICK_REVIEWS_BUDGET_MS
+  const fromApi = await fetchComicKReviewsFromDetail(hid).catch(() => null)
+  const remaining = deadline - Date.now()
+  let comments: string[] | null = null
+  let commentsFailure = "comentários: sem orçamento depois da API"
+  if (remaining > 0) {
+    // O `withTimeout` é só rede de segurança: o prazo já vai para dentro, por base.
+    comments = await withTimeout(fetchComicKComments(hid, { deadline }), remaining, "comick:comentarios")
+      .catch(() => null)
+    commentsFailure = "comentários: página não carregou no orçamento"
+  }
+
+  if (fromApi == null && comments == null) {
+    throw new Error("ComicK: API e comentários falharam")
+  }
+  const reviews = [...(fromApi ?? []), ...(comments ?? [])]
+  if (fromApi == null) return { reviews, partialFailure: "API de reviews não respondeu" }
+  if (comments == null) return { reviews, partialFailure: commentsFailure }
+  return { reviews }
 }
 
 export async function fetchComicKByHid(hid: string): Promise<ComicKDetail | null> {

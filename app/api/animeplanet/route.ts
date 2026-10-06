@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { fetchHtmlWithCfFallback } from "@/lib/external/flaresolverr"
-import { parseAnimePlanetDetailHtml } from "@/lib/external/animeplanet"
+import { ANIMEPLANET_CF_ABORT_MS, parseAnimePlanetDetailHtml, parseAnimePlanetSearchCards } from "@/lib/external/animeplanet"
 
 const AP_BASE = "https://www.anime-planet.com"
 const AP_META = new Set(["all", "tags", "genres", "top-100", "recommendations", "browse"])
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
   try {
     if (knownSlug && AP_SLUG_RE.test(knownSlug) && !AP_META.has(knownSlug)) {
-      const detailResult = await fetchHtmlWithCfFallback(`${AP_BASE}/manga/${knownSlug}`, HEADERS)
+      const detailResult = await fetchHtmlWithCfFallback(`${AP_BASE}/manga/${knownSlug}`, HEADERS, ANIMEPLANET_CF_ABORT_MS)
       const parsed = detailResult ? parseAnimePlanetDetailHtml(detailResult.html) : null
       if (parsed) return NextResponse.json(parsed)
     }
@@ -33,7 +33,8 @@ export async function GET(req: NextRequest) {
 
     const listResult = await fetchHtmlWithCfFallback(
       `${AP_BASE}/manga/all?name=${encodeURIComponent(title)}`,
-      HEADERS
+      HEADERS,
+      ANIMEPLANET_CF_ABORT_MS,
     )
     if (!listResult) return NextResponse.json(null)
 
@@ -44,19 +45,14 @@ export async function GET(req: NextRequest) {
     if (directDetailMatch && !AP_META.has(directDetailMatch[1])) {
       detailHtml = listResult.html
     } else {
-      const slugRegex = /href="\/manga\/([a-z0-9][a-z0-9-]*)"[^>]*title="([^"]*)"/g
-      let slug: string | null = null
-      let match: RegExpExecArray | null
-      while ((match = slugRegex.exec(listResult.html)) !== null) {
-        const [, s, t] = match
-        if (!AP_META.has(s) && !/\(novel\)$/i.test(t.trim())) {
-          slug = s
-          break
-        }
-      }
+      // Cartões pelo mesmo parser do adapter (o markup atual tem `title` ANTES de `href`).
+      const slug =
+        parseAnimePlanetSearchCards(listResult.html).find(
+          (card) => !AP_META.has(card.slug) && !/\(novel\)$/i.test(card.title.trim()),
+        )?.slug ?? null
       if (!slug) return NextResponse.json(null)
 
-      const detailResult = await fetchHtmlWithCfFallback(`${AP_BASE}/manga/${slug}`, HEADERS)
+      const detailResult = await fetchHtmlWithCfFallback(`${AP_BASE}/manga/${slug}`, HEADERS, ANIMEPLANET_CF_ABORT_MS)
       if (!detailResult) return NextResponse.json(null)
       detailHtml = detailResult.html
     }

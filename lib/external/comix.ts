@@ -12,17 +12,17 @@ const COMIX_BASE = "https://comix.to/api/v1"
 // cortava antes do desafio terminar → null + circuit aberto, fazendo a atribuição
 // manual de hid e o fetch de detalhe/reviews falharem mesmo com o hid certo.
 // 25s dá folga sobre a variância do solve (maxTimeout interno do Chrome é 60s).
-const COMIX_CF_ABORT_MS = 25000
+export const COMIX_CF_ABORT_MS = 25000
 
-// Sessão FlareSolverr compartilhada por TODAS as chamadas do comix. Desde ~2026-06-12
-// (fim do dia) a CF do comix ficou estrita: SSR (/title/{hid}) E os endpoints
-// /api/v1/* (incl. /threads/*) passaram a ser desafiados, e o cf_clearance NÃO é
-// replayável por fetch externo. Sem sessão, cada uma das ~4 calls de uma review pagaria
-// um solve frio (~11s → ~44s, estourando o teto). Com a sessão, só a 1ª paga o solve;
-// as seguintes reusam o browser quente (<1s). A sessão é lazy (criada no 1º uso) e
-// persistente (sobrevive entre requests até o container reiniciar — flareSolverrFetch
-// recria sob demanda).
-const COMIX_FS_SESSION = "comix"
+// SEM sessão nomeada no FlareSolverr (removida em 06/10/2026). Ela existia para amortizar o
+// solve de Cloudflare entre as ~4 chamadas de uma review (desafio estrito desde ~2026-06-12).
+// Medido em 06/10: NENHUMA página da Comix mostrou desafio — nem no FlareSolverr local nem no
+// da Fly —, sem sessão a cadeia ficou ~0,6 s mais lenta (local) e a sessão prendia ~195 MB
+// para sempre. Na máquina de 1 GB da Fly, sessão + uma página pesada deixava 24 MB livres e a
+// página estourava. Cada chamada agora abre e fecha o próprio Chrome.
+// ⚠️ GATILHO para voltar: se o diagnóstico da Comix voltar a mostrar desafio, sem sessão cada
+// chamada paga o solve (~11 s local, ~24 s frio na Fly) e a cadeia de reviews estoura os 25 s
+// — aí a sessão volta, e com ela os 2 GB.
 
 // The comix.to API only responds with full data when called as an XHR
 // (same origin pattern). Without X-Requested-With the detail endpoint returns 404.
@@ -162,7 +162,7 @@ async function fetchComixJson(path: string): Promise<unknown | null> {
     return null
   }
 
-  const fallback = await fetchHtmlWithCfFallback(url, HEADERS, COMIX_CF_ABORT_MS, COMIX_FS_SESSION)
+  const fallback = await fetchHtmlWithCfFallback(url, HEADERS, COMIX_CF_ABORT_MS)
   if (!fallback) {
     logComixFailure(url, "cloudflare_challenge", "flaresolverr returned no response")
     return null
@@ -216,7 +216,7 @@ async function fetchComixHtml(url: string, isValid?: (html: string) => boolean):
   // Sem bypass (sidecar + FlareSolverr) não há como atravessar o CF; considera o
   // sidecar, não só o FlareSolverr (senão o circuito do FS vetava a camada primária).
   if (isCfBypassUnavailable()) return null
-  const fallback = await fetchHtmlWithCfFallback(url, HTML_HEADERS, COMIX_CF_ABORT_MS, COMIX_FS_SESSION)
+  const fallback = await fetchHtmlWithCfFallback(url, HTML_HEADERS, COMIX_CF_ABORT_MS)
   if (!fallback) {
     logComixFailure(url, "cloudflare_challenge", "flaresolverr returned no response")
     return null
@@ -264,7 +264,7 @@ async function fetchComixThreadJson(path: string): Promise<unknown | null> {
   // Sem bypass (sidecar + FlareSolverr) não há como atravessar o CF; considera o
   // sidecar, não só o FlareSolverr (senão o circuito do FS vetava a camada primária).
   if (isCfBypassUnavailable()) return null
-  const fallback = await fetchHtmlWithCfFallback(url, HEADERS, COMIX_CF_ABORT_MS, COMIX_FS_SESSION)
+  const fallback = await fetchHtmlWithCfFallback(url, HEADERS, COMIX_CF_ABORT_MS)
   if (!fallback) return null
   const preMatch = fallback.html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i)
   const raw = (preMatch?.[1] ?? fallback.html).trim()

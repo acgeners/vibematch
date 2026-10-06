@@ -1,8 +1,9 @@
 import { searchAniList, fetchAniListById, fetchAniListReviews, fetchAniListRecommendations } from "./anilist"
-import { searchAnimePlanet, fetchAnimePlanetByTitle, fetchAnimePlanetReviews, fetchAnimePlanetRecommendations } from "./animeplanet"
+import { searchAnimePlanet, fetchAnimePlanetByTitle, fetchAnimePlanetReviews, fetchAnimePlanetRecommendations, ANIMEPLANET_CF_ABORT_MS } from "./animeplanet"
 import type { AnimePlanetDetail } from "./animeplanet"
-import { searchComicK, fetchComicKByHid, fetchComicKReviews } from "./comick"
-import { searchComix, fetchComixById, fetchComixReviews } from "./comix"
+import { searchComicK, fetchComicKByHid, collectComicKReviews, COMICK_API_CF_ABORT_MS, COMICK_REVIEWS_BUDGET_MS } from "./comick"
+import type { ComicKReviewsCollected } from "./comick"
+import { searchComix, fetchComixById, fetchComixReviews, COMIX_CF_ABORT_MS } from "./comix"
 import { searchMangago, fetchMangagoById, fetchMangagoReviews } from "./mangago"
 import { resolveComixUrl } from "./comix-resolve"
 import { isComixRenderConfigured } from "./comix-render-client"
@@ -67,20 +68,34 @@ function coerceMergedYearEnd(
 const TIMEOUT_SEARCH_MS = 8000
 const TIMEOUT_HYDRATE_MS = 8000
 const TIMEOUT_REVIEWS_MS = 12000
-// ComicK raspa a página do frontend (resolve Cloudflare via FlareSolverr no
-// caminho); um solve frio leva ~8-15s, mais que as APIs JSON das outras fontes.
-// Teto maior só pra ele — análogo à observação de que reviews do MangaUpdates
-// (2 requests) já justificam um teto acima do padrão.
-const TIMEOUT_REVIEWS_COMICK_MS = 18000
+// Fontes que só atravessam o Cloudflare pelo FlareSolverr: o teto da orquestração DERIVA do
+// orçamento que o próprio adapter dá a uma página (+ o fetch direto que vem antes dela). Um
+// teto MENOR que esse orçamento o torna inerte — a orquestração desiste antes da página
+// voltar. Pesa mais desde a fila única de páginas (FLARESOLVERR_MAX_CONCURRENCY = 1): o
+// orçamento já inclui a espera pela vez, e numa hidratação as fontes CF esperam umas pelas
+// outras. Medido na Fly, uma página por vez: ComicK 4,4 s, Comix 5,4 s, AnimePlanet ~8 s — em
+// fila, a última passa dos 8 s antigos mesmo com cada uma dentro do próprio orçamento.
+const CF_DIRECT_FETCH_SLACK_MS = 1000
+const TIMEOUT_ANIMEPLANET_PAGE_MS = ANIMEPLANET_CF_ABORT_MS + CF_DIRECT_FETCH_SLACK_MS
+const TIMEOUT_COMICK_API_MS = COMICK_API_CF_ABORT_MS + CF_DIRECT_FETCH_SLACK_MS
+const TIMEOUT_COMIX_PAGE_MS = COMIX_CF_ABORT_MS + CF_DIRECT_FETCH_SLACK_MS
+const TIMEOUT_SEARCH_BY_SOURCE: Partial<Record<ExternalSourceId, number>> = {
+  animeplanet: TIMEOUT_ANIMEPLANET_PAGE_MS,
+  comick: TIMEOUT_COMICK_API_MS,
+}
+// ComicK: API JSON + página de comentários (SPA pesada), em série. A coleta respeita o
+// próprio orçamento (`COMICK_REVIEWS_BUDGET_MS`) e devolve o parcial quando os comentários não
+// cabem; este teto é só a rede de segurança acima dele. Era 18 s contra ~20 s medidos na Fly
+// (4,4 + 15,9) — o estouro descartava até as reviews da API, que já tinham chegado.
+const TIMEOUT_REVIEWS_COMICK_MS = COMICK_REVIEWS_BUDGET_MS + 2 * CF_DIRECT_FETCH_SLACK_MS
 // Comix passa por FlareSolverr em TODAS as ~4 calls (SSR detalhe → lookup →
 // comments×2) desde que a CF ficou estrita (2026-06-12): nenhuma é mais token-free.
-// Com a sessão FlareSolverr compartilhada (COMIX_FS_SESSION), só a 1ª paga o solve
-// frio (~11s) e as demais reusam o browser quente (<1s) → ~12s no pior caso (sessão
-// fria), ~2-4s quando já quente de uma call anterior. 25s dá folga sobre o solve frio
-// (era 15s, que estourava porque cada call solava ~11s isolada).
+// Sem sessão nomeada desde 06/10/2026 (cada chamada abre o próprio Chrome): medido na Fly,
+// 5,4 + 3,0 + 3,0 s sem desafio de Cloudflare. 25s cobre isso com folga. ⚠️ Se a Comix voltar
+// a desafiar, cada chamada pagaria o solve (~11 s) e a cadeia estouraria — ver comix.ts.
 const TIMEOUT_REVIEWS_COMIX_MS = 25000
-// Mangago faz multi-hop pela sessão FlareSolverr (lista paginada + até 40
-// tópicos, 1 fetch cada); com solve frio na 1ª call, ~40 corpos cabem em ~60s.
+// Mangago faz multi-hop pelo FlareSolverr (lista paginada + até 40 tópicos, 1 fetch
+// cada); ~40 corpos cabem em ~60s.
 // mangago vira o gargalo da fase de reviews (roda em paralelo com as outras).
 const TIMEOUT_REVIEWS_MANGAGO_MS = 60000
 // O hydrate do mangago é um scrape via FlareSolverr (não uma API), e a MESMA
@@ -95,8 +110,7 @@ const TIMEOUT_REVIEWS_MANGAGO_MS = 60000
 // medido do t=0 — estourava só na espera. Resultado: `hydrate:mangago excedeu
 // 15000ms`, `mg` vira null, e o rating/votos nunca chegavam ao platform_ratings
 // (confirmado: 0 linhas mangago no banco). 30s dá folga pra esperar um solve frio
-// à frente na fila e ainda completar o próprio. Ver TIMEOUT_REVIEWS_COMIX_MS (25s),
-// que subiu pela mesma razão de "solve frio + sessão FlareSolverr compartilhada".
+// à frente na fila e ainda completar o próprio. Ver TIMEOUT_REVIEWS_COMIX_MS (25s).
 const TIMEOUT_HYDRATE_MANGAGO_MS = 30000
 const TIMEOUT_SIMILAR_MS = 8000
 
@@ -557,7 +571,11 @@ export async function searchAllSourcesWithStatus(query: string): Promise<SearchA
   if (DEBUG_SEARCH) debugLog(`query="${query}"`)
   const settled = await Promise.allSettled(
     SEARCH_CONNECTORS.map((connector) =>
-      withTimeout(connector.search(query), TIMEOUT_SEARCH_MS, `search:${connector.source}`)
+      withTimeout(
+        connector.search(query),
+        TIMEOUT_SEARCH_BY_SOURCE[connector.source] ?? TIMEOUT_SEARCH_MS,
+        `search:${connector.source}`,
+      )
     )
   )
   const failedSources: ExternalSourceId[] = []
@@ -1100,14 +1118,22 @@ export async function collectReviewsFromCandidate(
   //
   // Desestruturar antes estreita os tipos: dentro do `if` o id é não-nulo, sem cast.
   const { muId, anilistId, malId, kitsuId, animePlanetSlug, mangadexId, comickHid, comixHid, mangagoSlug } = candidate
-  const plan: Array<{ source: ExternalSourceId; timeoutMs: number; run: () => Promise<string[]> }> = []
+  // `run` devolve as reviews — ou, quando a fonte entrega só parte (ComicK), as reviews mais o
+  // motivo do que faltou. Parcial NÃO entra em `failedSources`: lá a fonte seria re-buscada na
+  // 2ª passada, que devolveria as mesmas reviews já gravadas e forçaria o resumo/digest PAGOS
+  // sem nada novo. Ele aparece no log como `fonte=N(parcial: …)`.
+  const plan: Array<{
+    source: ExternalSourceId
+    timeoutMs: number
+    run: () => Promise<string[] | ComicKReviewsCollected>
+  }> = []
   if (muId) plan.push({ source: "mangaupdates", timeoutMs: TIMEOUT_REVIEWS_MS, run: () => fetchMangaUpdatesReviews(muId) })
   if (anilistId) plan.push({ source: "anilist", timeoutMs: TIMEOUT_REVIEWS_MS, run: () => fetchAniListReviews(anilistId) })
   if (malId) plan.push({ source: "myanimelist", timeoutMs: TIMEOUT_REVIEWS_MS, run: () => fetchMalReviews(malId) })
   if (kitsuId) plan.push({ source: "kitsu", timeoutMs: TIMEOUT_REVIEWS_MS, run: () => fetchKitsuReactions(kitsuId) })
-  if (animePlanetSlug) plan.push({ source: "animeplanet", timeoutMs: TIMEOUT_REVIEWS_MS, run: () => fetchAnimePlanetReviews(animePlanetSlug) })
+  if (animePlanetSlug) plan.push({ source: "animeplanet", timeoutMs: Math.max(TIMEOUT_REVIEWS_MS, TIMEOUT_ANIMEPLANET_PAGE_MS), run: () => fetchAnimePlanetReviews(animePlanetSlug) })
   if (mangadexId) plan.push({ source: "mangadex", timeoutMs: TIMEOUT_REVIEWS_MS, run: () => fetchMangaDexForumComments(mangadexId) })
-  if (comickHid) plan.push({ source: "comick", timeoutMs: TIMEOUT_REVIEWS_COMICK_MS, run: () => fetchComicKReviews(comickHid) })
+  if (comickHid) plan.push({ source: "comick", timeoutMs: TIMEOUT_REVIEWS_COMICK_MS, run: () => collectComicKReviews(comickHid) })
   if (comixHid) plan.push({ source: "comix", timeoutMs: TIMEOUT_REVIEWS_COMIX_MS, run: () => fetchComixReviews(comixHid) })
   if (mangagoSlug) plan.push({ source: "mangago", timeoutMs: TIMEOUT_REVIEWS_MANGAGO_MS, run: () => fetchMangagoReviews(mangagoSlug) })
 
@@ -1116,7 +1142,11 @@ export async function collectReviewsFromCandidate(
   const active = onlySources ? plan.filter((p) => onlySources.includes(p.source)) : plan
   const fetchers = active.map((p) =>
     withTimeout(
-      p.run().then((reviews) => ({ source: p.source, reviews })),
+      p.run().then((out) =>
+        Array.isArray(out)
+          ? { source: p.source, reviews: out }
+          : { source: p.source, reviews: out.reviews, partialFailure: out.partialFailure },
+      ),
       p.timeoutMs,
       `reviews:${p.source}`,
     ),
@@ -1159,7 +1189,10 @@ export async function collectReviewsFromCandidate(
     if (!entry.value) return `${src}=vazio`
     const reviews = entry.value.reviews
     const lens = reviews.map((r) => r.length).sort((a, b) => b - a).slice(0, 3)
-    return `${src}=${reviews.length}(top3lens=${lens.join(",")})`
+    const partial = "partialFailure" in entry.value && entry.value.partialFailure
+      ? `,parcial: ${entry.value.partialFailure}`
+      : ""
+    return `${src}=${reviews.length}(top3lens=${lens.join(",")}${partial})`
   })
   console.log(
     `[collectReviews] candidate="${candidate.title}" tentadas=${active.length} falharam=${failedSources.length ? failedSources.join(",") : "nenhuma"} raw=${rawCounts.join(" ")}`,
@@ -1202,7 +1235,7 @@ async function collectSimilarFromCandidate(candidate: MergedCandidate, limit = 6
       ? withTimeout(fetchMalRecommendations(candidate.malId).then((recs) => ({ source: "myanimelist" as const, recs })), TIMEOUT_SIMILAR_MS, "similar:myanimelist")
       : Promise.resolve(null),
     candidate.animePlanetSlug
-      ? withTimeout(fetchAnimePlanetRecommendations(candidate.animePlanetSlug).then((titles) => ({ source: "animeplanet" as const, titles })), TIMEOUT_SIMILAR_MS, "similar:animeplanet")
+      ? withTimeout(fetchAnimePlanetRecommendations(candidate.animePlanetSlug).then((titles) => ({ source: "animeplanet" as const, titles })), Math.max(TIMEOUT_SIMILAR_MS, TIMEOUT_ANIMEPLANET_PAGE_MS), "similar:animeplanet")
       : Promise.resolve(null),
   ]
 
@@ -1699,9 +1732,9 @@ async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated:
     candidate.kitsuId ? withTimeout(fetchKitsuMangaById(candidate.kitsuId), TIMEOUT_HYDRATE_MS, "hydrate:kitsu") : null,
     candidate.malId ? withTimeout(fetchMalMangaById(candidate.malId), TIMEOUT_HYDRATE_MS, "hydrate:myanimelist") : null,
     candidate.mangadexId ? withTimeout(fetchMangaDexById(candidate.mangadexId), TIMEOUT_HYDRATE_MS, "hydrate:mangadex") : null,
-    candidate.comickHid ? withTimeout(fetchComicKByHid(candidate.comickHid), TIMEOUT_HYDRATE_MS, "hydrate:comick") : null,
-    candidate.comixHid ? withTimeout(fetchComixById(candidate.comixHid), TIMEOUT_HYDRATE_MS, "hydrate:comix") : null,
-    candidate.animePlanetSlug ? withTimeout(fetchAnimePlanetByTitle(candidate.title, candidate.animePlanetSlug), TIMEOUT_HYDRATE_MS, "hydrate:animeplanet") : null,
+    candidate.comickHid ? withTimeout(fetchComicKByHid(candidate.comickHid), Math.max(TIMEOUT_HYDRATE_MS, TIMEOUT_COMICK_API_MS), "hydrate:comick") : null,
+    candidate.comixHid ? withTimeout(fetchComixById(candidate.comixHid), Math.max(TIMEOUT_HYDRATE_MS, TIMEOUT_COMIX_PAGE_MS), "hydrate:comix") : null,
+    candidate.animePlanetSlug ? withTimeout(fetchAnimePlanetByTitle(candidate.title, candidate.animePlanetSlug), Math.max(TIMEOUT_HYDRATE_MS, TIMEOUT_ANIMEPLANET_PAGE_MS), "hydrate:animeplanet") : null,
     candidate.mangagoSlug ? withTimeout(fetchMangagoById(candidate.mangagoSlug), TIMEOUT_HYDRATE_MANGAGO_MS, "hydrate:mangago") : null,
   ])
 
