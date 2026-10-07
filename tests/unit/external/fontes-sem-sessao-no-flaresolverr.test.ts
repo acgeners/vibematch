@@ -119,8 +119,10 @@ describe("Mangago sem sessão no FlareSolverr", () => {
     const commands = simulateFlareSolverr()
     const { mangago, fs } = await loadAdapters()
 
-    await mangago.searchMangago("Solo Leveling")
-    await mangago.fetchMangagoReviews("solo_leveling")
+    // O FlareSolverr simulado devolve a página de RECUSA do Mangago. Desde a detecção de
+    // bloqueio as duas chamadas FALHAM com o motivo, em vez de anunciar "nada encontrado".
+    await expect(mangago.searchMangago("Solo Leveling")).rejects.toMatchObject({ reason: "blocked" })
+    await expect(mangago.fetchMangagoReviews("solo_leveling")).rejects.toMatchObject({ reason: "blocked" })
 
     const urls = commands.map((c) => c.url ?? c.cmd)
     expect(urls.some((u) => u.includes("/r/l_search/"))).toBe(true)

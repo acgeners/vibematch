@@ -8,10 +8,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 // lento, estourando o CF_ABORT_MS num solve frio de Cloudflare) é caro e instável de
 // reproduzir de verdade — foi a única parte do fix que não deu pra medir no app rodando.
 // Aqui a política fica presa por asserção, e não por raciocínio.
-vi.mock("@/lib/external/flaresolverr", () => ({
-  fetchHtmlWithCfFallback: vi.fn(),
-  isCfBypassUnavailable: vi.fn(() => false),
-}))
+vi.mock("@/lib/external/flaresolverr", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/external/flaresolverr")>()
+  return {
+    fetchHtmlWithCfFallback: vi.fn(),
+    isCfBypassUnavailable: vi.fn(() => false),
+    // A detecção de desafio é a REAL: o Mangago classifica a página com ela antes de parsear.
+    // Omiti-la do mock fazia toda tentativa lançar TypeError — e falhar calada dentro do retry.
+    isCloudflareChallenge: real.isCloudflareChallenge,
+  }
+})
 
 import { fetchMangagoById } from "@/lib/external/mangago"
 import { fetchHtmlWithCfFallback, isCfBypassUnavailable } from "@/lib/external/flaresolverr"
