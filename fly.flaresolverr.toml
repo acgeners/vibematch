@@ -5,10 +5,13 @@
 # principal continuando a chamar um nome sem máquina. O sintoma não é erro: as fontes gateadas
 # por Cloudflare (ComicK, AnimePlanet, Mangago) somem da busca em silêncio.
 app = "vibematch-flaresolverr"
-# `iad` de propósito até prova em contrário: o app está em `gru`, então há um salto de
-# hemisfério por request — mas quem responde do outro lado é o Cloudflare dos sites raspados,
-# e sair de um IP US pode ser justamente o que faz o desafio passar. Medir antes de mover.
-primary_region = "iad"
+# `gru` desde 07/10/2026, por MEDIÇÃO. Em `iad` a máquina saía pela AS60068 (Datacamp), que o
+# Mangago bane no Cloudflare (`error code: 1005`; o browser recebe uma página de bloqueio de
+# 107 B). Em `gru` ela sai pela AS396356 (Latitude.sh) e Mangago, Comix, ComicK e AnimePlanet
+# passaram sem desafio — a hipótese de que um IP dos EUA era o que fazia o desafio passar caiu.
+# ⚠️ Mudar esta linha NÃO move a máquina: o deploy atualiza a máquina onde ela já está. E o ASN de
+# saída da Fly não é garantido — se uma fonte voltar a cair, remeça o ASN antes de culpar o código.
+primary_region = "gru"
 
 [build]
   # Imagem v3.5.0 fixada por digest + watchdog que faz a máquina sair com erro quando o processo
