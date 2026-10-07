@@ -1,6 +1,6 @@
 import type { PublicationStatus } from "@/types/domain"
 import type { ExternalSearchResult } from "./types"
-import { fetchHtmlWithCfFallback, isCfBypassUnavailable } from "./flaresolverr"
+import { fetchHtmlWithCfFallback, isCfBypassUnavailable, isCloudflareChallenge } from "./flaresolverr"
 import { normalizeAlternativeTitles } from "@/lib/titles/alternative-titles"
 
 // ============================================================================
@@ -56,6 +56,78 @@ const HEADERS = {
   "Sec-Fetch-Dest": "document",
   "Sec-Fetch-Mode": "navigate",
   "Sec-Fetch-Site": "same-origin",
+}
+
+// ---------------------------------------------------------------------------
+// Bloqueio ≠ "nada aqui"
+// ---------------------------------------------------------------------------
+// O bypass devolve HTML mesmo quando o Mangago RECUSA a requisição, e os parsers transformam
+// esse HTML em lista vazia. Sem classificar a página antes, um bloqueio virava "0 resultados" /
+// "0 reviews" — indistinguível de uma obra que de fato não tem nada lá. Medido em 06–07/10/2026,
+// com o FlareSolverr saindo pela AS60068 (Datacamp), que o Mangago bane no Cloudflare:
+//   • HTTP direto: 403 `error code: 1005` (ASN banido);
+//   • pelo browser: HTTP 200 com uma página de 107 B, "we're sorry, the request file are not found";
+//   • o 404 VERDADEIRO é outra página: 5,5 KB, título "404 - Mangago" — e o parser de detalhe a lê
+//     como uma obra chamada "I don't know's home" (o og:title da página de erro).
+// A menor página legítima medida tem 5,5 KB (o próprio 404); a de bloqueio, 107 B. Por isso a
+// frase só conta como bloqueio numa página MINÚSCULA: leitores citam essa mensagem em tópicos de
+// discussão, e um tópico (~30 KB) que a cite não pode virar falha.
+const MANGAGO_BLOCK_PAGE = /we're sorry, the request file are not found/i
+const MANGAGO_BLOCK_PAGE_MAX_CHARS = 2048
+// Família "Access denied" do Cloudflare (1005 = ASN banido, 1006–1008 = IP banido, 1009 = país,
+// 1020 = regra de firewall). Mesma régua de tamanho: a página de erro do Cloudflare é pequena.
+const CLOUDFLARE_ACCESS_DENIED = /error code: 10(?:0[5-9]|20)\b|\bError 10(?:0[5-9]|20)\b[\s\S]{0,400}Cloudflare/i
+const CLOUDFLARE_ERROR_MAX_CHARS = 16384
+const MANGAGO_NOT_FOUND_TITLE = /<title>\s*404 - Mangago\s*<\/title>/i
+
+export type MangagoPageKind = "ok" | "not_found" | "blocked"
+
+/** O que o HTML recebido do Mangago É: conteúdo, o 404 verdadeiro do site, ou uma recusa. */
+export function classifyMangagoPage(html: string): MangagoPageKind {
+  if (isCloudflareChallenge(html)) return "blocked"
+  if (html.length <= MANGAGO_BLOCK_PAGE_MAX_CHARS && MANGAGO_BLOCK_PAGE.test(html)) return "blocked"
+  if (html.length <= CLOUDFLARE_ERROR_MAX_CHARS && CLOUDFLARE_ACCESS_DENIED.test(html)) return "blocked"
+  if (MANGAGO_NOT_FOUND_TITLE.test(html)) return "not_found"
+  return "ok"
+}
+
+/**
+ * A fonte NÃO respondeu — bloqueio, bypass fora ou fetch falho. É lançada para que quem
+ * orquestra (busca multi-fonte, coleta de reviews, resolvedor de slug) registre FALHA, e não um
+ * zero legítimo: lá `rejected` vira `failedSources`/`search_failed`, e `[]` vira "não tem".
+ */
+export class MangagoUnavailableError extends Error {
+  constructor(
+    readonly reason: "blocked" | "bypass_unavailable" | "fetch_failed",
+    readonly url: string,
+  ) {
+    super(`mangago ${reason}: ${url}`)
+    this.name = "MangagoUnavailableError"
+  }
+}
+
+/** CF-gated: sem bypass (circuito aberto) o fetch só volta o desafio — isso é falha, não vazio. */
+function assertBypassAvailable(url: string): void {
+  if (isCfBypassUnavailable()) throw new MangagoUnavailableError("bypass_unavailable", url)
+}
+
+/**
+ * Busca uma página e a classifica; lança `MangagoUnavailableError` quando a fonte não respondeu.
+ * NÃO consulta o circuito do bypass: quem chama decide se isso é falha (`assertBypassAvailable`)
+ * ou fim de tentativas (o detalhe devolve `null`).
+ */
+async function fetchMangagoPage(
+  url: string,
+  abortMs: number = CF_ABORT_MS,
+): Promise<{ kind: "ok" | "not_found"; html: string }> {
+  const result = await fetchHtmlWithCfFallback(url, HEADERS, abortMs)
+  if (!result) throw new MangagoUnavailableError("fetch_failed", url)
+  const kind = classifyMangagoPage(result.html)
+  if (kind === "blocked") {
+    console.warn(`[mangago] requisição RECUSADA (${result.html.length} chars) — falha, não "nada aqui": ${url}`)
+    throw new MangagoUnavailableError("blocked", url)
+  }
+  return { kind, html: result.html }
 }
 
 export interface MangagoDetail {
@@ -332,17 +404,17 @@ export function parseSearchResults(html: string): ExternalSearchResult[] {
   return results
 }
 
+/**
+ * Lança `MangagoUnavailableError` quando a fonte não respondeu (bloqueio, bypass fora, fetch
+ * falho): a busca multi-fonte registra isso em `failedSources` e o resolvedor de slug, como
+ * `search_failed` — que ele NÃO guarda em cache. `[]` fica reservado para "busquei e não há".
+ */
 export async function searchMangago(query: string): Promise<ExternalSearchResult[]> {
-  // CF-gated: sem FlareSolverr (circuito aberto) o fetch só volta o desafio.
-  if (isCfBypassUnavailable()) return []
-  try {
-    const url = `${BASE}/r/l_search/?name=${encodeURIComponent(query)}&page=1`
-    const result = await fetchHtmlWithCfFallback(url, HEADERS, CF_ABORT_MS)
-    if (!result) return []
-    return parseSearchResults(result.html)
-  } catch {
-    return []
-  }
+  const url = `${BASE}/r/l_search/?name=${encodeURIComponent(query)}&page=1`
+  assertBypassAvailable(url)
+  const page = await fetchMangagoPage(url)
+  if (page.kind === "not_found") return []
+  return parseSearchResults(page.html)
 }
 
 // ---------------------------------------------------------------------------
@@ -511,11 +583,14 @@ export async function fetchMangagoById(
     // Circuito aberto = container fora (ECONNREFUSED). Retentar só pagaria latência.
     if (isCfBypassUnavailable()) return null
     try {
-      const result = await fetchHtmlWithCfFallback(url, HEADERS, budgets[i])
-      const detail = result ? parseMangagoDetailHtml(result.html) : null
+      const page = await fetchMangagoPage(url, budgets[i])
+      // 404 VERDADEIRO: definitivo, sem retentar. Parseado, ele virava uma obra chamada
+      // "I don't know's home" (o og:title da página de erro) — slug morto passando por achado.
+      if (page.kind === "not_found") return null
+      const detail = parseMangagoDetailHtml(page.html)
       if (detail) return detail
     } catch {
-      // tentativa perdida; o loop decide se ainda há outra
+      // bloqueio, fetch falho ou exceção: tentativa perdida; o loop decide se ainda há outra
     }
     if (i < budgets.length - 1) await sleep(RETRY_BACKOFF_MS)
   }
@@ -650,42 +725,60 @@ function extractTopics(html: string, seen: Set<string>, out: Array<{ id: string;
  * todos e deixa os seletores (por comprimento) escolherem as melhores — máxima
  * qualidade que o pipeline absorve. Cada corpo é 1 fetch FlareSolverr (~1s
  * quente), então 40 ≈ ~45s; não vale ir além (só custo, zero sinal novo).
- * Fail-soft: [] em qualquer erro; para no meio se o circuito do FlareSolverr abrir.
+ *
+ * Falha ≠ vazio. Se a 1ª página da lista não vier (bloqueio, bypass fora, fetch falho), LANÇA
+ * `MangagoUnavailableError`: a coleta põe a fonte em `failedSources` (2ª passada dirigida) e as
+ * reviews já salvas seguem no pool da avaliação (`mergeFreshWithPersistedReviews`). `[]` só sai
+ * quando o Mangago RESPONDEU e não há tópico (404 verdadeiro da discussão, ou lista vazia). Falha
+ * depois da 1ª página devolve o parcial já obtido; mas havendo tópicos e NENHUM corpo por falha,
+ * também lança — "0 reviews" ali afirmaria que a obra não tem opinião.
  */
 export async function fetchMangagoReviews(slug: string, limit = 40): Promise<string[]> {
-  if (isCfBypassUnavailable()) return []
-  try {
-    // 1) Junta ids de tópico paginando a lista até ter `limit` (ou esgotar páginas).
-    const topics: Array<{ id: string; title: string }> = []
-    const seen = new Set<string>()
-    for (let page = 1; page <= MANGAGO_REVIEW_LIST_PAGES && topics.length < limit; page++) {
-      if (isCfBypassUnavailable()) break
-      const url =
-        page === 1
-          ? `${BASE}/home/manga/discussion/${slug}/`
-          : `${BASE}/home/manga/discussion/${slug}/?page=${page}&sort=date`
-      const list = await fetchHtmlWithCfFallback(url, HEADERS, CF_ABORT_MS)
-      if (!list) break
-      const added = extractTopics(list.html, seen, topics, limit)
-      if (added === 0) break // página sem tópicos novos → acabou
+  // 1) Junta ids de tópico paginando a lista até ter `limit` (ou esgotar páginas).
+  const topics: Array<{ id: string; title: string }> = []
+  const seen = new Set<string>()
+  for (let page = 1; page <= MANGAGO_REVIEW_LIST_PAGES && topics.length < limit; page++) {
+    const url =
+      page === 1
+        ? `${BASE}/home/manga/discussion/${slug}/`
+        : `${BASE}/home/manga/discussion/${slug}/?page=${page}&sort=date`
+    let list: Awaited<ReturnType<typeof fetchMangagoPage>>
+    try {
+      assertBypassAvailable(url)
+      list = await fetchMangagoPage(url)
+    } catch (err) {
+      if (page === 1) throw err // nada veio: a fonte falhou
+      break // páginas seguintes: fica com os tópicos já juntados
     }
-    if (topics.length === 0) return []
-
-    // 2) Busca o corpo de cada tópico (parte cara: 1 fetch por review).
-    const reviews: string[] = []
-    for (const { id, title } of topics) {
-      if (isCfBypassUnavailable()) break
-      const topic = await fetchHtmlWithCfFallback(`${BASE}/home/mangatopic/${id}/`, HEADERS, CF_ABORT_MS)
-      if (!topic) continue
-      const body = cleanHtml(decodeAttr(metaContent(topic.html, "description")))
-      // Corpo do post é a opinião plena; cai pro título quando o tópico não tem corpo.
-      const text = body && !isSiteBoilerplate(body) ? body : title
-      if (!text || text.length < 8) continue
-      if (/^\s*https?:\/\/\S+\s*$/i.test(text)) continue // link solto, não é opinião
-      reviews.push(text.length > 900 ? `${text.slice(0, 900)}…` : text)
-    }
-    return reviews
-  } catch {
-    return []
+    if (list.kind === "not_found") break // sem discussão para o slug: "não tem", legítimo
+    const added = extractTopics(list.html, seen, topics, limit)
+    if (added === 0) break // página sem tópicos novos → acabou
   }
+  if (topics.length === 0) return []
+
+  // 2) Busca o corpo de cada tópico (parte cara: 1 fetch por review).
+  const reviews: string[] = []
+  let failure: unknown = null
+  for (const { id, title } of topics) {
+    const url = `${BASE}/home/mangatopic/${id}/`
+    let topic: Awaited<ReturnType<typeof fetchMangagoPage>>
+    try {
+      assertBypassAvailable(url)
+      topic = await fetchMangagoPage(url)
+    } catch (err) {
+      failure = err
+      // Bloqueio ou bypass fora valem para os próximos tópicos também: insistir é latência.
+      if (err instanceof MangagoUnavailableError && err.reason !== "fetch_failed") break
+      continue
+    }
+    if (topic.kind === "not_found") continue
+    const body = cleanHtml(decodeAttr(metaContent(topic.html, "description")))
+    // Corpo do post é a opinião plena; cai pro título quando o tópico não tem corpo.
+    const text = body && !isSiteBoilerplate(body) ? body : title
+    if (!text || text.length < 8) continue
+    if (/^\s*https?:\/\/\S+\s*$/i.test(text)) continue // link solto, não é opinião
+    reviews.push(text.length > 900 ? `${text.slice(0, 900)}…` : text)
+  }
+  if (reviews.length === 0 && failure) throw failure
+  return reviews
 }
