@@ -158,7 +158,20 @@ describe("as linhas do recalc declaram o contrato", () => {
       tasteProfile: null, declaredTagPrefs: [], includeQuality: false, aiQualityByWork: new Map(), fast: true,
     })
     const gravadas = new Set(Object.keys(rows[0]))
-    for (const c of colunas) expect(gravadas, `a coluna ${c} do trigger não é gravada pelo recalc`).toContain(c)
+    // Nota.Calc APOSENTADA (2026-10-07): o recalc deixou de gravar estas três, mas elas seguem na
+    // tabela (legado, sem migration) e na lista do trigger — onde continuam servindo: um checkout
+    // defasado que ainda as grave precisa do contrato. Saem da lista na migration que dropar as colunas.
+    const LEGADO_FORA_DO_RECALC = ["calc_score", "mae_calc", "rmse_calc"]
+    for (const c of colunas) {
+      if (LEGADO_FORA_DO_RECALC.includes(c)) continue
+      expect(gravadas, `a coluna ${c} do trigger não é gravada pelo recalc`).toContain(c)
+    }
+    // A exceção não pode virar brecha pra nome errado: o legado é coluna REAL e o recalc NÃO a grava.
+    const todasAsMigrations = readdirSync(dir).filter((f) => f.endsWith(".sql")).map((f) => readFileSync(join(dir, f), "utf8")).join("\n")
+    for (const c of LEGADO_FORA_DO_RECALC.filter((c) => colunas.includes(c))) {
+      expect(todasAsMigrations, `${c} não é coluna declarada em migration nenhuma`).toMatch(new RegExp(`\\b${c}\\s+numeric`, "i"))
+      expect(gravadas, `${c} é legado da Nota.Calc e não pode voltar a ser gravado pelo recalc`).not.toContain(c)
+    }
     for (const fora of ["confidence", "alignment_score", "alignment_stale", "art_estimate", "art_percentile", "platform_avg", "total_votes"]) {
       expect(colunas, `${fora} não é resultado de scoring e não pode disparar a guarda`).not.toContain(fora)
     }

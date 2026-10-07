@@ -294,7 +294,7 @@ export function PostReadingWeightSuggestionsPanel() {
           <div className="flex items-center justify-between gap-2 pt-1">
             <p className="text-[11px] text-muted-foreground max-w-md">
               ⚠️ Aplicar recalcula a nota pessoal de todas as obras com pós-leitura preenchido
-              e dispara recálculo completo (Nota.Calc e Nota Prevista).
+              e dispara recálculo completo (Nota Prevista).
             </p>
             <Button
               onClick={handleApply}

@@ -41,7 +41,6 @@ interface CalibrationPanelProps {
     /** Fase 1 shadow mode: MAE in-sample do expected_score (L1 Ridge cleaned). */
     maeExpected: number | null
     pseudoVotesNotaM: number | null
-    pseudoVotesBlend: number | null
     worstDiffs: CalibrationDiff[]
     /** True quando todos os expected_score são null/stub — predictor L1 ainda não rodou ou treino < 20. */
     expectedPredictorIsStub: boolean
@@ -411,15 +410,15 @@ const PIPELINE_STEPS: Array<{ n: number; title: string; body: string; tip: strin
   },
   {
     n: 2,
-    title: "Mistura com o público",
-    body: "Pondera com a nota do público conforme os votos.",
-    tip: "A nota da IA é ponderada com a média das plataformas. Quanto mais votos a obra tem, mais o público pesa. (Interno: Nota.Calc — pooling bayesiano de pseudo-votos + penalidades.)",
+    title: "Nota do público",
+    body: "A média das plataformas e os votos entram como sinais.",
+    tip: "A média das plataformas (suavizada quando há poucos votos) e o volume de votos entram no modelo como sinais próprios, ao lado da nota da IA — é o modelo que aprende quanto cada um pesa. (Interno: features Nota.M e LogVotos do Ridge.)",
   },
   {
     n: 3,
     title: "Ajuste ao seu gosto",
     body: "Personaliza pela sua afinidade de tags e critérios.",
-    tip: "Um modelo aprende, do seu histórico, como afinidade de tags e critérios mexem na sua nota — e ajusta o resultado. (Interno: regressão Ridge, expected_score, misturada com a Nota.Calc.)",
+    tip: "Um modelo aprende, do seu histórico, como afinidade de tags e critérios mexem na sua nota — e ajusta o resultado. (Interno: regressão Ridge, expected_score.)",
   },
   {
     n: 4,

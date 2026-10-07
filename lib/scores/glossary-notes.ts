@@ -64,11 +64,6 @@ export const SCORE_NOTES: Record<string, ScoreNote> = {
     title: "Ela é amplificada de propósito.",
     body: "Depois da soma ponderada, o resultado é esticado em torno de 5 (`5 + (nota − 5) × 1,25`). Sem isso as notas se amontoam no meio da escala, porque a média dos nove atributos raramente é extrema — e uma nota que não separa obras não serve para ordenar nenhuma lista.",
   },
-  calc_score: {
-    tone: "contexto",
-    title: "Ela não aparece em lista nenhuma, e isso é escolha.",
-    body: "Foi a nota principal do app até 06/2026, quando virou entrada da Nota Prevista em vez de resultado. Continua sendo calculada porque ancora o modelo quando há poucos rótulos — mas mostrá-la ao lado da Prevista seria oferecer dois números para a mesma pergunta.",
-  },
   platform_avg: {
     tone: "contexto",
     title: "É a única nota da página que não é sobre você.",

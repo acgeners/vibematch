@@ -48,7 +48,6 @@ const SNAPSHOT = {
   baselineMae: 0.96,
   maeExpected: 0.68,
   pseudoVotesNotaM: null,
-  pseudoVotesBlend: null,
   worstDiffs: [],
   expectedPredictorIsStub: false,
   expectedCoveredCount: 971,

@@ -118,8 +118,8 @@ export function buildPreferencesGroups(plan: string, isAdmin: boolean): Settings
           id: "score-colors",
           title: "Cores das notas",
           description:
-            "Percentis que definem as cores das notas agregadas (Nota Prevista / Nota.Calc).",
-          help: "Define os percentis que separam as faixas de cor das notas agregadas (Nota Prevista e Nota.Calc). Ajuste pra que verde/amarelo/vermelho reflitam o que você considera bom, médio e ruim no seu catálogo.",
+            "Percentis que definem as cores da Nota Prevista e dos atributos.",
+          help: "Define os percentis que separam as faixas de cor da Nota Prevista e dos atributos (os que não têm ajuste próprio). Ajuste pra que verde/amarelo/vermelho reflitam o que você considera bom, médio e ruim no seu catálogo.",
           icon: Palette,
         },
         {

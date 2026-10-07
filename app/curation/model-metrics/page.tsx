@@ -180,7 +180,7 @@ export default async function ModelMetricsPage() {
 
       <Panel
         title={`Baselines no subconjunto comum (${d.primaryCommonSubset.subsetCount} obras)`}
-        hint="Só obras com Nota Prevista, Nota.Calc e Prioridade presentes — comparação direta."
+        hint="Só obras com Nota Prevista e Prioridade presentes — comparação direta."
       >
         {d.primaryCommonSubset.subsetCount === 0 ? <Empty /> : <BaselineTable rows={d.primaryCommonSubset.rows} />}
       </Panel>

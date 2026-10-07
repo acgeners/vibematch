@@ -98,7 +98,8 @@ export function calculateGPT(
  * porque dividia pelo std E recentrava em 5/0; centrar na média SEM dividir pelo
  * std evita esse modo de falha.) Slope 1.25 fixo — super-amplificar piora a MAE.
  *
- * Só afeta calc_score: a feature IA(n) do Ridge passa por StandardScaler, que é
+ * O centro só afeta o `ia_eval_normalized` persistido (era o insumo da Nota.Calc,
+ * aposentada em 2026-10-07): a feature IA(n) do Ridge passa por StandardScaler, que é
  * invariante a qualquer centro/escala constante.
  */
 export function normalizeGPT(gpt: number, center = 5): number {

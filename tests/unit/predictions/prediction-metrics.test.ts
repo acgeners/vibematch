@@ -24,7 +24,6 @@ function snap(p: Partial<ResolvedSnapshot> & { actual: number }): ResolvedSnapsh
     predictedIsStub: p.predictedIsStub ?? false,
     actual: p.actual,
     predictedScore: p.predictedScore ?? null,
-    calcScore: p.calcScore ?? null,
     decisionScore: p.decisionScore ?? null,
     formulaVersion: p.formulaVersion ?? "v9",
     trainingSampleSize: p.trainingSampleSize ?? null,
@@ -209,9 +208,9 @@ describe("agrupamentos de erro", () => {
 
 describe("baselines", () => {
   const records = [
-    snap({ actual: 8, predictedScore: 7, calcScore: 7.5, decisionScore: 7.2 }),
-    snap({ actual: 6, predictedScore: 7, calcScore: 6.5, decisionScore: 6.8 }),
-    snap({ actual: 9, predictedScore: 9, calcScore: 9, decisionScore: 9 }),
+    snap({ actual: 8, predictedScore: 7, decisionScore: 7.2 }),
+    snap({ actual: 6, predictedScore: 7, decisionScore: 6.8 }),
+    snap({ actual: 9, predictedScore: 9, decisionScore: 9 }),
   ]
   it("baseline da média usa a média das notas reais", () => {
     const mean = computeBaselines(records).find((r) => r.key === "mean")
@@ -224,12 +223,19 @@ describe("baselines", () => {
     const partial = [...records, snap({ actual: 7, predictedScore: 7 })]
     const rows = computeBaselines(partial)
     expect(rows.find((r) => r.key === "expected")?.count).toBe(4)
-    expect(rows.find((r) => r.key === "calc")?.count).toBe(3)
+    expect(rows.find((r) => r.key === "decision")?.count).toBe(3)
   })
-  it("common subset só usa obras com expected+calc+decision", () => {
+  it("common subset só usa obras com expected+decision", () => {
     const partial = [...records, snap({ actual: 7, predictedScore: 7 })]
     const cs = computeBaselinesOnCommonSubset(partial)
     expect(cs.subsetCount).toBe(3)
+  })
+  it("a Nota.Calc (aposentada) não é mais baseline — nem exigida no subconjunto comum", () => {
+    // Snapshots capturados depois da aposentadoria não trazem calc. Se o subconjunto ainda o
+    // exigisse, ele encolheria sozinho até sobrar só o histórico anterior.
+    expect(computeBaselines(records).map((r) => r.key)).toEqual(["mean", "expected", "decision"])
+    expect(computeBaselinesOnCommonSubset(records).rows.map((r) => r.key)).toEqual(["mean", "expected", "decision"])
+    expect(computeBaselinesOnCommonSubset(records).subsetCount).toBe(3)
   })
 })
 

@@ -81,7 +81,6 @@ describe("1ª nota (NULL → valor)", () => {
       work_id: W1,
       user_score: 8,
       predicted_expected: 7.5, // o valor ANTES da nota — não o 9.9 do "recálculo"
-      predicted_calc: 7.2,
       predicted_personal_fit: 0.6,
       predicted_personal_fit_percentile: 80,
       prediction_calculated_at: "2026-09-27T10:00:00Z",
@@ -91,6 +90,9 @@ describe("1ª nota (NULL → valor)", () => {
       capture_source: "writeReadingState",
       capture_error: null,
     })
+    // Nota.Calc aposentada (2026-10-07): não é mais capturada. A coluna `predicted_calc` segue no
+    // banco (legado) e fica NULL nas linhas novas — a chave nem é enviada.
+    expect(Object.keys(db.prediction_ledger[0])).not.toContain("predicted_calc")
   })
 
   it("lê a previsão ANTES do upsert da nota e grava o ledger DEPOIS", async () => {

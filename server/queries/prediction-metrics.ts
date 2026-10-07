@@ -59,7 +59,6 @@ interface RawSnapshotRow {
   captured_at: string
   predicted_score: number | null
   predicted_is_stub: boolean
-  calc_score: number | null
   decision_score: number | null
   actual_user_score: number | null
   formula_version: string
@@ -78,7 +77,6 @@ function toResolved(row: RawSnapshotRow): ResolvedSnapshot {
     predictedIsStub: row.predicted_is_stub,
     actual: Number(row.actual_user_score),
     predictedScore: row.predicted_score == null ? null : Number(row.predicted_score),
-    calcScore: row.calc_score == null ? null : Number(row.calc_score),
     decisionScore: row.decision_score == null ? null : Number(row.decision_score),
     formulaVersion: row.formula_version,
     trainingSampleSize: row.training_sample_size == null ? null : Number(row.training_sample_size),
@@ -186,7 +184,7 @@ export async function getModelMetricsDashboard(): Promise<ModelMetricsDashboard>
         supabase
           .from("prediction_snapshots")
           .select(
-            "work_id, captured_at, predicted_score, predicted_is_stub, calc_score, decision_score, actual_user_score, formula_version, resolved_at, training_sample_size, ranking_snapshot_id, superseded",
+            "work_id, captured_at, predicted_score, predicted_is_stub, decision_score, actual_user_score, formula_version, resolved_at, training_sample_size, ranking_snapshot_id, superseded",
           )
           .is("discarded_at", null),
       { orderBy: ["id"], label: "getModelMetricsDashboard.snapshots" },
