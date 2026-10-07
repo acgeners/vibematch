@@ -11,7 +11,10 @@ app = "vibematch-flaresolverr"
 primary_region = "iad"
 
 [build]
-  image = "ghcr.io/flaresolverr/flaresolverr:latest"
+  # Imagem v3.5.0 fixada por digest + watchdog que faz a máquina sair com erro quando o processo
+  # fica vivo e mudo (o `on-failure` da Fly só reinicia em código de saída != 0). Ver
+  # services/flaresolverr/. Não volte para `:latest`: ele já aponta para outra versão.
+  dockerfile = "services/flaresolverr/Dockerfile"
 
 [env]
   LOG_LEVEL = "info"
