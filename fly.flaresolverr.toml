@@ -29,8 +29,9 @@ primary_region = "gru"
 [[services]]
   internal_port = 8191
   protocol = "tcp"
-  auto_stop_machines = false   # scraping precisa dele de pé
-  min_machines_running = 1
+  auto_stop_machines = "stop"  # curadoria local-first (07/10/2026): fallback acorda sob demanda via flycast
+  auto_start_machines = true
+  min_machines_running = 0
 
   # 🔴 SEM ESTE BLOCO O SERVIÇO NÃO É ROTEÁVEL — e a falha não se parece com config.
   # O FlareSolverr escuta em `0.0.0.0:8191`, que é IPv4; a rede privada da Fly (6PN) é
