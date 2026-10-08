@@ -1313,7 +1313,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       {/* Aba ANÁLISE DA IA (2026-08-13). A régua das abas não é procedência, é o que se
           faz com o conteúdo: aqui mora a LEITURA da obra pela IA (atributos com
           justificativa, síntese das reviews, estimativa de arte, deep dive); a comparação
-          com o catálogo — Nota Prevista, Nota.Calc, Alinhamento, Veredito — fica em
+          com o catálogo — Nota Prevista, Alinhamento, Veredito — fica em
           "Notas & Avaliações"; e o que descreve a obra pra decidir a leitura fica na Visão
           Geral. Se a régua fosse procedência, a sinopse consolidada (escrita por modelo)
           teria que vir pra cá e o Veredito sairia de perto dos números comparáveis.

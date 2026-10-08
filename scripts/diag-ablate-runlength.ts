@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * ABLAÇÃO read-only: RunLength ajuda a Nota Prevista? Mede OOF MAE (out-of-fold,
- * sem leakage — mesma família usada pra fitar o blend) COM e SEM RunLength, e
- * também a MAE do score FINAL (blend Ridge⊕Calc, com o peso re-otimizado em cada
- * variante). "Drop" = forçar RunLength constante → variância zero → contribuição
+ * sem leakage) COM e SEM RunLength. A Nota Prevista É o Ridge (+ obs): o blend com a
+ * Nota.Calc foi aposentado em 2026-09-29 e a Nota.Calc inteira em 2026-10-07, então
+ * a seção "FINAL (blend Ridge⊕Calc)" que existia aqui saiu — sem calc ela só
+ * imprimiria Infinity/NaN. "Drop" = forçar RunLength constante → variância zero → contribuição
  * zero e as outras features refitam (equivale a remover a coluna), reusando a
  * função REAL `expectedOutOfFoldPredictions`.
  *
@@ -49,16 +50,6 @@ function toInput(w: any): ExpectedScoreInput {
 const mae = (pred: number[], y: number[]) => pred.reduce((s, p, i) => s + Math.abs(p - y[i]), 0) / pred.length
 const rmse = (pred: number[], y: number[]) => Math.sqrt(pred.reduce((s, p, i) => s + (p - y[i]) ** 2, 0) / pred.length)
 
-// Grid-search do peso do blend (igual ao recalc: w·ridgeOOF + (1-w)·calcNoObs).
-function bestBlend(oof: number[], calc: number[], y: number[]) {
-  let bestW = 1, best = Infinity
-  for (let w = 0; w <= 1.0001; w += 0.05) {
-    const m = mae(oof.map((p, i) => w * p + (1 - w) * calc[i]), y)
-    if (m < best) { best = m; bestW = w }
-  }
-  return { bestW, mae: best }
-}
-
 async function main() {
   const sb = createAdminClient()
   const ownerId = await getOwnerUserId(sb)
@@ -81,7 +72,6 @@ async function main() {
   const labeled = (works as any[]).filter((w) => w.userScore != null)
   const inputs = labeled.map(toInput)
   const targets = labeled.map((w) => w.userScore as number)
-  const calc = labeled.map((w) => w.calcScoreNoObs as number)
   const withReal = inputs.filter((i) => i.runLength != null).length
   console.log(`rotuladas=${labeled.length} · com RunLength REAL=${withReal} (${(100 * withReal / labeled.length).toFixed(0)}%) · imputadas=${labeled.length - withReal}`)
 
@@ -93,19 +83,12 @@ async function main() {
 
   const maeBase = mae(oofBase, targets), rmseBase = rmse(oofBase, targets)
   const maeDrop = mae(oofDrop, targets), rmseDrop = rmse(oofDrop, targets)
-  const blendBase = bestBlend(oofBase, calc, targets)
-  const blendDrop = bestBlend(oofDrop, calc, targets)
 
   const pct = (a: number, b: number) => `${((a - b) / b * 100 >= 0 ? "+" : "")}${((a - b) / b * 100).toFixed(2)}%`
-  console.log(`\n===== OOF (Ridge puro, sem blend) =====`)
+  console.log(`\n===== OOF (Ridge puro = a Nota Prevista) =====`)
   console.log(`  COM RunLength:   MAE=${maeBase.toFixed(4)}  RMSE=${rmseBase.toFixed(4)}`)
   console.log(`  SEM RunLength:   MAE=${maeDrop.toFixed(4)}  RMSE=${rmseDrop.toFixed(4)}`)
   console.log(`  Δ MAE (sem−com): ${(maeDrop - maeBase >= 0 ? "+" : "")}${(maeDrop - maeBase).toFixed(4)}  (${pct(maeDrop, maeBase)}) ${maeDrop < maeBase ? "→ DROPAR ajuda ✅" : maeDrop > maeBase ? "→ DROPAR piora ❌" : "→ neutro"}`)
-
-  console.log(`\n===== FINAL (blend Ridge⊕Calc, peso re-otimizado) =====`)
-  console.log(`  COM RunLength:   MAE=${blendBase.mae.toFixed(4)}  (blendW=${blendBase.bestW.toFixed(2)})`)
-  console.log(`  SEM RunLength:   MAE=${blendDrop.mae.toFixed(4)}  (blendW=${blendDrop.bestW.toFixed(2)})`)
-  console.log(`  Δ MAE (sem−com): ${(blendDrop.mae - blendBase.mae >= 0 ? "+" : "")}${(blendDrop.mae - blendBase.mae).toFixed(4)}  (${pct(blendDrop.mae, blendBase.mae)}) ${blendDrop.mae < blendBase.mae ? "→ DROPAR ajuda ✅" : blendDrop.mae > blendBase.mae ? "→ DROPAR piora ❌" : "→ neutro"}`)
 
   console.log("\n(ablação read-only — 0 escrita)")
 }

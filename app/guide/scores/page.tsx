@@ -107,8 +107,6 @@ export default async function DicionarioDosNumerosPage() {
           <Etapa titulo="o que é calculado com isso">
             <No nome="Nota.IA" desc="os 9 somados pela sua ênfase" />
             <Seta>→</Seta>
-            <No nome="Nota.Calc" desc="a Nota.IA misturada com a nota externa, por volume de votos" />
-            <Seta>→</Seta>
             <No
               nome="Nota Prevista"
               desc={`regressão treinada nas obras que você já avaliou (mínimo de ${MIN_TRAIN})`}

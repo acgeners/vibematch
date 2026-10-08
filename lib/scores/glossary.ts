@@ -270,20 +270,6 @@ const MEDIDAS: ReadonlyArray<Omit<ScoreEntry, "role" | "note">> = [
     coverage: "nove_atributos",
     href: { url: "/guide/attributes", label: "O que cada atributo quer dizer" },
   },
-  {
-    key: "calc_score",
-    name: LABELS.calc_score.full,
-    slug: "calc_score",
-    producer: "calculo",
-    scale: "0–10",
-    summary:
-      "A Nota.IA misturada com a nota externa, dando mais peso à externa quanto mais votos ela tiver. Foi a nota principal do app até 06/2026; hoje é âncora interna da Nota Prevista.",
-    feedsExpected: "sim, como âncora",
-    where: "não aparece — é interna",
-    movedBy: ["category_scores", "platform_ratings", "total_chapters"],
-    coverage: null,
-    href: null,
-  },
 ]
 
 /**

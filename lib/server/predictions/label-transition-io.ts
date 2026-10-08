@@ -97,7 +97,6 @@ export function createLabelTransitionDeps(args: {
         work_id: string
         expected_score: unknown
         expected_is_stub: boolean | null
-        calc_score: unknown
         personal_fit: unknown
         personal_fit_percentile: unknown
         alignment_score: unknown
@@ -116,7 +115,7 @@ export function createLabelTransitionDeps(args: {
         const { data, error } = await admin
           .from("user_calculated_scores")
           .select(
-            "work_id, expected_score, expected_is_stub, calc_score, personal_fit, personal_fit_percentile, alignment_score, alignment_payload, alignment_stale, calculated_at",
+            "work_id, expected_score, expected_is_stub, personal_fit, personal_fit_percentile, alignment_score, alignment_payload, alignment_stale, calculated_at",
           )
           .eq("user_id", userId)
           .in("work_id", chunk)
@@ -133,7 +132,6 @@ export function createLabelTransitionDeps(args: {
           }
           const expected = toScore(r.expected_score)
           const base = {
-            calc: toScore(r.calc_score),
             personalFit: toScore(r.personal_fit),
             personalFitPercentile: toScore(r.personal_fit_percentile),
             calculatedAt: r.calculated_at ?? null,
@@ -187,7 +185,7 @@ export function createLabelTransitionDeps(args: {
       if (!isMissingColumn(error)) throw new Error(error.message)
       if (!legacyLedgerWarned) {
         legacyLedgerWarned = true
-        console.warn("[ledger] migration 200 ausente — gravando só as colunas da mig 101 (calc/personal_fit/proveniência perdidos até aplicar)")
+        console.warn("[ledger] migration 200 ausente — gravando só as colunas da mig 101 (personal_fit/proveniência perdidos até aplicar)")
       }
       const { error: legacyError } = await ledgerClient
         .from("prediction_ledger")

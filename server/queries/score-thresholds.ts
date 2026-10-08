@@ -45,9 +45,9 @@ function computeColumn(
 }
 
 /**
- * Calcula 4 cutoffs de cor por coluna de nota agregada (Nota Prevista e Nota.Calc)
- * baseados nos percentis de `formula_config`, aplicados à distribuição de cada
- * coluna independentemente. Cada coluna é `null` quando o pool < MIN_POOL_SIZE
+ * Calcula 4 cutoffs de cor para a Nota Prevista (e para cada critério) baseados nos
+ * percentis de `formula_config`, aplicados à distribuição de cada coluna
+ * independentemente. Cada coluna é `null` quando o pool < MIN_POOL_SIZE
  * (o ScoreBadge cai pros thresholds fixos). Devolve `null` só se nem o config existe.
  *
  * Cache com tag `score-color-thresholds`. Invalidar via revalidateTag
@@ -69,7 +69,7 @@ export const getScoreColorThresholds = unstable_cache(
         () =>
           supabase
             .from("works")
-            .select("calculated_scores(expected_score, calc_score), category_scores(criterion_slug, score)")
+            .select("calculated_scores(expected_score), category_scores(criterion_slug, score)")
             .eq("is_archived", false),
         { orderBy: ["id"], label: "getScoreColorThresholds.works" },
       ),
@@ -85,23 +85,20 @@ export const getScoreColorThresholds = unstable_cache(
     }
 
     const expecteds: number[] = []
-    const calcs: number[] = []
     // Distribuição de cada critério (slug → notas) pra colorir atributos por percentil.
     const criterionScores = new Map<string, number[]>()
 
     for (const row of (workRows ?? []) as Array<{
       calculated_scores:
-        | { expected_score: number | null; calc_score: number | null }
-        | Array<{ expected_score: number | null; calc_score: number | null }>
+        | { expected_score: number | null }
+        | Array<{ expected_score: number | null }>
         | null
       category_scores?: Array<{ criterion_slug: string; score: number | null }> | null
     }>) {
       const cs = Array.isArray(row.calculated_scores) ? row.calculated_scores[0] : row.calculated_scores
       if (cs) {
         const e = cs.expected_score == null ? Number.NaN : Number(cs.expected_score)
-        const c = cs.calc_score == null ? Number.NaN : Number(cs.calc_score)
         if (Number.isFinite(e)) expecteds.push(e)
-        if (Number.isFinite(c)) calcs.push(c)
       }
       for (const catScore of row.category_scores ?? []) {
         const v = catScore.score == null ? Number.NaN : Number(catScore.score)
@@ -113,10 +110,8 @@ export const getScoreColorThresholds = unstable_cache(
     }
 
     expecteds.sort((a, b) => a - b)
-    calcs.sort((a, b) => a - b)
 
     const expected = computeColumn(expecteds, cfg)
-    const calc = computeColumn(calcs, cfg)
 
     // Override por critério: criterion_color_pcts é um jsonb { slug: {top,high,mid,low} }.
     // Quando ausente (pré-migration) ou sem entrada pro slug, usa o cfg global.
@@ -141,7 +136,7 @@ export const getScoreColorThresholds = unstable_cache(
       if (t) criteria[slug] = t
     }
 
-    return { expected, calc, criteria }
+    return { expected, criteria }
   },
   ["score-color-thresholds-v4"],
   { revalidate: 300, tags: ["score-color-thresholds"] }

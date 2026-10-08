@@ -72,6 +72,9 @@ interface RawRow {
 
 /** ResolvedSnapshot + campos ricos que as funções base não carregam. */
 interface RichResolved extends ResolvedSnapshot {
+  /** Nota.Calc do snapshot — HISTÓRICO: a Nota.Calc foi aposentada em 2026-10-07 e não é mais
+   *  capturada, então só snapshots anteriores trazem valor (`prediction_snapshots.calc_score`). */
+  calcScore: number | null
   personalFit: number | null
   alignmentScore: number | null
   rankPosition: number | null

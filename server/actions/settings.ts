@@ -527,7 +527,6 @@ export interface CalibrationHistoryEntry {
   stacker_enabled: boolean | null
   mae_loocv_stacker: number | null
   mae_final: number | null
-  mae_calc: number | null
   mae_predicted: number | null
   /** Fase 1 shadow mode: MAE do expected_score (L1 Ridge cleaned). NULL em snapshots anteriores à migration 066. */
   mae_expected: number | null
@@ -545,14 +544,14 @@ export async function getCalibrationSnapshot() {
       .from("works_owner")
       .select(
         `id, title, user_score,
-         calculated_scores(calc_score, total_votes, expected_score, expected_is_stub)`
+         calculated_scores(total_votes, expected_score, expected_is_stub)`
       )
       .eq("is_archived", false)
       .limit(2000),
     supabase
       .from("calibration_history")
       .select(
-        "recorded_at, formula_version, stacker_enabled, mae_loocv_stacker, mae_final, mae_calc, mae_predicted, mae_expected, cv_mae_expected, train_size, total_works",
+        "recorded_at, formula_version, stacker_enabled, mae_loocv_stacker, mae_final, mae_predicted, mae_expected, cv_mae_expected, train_size, total_works",
       )
       .order("recorded_at", { ascending: false })
       .limit(1000),
@@ -569,7 +568,8 @@ export async function getCalibrationSnapshot() {
       workId: w.id as string,
       title: (w as { title: string }).title,
       userScore: w.user_score == null ? null : Number(w.user_score),
-      calcScore: cs?.calc_score == null ? null : Number(cs.calc_score),
+      // Nota.Calc aposentada (2026-10-07): não é mais lida — o campo existe só pela forma do `computeCalibration`.
+      calcScore: null,
       predictedScore: cs?.predicted_score == null ? null : Number(cs.predicted_score),
       finalScore: cs?.final_score == null ? null : Number(cs.final_score),
       totalVotes: Number(cs?.total_votes ?? 0),
@@ -590,8 +590,8 @@ export async function getCalibrationSnapshot() {
     ).length,
   }))
 
-  // MAE in-sample do expected_score (L1 shadow). Mesma metodologia que mae_calc/
-  // mae_predicted/mae_final: itens com user_score e expected_score preenchidos.
+  // MAE in-sample do expected_score (L1 shadow): itens com user_score e expected_score
+  // preenchidos.
   // NULL quando ainda não há dado (pré-recálculo após migration 066) ou stub.
   let maeExpected: number | null = null
   let expectedCovered = 0
@@ -622,15 +622,12 @@ export async function getCalibrationSnapshot() {
     totalWorks: items.length,
     trainSize: calibration.trainSize,
     baselineMae,
-    maeCalc: calibration.maeCalc,
     maePredicted: calibration.maePredicted,
     maeFinal: calibration.maeFinal,
     maeExpected,
-    rmseCalc: calibration.rmseCalc,
     rmsePredicted: calibration.rmsePredicted,
     rmseFinal: calibration.rmseFinal,
     pseudoVotesNotaM: calibration.pseudoVotesNotaM,
-    pseudoVotesBlend: calibration.pseudoVotesBlend,
     worstDiffs: calibration.worstDiffs as CalibrationDiff[],
     predictorIsStub: items.some((it) => it.predictedIsStub),
     expectedPredictorIsStub: items.length > 0 && items.every((it) => it.expectedScore == null || it.expectedIsStub === true),

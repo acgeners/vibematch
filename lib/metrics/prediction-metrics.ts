@@ -25,8 +25,6 @@ export interface ResolvedSnapshot {
   actual: number
   /** Nota Prevista (expected_score) no snapshot — preditor principal. 0–10. */
   predictedScore: number | null
-  /** Nota.Calc no snapshot. 0–10. */
-  calcScore: number | null
   /** Prioridade (decision_score) no snapshot. 0–10. */
   decisionScore: number | null
   formulaVersion: string
@@ -225,7 +223,7 @@ export function computeErrorByPeriod(
 }
 
 export interface BaselineRow {
-  key: "mean" | "expected" | "calc" | "decision"
+  key: "mean" | "expected" | "decision"
   label: string
   count: number
   mae: number | null
@@ -256,13 +254,11 @@ export function computeBaselines(records: ResolvedSnapshot[]): BaselineRow[] {
     )
 
   const expected = pick((r) => r.predictedScore)
-  const calc = pick((r) => r.calcScore)
   const decision = pick((r) => r.decisionScore)
 
   return [
     { key: "mean", label: "Baseline (média)", count: meanStats.count, mae: meanStats.mae, rmse: meanStats.rmse },
     { key: "expected", label: LABELS.expected_score.full, count: expected.count, mae: expected.mae, rmse: expected.rmse },
-    { key: "calc", label: LABELS.calc_score.full, count: calc.count, mae: calc.mae, rmse: calc.rmse },
     { key: "decision", label: "Prioridade (decisão)", count: decision.count, mae: decision.mae, rmse: decision.rmse },
   ]
 }
@@ -273,12 +269,16 @@ export interface CommonSubsetBaselines {
 }
 
 /**
- * Baselines comparados no MESMO subconjunto (obras com expected, calc e decision
- * todos presentes) — comparação honesta, sem misturar coberturas diferentes.
+ * Baselines comparados no MESMO subconjunto (obras com expected e decision presentes)
+ * — comparação honesta, sem misturar coberturas diferentes.
+ *
+ * A Nota.Calc saiu daqui em 2026-10-07 (aposentada): ela não é mais capturada nos snapshots,
+ * e exigi-la no subconjunto o faria encolher sozinho, snapshot a snapshot, até sobrar só o
+ * histórico anterior à aposentadoria. A coluna `prediction_snapshots.calc_score` segue no banco.
  */
 export function computeBaselinesOnCommonSubset(records: ResolvedSnapshot[]): CommonSubsetBaselines {
   const subset = records.filter(
-    (r) => r.predictedScore != null && r.calcScore != null && r.decisionScore != null,
+    (r) => r.predictedScore != null && r.decisionScore != null,
   )
   const all = subset.map((r) => r.actual)
   const meanStats = meanBaselineStats(all)
@@ -286,7 +286,6 @@ export function computeBaselinesOnCommonSubset(records: ResolvedSnapshot[]): Com
     errorStats(subset.map((r) => ({ predicted: sel(r), actual: r.actual })))
 
   const expected = stats((r) => r.predictedScore as number)
-  const calc = stats((r) => r.calcScore as number)
   const decision = stats((r) => r.decisionScore as number)
 
   return {
@@ -294,7 +293,6 @@ export function computeBaselinesOnCommonSubset(records: ResolvedSnapshot[]): Com
     rows: [
       { key: "mean", label: "Baseline (média)", count: meanStats.count, mae: meanStats.mae, rmse: meanStats.rmse },
       { key: "expected", label: LABELS.expected_score.full, count: expected.count, mae: expected.mae, rmse: expected.rmse },
-      { key: "calc", label: LABELS.calc_score.full, count: calc.count, mae: calc.mae, rmse: calc.rmse },
       { key: "decision", label: "Prioridade (decisão)", count: decision.count, mae: decision.mae, rmse: decision.rmse },
     ],
   }

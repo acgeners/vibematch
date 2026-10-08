@@ -1,26 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect } from "vitest"
 import { readFileSync } from "node:fs"
 
 /**
- * A NOTA PREVISTA É O RIDGE — `calc` foi aposentado dela (2026-09-29).
+ * A NOTA PREVISTA É O RIDGE — e a Nota.Calc não existe mais.
  *
- * Até então o recálculo fazia `w·Ridge + (1−w)·calcNoObs`, com `w` escolhido por busca em grade
- * a cada recalc. Medido: `w` já estava em 1,0; o blend avaliado honestamente PIORAVA o MAE; e o
- * que ele ainda fazia era instabilidade (w oscilando 0,95 ↔ 1,0 mexia centenas de posições).
+ * 2026-09-29: o blend `w·Ridge + (1−w)·calcNoObs` saiu da Prevista. Medido: `w` já estava em 1,0;
+ * o blend avaliado honestamente PIORAVA o MAE; e o que ele ainda fazia era instabilidade (w
+ * oscilando 0,95 ↔ 1,0 mexia centenas de posições).
  *
- * Estes testes provam o comportamento, não a grafia: `calculateNotaCalc` é substituído por um
- * mock que desloca o `calc` sem tocar em NENHUMA feature do Ridge — se a Prevista ainda
- * dependesse do `calc` por qualquer caminho, ela mudaria junto.
+ * 2026-10-07: a Nota.Calc foi aposentada INTEIRA — deixou de ser calculada, gravada e capturada.
+ * Antes de tirar, remedido no clone local com o núcleo real: sabotar o calc (+5 e =0) mudou ZERO
+ * células de 1.010 linhas fora as dele, nenhuma Prioridade e nenhuma posição de ranking; corr com
+ * o resíduo OOF do Ridge 0,05; peso ótimo do blend 0. As colunas (`calc_score`, `mae_calc`,
+ * `rmse_calc`, `prediction_snapshots.calc_score`, `prediction_ledger.predicted_calc`) ficam no
+ * banco como LEGADO — sem migration —, e é por isso que a chave tem de sair da linha (ausente, não
+ * `null`): o upsert não toca a coluna e o espelho per-user também a omite.
  */
-
-const desloc = vi.hoisted(() => ({ v: 0 }))
-vi.mock("@/lib/calculations", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/calculations")>()
-  return {
-    ...actual,
-    calculateNotaCalc: (i: Parameters<typeof actual.calculateNotaCalc>[0]) => actual.calculateNotaCalc(i) + desloc.v,
-  }
-})
 
 import { buildWork, computeRecalc, type RawWork } from "@/server/actions/calculations"
 import { SCORING_CRITERION_SLUGS } from "@/lib/calculations/scoring-features"
@@ -90,10 +85,6 @@ function rodar(opts: { blendPersistido?: number; labelShift?: number; fast?: boo
 
 const prevista = (x: ReturnType<typeof rodar>) => x.res.rows.map((r) => r.expected_score)
 
-beforeEach(() => {
-  desloc.v = 0
-})
-
 describe("a Nota Prevista é a saída do Ridge", () => {
   it("é exatamente o Ridge (+ obs), obra a obra", () => {
     const { works, res } = rodar()
@@ -117,14 +108,15 @@ describe("a Nota Prevista é a saída do Ridge", () => {
     for (const b of [0.9, 0.5, 0]) expect(prevista(rodar({ blendPersistido: b }))).toEqual(base)
   })
 
-  it("B · deslocar o calc em +5 NÃO muda a Prevista — mas muda o calc_score (o mock pegou)", () => {
-    const antes = rodar()
-    desloc.v = 5
-    const depois = rodar()
-    expect(prevista(depois)).toEqual(prevista(antes))
-    const calcAntes = antes.res.rows.map((r) => r.calc_score)
-    const calcDepois = depois.res.rows.map((r) => r.calc_score)
-    expect(calcDepois).not.toEqual(calcAntes)
+  it("B · nenhuma linha do recálculo carrega a Nota.Calc — a chave está AUSENTE, não nula", () => {
+    const { res } = rodar()
+    for (const r of res.rows) {
+      for (const k of ["calc_score", "mae_calc", "rmse_calc"]) expect(Object.keys(r)).not.toContain(k)
+    }
+    // E o retorno não carrega mais as métricas nem o parâmetro dela.
+    expect(Object.keys(res)).not.toContain("newMaeCalc")
+    expect(Object.keys(res)).not.toContain("newRmseCalc")
+    expect(Object.keys(res)).not.toContain("pseudoVotesBlend")
   })
 
   it("C · mudar o que o Ridge aprende muda a Prevista normalmente", () => {
@@ -133,27 +125,8 @@ describe("a Nota Prevista é a saída do Ridge", () => {
 })
 
 describe("o que não pode ter mudado", () => {
-  it("F · a CV honesta mede o Ridge: deslocar o calc não mexe no cvMAE", () => {
-    const antes = rodar({ fast: false }).res.cvMaeExpected
-    desloc.v = 5
-    const depois = rodar({ fast: false }).res.cvMaeExpected
-    expect(antes).not.toBeNull()
-    expect(depois).toBe(antes)
-  })
-
-  it("G · calc_score continua calculado e persistido na linha do recálculo", () => {
-    const { res, works } = rodar()
-    expect(res.rows.every((r) => typeof r.calc_score === "number" && Number.isFinite(r.calc_score))).toBe(true)
-    expect(res.rows.map((r) => r.calc_score)).toEqual(works.map((w) => w.calcScore))
-  })
-
-  it("I · deslocar o calc não toca IA(n), chance, Alinhamento nem desempate", () => {
-    const antes = rodar().res.rows
-    desloc.v = 5
-    const depois = rodar().res.rows
-    const semCalc = (rs: typeof antes) =>
-      rs.map((r) => [r.ia_eval, r.ia_eval_normalized, r.chance_score, r.personal_fit, r.personal_fit_percentile, r.tag_overlap_net, r.expected_baseline])
-    expect(semCalc(depois)).toEqual(semCalc(antes))
+  it("F · a CV honesta segue medindo o Ridge", () => {
+    expect(rodar({ fast: false }).res.cvMaeExpected).not.toBeNull()
   })
 })
 
@@ -166,17 +139,23 @@ describe("arquitetura: o blend não volta", () => {
     expect(readFileSync("server/recalc/user-recalc.ts", "utf8")).toContain("computeRecalc({")
   })
 
-  it("calcScoreNoObs só é declarado e atribuído — nunca entra numa conta", () => {
-    const usos = calc.match(/[^\n]*\bcalcScoreNoObs\b[^\n]*/g) ?? []
-    expect(usos.map((l) => l.trim())).toEqual([
-      "calcScoreNoObs: number",
-      "calcScoreNoObs: 0,",
-      "w.calcScoreNoObs = calculateNotaCalc({",
-    ])
+  it("a Nota.Calc não é calculada no recálculo (nem a fórmula existe mais)", () => {
+    expect(calc).not.toMatch(/\bcalculateNotaCalc\b|\bcalcScoreNoObs\b|\bpseudoVotesBlend\b|\bnewMaeCalc\b|\.calcScore\b/)
+    // `calcScore: null` sobra só como FORMATO de entrada do `computeCalibration` (lib compartilhada);
+    // qualquer valor que não seja `null` ali é a Nota.Calc voltando a entrar numa conta.
+    expect(calc).not.toMatch(/\bcalcScore\s*:(?!\s*null\b)/)
+    expect(calc).not.toMatch(/\bcalc_score\s*:|\bmae_calc\s*:|\brmse_calc\s*:|\bpseudo_votes_blend\s*:/)
+    expect(semComentarios(readFileSync("lib/calculations/index.ts", "utf8"))).not.toMatch(/calculateNotaCalc|\.\/score/)
   })
 
-  it("H · ledger e snapshots seguem capturando o calc como componente", () => {
-    expect(readFileSync("lib/server/predictions/label-transition-io.ts", "utf8")).toMatch(/calc_score/)
-    expect(readFileSync("lib/server/predictions/record-prediction.ts", "utf8")).toMatch(/calc_score/)
+  it("H · ledger e snapshots NÃO capturam mais a Nota.Calc", () => {
+    for (const f of [
+      "lib/server/predictions/label-transition-io.ts",
+      "lib/server/predictions/label-transition.ts",
+      "lib/server/predictions/record-prediction.ts",
+      "lib/server/predictions/prediction-context.ts",
+    ]) {
+      expect(semComentarios(readFileSync(f, "utf8")), f).not.toMatch(/\bcalc_score\b|\bpredicted_calc\b|\bcalcScore\b|\bcalc\s*:/)
+    }
   })
 })

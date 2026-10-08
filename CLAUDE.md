@@ -1971,8 +1971,8 @@ ligado — o problema era só a tela não dizer qual dos dois está valendo. Hoj
 `ênfase automática` ou `ênfase sua`.
 
 ⚠️ **A ordenação da Nota.IA muda pouco entre os dois** (Spearman 0,857, |Δ| mediano 0,27 ponto),
-e ela chega à Prevista diluída — `IA(n)` é uma feature entre 20, e a Nota.Calc pesa ~0,05 no
-blend. Não espere que trocar o toggle reordene o catálogo.
+e ela chega à Prevista diluída — `IA(n)` é uma feature entre 20 (a Nota.Calc, que era a outra
+porta, foi aposentada). Não espere que trocar o toggle reordene o catálogo.
 
 ⚠️ **Alfa de texto não se lê na cor computada:** `text-background/50` dava **3,87:1** (abaixo do
 AA de 4,5:1 em 12px) e medir sem compor o canal alfa sobre o fundo dava "18:1". Hoje `/65`
@@ -4765,13 +4765,13 @@ provider antes de o banco recusar a persistência.
 
 ## Scoring pipeline
 
-> **History (read this first):** the original pipeline had four named scores — Nota.IA → Nota.Calc → Nota.Pr → Nota.Final. The `Nota.Pr` + `Nota.Final` stage was **retired** and replaced by a single **Nota Prevista** (`expected_score`). `lib/calculations/final.ts`/`stacker.ts` were deleted and the `final_score`/`predicted_score` columns dropped in migration 099 (2026-06-14); `lib/calculations/prediction.ts` (dead code, no callers) has since been removed too. The user-facing score is now **Nota Prevista**; **Nota.Calc** survives only as a separate, legacy value (it no longer feeds the Nota Prevista — see stage 3).
+> **History (read this first):** the original pipeline had four named scores — Nota.IA → Nota.Calc → Nota.Pr → Nota.Final. The `Nota.Pr` + `Nota.Final` stage was **retired** and replaced by a single **Nota Prevista** (`expected_score`). `lib/calculations/final.ts`/`stacker.ts` were deleted and the `final_score`/`predicted_score` columns dropped in migration 099 (2026-06-14); `lib/calculations/prediction.ts` (dead code, no callers) has since been removed too. The user-facing score is now **Nota Prevista**; **Nota.Calc** was **retired** (stage 2 below) — it is no longer computed, persisted or captured.
 
-Today a work's score flows through three stages:
+Today a work's score flows through two active stages (1 and 3); stage 2 is retired:
 
 1. **GPT (Nota.IA)** — weighted sum of `category_scores` using `score_weights`. Negative-weight criteria (drama, tragedy) only penalise when above `max_negative_threshold`. Result is clamped 0–10 then amplified: `GPT.N = 5 + (GPT - 5) × 1.25` (`lib/calculations/gpt.ts`).
 
-2. **Nota.Calc** (`calc_score`) — blends GPT.N with platform average using Bayesian pseudo-vote pooling, then applies chapter and observation penalties (`lib/calculations/score.ts`). Computed both with and without the observation nudge (`calcScoreNoObs`, now diagnostic only). Persisted as `calc_score` for the surfaces that still show or record it (UI column, ledger/snapshots) — it is **not** an input of stage 3 and not the headline score.
+2. ~~**Nota.Calc**~~ (`calc_score`) — **RETIRED (2026-10-07).** It used to blend GPT.N with the platform average by a fixed formula. It feeds nothing: not the Nota Prevista, Prioridade, Chance, Alinhamento, ranking or recommendations. The recalc no longer computes or writes it (`calc_score`, `mae_calc`, `rmse_calc`, `pseudo_votes_blend`), and new `prediction_snapshots` / `prediction_ledger` rows no longer capture it. The **columns stay in the schema as legacy** (the recalc omits the keys, so they keep their last value) and historical rows are preserved; dropping them is a separate step, with a migration, not part of this change. Measured before retiring: sabotaging `calc` changed 0 cells outside its own columns, 0 Prioridade values and 0 of 1,007 ranking positions. Guarded by `tests/unit/calculations/prevista-sem-calc.test.ts`. ⚠️ `formula_config.min_calc_score` is **not** this score — it is the repurposed "Alinhamento mínimo" threshold.
 
 3. **Nota Prevista** (`expected_score`) — the headline predicted score. A **single Ridge regression** (`trainExpectedPredictor` in `lib/calculations/expected.ts`) trained on works with a manual `user_score`. Features: the 9 category scores, GPT.N, platform avg, log(votes), chapters, synopsis quality, loved/avoided tag overlap, criterion-fit score, release age, run length, plus categorical publication status (one-hot) and origin country. (8 post-reading "quality" features are added only on the paid plan via `includeQuality`.) 🔴 **The Nota Prevista IS the Ridge output: `expected_score = clamp(Ridge + observation adjustment)`.** Until 2026-09-29 it was blended with Nota.Calc (`w·Ridge + (1−w)·calcScoreNoObs`, `w` grid-searched every recalc); that blend was **retired** because `w` had already settled at 1.0, the honestly-evaluated blend *worsened* MAE (+0.008, IC95% [+0.001; +0.016]), and all it still did was make the ranking unstable (`w = 0.9` would move ~290 positions with no measured gain). Guarded by `tests/unit/calculations/prevista-sem-calc.test.ts`. The observation adjustment is **not** a feature; it is added deterministically once, on top of the Ridge output. Below `MIN_TRAIN = 20` labelled samples the predictor falls back to the training mean. Persisted as `expected_score`.
 

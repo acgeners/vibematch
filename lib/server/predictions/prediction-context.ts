@@ -27,7 +27,7 @@ export type PredictionContext = (typeof PREDICTION_CONTEXTS)[number]
 /**
  * Schema de ENTRADA pra registrar um snapshot. Validado no boundary do serviço.
  * Scores podem ser null (obra sem aquele componente), mas quando presentes
- * precisam ser finitos. predictedScore/decisionScore/calcScore na escala 0–10;
+ * precisam ser finitos. predictedScore/decisionScore na escala 0–10;
  * personalFit 0–1; alignment 0–100 (não restringimos a faixa aqui — o CHECK do
  * banco cuida das faixas críticas).
  */
@@ -35,7 +35,6 @@ export const predictionSnapshotSchema = z.object({
   workId: z.string().uuid(),
   userId: z.string().uuid(),
   predictedScore: z.number().finite().nullable(),
-  calcScore: z.number().finite().nullable(),
   personalFit: z.number().finite().nullable(),
   alignmentScore: z.number().finite().nullable(),
   decisionScore: z.number().finite().nullable(),

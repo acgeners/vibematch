@@ -28,7 +28,6 @@ type SnapshotRow = {
   user_id: string
   work_id: string
   predicted_score: number | null
-  calc_score: number | null
   personal_fit: number | null
   alignment_score: number | null
   decision_score: number | null
@@ -54,7 +53,6 @@ function toRow(input: PredictionSnapshotInput, capturedAt: string): SnapshotRow 
     user_id: input.userId,
     work_id: input.workId,
     predicted_score: input.predictedScore,
-    calc_score: input.calcScore,
     personal_fit: input.personalFit,
     alignment_score: input.alignmentScore,
     decision_score: input.decisionScore,
@@ -155,7 +153,7 @@ export async function recordRecommendationSnapshots(args: {
       supabase
         .from("works_owner")
         .select(
-          "id, user_score, calculated_scores(expected_score, calc_score, personal_fit, alignment_score, alignment_payload, expected_is_stub)",
+          "id, user_score, calculated_scores(expected_score, personal_fit, alignment_score, alignment_payload, expected_is_stub)",
         )
         .in("id", args.workIds),
     ])
@@ -176,7 +174,6 @@ export async function recordRecommendationSnapshots(args: {
       user_score: number | null
       calculated_scores: {
         expected_score: number | null
-        calc_score: number | null
         personal_fit: number | null
         alignment_score: number | null
         alignment_payload: { confidence?: number } | null
@@ -216,7 +213,6 @@ export async function recordRecommendationSnapshots(args: {
         workId: w.id,
         userId,
         predictedScore: expected,
-        calcScore: cs?.calc_score ?? null,
         personalFit: cs?.personal_fit ?? null,
         alignmentScore: cs?.alignment_score ?? null,
         decisionScore: decision,
@@ -330,7 +326,6 @@ export async function recordRankingSnapshots(args: {
       user_score: number | null
       calculated_scores: {
         expected_score: number | null
-        calc_score: number | null
         personal_fit: number | null
         alignment_score: number | null
         alignment_payload: { confidence?: number } | null
@@ -343,7 +338,7 @@ export async function recordRankingSnapshots(args: {
       const { data, error } = await supabase
         .from("works_owner")
         .select(
-          "id, user_score, calculated_scores(expected_score, calc_score, personal_fit, alignment_score, alignment_payload, expected_is_stub)",
+          "id, user_score, calculated_scores(expected_score, personal_fit, alignment_score, alignment_payload, expected_is_stub)",
         )
         .in("id", chunk)
       if (error) {
@@ -398,7 +393,6 @@ export async function recordRankingSnapshots(args: {
         workId: id,
         userId,
         predictedScore: expected,
-        calcScore: cs?.calc_score ?? null,
         personalFit: cs?.personal_fit ?? null,
         alignmentScore: cs?.alignment_score ?? null,
         decisionScore: decision,

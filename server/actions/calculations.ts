@@ -15,7 +15,6 @@ import {
   calculatePlatformAvg,
   computeGlobalPlatformMean,
   normalizeChapters,
-  calculateNotaCalc,
 } from "@/lib/calculations"
 import { calculateGPTWithDiagnostics, calculateGPT } from "@/lib/calculations/gpt"
 import { getCurrentUserId, ensurePermission, getOwnerUserId } from "@/server/queries/current-user"
@@ -93,8 +92,8 @@ const POST_SCORE_FIELDS = [
 /**
  * Ajuste manual de observação aplicado de forma determinística sobre a Nota
  * Esperada — clamp ∈ [-0.30, +0.30], soma direta em pontos de nota, resultado
- * clampado em [0, 10]. Restaura o comportamento do legado Nota.Calc agora que
- * `ObsAdjustment` não é mais feature do Ridge (ver lib/calculations/expected.ts).
+ * clampado em [0, 10]. `ObsAdjustment` não é feature do Ridge (ver
+ * lib/calculations/expected.ts): ele é somado UMA vez, aqui, sobre a saída do modelo.
  */
 function applyObsAdjustment(expected: number, observationAdjustment: number): number {
   const obs = Math.min(Math.max(observationAdjustment, -0.3), 0.3)
@@ -147,7 +146,7 @@ interface WorkComputed {
   categoryScores: CategoryScoreMap
   /**
    * categoryScores com offset de atributos aplicado (Fase 1.5). Usado nos
-   * features do Ridge, criterionFit e personalFit — NÃO no calc_score (Nota.IA
+   * features do Ridge, criterionFit e personalFit — NÃO no ia_eval persistido (Nota.IA
    * fica como opinião crua da IA). Idêntico a categoryScores quando o biasMap
    * é zero (obras sem nenhum atributo de origem IA, ou sem bias coletado).
    */
@@ -175,10 +174,7 @@ interface WorkComputed {
   iaEvalNormalizedCalibrated: number
   chaptersNormalized: number
   platformAvg: number | null
-  calcScore: number
-  /** Nota.Calc sem o nudge de observação. Só diagnóstico — não entra em nota nenhuma. */
-  calcScoreNoObs: number
-  /** Nota Prevista = saída do Ridge (+ obs). `calc` NÃO entra (aposentado em 2026-09-29). */
+  /** Nota Prevista = saída do Ridge (+ obs). A Nota.Calc foi aposentada (ver computeRecalc). */
   expectedScore: number | null
   /** Stage 1 puro (baseline a partir do perfil). */
   expectedBaseline: number | null
@@ -304,8 +300,6 @@ export function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed
     iaEvalNormalizedCalibrated: 0,
     chaptersNormalized: 0,
     platformAvg: null,
-    calcScore: 0,
-    calcScoreNoObs: 0,
     expectedScore: null,
     expectedBaseline: null,
     expectedQualityAdj: null,
@@ -477,13 +471,17 @@ function computeHonestExpectedCvMae(
 
 /**
  * Reprocessa TODA a base:
- *   1. Calcula percentis de #Votos -> atualiza pseudo_votes_*
- *   2. Calcula GPT.N, Nota.M, Cps.N, Nota.Calc para todos
- *   3. Treina Ridge nos títulos com user_score e prediz Nota.Pr para todos
- *   4. Calcula MAEs reais -> atualiza mae_calc, mae_predicted
- *   5. Calcula NotaFinal com MAEs novos
+ *   1. Calcula percentis de #Votos -> atualiza pseudo_votes_nota_m
+ *   2. Calcula GPT.N, Nota.M, Cps.N para todos
+ *   3. Treina o Ridge nos títulos com user_score e prediz a Nota Prevista para todos
+ *   4. Mede as MAEs da Nota Prevista (in-sample e CV honesta)
+ *   5. Alinhamento, Chance de gostar
  *   6. Bulk upsert em calculated_scores
  *   7. Persiste novo formula_config
+ *
+ * A Nota.Calc foi APOSENTADA (ver o bloco "Nota.Calc aposentada" em computeRecalc): este
+ * recálculo não calcula nem grava mais `calc_score`, `mae_calc`, `rmse_calc` nem
+ * `pseudo_votes_blend`. As colunas ficam no banco como legado.
  */
 /**
  * Contexto de execução do recálculo. EXPLÍCITO (sem heurística de ambiente):
@@ -640,8 +638,8 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   }
 
   const {
-    rows, pseudoVotesNotaM, pseudoVotesBlend, gptMean, gptClampHits, gptClampHitRate,
-    gptNegativeActivations, negativeActivationRate, inferenceSnapshot, newMaeCalc, newRmseCalc,
+    rows, pseudoVotesNotaM, gptMean, gptClampHits, gptClampHitRate,
+    gptNegativeActivations, negativeActivationRate, inferenceSnapshot,
     maeExpected, rmseExpected, maeExpectedBaseline, cvMaeExpected, expectedPredictor,
     cvSig, oofBucketBreakdown,
   } = computeRecalc({ works, weights, config, tasteProfile, declaredTagPrefs, includeQuality, aiQualityByWork, effectiveInterestByWork })
@@ -706,14 +704,13 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   const { error: configUpdateErr } = await supabase
     .from("formula_config")
     .update({
-      mae_calc: newMaeCalc,
       // Ramo legado removido — mae/rmse_predicted, distance_p95, stacker e
       // ridge_coefficients zerados (serão dropados em migration de follow-up).
+      // `mae_calc`, `rmse_calc` e `pseudo_votes_blend` NÃO são mais gravados: eram da
+      // Nota.Calc, aposentada. As colunas guardam o último valor, como legado.
       mae_predicted: null,
-      rmse_calc: newRmseCalc,
       rmse_predicted: null,
       pseudo_votes_nota_m: pseudoVotesNotaM,
-      pseudo_votes_blend: pseudoVotesBlend,
       // Centro da amplificação GPT.N (média do GPT cru deste recalc). Reusado
       // como `center` em normalizeGPT nos caminhos single-work.
       gpt_mean: gptMean,
@@ -787,7 +784,7 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
     stacker_enabled: false,
     mae_loocv_stacker: null,
     mae_final: null,
-    mae_calc: newMaeCalc,
+    // `mae_calc` não é mais medida (Nota.Calc aposentada) — a coluna fica NULL nas linhas novas.
     mae_predicted: null,
     mae_expected: maeExpected,
     cv_mae_expected: cvMaeExpected,
@@ -832,12 +829,10 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
       alpha: expectedPredictor.model.alpha,
       cvMAE: expectedPredictor.model.cvMAE,
       cvRMSE: expectedPredictor.model.cvRMSE,
-      maeCalc: newMaeCalc,
       maePredicted: null,
       maeFinal: null,
       maeExpected,
       maeExpectedBaseline,
-      rmseCalc: newRmseCalc,
       rmsePredicted: null,
       rmseFinal: null,
       rmseExpected,
@@ -856,7 +851,6 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
       expectedBaselineIndices: expectedPredictor.baselineIndices,
       expectedQualityIndices: expectedPredictor.qualityIndices,
       pseudoVotesNotaM,
-      pseudoVotesBlend,
       featureNames: expectedPredictor.featureNames,
       coefficients: expectedPredictor.model.coefficients,
       stacker: null,
@@ -987,7 +981,7 @@ export function computeRecalc(input: RecalcComputeInput) {
 
   const { works, weights, config, tasteProfile, declaredTagPrefs, includeQuality, aiQualityByWork, effectiveInterestByWork = new Map<string, string | null>(), fast = false } = input
 
-  // ---------- 1) Percentis de votos -> pseudo_votes_* ----------
+  // ---------- 1) Percentis de votos -> pseudo_votes_nota_m ----------
   // Calculamos cedo pra usar nas demais etapas
   const interimCalibration = computeCalibration(
     works.map((w) => ({
@@ -1002,9 +996,9 @@ export function computeRecalc(input: RecalcComputeInput) {
 
   // pseudo_votes pode ser null se houver <5 works com votos. Esse caso é
   // extremamente improvável em produção, mas mantém defaults sanos pra não
-  // quebrar o Bayesian blend.
+  // quebrar o pooling bayesiano da Nota.M. (`pseudoVotesBlend`, o outro número que
+  // `computeCalibration` devolve, era só da Nota.Calc — aposentada — e não é mais usado.)
   const pseudoVotesNotaM = interimCalibration.pseudoVotesNotaM ?? 1000
-  const pseudoVotesBlend = interimCalibration.pseudoVotesBlend ?? 600
 
   // ---------- 1b) Pesos automáticos (opcional) ----------
   // Quando config.score_weights_auto = true (default desde migration 069),
@@ -1038,7 +1032,7 @@ export function computeRecalc(input: RecalcComputeInput) {
     }
   }
 
-  // ---------- 2) GPT, GPT.N, Cps.N, Nota.M, Nota.Calc ----------
+  // ---------- 2) GPT, GPT.N, Cps.N, Nota.M ----------
   let gptClampHits = 0
   const gptNegativeActivations: Record<string, number> = {}
   // Pass 1: GPT cru de todas — precisamos da média do catálogo antes de normalizar.
@@ -1080,29 +1074,6 @@ export function computeRecalc(input: RecalcComputeInput) {
   )
   for (const w of works) {
     w.platformAvg = calculatePlatformAvg(w.platformRatings, realGlobalMean, pseudoVotesNotaM)
-  }
-
-  // Nota.Calc
-  for (const w of works) {
-    w.calcScore = calculateNotaCalc({
-      iaEvalNormalized: w.iaEvalNormalized,
-      platformAvg: w.platformAvg,
-      totalVotes: w.totalVotes,
-      synopsisQuality: w.synopsisQuality,
-      observationAdjustment: w.observationAdjustment,
-      pseudoVotesBlend,
-    })
-    // Mesma Nota.Calc sem o nudge manual de observação. Era o parceiro do blend com a
-    // Prevista (aposentado em 2026-09-29); segue calculada porque diagnósticos a usam como
-    // referência. Não entra em nenhuma nota.
-    w.calcScoreNoObs = calculateNotaCalc({
-      iaEvalNormalized: w.iaEvalNormalized,
-      platformAvg: w.platformAvg,
-      totalVotes: w.totalVotes,
-      synopsisQuality: w.synopsisQuality,
-      observationAdjustment: 0,
-      pseudoVotesBlend,
-    })
   }
 
   // ---------- 2b) Perfil efetivo: persistido ⊕ tags declaradas ----------
@@ -1159,15 +1130,18 @@ export function computeRecalc(input: RecalcComputeInput) {
   const expectedPredictor = trainExpectedPredictor(expectedTrainInputs, trainTargets, includeQuality)
   const expectedPredictions = expectedPredictor.predict(expectedAllInputs)
 
-  // ---------- Nota Prevista = Ridge puro (calc aposentado da Prevista) ----------
+  // ---------- Nota Prevista = Ridge puro · Nota.Calc aposentada ----------
   // Até 2026-09-29 havia aqui um blend `w·Ridge + (1−w)·calcNoObs`, com `w` escolhido por
   // busca em grade no OOF a cada recalc. Aposentado por medição (231 rotuladas): `w` já
   // estava em 1,0 na nuvem, e o blend avaliado honestamente PIORAVA o MAE (+0,008, IC95%
   // [+0,001; +0,016]; `calc` tem R² 0,965 nos inputs do Ridge e corr 0,066 com o resíduo
   // dele). O que o blend ainda fazia era instabilidade: `w` oscilava entre recalcs
   // (0,95 ↔ 1,0) e `w = 0,9` movia centenas de posições sem ganho medido.
-  // `calc_score` segue calculado e persistido (exibição, ledger/snapshots) — só deixou de
-  // entrar na Nota Prevista. As predições OOF continuam: alimentam o MAE por faixa abaixo.
+  // Em 2026-10-07 a Nota.Calc saiu INTEIRA: não é mais calculada nem gravada (`calc_score`,
+  // `mae_calc`, `rmse_calc`, `pseudo_votes_blend` ficam no banco com o último valor, como
+  // legado). Remedido no clone local antes de tirar: sabotar o calc (+5 ou 0) mudou ZERO
+  // células de 1.010 linhas fora as dele; corr com o resíduo OOF 0,05; peso ótimo do blend 0.
+  // As predições OOF continuam: alimentam o MAE por faixa abaixo.
   let oofPreds: number[] | null = null
   if (!expectedPredictor.isStub && trainSet.length >= 30) {
     oofPreds = expectedOutOfFoldPredictions(expectedTrainInputs, trainTargets, includeQuality)
@@ -1209,7 +1183,7 @@ export function computeRecalc(input: RecalcComputeInput) {
     const w = works[i]
     // Nota Prevista SÓ existe quando os 9 atributos da IA estão presentes. Sem
     // eles, os features dominantes do Ridge (category_scores + IA(n) + criterionFit)
-    // são median-imputados e a predição colapsa no calc_score (média do público) →
+    // são median-imputados e a predição colapsa na média do público →
     // uma nota "parcial" que não reflete previsão nenhuma (ex.: 3.1 numa obra sem
     // avaliação). Nesses casos deixamos expected_score = null: some de todas as
     // telas (badges gateiam em `expected_score != null`; o ranking joga essas
@@ -1222,8 +1196,8 @@ export function computeRecalc(input: RecalcComputeInput) {
       w.expectedIsStub = expectedPredictor.isStub
       continue
     }
-    // Nota Prevista = saída do Ridge. `calc` NÃO entra (ver o bloco "calc aposentado"
-    // acima). observation_adjustment é um nudge manual DETERMINÍSTICO (±0.30) somado
+    // Nota Prevista = saída do Ridge. A Nota.Calc não existe mais (ver o bloco "Nota.Calc
+    // aposentada" acima). observation_adjustment é um nudge manual DETERMINÍSTICO (±0.30) somado
     // UMA vez sobre ela — não é feature do Ridge (ver lib/calculations/expected.ts).
     w.expectedScore = applyObsAdjustment(p.expected, w.observationAdjustment)
     // Invariante do waterfall: baseline + qualityAdj == expected (pré-obs). Em Free
@@ -1235,7 +1209,7 @@ export function computeRecalc(input: RecalcComputeInput) {
   }
 
   // MAE in-sample decomposto: baseline-only, combined (baseline+qualityAdj).
-  // Mesma metodologia de mae_calc/mae_predicted pra comparação direta.
+  // In-sample: obras com user_score e expected_score preenchidos.
   let maeExpected: number | null = null
   let rmseExpected: number | null = null
   let maeExpectedBaseline: number | null = null
@@ -1303,20 +1277,6 @@ export function computeRecalc(input: RecalcComputeInput) {
     }
     if (count > 0) honestCvMae = sumAbs / count
   }
-
-  // ---------- 4) Calibrar MAE da Nota.Calc ----------
-  const calibrationAfterPr = computeCalibration(
-    works.map((w) => ({
-      workId: w.id,
-      userScore: w.userScore,
-      calcScore: w.calcScore,
-      predictedScore: null,
-      finalScore: null,
-      totalVotes: w.totalVotes,
-    }))
-  )
-  const newMaeCalc = calibrationAfterPr.maeCalc
-  const newRmseCalc = calibrationAfterPr.rmseCalc
 
   // ---------- 5) Personal fit (determinístico, a partir do TasteProfile) ----------
   // Independente da Nota Prevista — alinhamento de gosto via tags + critérios.
@@ -1421,13 +1381,14 @@ export function computeRecalc(input: RecalcComputeInput) {
     ia_eval: w.iaEvalRaw,
     ia_eval_normalized: w.iaEvalNormalized,
     chapters_normalized: w.chaptersNormalized,
-    calc_score: w.calcScore,
+    // `calc_score`, `mae_calc` e `rmse_calc` SAÍRAM da linha de propósito (Nota.Calc aposentada):
+    // a chave ausente faz o upsert não tocar a coluna (fica o último valor, como legado) e o
+    // espelho per-user (`mirrorOwnerScores`) também a omite. Gravar `null` apagaria o legado sem
+    // ganho nenhum — nada lê essas colunas.
     expected_score: w.expectedScore,
     expected_baseline: w.expectedBaseline,
     expected_quality_adj: w.expectedQualityAdj,
     expected_is_stub: w.expectedIsStub,
-    mae_calc: newMaeCalc,
-    rmse_calc: newRmseCalc,
     personal_fit: w.personalFit,
     personal_fit_percentile: w.personalFitPercentile,
     chance_score: w.chanceScore,
@@ -1498,8 +1459,8 @@ export function computeRecalc(input: RecalcComputeInput) {
       : (honestExpectedCvMae ?? expectedPredictor.model.cvMAE)
 
   return {
-    rows, pseudoVotesNotaM, pseudoVotesBlend, gptMean, gptClampHits, gptClampHitRate,
-    gptNegativeActivations, negativeActivationRate, inferenceSnapshot, newMaeCalc, newRmseCalc,
+    rows, pseudoVotesNotaM, gptMean, gptClampHits, gptClampHitRate,
+    gptNegativeActivations, negativeActivationRate, inferenceSnapshot,
     maeExpected, rmseExpected, maeExpectedBaseline, cvMaeExpected, expectedPredictor,
     cvSig, oofBucketBreakdown,
   }

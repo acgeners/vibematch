@@ -331,7 +331,7 @@ function SortLevelsSection({ searchParams, updateParams, className, contentClass
     if (levels.length >= 5) return
     const used = new Set(levels.map((l) => l.field))
     const next = campos.find((f) => !used.has(f.value))
-    setLevels([...levels, { field: next?.value ?? "calc_score", dir: "desc" }])
+    setLevels([...levels, { field: next?.value ?? "expected_score", dir: "desc" }])
   }
 
   // `parseSortLevels` já limita a 5; o clamp aqui é contra chave ausente no mapa.

@@ -9,7 +9,7 @@ export interface ScoreColorThresholds {
 }
 
 /**
- * Thresholds calculados por coluna. Cada coluna (Nota Prevista, Nota.Calc) usa
+ * Thresholds calculados por coluna. Cada coluna (Nota Prevista, cada critério) usa
  * sua própria distribuição — então o mesmo percentil pode resultar em
  * cutoffs diferentes em cada uma. Consumidores que exibem uma única nota
  * devem fatiar o slice apropriado antes de passar pro ScoreBadge.
@@ -17,8 +17,6 @@ export interface ScoreColorThresholds {
 export interface ColumnThresholds {
   /** Nota Prevista (expected_score) — a coluna principal do catálogo. */
   expected: ScoreColorThresholds | null
-  /** Nota.Calc determinístico (calc_score) — âncora de ensemble do expected. */
-  calc: ScoreColorThresholds | null
   /**
    * Cutoffs por critério (slug → thresholds), cada um calculado sobre a
    * distribuição daquele atributo no catálogo. Usado pra colorir os 9

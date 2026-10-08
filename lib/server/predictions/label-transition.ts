@@ -60,7 +60,6 @@ export interface PreRatingPrediction {
   status: CaptureStatus
   expected: number | null
   decision: number | null
-  calc: number | null
   personalFit: number | null
   personalFitPercentile: number | null
   isStub: boolean
@@ -72,7 +71,6 @@ export const NO_PREDICTION: PreRatingPrediction = {
   status: "no_prediction",
   expected: null,
   decision: null,
-  calc: null,
   personalFit: null,
   personalFitPercentile: null,
   isStub: true,
@@ -93,7 +91,6 @@ export interface LedgerRow {
   predicted_is_stub: boolean
   user_score: number
   train_size_at_capture: number | null
-  predicted_calc: number | null
   predicted_personal_fit: number | null
   predicted_personal_fit_percentile: number | null
   prediction_calculated_at: string | null
@@ -132,7 +129,6 @@ export function buildLedgerRow(args: {
     predicted_is_stub: p.isStub,
     user_score: args.userScore,
     train_size_at_capture: args.trainSize,
-    predicted_calc: p.calc,
     predicted_personal_fit: p.personalFit,
     predicted_personal_fit_percentile: p.personalFitPercentile,
     prediction_calculated_at: p.calculatedAt,

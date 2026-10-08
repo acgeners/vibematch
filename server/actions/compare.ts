@@ -47,7 +47,6 @@ export interface CompareWork extends HiatusFields {
   /** Alinhamento com o perfil: cru (0–1) e percentil na biblioteca (0–100). */
   personalFit: number | null
   personalFitPercentile: number | null
-  calcScore: number | null
   userScore: number | null
   platformAvg: number | null
   totalVotes: number
@@ -243,7 +242,6 @@ function mapWorkToCompare(
     }),
     personalFit: work.calculated_scores?.personal_fit ?? null,
     personalFitPercentile: work.calculated_scores?.personal_fit_percentile ?? null,
-    calcScore: work.calculated_scores?.calc_score ?? null,
     userScore: (work as { user_score?: number | null }).user_score ?? null,
     platformAvg: work.calculated_scores?.platform_avg ?? null,
     totalVotes: work.calculated_scores?.total_votes ?? 0,
