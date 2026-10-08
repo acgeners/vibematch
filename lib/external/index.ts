@@ -24,6 +24,7 @@ import { searchKitsuManga, fetchKitsuMangaById, fetchKitsuReactions } from "./ki
 import { searchMangaDex, fetchMangaDexById, fetchMangaDexForumComments } from "./mangadex"
 import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews, fetchMangaUpdatesAlternativeTitles } from "./mangaupdates"
 import { withTimeout, WithTimeoutError } from "./with-timeout"
+import { pickTotalChapters, toChapterCount } from "./chapter-total"
 import { normalizeText, bestTitleMatch, bestTitleMatchDetailed } from "./title-match"
 import { normalizeAlternativeTitles } from "@/lib/titles/alternative-titles"
 // Re-export: fonte única mora em ./title-match; preservado aqui porque vários
@@ -1515,7 +1516,10 @@ async function hydrateAndFilterCandidate(candidate: MergedCandidate): Promise<{
     console.info(
       `[hydrateAccept] candidate="${candidate.title}" source=${result.source} title=${titleScore.toFixed(2)} syn=${synScore.toFixed(2)} composite=${composite.toFixed(2)} trusted=${trustedSet.has(result.source)} accept=${acceptedBySource}${reason ? ` reason="${reason}"` : ""}`
     )
-    if (acceptedBySource) accepted.push({ ...result, score: result.score })
+    // Capítulo vira CONTAGEM aqui, uma vez, para o merge, a procedência e os conflitos
+    // enxergarem o mesmo número: 29.1 é o 30º capítulo (o mesmo `ceil` da `/reading`), e
+    // o 0 do Kitsu não é contagem — antes ele podia vencer o merge e zerar o total.
+    if (acceptedBySource) accepted.push({ ...result, score: result.score, chapters: toChapterCount(result.chapters) })
     else rejected.push({ result, reason })
   }
 
@@ -1761,7 +1765,7 @@ async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated:
   if (md) hydrated.push({ id: `mangadex:${candidate.mangadexId}`, source: "mangadex", title: md.title, alternativeTitles: md.alternativeTitles, synopsis: md.synopsis, coverUrl: md.coverUrl, year: md.year, publicationStatus: md.publicationStatus, chapters: md.chapters, score: md.rating, votes: md.votes, genres: md.genres, contentRating: md.contentRating })
   if (cmx) hydrated.push({ id: `comick:${candidate.comickHid}`, source: "comick", title: cmx.title, alternativeTitles: cmx.alternativeTitles, synopsis: cmx.synopsis, coverUrl: cmx.coverUrl, publicationStatus: cmx.publicationStatus, chapters: cmx.lastChapter, score: cmx.rating, votes: cmx.votes, genres: cmx.tags, contentRating: cmx.contentRating })
   if (cmix) hydrated.push({ id: `comix:${candidate.comixHid}`, source: "comix", title: cmix.title, alternativeTitles: cmix.alternativeTitles, synopsis: cmix.synopsis, coverUrl: cmix.coverUrl, year: cmix.year, publicationStatus: cmix.publicationStatus, chapters: cmix.chapters, score: cmix.rating, votes: cmix.votes, genres: cmix.tags })
-  if (mg) hydrated.push({ id: `mangago:${candidate.mangagoSlug}`, source: "mangago", title: mg.title, alternativeTitles: mg.alternativeTitles, synopsis: mg.synopsis, coverUrl: mg.coverUrl, year: mg.year, publicationStatus: mg.publicationStatus, genres: mg.genres, score: mg.rating, votes: mg.votes })
+  if (mg) hydrated.push({ id: `mangago:${candidate.mangagoSlug}`, source: "mangago", title: mg.title, alternativeTitles: mg.alternativeTitles, synopsis: mg.synopsis, coverUrl: mg.coverUrl, year: mg.year, publicationStatus: mg.publicationStatus, chapters: mg.chapters, genres: mg.genres, score: mg.rating, votes: mg.votes })
   const muStatusText = typeof mu?.statusText === "string" ? mu.statusText : undefined
   return { hydrated, apDetail: ap as AnimePlanetDetail | null, muStatusText }
 }
@@ -1868,6 +1872,8 @@ function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[],
     ? [{ platform: "animeplanet" as const, rating: apDetail.rating ?? null, votes: apDetail.votes ?? null }]
     : []
 
+  const publicationStatus = accepted.find((result) => result.publicationStatus)?.publicationStatus ?? candidate.publicationStatus
+
   return {
     title: primary.title,
     originalTitle: primary.originalTitle ?? candidate.originalTitle ?? accepted.find((result) => result.originalTitle)?.originalTitle,
@@ -1886,8 +1892,10 @@ function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[],
       accepted.find((result) => result.year)?.year ?? candidate.year,
       accepted.find((result) => result.yearEnd)?.yearEnd ?? candidate.yearEnd,
     ),
-    publicationStatus: accepted.find((result) => result.publicationStatus)?.publicationStatus ?? candidate.publicationStatus,
-    totalChapters: accepted.find((result) => result.chapters != null)?.chapters ?? candidate.chapters,
+    publicationStatus,
+    // Régua com dono (`pickTotalChapters`): obra ainda saindo usa o mesmo total que a
+    // `/reading` grava; obra terminada segue no MangaUpdates-primeiro.
+    totalChapters: pickTotalChapters(accepted, publicationStatus).value ?? toChapterCount(candidate.chapters),
     genres: uniqueStrings(accepted.flatMap((result) => result.genres ?? [])),
     tags: [],
     muRating: ratings.find((r) => r.platform === "mangaupdates")?.rating ?? undefined,
@@ -2065,8 +2073,14 @@ export async function fetchMultiSourceDetails(candidate: MergedCandidate): Promi
   if (Object.keys(externalIds).length > 0) data.externalIds = externalIds
 
   const conflicts: ConflictField[] = []
-  const chaptersConflict = detectConflict("chapters", "totalChapters", "Total de capítulos", uniqueAccepted)
-  if (chaptersConflict) conflicts.push(chaptersConflict)
+  // Obra ainda saindo com Comix/Mangago respondendo: o total sai da régua, sem nada a
+  // decidir — é o que a `/reading` aplica sozinha. Sem isto a divergência MU × Comix (quase
+  // toda obra em andamento) virava conflito, e o "Atualizar" do Assinante, que PULA campo em
+  // conflito, nunca subia o total.
+  if (!pickTotalChapters(uniqueAccepted, data.publicationStatus).decidedByRule) {
+    const chaptersConflict = detectConflict("chapters", "totalChapters", "Total de capítulos", uniqueAccepted)
+    if (chaptersConflict) conflicts.push(chaptersConflict)
+  }
   const statusConflict = detectConflict("publicationStatus", "publicationStatus", "Status de publicação", uniqueAccepted, formatStatus)
   if (statusConflict) conflicts.push(statusConflict)
   const yearConflict = detectConflict("year", "year", "Ano de início", uniqueAccepted)

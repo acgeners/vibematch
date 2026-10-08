@@ -7,6 +7,7 @@ import { comixWorkUrl } from "@/lib/external/comix"
 import { fetchMangaDexChapterDates } from "@/lib/external/mangadex"
 import { fetchMangaUpdatesStatus } from "@/lib/external/mangaupdates"
 import { withTimeout } from "@/lib/external/with-timeout"
+import { toChapterCount } from "@/lib/external/chapter-total"
 import { mapWithConcurrency } from "@/lib/external/map-with-concurrency"
 import { markRecalcPending } from "@/server/recalc/queue"
 import { ensureAdmin } from "@/server/queries/current-user"
@@ -205,12 +206,17 @@ export async function checkReadingUpdates(
           ? chapterNumbers.filter((n) => n > (w.chapters_read ?? 0)).length
           : null
 
-        // Sincroniza total_chapters com o cap da fonte autoritativa (mangago quando
-        // achou; senão comix) e recalcula. `ceil` porque um cap decimal é 1 cap inteiro
+        // Sincroniza total_chapters com o cap da fonte autoritativa (a de MAIOR capítulo
+        // entre Comix e Mangago — ver `getLatestChapter`) e recalcula. `ceil` porque um cap decimal é 1 cap inteiro
         // e mantém total ≥ latest (não re-detecta o mesmo decimal como "novo"). Ajusta
         // pra cima OU pra baixo — corrige totais antigos inflados (ex.: 130 do round(129.7)).
-        if (latest != null && Math.ceil(latest) !== total) {
-          await supabase.from("works").update({ total_chapters: Math.ceil(latest) }).eq("id", w.id)
+        //
+        // ⚠️ `toChapterCount` é o MESMO arredondamento do "Atualizar dados"
+        // (`pickTotalChapters`): as duas rotas gravam este campo, e com réguas próprias
+        // uma desfazia a outra.
+        const latestCount = toChapterCount(latest)
+        if (latestCount != null && latestCount !== total) {
+          await supabase.from("works").update({ total_chapters: latestCount }).eq("id", w.id)
           // total_chapters é feature do Ridge → marca pendente em vez de N
           // recalc-all dentro deste loop de sync de capítulos.
           await markRecalcPending("reading-chapter-sync").catch(() => {})

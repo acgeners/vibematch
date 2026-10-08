@@ -142,6 +142,12 @@ export interface MangagoDetail {
   rating?: number
   /** Nº de votos ("#### voted" ao lado do rating). */
   votes?: number
+  /**
+   * Maior capítulo da `#chapter_table` — a MESMA página do detalhe, então sai sem
+   * requisição a mais. Sem ele o Mangago ficava fora do total de capítulos do "Atualizar
+   * dados", embora seja uma das duas fontes que a `/reading` usa para isso.
+   */
+  chapters?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -532,10 +538,11 @@ export function parseMangagoDetailHtml(html: string): MangagoDetail | null {
   const publicationStatus = extractStatus(html)
   const year = extractYear(labeledValue(html, "(?:released|year|release date)"))
   const { rating, votes } = extractRating(html)
+  const chapters = parseMangagoChapters(html)?.latest ?? undefined
 
   // Só devolve quando há algum sinal aproveitável além do título.
   if (!synopsis && !coverUrl && genres.length === 0 && rating == null) {
-    return { title }
+    return chapters != null ? { title, chapters } : { title }
   }
 
   return {
@@ -548,6 +555,7 @@ export function parseMangagoDetailHtml(html: string): MangagoDetail | null {
     year,
     rating,
     votes,
+    chapters,
   }
 }
 
