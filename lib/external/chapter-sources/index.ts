@@ -2,6 +2,7 @@ import { withTimeout } from "@/lib/external/with-timeout"
 import type { PublicationStatus } from "@/types/domain"
 import { getComixLatestChapter } from "./comix"
 import { getMangagoLatestChapter } from "./mangago"
+import { CHAPTER_SOURCE_IDS } from "./types"
 import type { ChapterCheckInput, ChapterLookup, ChapterSourceId } from "./types"
 
 export type { ChapterCheckInput, ChapterLookup, ChapterSourceId } from "./types"
@@ -20,14 +21,16 @@ export type { ChapterCheckInput, ChapterLookup, ChapterSourceId } from "./types"
 // ⚠️ Ele era a fonte preferida de data ABSOLUTA e da lista real de capítulos
 // (`chapterNumbers` → a contagem exata de não lidos). O mangago fornece as duas, então
 // isso sobrevive — mas só em obra com slug do Mangago salvo.
-const CHAPTER_SOURCES: Array<{
-  id: ChapterSourceId
-  lookup: (input: ChapterCheckInput) => Promise<ChapterLookup>
-}> = [
-  { id: "comix", lookup: getComixLatestChapter },
+//
+// ⚠️ O registro é um `Record` sobre `CHAPTER_SOURCE_IDS` de propósito: fonte nova na lista
+// sem checadora aqui (ou o contrário) não compila — e a lista é a mesma que o merge do
+// "Atualizar dados" usa como autoridade (`pickTotalChapters`).
+const CHAPTER_LOOKUPS: Record<ChapterSourceId, (input: ChapterCheckInput) => Promise<ChapterLookup>> = {
+  comix: getComixLatestChapter,
   // Mangago é slug-only (não busca por título) → só roda em obra com Mangago confirmado.
-  { id: "mangago", lookup: getMangagoLatestChapter },
-]
+  mangago: getMangagoLatestChapter,
+}
+const CHAPTER_SOURCES = CHAPTER_SOURCE_IDS.map((id) => ({ id, lookup: CHAPTER_LOOKUPS[id] }))
 
 // Scrapers atrás de Cloudflare (comix via FlareSolverr) podem travar; o timeout
 // transforma a fonte lenta numa rejeição fail-soft sem somar dezenas de segundos.
