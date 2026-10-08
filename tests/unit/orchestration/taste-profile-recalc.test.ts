@@ -36,6 +36,8 @@ import { __resetSingleFlight } from "@/lib/ai-cache/single-flight"
 import type { RatedWorkInput, TasteProfileRow } from "@/lib/ai-recommendation/types"
 
 const EMPTY = { loved_tags: [], avoided_tags: [], loved_themes: [], avoided_themes: [], criterion_preferences: {}, narrative_patterns: [], summary: "" }
+// O guard de código canônico tem teste próprio (recalc-guarda-codigo-canonico); aqui ele libera.
+const livre = () => ({ allow: true as const, provenance: {} })
 // `userId` explícito (migration 147: o perfil tem DONO). Sem ele, `insertNewTasteProfile` cairia
 // em `getCurrentUserId()` — que vai ao banco procurar o singleton, e aqui o Supabase é mockado.
 const ARGS = { profile: EMPTY, nWorks: 12, inputHash: "h", isStub: false, modelName: "m", promptVersion: "v6", rawResponse: null, userId: "00000000-0000-0000-0000-000000000001" }
@@ -109,7 +111,7 @@ describe("Correção 2 — recalc orquestrado (force=false, coalescido)", () => 
     let recalcCalls = 0
     const out = await ensureRecalculateScores({
       recalc: async () => { recalcCalls++; pending.pending = false; return { recalculated: 7 } },
-      readPending: async () => pending,
+      codeGuard: livre, readPending: async () => pending,
       jobStore: new InMemoryJobStore(),
     })
     expect(out.status).toBe("succeeded")
@@ -121,7 +123,7 @@ describe("Correção 2 — recalc orquestrado (force=false, coalescido)", () => 
     let recalcCalls = 0
     const out = await ensureRecalculateScores({
       recalc: async () => { recalcCalls++; return { recalculated: 0 } },
-      readPending: async () => ({ pending: false, lastEditAt: null }),
+      codeGuard: livre, readPending: async () => ({ pending: false, lastEditAt: null }),
       jobStore: new InMemoryJobStore(),
     })
     expect(out.status).toBe("fresh")
@@ -133,7 +135,7 @@ describe("Correção 2 — recalc orquestrado (force=false, coalescido)", () => 
     const js = new InMemoryJobStore()
     const out = await ensureRecalculateScores({
       recalc: async () => { throw new Error("recalc boom") },
-      readPending: async () => pending,
+      codeGuard: livre, readPending: async () => pending,
       jobStore: js,
     })
     expect(out.status).toBe("failed")
@@ -147,7 +149,7 @@ describe("Correção 2 — recalc orquestrado (force=false, coalescido)", () => 
     const js = new InMemoryJobStore()
     const deps = {
       recalc: async () => { recalcCalls++; await new Promise((r) => setTimeout(r, 5)); pending.pending = false; return { recalculated: 3 } },
-      readPending: async () => pending,
+      codeGuard: livre, readPending: async () => pending,
       jobStore: js,
     }
     await Promise.all([ensureRecalculateScores(deps), ensureRecalculateScores(deps)])

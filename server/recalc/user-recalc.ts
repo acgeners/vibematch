@@ -8,6 +8,7 @@ import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getOwnerUserId } from "@/server/queries/current-user"
 import { exigirContratoDeScoring } from "@/server/queries/canonical-contract"
+import { assertRecalcCodeAllowed } from "@/server/recalc/code-guard"
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // O MODELO DE CADA UM — Fatia 2b
@@ -51,6 +52,9 @@ export interface UserRecalcResult {
  * Um número ausente é honesto. Um número inventado é pior que nenhum, porque ninguém desconfia.
  */
 export async function recalculateForUser(userId: string): Promise<UserRecalcResult> {
+  // 🔴 Código canônico (server/recalc/code-guard.ts), ANTES de qualquer leitura — o mesmo preflight
+  // do `recalculateAll`. Os chamadores rodam em `after()` e só logam: recusado, nada é gravado.
+  assertRecalcCodeAllowed()
   const ownerId = await getOwnerUserId()
   if (userId === ownerId) {
     // O dono tem o recalc dele (`recalculateAll`), que também escreve `calculated_scores` e o

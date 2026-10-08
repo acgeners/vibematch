@@ -1739,7 +1739,11 @@ export async function finalizePendingBatch() {
   const pending = (data ?? []).filter((w: any) => !w.calculated_scores).length
 
   const finalizeRecalc = await recalculateScoresNow()
-  if (finalizeRecalc.status === "failed") throw new Error(finalizeRecalc.error)
+  // `blocked` também lança: o botão só existe para recalcular, e seguir faria o toast dizer
+  // "N obras recalculadas" sobre um recálculo que o guard de código recusou.
+  if (finalizeRecalc.status === "failed" || finalizeRecalc.status === "blocked") {
+    throw new Error(finalizeRecalc.error)
+  }
 
   revalidatePath("/catalog")
   revalidateTag("works-slug-index", "max")

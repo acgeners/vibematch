@@ -25,6 +25,14 @@ export interface RecalcPendingSnapshot {
   lastEditAt: string | null
 }
 
+/**
+ * Guarda de código canônico (injeção real = `checkRecalcCode`, server/recalc/code-guard.ts). A
+ * proveniência vai para `payload.code` do job — é o que diz DE ONDE veio um recálculo.
+ */
+export type RecalcCodeGate =
+  | { allow: true; provenance: Readonly<Record<string, unknown>> }
+  | { allow: false; message: string }
+
 export interface EnsureRecalcDeps<R extends { recalculated: number }> {
   /** Força o recálculo mesmo sem pendência (create / "Recalcular agora"). Default false. */
   force?: boolean
@@ -32,6 +40,8 @@ export interface EnsureRecalcDeps<R extends { recalculated: number }> {
   recalc: () => Promise<R>
   /** Leitura do estado pendente (injeção real = getRecalcPendingState). */
   readPending: () => Promise<RecalcPendingSnapshot>
+  /** OBRIGATÓRIA de propósito: um runner sem guarda seria a guarda construída e desligada. */
+  codeGuard: () => RecalcCodeGate
   jobStore?: JobStore
 }
 
@@ -40,6 +50,8 @@ export type RecalcOutcome<R = { recalculated: number }> =
   | { status: "succeeded"; recalculated: number; result: R | null }
   | { status: "processing" }
   | { status: "failed"; error: string }
+  /** Código não canônico contra a nuvem: nada foi calculado, nenhum job criado, a pendência fica. */
+  | { status: "blocked"; error: string }
 
 /**
  * Dedup key do recálculo GLOBAL. A "geração" é o `recalc_last_edit_at` (setado por
@@ -58,6 +70,7 @@ export function recalcDedupKey(lastEditAt: string | null): string {
  *  - DURANTE `next build` (prerender) ⇒ fresh (NUNCA executa/cria job — evita efeito
  *    colateral no build; o recalc fica para o primeiro page-load em runtime);
  *  - `recalc_pending=false` e sem `force` ⇒ fresh (sem job, sem execução);
+ *  - código não canônico contra a nuvem ⇒ blocked (sem job, sem execução);
  *  - senão ⇒ job global durável (work_id=null), free, com dedup/coalescência.
  * `recalc_pending` continua sendo zerado pelo PRÓPRIO recalc (fonte única).
  */
@@ -73,6 +86,11 @@ export async function ensureRecalculateScores<R extends { recalculated: number }
   const state = await deps.readPending()
   if (!force && !state.pending) return { status: "fresh" }
 
+  // 🔴 ANTES do job: recusado, não sobra um job "falho" a cada página carregada — e
+  // `recalc_pending` fica intacto, porque só o próprio recálculo o zera.
+  const gate = deps.codeGuard()
+  if (!gate.allow) return { status: "blocked", error: gate.message }
+
   const jobStore = deps.jobStore ?? (await getJobStore())
   // Box (não `let`): evita que o control-flow do TS estreite o valor capturado no
   // closure para `null`.
@@ -84,7 +102,7 @@ export async function ensureRecalculateScores<R extends { recalculated: number }
       workId: null, // GLOBAL
       dedupKey: recalcDedupKey(state.lastEditAt),
       estimateUsd: 0, // FREE — sem gate de custo, sem LLM.
-      payload: { generation: state.lastEditAt ?? "force", forced: force },
+      payload: { generation: state.lastEditAt ?? "force", forced: force, code: gate.provenance },
     },
     async () => {
       captured.value = await deps.recalc()

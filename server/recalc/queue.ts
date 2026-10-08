@@ -14,6 +14,7 @@ import { decideMarkRecalc, needsOwnerToDecide } from "@/lib/calculations/recalc-
 import type { RecalcInput } from "@/lib/calculations/recalc-inputs"
 import { recalculateAll, type RecalculateExecutionContext } from "@/server/actions/calculations"
 import { ensureRecalculateScores } from "@/lib/orchestration/integrations/recalculate-scores"
+import { checkRecalcCode } from "@/server/recalc/code-guard"
 import {
   countMissingEmbeddings,
   countPendingCanonicalSynopses,
@@ -149,6 +150,8 @@ const recalcDeps = (force: boolean, ctx: RecalculateExecutionContext = "next-run
   force,
   recalc: () => recalculateAll(ctx),
   readPending: getRecalcPendingState,
+  // Código não canônico contra a nuvem não recalcula (server/recalc/code-guard.ts).
+  codeGuard: checkRecalcCode,
 })
 
 /**
@@ -178,7 +181,7 @@ export async function recalculateScoresHeadless() {
  */
 export async function recalculateScoresNowResult() {
   const out = await recalculateScoresNow()
-  if (out.status === "failed") throw new Error(out.error)
+  if (out.status === "failed" || out.status === "blocked") throw new Error(out.error)
   if (out.status !== "succeeded" || out.result == null) {
     throw new Error("Recálculo em andamento — tente novamente em instantes.")
   }
@@ -194,12 +197,20 @@ export async function recalculateScoresNowResult() {
 function recalculateScoresInBackground(context: string): void {
   after(async () => {
     try {
-      await ensureRecalculateScores(recalcDeps(false))
+      const out = await ensureRecalculateScores(recalcDeps(false))
+      // Disparo IMPLÍCITO (navegação, fallback do mark): recusado não é erro da página — só avisa.
+      // Uma vez por mensagem e processo: o gatilho roda a cada página carregada.
+      if (out.status === "blocked" && out.error !== ultimoBloqueioAvisado) {
+        ultimoBloqueioAvisado = out.error
+        console.warn(`[recalc-guard] recálculo automático NÃO executado (${context}): ${out.error}`)
+      }
     } catch (err) {
       console.error(`[${context}] recálculo orquestrado (bg) falhou:`, err instanceof Error ? err.message : err)
     }
   })
 }
+
+let ultimoBloqueioAvisado: string | null = null
 
 /** Lê o estado de recálculo pendente (sem efeito colateral). */
 export async function getRecalcPendingState(): Promise<RecalcPendingState> {

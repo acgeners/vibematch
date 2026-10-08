@@ -14,6 +14,10 @@ import { join } from "node:path"
  */
 
 vi.mock("server-only", () => ({}))
+// O guard de CÓDIGO canônico roda antes deste preflight e tem teste próprio
+// (orchestration/recalc-guarda-codigo-canonico) — aqui ele libera, senão o estado do git de quem
+// roda a suíte decidiria o resultado.
+vi.mock("@/server/recalc/code-guard", () => ({ assertRecalcCodeAllowed: () => ({}) }))
 
 const db = vi.hoisted(() => ({
   contrato: { data: null as unknown, error: null as { code?: string; message: string } | null },
