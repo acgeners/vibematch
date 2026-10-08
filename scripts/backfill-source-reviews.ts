@@ -29,6 +29,10 @@
  * sidecar; a Comix deixou de passar em 29/07) — o FlareSolverr é a ÚNICA via. Sem ele o
  * script roda inteiro e grava ZERO, que é o modo de falha caro. O resumo denuncia.
  *
+ * Falha da fonte NÃO é "0 reviews": quando o adaptador rejeita (o Mangago lança
+ * `MangagoUnavailableError`), a obra sai como `ERR`, nada é gravado e ela segue no escopo da
+ * próxima execução — ver `scripts/lib/coleta-de-reviews.ts`.
+ *
  * Uso:
  * 🔴 ALVO: NUVEM — este script GRAVA. Rodá-lo contra o local, que é réplica descartável,
  *    joga o trabalho fora no próximo `db:pull`.
@@ -43,6 +47,7 @@ import { extractUserRating } from "../lib/external/index"
 import { saveWorkReviews } from "../lib/external/persist-reviews"
 import type { SourcedReview } from "../lib/external/types"
 import { exigeAlvoNuvem } from "./lib/exige-alvo-nuvem"
+import { coletarReviewsDaObra } from "./lib/coleta-de-reviews"
 
 const APPLY = process.argv.includes("--apply")
 const arg = (n: string) => process.argv.find((a) => a.startsWith(`--${n}=`))?.split("=")[1] ?? null
@@ -139,6 +144,10 @@ async function main() {
   let totalReviews = 0
   let comReview = 0
   let semReview = 0
+  // Fonte que NÃO respondeu (a promise rejeitou). Contada à parte de `semReview`: juntar as duas
+  // era o defeito — a falha aparecia como "obra sem review".
+  let falharam = 0
+  const motivosDaFalha = new Map<string, number>()
   let feitas = 0
   const t0 = Date.now()
   // Uma linha por obra já dá sinal de vida, mas não diz QUANTO FALTA — e num lote de
@@ -150,21 +159,12 @@ async function main() {
     console.log(`  ⏱  ${feitas}/${alvos.length} · ${totalReviews} reviews · faltam ~${restaMin} min`)
   }
 
-  for (const alvo of alvos) {
-    const textos = await fonte.fetch(alvo.externalId, MAX_REVIEWS).catch(() => [] as string[])
-    if (textos.length === 0) {
-      semReview += 1
-      console.log(`  ${"0".padStart(3)}  "${alvo.title.slice(0, 46)}"`)
-      marcarProgresso()
-      await sleep(PAUSA_MS)
-      continue
-    }
-
-    const reviews: SourcedReview[] = textos.map((texto): SourcedReview => {
+  const paraSourced = (textos: string[], titulo: string): SourcedReview[] =>
+    textos.map((texto): SourcedReview => {
       const { rating, cleanText } = extractUserRating(texto)
       return {
         source: FONTE,
-        sourceTitle: alvo.title,
+        sourceTitle: titulo,
         // O vínculo já foi ACEITO (está em work_external_ids, não rejeitado),
         // então não há match a pontuar: é 1 por construção.
         matchScore: 1,
@@ -174,21 +174,35 @@ async function main() {
       }
     })
 
-    if (APPLY) {
+  for (const alvo of alvos) {
+    const resultado = await coletarReviewsDaObra(
+      () => fonte.fetch(alvo.externalId, MAX_REVIEWS),
       // `accumulate` = união por fonte; NUNCA remove review boa de outra fonte.
       // `skipPaidEnrichment` = sem digest/resumo Sonnet. Custo de IA: zero.
-      await saveWorkReviews(alvo.workId, reviews, { skipPaidEnrichment: true, accumulate: true })
-    }
+      APPLY
+        ? (textos) => saveWorkReviews(alvo.workId, paraSourced(textos, alvo.title), { skipPaidEnrichment: true, accumulate: true })
+        : undefined,
+    )
 
-    totalReviews += reviews.length
-    comReview += 1
-    console.log(`  ${String(reviews.length).padStart(3)}  "${alvo.title.slice(0, 46)}"`)
+    if (resultado.status === "falhou") {
+      falharam += 1
+      motivosDaFalha.set(resultado.motivo, (motivosDaFalha.get(resultado.motivo) ?? 0) + 1)
+      console.log(`  ERR  "${alvo.title.slice(0, 46)}"  (${resultado.motivo})`)
+    } else if (resultado.status === "zero") {
+      semReview += 1
+      console.log(`  ${"0".padStart(3)}  "${alvo.title.slice(0, 46)}"`)
+    } else {
+      totalReviews += resultado.textos.length
+      comReview += 1
+      console.log(`  ${String(resultado.textos.length).padStart(3)}  "${alvo.title.slice(0, 46)}"`)
+    }
     marcarProgresso()
     await sleep(PAUSA_MS)
   }
 
   console.log(`\n  obras que trouxeram reviews: ${comReview}`)
   console.log(`  obras sem review em ${fonte.rotulo}:    ${semReview}`)
+  console.log(`  obras em que ${fonte.rotulo} FALHOU:  ${falharam}`)
   console.log(`  reviews ${APPLY ? "GRAVADAS" : "que seriam gravadas"}: ${totalReviews}`)
   console.log(`  custo de IA: US$ 0,00  (digest não foi gerado — ver o cabeçalho)`)
 
@@ -199,6 +213,16 @@ async function main() {
       `\n🔴 NENHUMA das ${alvos.length} obras trouxe review. Isso quase nunca é ${fonte.rotulo} estar vazio:` +
         `\n   confira se o FlareSolverr está de pé (docker start flaresolverr) antes de concluir` +
         `\n   qualquer coisa deste resultado.`,
+    )
+    process.exitCode = 3
+  }
+  // Falha não é "sem review": nada foi gravado nessas obras e elas continuam no escopo. Sair 0
+  // diria que o backfill terminou — e ele não terminou.
+  if (falharam > 0) {
+    const porMotivo = [...motivosDaFalha].map(([m, n]) => `${m} ×${n}`).join(", ")
+    console.error(
+      `\n🔴 ${falharam} obra(s) com ${fonte.rotulo} FALHANDO (${porMotivo}) — isso NÃO é "sem review".` +
+        `\n   Nada foi gravado nelas e elas seguem no escopo: rode de novo quando a fonte responder.`,
     )
     process.exitCode = 3
   }
