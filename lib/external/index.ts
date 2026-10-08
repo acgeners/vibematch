@@ -23,7 +23,7 @@ import { fetchMalReviews } from "./myanimelist-reviews"
 import { searchKitsuManga, fetchKitsuMangaById, fetchKitsuReactions } from "./kitsu"
 import { searchMangaDex, fetchMangaDexById, fetchMangaDexForumComments } from "./mangadex"
 import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews, fetchMangaUpdatesAlternativeTitles } from "./mangaupdates"
-import { withTimeout } from "./with-timeout"
+import { withTimeout, WithTimeoutError } from "./with-timeout"
 import { normalizeText, bestTitleMatch, bestTitleMatchDetailed } from "./title-match"
 import { normalizeAlternativeTitles } from "@/lib/titles/alternative-titles"
 // Re-export: fonte única mora em ./title-match; preservado aqui porque vários
@@ -1183,7 +1183,11 @@ export async function collectReviewsFromCandidate(
       // CHAMADAS (que aqui deram certo — só chegaram tarde). Sem este aviso, a coleta
       // descartada por estouro de teto voltava depois e marcava o gate como "ok",
       // deixando o painel verde enquanto a fonte entregava zero.
-      if (src === "comix") recordComixFailure("delivery_timeout")
+      // 🔴 SÓ o timeout deste wrapper é `delivery_timeout`. Desde 2026-10-07 a Comix também
+      // REJEITA quando falha (`ComixUnavailableError`), e esse motivo já foi gravado no gate
+      // pelo próprio adaptador: rotulá-lo aqui de novo trocaria a causa real e ainda armaria a
+      // guarda de "sucesso tardio", segurando o gate em falha depois de a fonte voltar.
+      if (src === "comix" && entry.reason instanceof WithTimeoutError) recordComixFailure("delivery_timeout")
       return `${src}=FALHOU(${entry.reason instanceof Error ? entry.reason.message : String(entry.reason)})`
     }
     if (!entry.value) return `${src}=vazio`

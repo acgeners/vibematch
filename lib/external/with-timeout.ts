@@ -13,6 +13,20 @@
  * tardio é descartado. Para cancelar de fato a request seria preciso threadar
  * um `AbortSignal` em cada fetcher (mais invasivo).
  */
+/**
+ * O timeout DESTE wrapper — e só ele. Classe própria para quem precisa separar "a fonte
+ * demorou demais" de "a fonte falhou" (ex.: o `delivery_timeout` da Comix), sem casar mensagem.
+ */
+export class WithTimeoutError extends Error {
+  constructor(
+    readonly label: string,
+    readonly ms: number,
+  ) {
+    super(`[withTimeout] ${label} excedeu ${ms}ms`)
+    this.name = "WithTimeoutError"
+  }
+}
+
 export async function withTimeout<T>(
   promise: Promise<T>,
   ms: number,
@@ -21,7 +35,7 @@ export async function withTimeout<T>(
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`[withTimeout] ${label} excedeu ${ms}ms`)),
+      () => reject(new WithTimeoutError(label, ms)),
       ms,
     )
   })

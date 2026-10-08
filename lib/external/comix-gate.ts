@@ -42,6 +42,9 @@ export type ComixFailure =
   // A descoberta de hid rodou CEGA (a página de busca não montou). Não é "a obra não
   // está na Comix": é não termos conseguido perguntar.
   | "search_blind"
+  // A Comix respondeu, mas sem a forma esperada: página 200 sem o objeto da obra (remodelada),
+  // ou o envelope de threads sem o que a coleta precisa. Era aceito como sucesso até 2026-10-07.
+  | "invalid_response"
 
 export type ComixHealthState = "ok" | "degraded" | "down" | "unknown"
 

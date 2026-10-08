@@ -40,9 +40,13 @@ async function main() {
   console.log("\n2. REVIEWS por hid (o caminho de toda avaliação seguinte)")
   for (const [titulo, hid] of HIDS) {
     const t0 = Date.now()
-    const r = await fetchComixReviews(hid)
+    // Desde 2026-10-07 a falha REJEITA: sem o try, a 1ª obra com a Comix fora derrubava a sonda.
+    const r = await fetchComixReviews(hid).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))))
+    const seg = ((Date.now() - t0) / 1000).toFixed(1)
     console.log(
-      `   "${titulo.slice(0, 40)}" hid=${hid} → ${r.length} review(s)  (${((Date.now() - t0) / 1000).toFixed(1)}s)`
+      r instanceof Error
+        ? `   "${titulo.slice(0, 40)}" hid=${hid} → FALHOU (${r.message})  (${seg}s)`
+        : `   "${titulo.slice(0, 40)}" hid=${hid} → ${r.length} review(s)  (${seg}s)`
     )
   }
 }
