@@ -14,7 +14,7 @@ import { promises as fs, openSync, closeSync } from "node:fs"
 import path from "node:path"
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { fetchComixById, fetchComixReviews } from "@/lib/external/comix"
+import { fetchComixById, collectComixReviews, ComixUnavailableError } from "@/lib/external/comix"
 import { extractComixHid } from "@/lib/external/comix-hid"
 import { isBlockedCoverUrl, recordCoverUrlResult } from "@/lib/external/blocked-covers"
 import { cleanSynopsisText, isSameSynopsis } from "@/lib/synopsis-text"
@@ -695,16 +695,35 @@ export async function checkComixHealth(): Promise<ComixHealthResult> {
   })
 
   // 3. Reviews (cadeia de threads) — endpoints /threads/* (CF-gated desde 2026-06-12).
+  // Desde 2026-10-07 a falha REJEITA (antes virava "0", indistinguível de "sem comentários").
   const t2 = Date.now()
-  const reviews = await fetchComixReviews(COMIX_CANARY_HID)
-  checks.push({
-    ok: reviews.length > 0,
-    label: "Reviews (threads)",
-    detail: reviews.length > 0
-      ? `${reviews.length} comentários do canário`
-      : "0 — cadeia de threads falhou (ou canário sem comentários)",
-    ms: Date.now() - t2,
-  })
+  try {
+    const { reviews, empty } = await collectComixReviews(COMIX_CANARY_HID)
+    checks.push({
+      // O canário foi escolhido por TER comentários: qualquer zero aqui merece olhar, mesmo o legítimo.
+      ok: reviews.length > 0,
+      label: "Reviews (threads)",
+      detail:
+        reviews.length > 0
+          ? `${reviews.length} comentários do canário`
+          : empty === "not_found"
+            ? `0 — o canário ${COMIX_CANARY_HID} não existe mais na Comix (404): troque o canário`
+            : empty === "no_comments"
+              ? "0 — a Comix respondeu, mas o canário não tem comentário utilizável"
+              : "0 — o lookup respondeu SEM thread: caso ainda não classificado (ver [comix] lookup_without_thread no log)",
+      ms: Date.now() - t2,
+    })
+  } catch (err) {
+    checks.push({
+      ok: false,
+      label: "Reviews (threads)",
+      detail:
+        err instanceof ComixUnavailableError
+          ? `falhou — ${err.reason}`
+          : `falhou — ${err instanceof Error ? err.message : String(err)}`,
+      ms: Date.now() - t2,
+    })
+  }
 
   // 4. Imagem (CDN static.comix.to) — host próprio, fora do FlareSolverr. Testa o
   // cover do detalhe direto; 403 = CF re-bloqueou (app usa fallback cross-source).

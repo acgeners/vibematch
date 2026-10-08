@@ -49,6 +49,85 @@ function logComixFailure(url: string, reason: ComixFailure, detail?: string) {
   recordComixFailure(reason)
 }
 
+/** Por que a Comix NÃO entregou o que a coleta de reviews pediu. */
+export type ComixUnavailableReason =
+  | "blocked" // desafio/bloqueio do Cloudflare que nenhuma camada atravessou
+  | "bypass_unavailable" // a página exigia bypass e não havia nenhum de pé
+  | "rate_limited" // HTTP 429
+  | "server_error" // HTTP 5xx
+  | "fetch_failed" // rede, ou status HTTP sem outra leitura
+  | "invalid_response" // JSON inválido, payload sem o envelope, página 200 sem a obra
+
+/**
+ * A Comix não respondeu — e quem coleta reviews precisa saber disso. `fetchComixReviews` LANÇA
+ * isto em vez de devolver `[]`: a coleta multi-fonte só distingue falha de "não tem" pela
+ * REJEIÇÃO da promise, e um `[]` calado tirava a Comix de `failedSources` (sem 2ª passada) e
+ * fazia o backfill e o canário afirmarem "0 reviews". Até 2026-10-07, rede, 429, 5xx, JSON
+ * inválido, desafio sem bypass e página remodelada saíam todos como `[]`.
+ */
+export class ComixUnavailableError extends Error {
+  constructor(
+    readonly reason: ComixUnavailableReason,
+    readonly url: string,
+  ) {
+    super(`comix ${reason}: ${url}`)
+    this.name = "ComixUnavailableError"
+  }
+}
+
+/** Desfecho de UMA página/endpoint da Comix: o valor validado, a ausência (404/410) ou a falha. */
+type ComixFetchOutcome<T> =
+  | { kind: "ok"; value: T }
+  | { kind: "not_found"; status: number }
+  | { kind: "unavailable"; reason: ComixUnavailableReason }
+
+/** O que falhou no fetch DIRETO — vira a causa reportada se o bypass também não entregar. */
+interface ComixPlainFailure {
+  reason: ComixUnavailableReason
+  failure: ComixFailure
+  detail: string
+}
+
+/** Loga UMA vez (no gate de saúde) e devolve o desfecho de falha. */
+function comixUnavailable(url: string, f: ComixPlainFailure): { kind: "unavailable"; reason: ComixUnavailableReason } {
+  logComixFailure(url, f.failure, f.detail)
+  return { kind: "unavailable", reason: f.reason }
+}
+
+/** Status HTTP de uma resposta que NÃO é desafio do Cloudflare. 404/410 = a coisa pedida não existe. */
+function classifyComixHttpStatus(status: number): "not_found" | ComixUnavailableReason {
+  if (status === 404 || status === 410) return "not_found"
+  if (status === 429) return "rate_limited"
+  if (status >= 500) return "server_error"
+  if (status === 403) return "blocked"
+  return "fetch_failed"
+}
+
+/**
+ * Decide o que fazer quando o fetch direto falhou e é preciso passar pelo bypass. Sem bypass, a
+ * causa é a do fetch direto (um desafio vira `bypass_unavailable`); com bypass que não devolve
+ * nada, também.
+ */
+async function comixViaBypass(
+  url: string,
+  headers: Record<string, string>,
+  plain: ComixPlainFailure,
+): Promise<{ kind: "html"; html: string } | { kind: "unavailable"; reason: ComixUnavailableReason }> {
+  // Sem bypass (sidecar + FlareSolverr) não há como atravessar o CF; considera o
+  // sidecar, não só o FlareSolverr (senão o circuito do FS vetava a camada primária).
+  if (isCfBypassUnavailable()) {
+    return plain.reason === "blocked"
+      ? comixUnavailable(url, { reason: "bypass_unavailable", failure: "flaresolverr_unavailable", detail: `${plain.detail} · sem bypass` })
+      : comixUnavailable(url, { ...plain, detail: `${plain.detail} · sem bypass` })
+  }
+  const fallback = await fetchHtmlWithCfFallback(url, headers, COMIX_CF_ABORT_MS)
+  if (!fallback) return comixUnavailable(url, { ...plain, detail: `${plain.detail} · bypass sem resposta` })
+  if (isCloudflareChallenge(fallback.html)) {
+    return comixUnavailable(url, { reason: "blocked", failure: "cloudflare_challenge", detail: "o bypass devolveu o desafio" })
+  }
+  return { kind: "html", html: fallback.html }
+}
+
 // Circuit breaker de auth: desde ~2026-06 a API /api/v1/manga* do comix.to exige um
 // token de assinatura `_=` gerado no client (anti-bot, chunk VM-ofuscado) e responde
 // {"message":"Missing token."} sem ele. Isso afeta SÓ a busca (`/manga?keyword=`) e o
@@ -193,49 +272,78 @@ async function fetchComixJson(path: string): Promise<unknown | null> {
  * `isValid` é o sinal POSITIVO: só aceitamos o plain fetch quando o conteúdo esperado
  * está mesmo lá. Um 200 sem o payload (desafio silencioso, página remodelada) cai pro
  * fallback em vez de virar um `null` mudo — não confiamos só na ausência de marcador
- * de challenge pra dizer que a resposta presta.
+ * de challenge pra dizer que a resposta presta. 🔴 O que o BYPASS devolve passa pela MESMA
+ * validação: até 2026-10-07 ele era aceito cru (e marcava o gate como "ok"), e a página
+ * remodelada que o fetch direto tinha recusado voltava pelo fallback como sucesso.
+ *
+ * 404/410 = a obra não existe mais na Comix (`not_found`, ausência — decisão de 2026-10-07),
+ * não a Comix fora do ar: não conta como falha no gate.
  */
-async function fetchComixHtml(url: string, isValid?: (html: string) => boolean): Promise<string | null> {
+async function fetchComixHtmlOutcome(url: string, isValid: (html: string) => boolean): Promise<ComixFetchOutcome<string>> {
+  let plain: ComixPlainFailure
   try {
     const res = await fetch(url, { headers: HTML_HEADERS, cache: "no-store" })
     const body = await res.text()
     if (res.ok) {
-      if (!isCloudflareChallenge(body) && (isValid?.(body) ?? true)) {
+      if (!isCloudflareChallenge(body) && isValid(body)) {
         recordComixOk()
-        return body
+        return { kind: "ok", value: body }
       }
+      plain = isCloudflareChallenge(body)
+        ? { reason: "blocked", failure: "cloudflare_challenge", detail: "desafio no fetch direto" }
+        : { reason: "invalid_response", failure: "invalid_response", detail: "página 200 sem o objeto da obra" }
     } else if (!isCloudflareChallenge(body)) {
       // Erro real (404 etc.) que não é challenge — FlareSolverr não ajudaria.
-      logComixFailure(url, "http_error", `status=${res.status}`)
-      return null
+      const kind = classifyComixHttpStatus(res.status)
+      if (kind === "not_found") {
+        console.warn(`[comix] not_found status=${res.status} url=${url}`)
+        return { kind: "not_found", status: res.status }
+      }
+      return comixUnavailable(url, { reason: kind, failure: "http_error", detail: `status=${res.status}` })
+    } else {
+      plain = { reason: "blocked", failure: "cloudflare_challenge", detail: `desafio status=${res.status}` }
     }
   } catch (err) {
-    logComixFailure(url, "network_error", err instanceof Error ? err.message : String(err))
+    plain = { reason: "fetch_failed", failure: "network_error", detail: err instanceof Error ? err.message : String(err) }
   }
 
-  // Sem bypass (sidecar + FlareSolverr) não há como atravessar o CF; considera o
-  // sidecar, não só o FlareSolverr (senão o circuito do FS vetava a camada primária).
-  if (isCfBypassUnavailable()) return null
-  const fallback = await fetchHtmlWithCfFallback(url, HTML_HEADERS, COMIX_CF_ABORT_MS)
-  if (!fallback) {
-    logComixFailure(url, "cloudflare_challenge", "flaresolverr returned no response")
-    return null
+  const via = await comixViaBypass(url, HTML_HEADERS, plain)
+  if (via.kind === "unavailable") return via
+  if (!isValid(via.html)) {
+    return comixUnavailable(url, { reason: "invalid_response", failure: "invalid_response", detail: "o bypass devolveu página sem o objeto da obra" })
   }
   recordComixOk()
-  return fallback.html
+  return { kind: "ok", value: via.html }
 }
 
 /**
  * Detalhe cru da obra (objeto do <script> de hidratação). Fonte única do SSR: o
  * `fetchComixById` monta o `ComixDetail` daqui e o `fetchComixReviews` tira daqui o
  * `id` interno numérico exigido pelo `threads/lookup`. A extração é o próprio
- * validador do plain fetch (ver `fetchComixHtml`).
+ * validador da página (ver `fetchComixHtmlOutcome`).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchComixDetailRaw(hid: string): Promise<any | null> {
-  const html = await fetchComixHtml(comixWorkUrl(hid), (body) => extractComixDetailFromHtml(body, hid) !== null)
-  if (!html) return null
-  return extractComixDetailFromHtml(html, hid)
+async function fetchComixDetailOutcome(hid: string): Promise<ComixFetchOutcome<any>> {
+  const page = await fetchComixHtmlOutcome(comixWorkUrl(hid), (body) => extractComixDetailFromHtml(body, hid) !== null)
+  if (page.kind !== "ok") return page
+  return { kind: "ok", value: extractComixDetailFromHtml(page.value, hid) }
+}
+
+/** O envelope que a API de threads devolve (`{ status, result }`, medido em 2026-10-07). */
+interface ComixEnvelope {
+  result: unknown
+}
+
+/** JSON parseável E com a chave `result` — um corpo de erro (`{"message": …}`) não é envelope. */
+function parseComixEnvelope(text: string): ComixEnvelope | null {
+  try {
+    const parsed: unknown = JSON.parse(text)
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) && "result" in parsed
+      ? (parsed as ComixEnvelope)
+      : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -243,39 +351,56 @@ async function fetchComixDetailRaw(hid: string): Promise<any | null> {
  * endpoints não exigem o token de assinatura `_=` (só /manga* exige), então resolvem
  * por plain fetch; FlareSolverr só como fallback de CF. NÃO consulta o circuito de
  * auth (que cobre apenas a busca gateada).
+ *
+ * 🔴 Só é sucesso o que vier no ENVELOPE `{ result }`. Até 2026-10-07 qualquer JSON servia: um
+ * 429 que caía no FlareSolverr voltava com o corpo do erro (`{"message":"Too Many Attempts."}`),
+ * era aceito, marcava o gate como "ok" e virava "0 comentários".
+ *
+ * Só desafio e 403 vão ao bypass (ele pode atravessar um bloqueio por IP). 429 e 5xx REJEITAM na
+ * hora: o bypass não resolve limite de taxa nem erro de servidor — refaria o fetch direto contra
+ * uma fonte que acabou de pedir calma —, e quem retenta agora é a 2ª passada da coleta.
  */
-async function fetchComixThreadJson(path: string): Promise<unknown | null> {
+async function fetchComixThreadJsonOutcome(path: string): Promise<ComixFetchOutcome<ComixEnvelope>> {
   const url = `${COMIX_BASE}${path}`
+  let plain: ComixPlainFailure
   try {
     const res = await fetch(url, { headers: HEADERS, cache: "no-store" })
-    if (res.ok && (res.headers.get("content-type") ?? "").includes("json")) {
-      try {
-        const json = await res.json()
+    const body = await res.text()
+    if (res.ok) {
+      const envelope = parseComixEnvelope(body)
+      if (envelope) {
         recordComixOk()
-        return json
-      } catch (err) {
-        logComixFailure(url, "json_parse_error", err instanceof Error ? err.message : String(err))
+        return { kind: "ok", value: envelope }
       }
+      plain = isCloudflareChallenge(body)
+        ? { reason: "blocked", failure: "cloudflare_challenge", detail: "desafio no fetch direto" }
+        : { reason: "invalid_response", failure: "json_parse_error", detail: "200 sem o envelope { result }" }
+    } else if (isCloudflareChallenge(body)) {
+      plain = { reason: "blocked", failure: "cloudflare_challenge", detail: `desafio status=${res.status}` }
+    } else {
+      const kind = classifyComixHttpStatus(res.status)
+      if (kind === "not_found") return { kind: "not_found", status: res.status }
+      if (kind !== "blocked") return comixUnavailable(url, { reason: kind, failure: "http_error", detail: `status=${res.status}` })
+      plain = { reason: "blocked", failure: "http_error", detail: `status=${res.status}` }
     }
   } catch (err) {
-    logComixFailure(url, "network_error", err instanceof Error ? err.message : String(err))
+    plain = { reason: "fetch_failed", failure: "network_error", detail: err instanceof Error ? err.message : String(err) }
   }
 
-  // Sem bypass (sidecar + FlareSolverr) não há como atravessar o CF; considera o
-  // sidecar, não só o FlareSolverr (senão o circuito do FS vetava a camada primária).
-  if (isCfBypassUnavailable()) return null
-  const fallback = await fetchHtmlWithCfFallback(url, HEADERS, COMIX_CF_ABORT_MS)
-  if (!fallback) return null
-  const preMatch = fallback.html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i)
-  const raw = (preMatch?.[1] ?? fallback.html).trim()
-  try {
-    const json = JSON.parse(raw)
-    recordComixOk()
-    return json
-  } catch (err) {
-    logComixFailure(url, "json_parse_error", `after-flaresolverr: ${err instanceof Error ? err.message : String(err)}`)
-    return null
+  const via = await comixViaBypass(url, HEADERS, plain)
+  if (via.kind === "unavailable") return via
+  const preMatch = via.html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i)
+  const envelope = parseComixEnvelope((preMatch?.[1] ?? via.html).trim())
+  if (!envelope) {
+    // Um 403 atravessado pelo bypass pode voltar como o CORPO do erro: a causa é a original.
+    const original = plain.failure === "http_error" ? plain : null
+    return comixUnavailable(
+      url,
+      original ?? { reason: "invalid_response", failure: "json_parse_error", detail: "o bypass devolveu algo que não é o envelope { result }" },
+    )
   }
+  recordComixOk()
+  return { kind: "ok", value: envelope }
 }
 
 /**
@@ -462,7 +587,10 @@ export async function searchComix(query: string): Promise<ExternalSearchResult[]
 export async function fetchComixById(hid: string): Promise<ComixDetail | null> {
   // Token-free: o objeto completo da obra vem no <script> de hidratação SSR da página
   // /title/{hid}. O antigo endpoint /manga/{hid} passou a exigir token de assinatura.
-  const r = await fetchComixDetailRaw(hid)
+  // Contrato do detalhe INALTERADO: qualquer desfecho que não seja a obra vira `null` (o
+  // hydrate, o resolvedor e o canário dependem disso). Só as reviews distinguem falha de ausência.
+  const page = await fetchComixDetailOutcome(hid)
+  const r = page.kind === "ok" ? page.value : null
   if (!r || typeof r !== "object") return null
 
   return {
@@ -557,31 +685,90 @@ function collectComixCommentTexts(
   }
 }
 
-export async function fetchComixReviews(hid: string): Promise<string[]> {
+/**
+ * Por que a coleta da Comix veio VAZIA — sempre preenchido quando `reviews` é `[]`, e `null`
+ * quando trouxe algo. É o que permite ao canário dizer QUAL zero é, sem reabrir a ambiguidade.
+ */
+export type ComixEmptyReason =
+  | "not_found" // o detalhe da obra deu 404/410: o vínculo aceito não existe mais na Comix
+  | "no_comments" // a Comix RESPONDEU: `commentCount: 0`, ou a 1ª página veio com `items` sem comentário utilizável
+  | "lookup_without_thread" // 🟡 PROVISÓRIO — ver `collectComixReviews`
+
+export interface ComixReviewsCollected {
+  reviews: string[]
+  empty: ComixEmptyReason | null
+}
+
+/**
+ * Comentários de nível-obra da Comix, com o desfecho. Três saídas, nunca duas:
+ *   reviews       a Comix respondeu e trouxe texto
+ *   `[]` + motivo a Comix RESPONDEU e não há o que colher (ver `ComixEmptyReason`)
+ *   rejeição      `ComixUnavailableError` — a Comix NÃO respondeu (rede, 429, 5xx, JSON inválido,
+ *                 desafio sem bypass, bypass sem resposta, página 200 sem a obra)
+ *
+ * PARCIAL: se a 1ª página de comentários veio e a 2ª falha, devolve o que a 1ª trouxe — mesma
+ * política de sempre, e de propósito fora do escopo da correção de 2026-10-07.
+ */
+export async function collectComixReviews(hid: string): Promise<ComixReviewsCollected> {
   // Token-free: o id interno vem do SSR da página; os endpoints /threads/* não exigem
   // o token de assinatura `_=` (só /manga* exige).
-  const internalId = (await fetchComixDetailRaw(hid))?.id
-  if (typeof internalId !== "number") return []
+  const workUrl = comixWorkUrl(hid)
+  const detail = await fetchComixDetailOutcome(hid)
+  if (detail.kind === "not_found") return { reviews: [], empty: "not_found" }
+  if (detail.kind === "unavailable") throw new ComixUnavailableError(detail.reason, workUrl)
+  const internalId = detail.value?.id
+  if (typeof internalId !== "number") {
+    logComixFailure(workUrl, "invalid_response", "detalhe sem o id interno numérico")
+    throw new ComixUnavailableError("invalid_response", workUrl)
+  }
 
   const lookupPath = `/threads/lookup?page_identifier=manga${internalId}&page_url=${encodeURIComponent(`/title/${hid}`)}`
-  const lookup = await fetchComixThreadJson(lookupPath)
+  const lookup = await fetchComixThreadJsonOutcome(lookupPath)
+  if (lookup.kind === "unavailable") throw new ComixUnavailableError(lookup.reason, `${COMIX_BASE}${lookupPath}`)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const threadId = (lookup as any)?.result?.thread?.id
-  if (typeof threadId !== "number" || threadId <= 0) return []
+  const thread = lookup.kind === "ok" ? (lookup.value.result as any)?.thread : undefined
+  if (typeof thread?.id !== "number" || thread.id <= 0) {
+    // 🟡 PROVISÓRIO — compatibilidade, NÃO classificação. O lookup respondeu (envelope válido, ou
+    // 404) mas não há `result.thread` utilizável. NÃO se sabe se isso é "obra nunca comentada"
+    // (zero) ou outra coisa: a sonda de 2026-10-07 só achou obras COM thread (`commentCount` 2 e
+    // 1). Até a primeira ocorrência real, este ramo mantém o comportamento antigo (`[]`) e se
+    // ANUNCIA com uma marca própria — não um warning genérico — para que o formato apareça no log
+    // sem sonda dedicada. Ao ver `lookup_without_thread` em produção, classifique-o e apague isto.
+    console.warn(
+      `[comix] lookup_without_thread hid=${hid} status=${lookup.kind === "ok" ? 200 : lookup.status} ` +
+        `result=${lookup.kind === "ok" ? JSON.stringify(lookup.value.result)?.slice(0, 300) : "—"} ` +
+        "— caso ainda NÃO classificado; devolvendo [] por compatibilidade",
+    )
+    return { reviews: [], empty: "lookup_without_thread" }
+  }
+  // A própria resposta diz quantos comentários há — zero aqui é prova, não ausência de dado.
+  if (thread.commentCount === 0) return { reviews: [], empty: "no_comments" }
 
   const texts: string[] = []
   const CAP = 60 // topo + respostas aninhadas; o seletor a jusante corta por fonte
   let cursor: string | undefined
   // 2 páginas (~44 comentários de topo) + as respostas aninhadas de cada um.
   for (let page = 0; page < 2; page++) {
-    const path = `/threads/${threadId}/comments${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
-    const data = await fetchComixThreadJson(path)
+    const path = `/threads/${thread.id}/comments${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
+    const out = await fetchComixThreadJsonOutcome(path)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = (data as any)?.result
-    const items: unknown[] = Array.isArray(result?.items) ? result.items : []
+    const result = out.kind === "ok" ? (out.value.result as any) : undefined
+    if (!Array.isArray(result?.items)) {
+      if (page > 0) break // PARCIAL: fica com o que a 1ª página trouxe
+      if (out.kind === "unavailable") throw new ComixUnavailableError(out.reason, `${COMIX_BASE}${path}`)
+      // A thread que o lookup acabou de dar não respondeu como thread (404, ou envelope sem `items`).
+      logComixFailure(`${COMIX_BASE}${path}`, "invalid_response", out.kind === "not_found" ? `status=${out.status}` : "envelope sem result.items")
+      throw new ComixUnavailableError("invalid_response", `${COMIX_BASE}${path}`)
+    }
+    const items: unknown[] = result.items
     collectComixCommentTexts(items, texts, { maxDepth: 3, cap: CAP })
     cursor = typeof result?.cursor === "string" && result.cursor ? result.cursor : undefined
     if (!cursor || items.length === 0 || texts.length >= CAP) break
   }
-  return texts
+  return { reviews: texts, empty: texts.length > 0 ? null : "no_comments" }
+}
+
+/** Comentários de nível-obra da Comix. Rejeita com `ComixUnavailableError` quando a fonte falha. */
+export async function fetchComixReviews(hid: string): Promise<string[]> {
+  return (await collectComixReviews(hid)).reviews
 }
