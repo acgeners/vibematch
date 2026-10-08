@@ -177,6 +177,10 @@ async function main() {
       console.error(`✗ recalc falhou (sanitizado): ${out.error}`)
       console.error("  recalc_pending preservado=true; job failed resumível. Rode novamente.")
       process.exit(1)
+    case "blocked":
+      console.error(`✗ ${out.error}`)
+      console.error("  recalc_pending preservado=true; nenhum job criado.")
+      process.exit(1)
   }
 }
 

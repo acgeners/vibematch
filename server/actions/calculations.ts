@@ -60,6 +60,7 @@ import { SCORING_CRITERION_SLUGS } from "@/lib/calculations/scoring-features"
 import { readFantasyDrift, scoringCriteriaSignature } from "@/server/queries/fantasy-drift"
 import { SCORING_CONTRACT, conferirContratoDoCalculo, mensagemDeContratoQuebrado } from "@/lib/calculations/scoring-contract"
 import { exigirContratoDeScoring } from "@/server/queries/canonical-contract"
+import { assertRecalcCodeAllowed } from "@/server/recalc/code-guard"
 import type { DeclaredTagPref } from "@/server/queries/tag-preferences"
 import { loadArtLabels } from "@/server/queries/pilot-taste"
 import { computeArtForCatalog } from "@/lib/art/model"
@@ -496,6 +497,10 @@ export type RecalculateExecutionContext = "next-runtime" | "headless"
 
 export async function recalculateAll(ctx: RecalculateExecutionContext = "next-runtime") {
   const headless = ctx === "headless"
+  // 🔴 Código canônico, ANTES de tudo: fora do Fly, contra a nuvem, só código contido em origin/main
+  // regrava o catálogo (server/recalc/code-guard.ts). O runner já recusa antes do job; esta é a
+  // segunda linha, para qualquer caminho que chegue aqui.
+  assertRecalcCodeAllowed()
   const supabase = createAdminClient()
   // 🔴 Contrato canônico (migration 202), ANTES de ler o catálogo: se o banco impõe um scoring que
   // não é o deste código, nada é calculado nem gravado (e `recalc_pending` fica de pé). O trigger

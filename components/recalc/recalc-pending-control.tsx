@@ -73,6 +73,10 @@ export function RecalcPendingControl({
       } else if (res.status === "processing") {
         toast.info("Recálculo em andamento.")
         refresh()
+      } else if (res.status === "blocked") {
+        // Checkout local fora do código canônico contra a nuvem: a mensagem diz o que fazer.
+        // O botão fica — a pendência continua de pé.
+        toast.error(res.error, { duration: 12_000 })
       } else {
         // failed — mantém o botão para retry explícito.
         toast.error("O recálculo falhou. Tente novamente.")

@@ -29,6 +29,8 @@ const ENABLED = SMOKE && !!process.env.SUPABASE_SERVICE_ROLE_KEY && !!process.en
 const GEN = `2026-06-18T${Date.now() % 100000}` // geração única deste run (dedup_key exclusivo)
 const pendingMock = (): Promise<RecalcPendingSnapshot> => Promise.resolve({ pending: true, lastEditAt: GEN })
 const notPendingMock = (): Promise<RecalcPendingSnapshot> => Promise.resolve({ pending: false, lastEditAt: null })
+// O guard de código canônico tem teste próprio; este smoke exercita a fila durável, não ele.
+const livre = () => ({ allow: true as const, provenance: { runtime: "local", basis: "smoke" } })
 
 describe.skipIf(!ENABLED)("SMOKE — recalculate_scores × fila durável", () => {
   let sb: ReturnType<typeof createAdminClient>
@@ -57,7 +59,7 @@ describe.skipIf(!ENABLED)("SMOKE — recalculate_scores × fila durável", () =>
   })
 
   it("recalc_pending=false e sem force ⇒ fresh, nenhum job", async () => {
-    const out = await ensureRecalculateScores({ recalc: noopRecalc, readPending: notPendingMock, jobStore: store })
+    const out = await ensureRecalculateScores({ recalc: noopRecalc, codeGuard: livre, readPending: notPendingMock, jobStore: store })
     console.log(`[SMOKE-RC] fresh: status=${out.status} recalcCalls=${recalcCalls}`)
     expect(out.status).toBe("fresh")
     expect(recalcCalls).toBe(0)
@@ -65,7 +67,7 @@ describe.skipIf(!ENABLED)("SMOKE — recalculate_scores × fila durável", () =>
 
   it("pendente ⇒ job GLOBAL durável succeeded (work_id null, free)", async () => {
     __resetSingleFlight()
-    const out = await ensureRecalculateScores({ recalc: noopRecalc, readPending: pendingMock, jobStore: store })
+    const out = await ensureRecalculateScores({ recalc: noopRecalc, codeGuard: livre, readPending: pendingMock, jobStore: store })
     expect(out.status).toBe("succeeded")
     const { data } = await sb
       .from("work_processing_jobs")
@@ -90,7 +92,7 @@ describe.skipIf(!ENABLED)("SMOKE — recalculate_scores × fila durável", () =>
     process.env.NEXT_PHASE = "phase-production-build"
     try {
       const before = (await sb.from("work_processing_jobs").select("*", { count: "exact", head: true }).eq("action", "recalculate_scores").gte("created_at", startedAt)).count ?? 0
-      const out = await ensureRecalculateScores({ recalc: noopRecalc, readPending: pendingMock, jobStore: store })
+      const out = await ensureRecalculateScores({ recalc: noopRecalc, codeGuard: livre, readPending: pendingMock, jobStore: store })
       const after = (await sb.from("work_processing_jobs").select("*", { count: "exact", head: true }).eq("action", "recalculate_scores").gte("created_at", startedAt)).count ?? 0
       console.log(`[SMOKE-RC] build-guard: status=${out.status} jobs_antes=${before} jobs_depois=${after}`)
       expect(out.status).toBe("fresh")
@@ -104,7 +106,7 @@ describe.skipIf(!ENABLED)("SMOKE — recalculate_scores × fila durável", () =>
   it("duas concorrentes (mesma geração) ⇒ uma execução", async () => {
     __resetSingleFlight()
     recalcCalls = 0
-    const deps = { recalc: noopRecalc, readPending: pendingMock, jobStore: store }
+    const deps = { recalc: noopRecalc, codeGuard: livre, readPending: pendingMock, jobStore: store }
     const [a, b] = await Promise.all([ensureRecalculateScores(deps), ensureRecalculateScores(deps)])
     console.log(`[SMOKE-RC] concorrente: a=${a.status} b=${b.status} recalcCalls=${recalcCalls}`)
     expect(a.status).toBe("succeeded")

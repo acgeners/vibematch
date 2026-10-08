@@ -33,6 +33,11 @@ import { execFileSync } from "node:child_process"
  * (um piloto numa branch de experimento, por exemplo). Não é um liga/desliga: sem motivo não há
  * override, e com motivo a chamada segue marcada como não canônica, com aviso e com o motivo
  * gravado na proveniência.
+ *
+ * ── O recálculo ─────────────────────────────────────────────────────────────────────────────
+ * A mesma regra de canonicidade decide o recálculo da nuvem (`decideRecalcCloudRun`, aplicada em
+ * `server/recalc/code-guard.ts`), com override PRÓPRIO (`RECALC_CLOUD_NONCANONICAL_REASON`). Os
+ * dois overrides não se substituem: cada um só vale para a sua operação.
  */
 
 export type CodeRuntime = "fly" | "local"
@@ -65,9 +70,12 @@ export interface CodeProvenance {
   git_error?: string
 }
 
-export type PaidCallDecision =
+/** A decisão de uma operação sensível contra a nuvem (chamada paga ou recálculo). */
+export type CodeGateDecision =
   | { allow: true; basis: "fly" | "local_db" | "canonical" | "override"; provenance: CodeProvenance }
   | { allow: false; message: string; provenance: CodeProvenance }
+
+export type PaidCallDecision = CodeGateDecision
 
 export const OVERRIDE_ENV = "PAID_CLOUD_NONCANONICAL_REASON"
 
@@ -93,8 +101,60 @@ export function decidePaidCloudCall(input: {
     return { allow: true, basis: "local_db", provenance: vazio("local", target) }
   }
 
-  const git = input.git
-  const provenance: CodeProvenance = git?.ok
+  const provenance = provenanceFromGit(input.git, target)
+
+  if (provenance.canonical === true) return { allow: true, basis: "canonical", provenance }
+
+  if (input.override) {
+    return { allow: true, basis: "override", provenance: { ...provenance, override_reason: input.override } }
+  }
+  return { allow: false, message: mensagemDeBloqueio(provenance), provenance }
+}
+
+/**
+ * A MESMA regra de canonicidade, para o RECÁLCULO — que é outra autorização. Ele não é pago, mas
+ * regrava os scores do catálogo inteiro na nuvem e dispara sozinho (basta abrir uma página com
+ * pendência), então um checkout experimental o rodaria sem ninguém pedir. Precedente: 02–03/10/2026,
+ * recálculos de uma branch defasada regravaram a Nota Prevista do catálogo.
+ *
+ * 🔴 O `override` que chega aqui é o do RECÁLCULO (`RECALC_CLOUD_NONCANONICAL_REASON`, lido em
+ * `server/recalc/code-guard.ts`), nunca o das chamadas pagas: autorizar um experimento pago não
+ * autoriza regravar o catálogo, e vice-versa.
+ *
+ * Diferença deliberada para a decisão paga: fora do Fly, o git é registrado sempre que foi lido —
+ * também no banco local —, porque esta proveniência vai para o job e é ela que diz de onde veio um
+ * recálculo. A DECISÃO não muda: banco local continua liberado.
+ */
+export function decideRecalcCloudRun(input: {
+  onFly: boolean
+  localDb: boolean
+  git: GitProbe | null
+  override: string | null
+}): CodeGateDecision {
+  const target = input.localDb ? "local" : "cloud"
+  if (input.onFly) {
+    return { allow: true, basis: "fly", provenance: vazio("fly", target) }
+  }
+  if (input.localDb) {
+    return { allow: true, basis: "local_db", provenance: input.git ? provenanceFromGit(input.git, target) : vazio("local", target) }
+  }
+
+  const provenance = provenanceFromGit(input.git, target)
+  if (provenance.canonical === true) return { allow: true, basis: "canonical", provenance }
+
+  if (input.override) {
+    return { allow: true, basis: "override", provenance: { ...provenance, override_reason: input.override } }
+  }
+  return { allow: false, message: mensagemDeRecalcBloqueado(provenance), provenance }
+}
+
+function vazio(runtime: CodeRuntime, target: "cloud" | "local"): CodeProvenance {
+  return { runtime, target, sha: null, branch: null, dirty: null, in_origin_main: null, canonical: null }
+}
+
+/** Proveniência de um processo LOCAL a partir da sonda. Git indeterminado ⇒ `canonical: null` (fail closed). */
+function provenanceFromGit(git: GitProbe | null, target: "cloud" | "local"): CodeProvenance {
+  return git?.ok
     ? {
         runtime: "local",
         target,
@@ -105,32 +165,36 @@ export function decidePaidCloudCall(input: {
         canonical: git.dirtyTracked === false && git.inOriginMain === true,
       }
     : { ...vazio("local", target), git_error: git?.ok === false ? git.error : "git não consultado" }
-
-  if (provenance.canonical === true) return { allow: true, basis: "canonical", provenance }
-
-  if (input.override) {
-    return { allow: true, basis: "override", provenance: { ...provenance, override_reason: input.override } }
-  }
-  return { allow: false, message: mensagemDeBloqueio(provenance), provenance }
 }
 
-function vazio(runtime: CodeRuntime, target: "cloud" | "local"): CodeProvenance {
-  return { runtime, target, sha: null, branch: null, dirty: null, in_origin_main: null, canonical: null }
+function ondeEsta(p: CodeProvenance): string {
+  return `${p.branch ?? "(detached)"} @ ${p.sha ? p.sha.slice(0, 7) : "?"}`
+}
+
+function porqueNaoCanonico(p: CodeProvenance): string {
+  if (p.git_error) return `não deu para ler o estado do git (${p.git_error})`
+  if (p.in_origin_main === null) return "a ref local origin/main não existe"
+  if (p.dirty && p.in_origin_main === false) return "há arquivos rastreados modificados E o HEAD não está em origin/main"
+  if (p.dirty) return "há arquivos rastreados modificados"
+  return "o HEAD não está contido em origin/main (ref local — se acabou de mergear, rode `git fetch` e tente de novo)"
 }
 
 function mensagemDeBloqueio(p: CodeProvenance): string {
-  const onde = `${p.branch ?? "(detached)"} @ ${p.sha ? p.sha.slice(0, 7) : "?"}`
-  let porque: string
-  if (p.git_error) porque = `não deu para ler o estado do git (${p.git_error})`
-  else if (p.in_origin_main === null) porque = "a ref local origin/main não existe"
-  else if (p.dirty && p.in_origin_main === false) porque = "há arquivos rastreados modificados E o HEAD não está em origin/main"
-  else if (p.dirty) porque = "há arquivos rastreados modificados"
-  else porque = "o HEAD não está contido em origin/main (ref local — se acabou de mergear, rode `git fetch` e tente de novo)"
   return (
     `Chamada paga RECUSADA antes do provider: este processo local está apontado para o banco da NUVEM ` +
-    `e o código não é o canônico — ${porque}. Checkout: ${onde}. ` +
+    `e o código não é o canônico — ${porqueNaoCanonico(p)}. Checkout: ${ondeEsta(p)}. ` +
     `Rode a partir de um checkout limpo contido em origin/main, aponte o banco para o local, ` +
     `ou, se o experimento for deliberado, defina ${OVERRIDE_ENV}="<motivo>".`
+  )
+}
+
+/** Mensagem de UI: diz o que fazer e NÃO oferece o override — ele é para experimento deliberado. */
+function mensagemDeRecalcBloqueado(p: CodeProvenance): string {
+  return (
+    `Recálculo da nuvem BLOQUEADO: este checkout local não está no código canônico — ` +
+    `${porqueNaoCanonico(p)}. Checkout: ${ondeEsta(p)}. Nada foi calculado nem gravado, e o ` +
+    `recálculo continua pendente. Rode-o a partir de um checkout limpo contido em origin/main ` +
+    `(código já mergeado).`
   )
 }
 

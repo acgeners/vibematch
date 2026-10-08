@@ -11,6 +11,8 @@ import { __resetSingleFlight } from "@/lib/ai-cache/single-flight"
 
 afterEach(() => __resetSingleFlight())
 
+// O guard de código canônico tem teste próprio (recalc-guarda-codigo-canonico); aqui ele libera.
+const livre = () => ({ allow: true as const, provenance: { runtime: "local", basis: "canonical" } })
 const pending = (lastEditAt: string | null = "2026-06-18T00:00:00Z"): RecalcPendingSnapshot => ({ pending: true, lastEditAt })
 const notPending = (): Promise<RecalcPendingSnapshot> => Promise.resolve({ pending: false, lastEditAt: null })
 
@@ -33,7 +35,7 @@ describe("ensureRecalculateScores", () => {
   it("1) recalc_pending=false e sem force ⇒ fresh (sem job, sem cálculo)", async () => {
     const st = { calls: 0 }
     const js = new InMemoryJobStore()
-    const out = await ensureRecalculateScores({ recalc: recalcFn(st), readPending: notPending, jobStore: js })
+    const out = await ensureRecalculateScores({ recalc: recalcFn(st), codeGuard: livre, readPending: notPending, jobStore: js })
     expect(out.status).toBe("fresh")
     expect(st.calls).toBe(0)
     expect(js.records.length).toBe(0)
@@ -42,7 +44,7 @@ describe("ensureRecalculateScores", () => {
   it("2) recalc_pending=true ⇒ job global free + executa + succeeded", async () => {
     const st = { calls: 0 }
     const js = new InMemoryJobStore()
-    const out = await ensureRecalculateScores({ recalc: recalcFn(st, { count: 7 }), readPending: () => Promise.resolve(pending()), jobStore: js })
+    const out = await ensureRecalculateScores({ recalc: recalcFn(st, { count: 7 }), codeGuard: livre, readPending: () => Promise.resolve(pending()), jobStore: js })
     expect(out.status).toBe("succeeded")
     if (out.status === "succeeded") expect(out.recalculated).toBe(7)
     expect(st.calls).toBe(1)
@@ -50,12 +52,13 @@ describe("ensureRecalculateScores", () => {
     expect(job.workId).toBeNull() // GLOBAL
     expect(job.costEstimateUsd).toBe(0) // FREE
     expect(job.costActualUsd).toBe(0)
-    expect(Object.keys(job.payload ?? {}).sort()).toEqual(["forced", "generation"])
+    expect(Object.keys(job.payload ?? {}).sort()).toEqual(["code", "forced", "generation"])
+    expect(job.payload?.code).toEqual({ runtime: "local", basis: "canonical" })
   })
 
   it("3) force + sem pendência ⇒ executa (create / Recalcular agora)", async () => {
     const st = { calls: 0 }
-    const out = await ensureRecalculateScores({ force: true, recalc: recalcFn(st), readPending: notPending, jobStore: new InMemoryJobStore() })
+    const out = await ensureRecalculateScores({ force: true, recalc: recalcFn(st), codeGuard: livre, readPending: notPending, jobStore: new InMemoryJobStore() })
     expect(out.status).toBe("succeeded")
     expect(st.calls).toBe(1)
   })
@@ -67,7 +70,7 @@ describe("ensureRecalculateScores", () => {
   it("4) duas chamadas concorrentes (mesma geração) ⇒ uma execução, um job", async () => {
     const st = { calls: 0 }
     const js = new InMemoryJobStore()
-    const deps = { recalc: recalcFn(st), readPending: () => Promise.resolve(pending()), jobStore: js }
+    const deps = { recalc: recalcFn(st), codeGuard: livre, readPending: () => Promise.resolve(pending()), jobStore: js }
     const [a, b] = await Promise.all([ensureRecalculateScores(deps), ensureRecalculateScores(deps)])
     expect(st.calls).toBe(1)
     expect(a.status).toBe("succeeded")
@@ -78,7 +81,7 @@ describe("ensureRecalculateScores", () => {
   it("5) falha ⇒ failed, erro sanitizado", async () => {
     const st = { calls: 0 }
     const js = new InMemoryJobStore()
-    const out = await ensureRecalculateScores({ recalc: recalcFn(st, { fail: "boom sk-supersecrettoken12345" }), readPending: () => Promise.resolve(pending()), jobStore: js })
+    const out = await ensureRecalculateScores({ recalc: recalcFn(st, { fail: "boom sk-supersecrettoken12345" }), codeGuard: livre, readPending: () => Promise.resolve(pending()), jobStore: js })
     expect(out.status).toBe("failed")
     if (out.status === "failed") expect(out.error).toContain("[REDACTED]")
     expect(js.records[0].status).toBe("failed")
@@ -91,7 +94,7 @@ describe("ensureRecalculateScores", () => {
       if (fail) throw new Error("transient")
       return { recalculated: 3 }
     }
-    const deps = { recalc, readPending: () => Promise.resolve(pending()), jobStore: js }
+    const deps = { recalc, codeGuard: livre, readPending: () => Promise.resolve(pending()), jobStore: js }
     const first = await ensureRecalculateScores(deps)
     expect(first.status).toBe("failed")
     __resetSingleFlight()
@@ -105,16 +108,16 @@ describe("ensureRecalculateScores", () => {
   it("7) nova geração (recalc_last_edit_at diferente) ⇒ novo job permitido", async () => {
     const st = { calls: 0 }
     const js = new InMemoryJobStore()
-    await ensureRecalculateScores({ recalc: recalcFn(st), readPending: () => Promise.resolve(pending("T1")), jobStore: js })
+    await ensureRecalculateScores({ recalc: recalcFn(st), codeGuard: livre, readPending: () => Promise.resolve(pending("T1")), jobStore: js })
     __resetSingleFlight()
-    await ensureRecalculateScores({ recalc: recalcFn(st), readPending: () => Promise.resolve(pending("T2")), jobStore: js })
+    await ensureRecalculateScores({ recalc: recalcFn(st), codeGuard: livre, readPending: () => Promise.resolve(pending("T2")), jobStore: js })
     expect(st.calls).toBe(2)
     expect(js.records.length).toBe(2)
   })
 
   it("9) regressão: a contagem do recalc é repassada SEM modificação + result completo", async () => {
     const fullResult = { recalculated: 123, calibration: { foo: 1 } }
-    const out = await ensureRecalculateScores({ recalc: async () => fullResult, readPending: () => Promise.resolve(pending()), jobStore: new InMemoryJobStore() })
+    const out = await ensureRecalculateScores({ recalc: async () => fullResult, codeGuard: livre, readPending: () => Promise.resolve(pending()), jobStore: new InMemoryJobStore() })
     expect(out.status === "succeeded" && out.recalculated).toBe(123)
     if (out.status === "succeeded") expect(out.result).toBe(fullResult) // result completo repassado
   })
@@ -142,7 +145,7 @@ describe("guard de build (next build)", () => {
     let readCalls = 0
     const out = await ensureRecalculateScores({
       recalc: recalcFn(st),
-      readPending: async () => {
+      codeGuard: livre, readPending: async () => {
         readCalls++
         return pending()
       },
@@ -157,7 +160,7 @@ describe("guard de build (next build)", () => {
   it("9-runtime) sem NEXT_PHASE + pendente ⇒ executa normalmente", async () => {
     delete process.env.NEXT_PHASE
     const st = { calls: 0 }
-    const out = await ensureRecalculateScores({ recalc: recalcFn(st), readPending: () => Promise.resolve(pending()), jobStore: new InMemoryJobStore() })
+    const out = await ensureRecalculateScores({ recalc: recalcFn(st), codeGuard: livre, readPending: () => Promise.resolve(pending()), jobStore: new InMemoryJobStore() })
     expect(out.status).toBe("succeeded")
     expect(st.calls).toBe(1)
   })
@@ -166,7 +169,7 @@ describe("guard de build (next build)", () => {
     delete process.env.NEXT_PHASE
     const st = { calls: 0 }
     const js = new InMemoryJobStore()
-    const out = await ensureRecalculateScores({ recalc: recalcFn(st), readPending: notPending, jobStore: js })
+    const out = await ensureRecalculateScores({ recalc: recalcFn(st), codeGuard: livre, readPending: notPending, jobStore: js })
     expect(out.status).toBe("fresh")
     expect(js.records.length).toBe(0)
   })
