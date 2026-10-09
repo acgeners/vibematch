@@ -27,6 +27,7 @@ import path from "node:path"
 import zlib from "node:zlib"
 import { createRequire } from "node:module"
 import { podar } from "./lib/backups-retencao.mjs"
+import { ordemDePaginacao, paginasOrdenadas } from "./lib/backup-ordem.mjs"
 
 const require = createRequire(import.meta.url)
 const { createClient } = require("@supabase/supabase-js")
@@ -76,12 +77,17 @@ async function listTables() {
   }
   const spec = await r.json().catch(() => ({}))
   const defs = spec.definitions ?? spec.components?.schemas ?? {}
-  return Object.keys(defs).filter((t) => !VIEWS.has(t)).sort()
+  // As definições voltam junto: a chave primária de cada tabela, que ordena a paginação, sai daqui.
+  return { tables: Object.keys(defs).filter((t) => !VIEWS.has(t)).sort(), defs }
 }
 
-async function dumpTable(table, outDir) {
+async function dumpTable(table, definicao, outDir) {
   const { count, error: cErr } = await sb.from(table).select("*", { count: "exact", head: true })
   if (cErr) throw new Error(`${table}: contagem falhou — ${cErr.message}`)
+
+  // 🔴 Ordem TOTAL antes do `.range()` — sem ela, páginas repetem e perdem linhas e a contagem
+  // abaixo não percebe. A regra e o porquê moram em `lib/backup-ordem.mjs`.
+  const ordem = ordemDePaginacao(table, definicao, count, PAGE)
 
   const file = path.join(outDir, `${table}.ndjson.gz`)
   const gzip = zlib.createGzip()
@@ -89,13 +95,9 @@ async function dumpTable(table, outDir) {
   gzip.pipe(out)
 
   let written = 0
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await sb.from(table).select("*").range(from, from + PAGE - 1)
-    if (error) throw new Error(`${table}: página ${from} falhou — ${error.message}`)
-    if (!data?.length) break
+  for await (const data of paginasOrdenadas(() => sb.from(table).select("*"), ordem, PAGE, table)) {
     for (const row of data) gzip.write(JSON.stringify(row) + "\n")
     written += data.length
-    if (data.length < PAGE) break
   }
 
   await new Promise((res, rej) => {
@@ -118,7 +120,7 @@ const outDir = path.join(base, stamp)
 // 🔴 O mkdir vem DEPOIS da descoberta, de propósito. Criado antes, todo backup falho deixava
 // um diretório vazio em `.backups/` — indistinguível, na listagem, de um backup que rodou e
 // não achou nada. Foram 3 desses que mascararam a falha entre 23/08 e 06/09.
-const tables = await listTables()
+const { tables, defs } = await listTables()
 
 // 🔴 FAIL-CLOSED. Esta linha existe porque a ausência dela custou 3 semanas de backup vazio:
 // `listTables()` lê o OpenAPI do PostgREST; com o projeto pausado/restrito o corpo não traz
@@ -139,7 +141,7 @@ const manifest = []
 let totalRows = 0
 let totalBytes = 0
 for (const t of tables) {
-  const r = await dumpTable(t, outDir)
+  const r = await dumpTable(t, defs[t], outDir)
   manifest.push(r)
   totalRows += r.rows
   totalBytes += r.bytes
