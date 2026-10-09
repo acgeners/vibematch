@@ -1,5 +1,8 @@
 # STATUS UNIFICADO — SatorIA / VibeMatch
 
+> ⚠️ **SUPERSEDED em 2026-10-09** — retrato de 07/2026. Reconciliado contra `origin/main @ a8096c2`:
+> quase tudo daqui foi encerrado ou substituído. O estado vivo está em `BACKLOG-ATUAL.md`.
+
 > **Data:** 2026-07-11 · **Atualizado:** 2026-07-13 (ver **§0-C** — RLS + backup + próximo passo · **§0-B** — P0 de acesso e custo · **§0-A** — sessão/chrome) · 2026-07-12 (**§0** — fontes externas; tema **G** reescrito)
 > **Escopo:** consolidação de TODAS as pendências dos registros da última semana (2026-07-01 → 07-10).
 > **Fontes:** PLANO-MULTIUSER, PLANO-ARQUITETURA-NOTAS, AUDIT_REPORT-2026-07-08 (canônico), PLANO-MESTRE (§24m–o + banner 07-09), STATUS-2026-06-28, PLANO-BUSSOLA-3-FORCAS, PLANO-INTERESSE-PREFS-CONFIANCA, PLANO-LABELS, PLANO-AI-EVALUATION-REDESIGN, STALENESS-MATERIALIDADE, DEPLOY-FLY, COMIX-ARCHITECTURE, DESIGN-MANGAGO-RESOLVE.

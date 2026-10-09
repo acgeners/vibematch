@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**O que está aberto mora em `BACKLOG-ATUAL.md`** (raiz) — inclusive o que NÃO deve ser reaberto. Os
+avisos "PENDENTE"/"ABERTO" espalhados abaixo são da época em que foram escritos; quem decide o estado
+de hoje é aquele arquivo.
+
 ## Commands
 
 ```bash

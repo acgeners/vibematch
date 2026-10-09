@@ -1,5 +1,9 @@
 # Plano Integrado de Saneamento e Evolução do SatorIA
 
+> ⚠️ **SUPERSEDED como lista de pendências em 2026-10-09** — reconciliado contra `origin/main @ a8096c2`.
+> P0 quase todo feito (A1a, A1b, A2/E2, D3, B5.4; A3 em parte); a Onda B foi atropelada pelo caminho
+> v32. O que segue aberto daqui está em `BACKLOG-ATUAL.md`. Este documento fica como história.
+
 **Data:** 22/08/2026  
 **Escopo:** confiabilidade da IA, consistência arquitetural, eficiência, observabilidade, ranking/performance, navegação/renderização e UI/UX.
 
