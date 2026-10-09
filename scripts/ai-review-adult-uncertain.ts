@@ -15,43 +15,95 @@
  *
  * Uso:
  * 🔴 ALVO: NUVEM — este script GRAVA (catálogo e/ou o log de custo em `ai_api_calls`). Rodá-lo contra o local, que é réplica descartável, joga o trabalho fora no próximo `db:pull`.
- *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/ai-review-adult-uncertain.ts [--dry-run] [--limit N]
- *   --dry-run : lista a fila e NÃO chama a IA nem grava (read-only)
- *   --limit N : processa no máximo N obras
+ *   npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/ai-review-adult-uncertain.ts [--execute] [--limit N] [--reset]
+ *   (sem flag) : PRÉVIA — mostra a fila e o que seria feito; NÃO chama a IA nem grava
+ *   --dry-run  : o mesmo que sem flag (mantido por compatibilidade)
+ *   --execute  : chama a IA (PAGO) e grava em `works` — a ÚNICA forma de gastar ou escrever
+ *   --limit N  : processa no máximo N obras (inteiro ≥ 1)
+ *   --reset    : com --execute, limpa os veredictos ai_review* antes, para reprocessar
+ *
+ * 🔴 Até 2026-10-09 o padrão era PAGAR: sem `--dry-run` o script chamava o Sonnet para a fila
+ * inteira (228 obras na medição) e gravava, por SDK direto — fora da guarda de código canônico,
+ * sem custo nem proveniência em `ai_api_calls`. Hoje a chamada passa por `createLoggedMessage`,
+ * que herda os três (lib/ai/anthropic-client.ts), e só `--execute` gasta ou escreve.
  */
-import Anthropic from "@anthropic-ai/sdk"
+import type Anthropic from "@anthropic-ai/sdk"
 import { createClient } from "@supabase/supabase-js"
+import type { SupabaseClient } from "@supabase/supabase-js"
+import { createLoggedMessage, getAnthropicClient, PaidCallBlockedError } from "@/lib/ai/anthropic-client"
 import { SONNET_MODEL, modelRejectsSampling } from "@/lib/ai/models"
+import { isLocalSupabaseUrl } from "@/lib/db-target"
 
 const CI_GROUP = "90edf1bb-a80e-459e-b421-ebca4e493128" // content_indicator
 
-const DRY = process.argv.includes("--dry-run")
-const RESET = process.argv.includes("--reset") // limpa veredictos ai_review* antes (p/ reprocessar)
-const limitArg = process.argv.indexOf("--limit")
-const LIMIT = limitArg >= 0 ? Number(process.argv[limitArg + 1]) : Infinity
+/** Operação em `ai_api_calls` — estável: é por ela que o custo deste script é somado. */
+export const OPERATION = "adult_review"
 
-const sb = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-)
+export interface Opcoes {
+  /** Só com `--execute` há chamada paga ou escrita. */
+  executar: boolean
+  reset: boolean
+  limite: number
+}
 
-async function all<T = Record<string, unknown>>(
-  table: string,
-  select: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  mod?: (q: any) => any,
-): Promise<T[]> {
-  const rows: T[] = []
-  for (let from = 0; ; from += 1000) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let q: any = sb.from(table).select(select).range(from, from + 999)
-    if (mod) q = mod(q)
-    const { data, error } = await q
-    if (error) throw error
-    rows.push(...((data ?? []) as T[]))
-    if (!data || data.length < 1000) break
+/**
+ * Lê as flags. Falha ALTO no que antes virava gasto calado: `--execute` com `--dry-run` (qual
+ * dos dois vale?) e `--limit` sem número válido (era `Number(undefined)` = NaN ⇒ fila INTEIRA).
+ */
+export function lerOpcoes(argv: readonly string[]): Opcoes {
+  const executar = argv.includes("--execute")
+  if (executar && argv.includes("--dry-run")) {
+    throw new Error("--execute e --dry-run juntos: escolha um (sem flag já é prévia, sem gastar).")
   }
-  return rows
+  let limite = Infinity
+  const i = argv.indexOf("--limit")
+  if (i >= 0) {
+    limite = Number(argv[i + 1])
+    if (!Number.isInteger(limite) || limite < 1) {
+      throw new Error(`--limit precisa de um inteiro ≥ 1 (recebi "${argv[i + 1] ?? ""}").`)
+    }
+  }
+  return { executar, reset: argv.includes("--reset"), limite }
+}
+
+export interface Resumo {
+  fila: number
+  processadas: number
+  escritas: number
+  executou: boolean
+}
+
+/**
+ * Lê a tabela inteira em páginas de 1000, com ORDEM TOTAL antes do `.range()`.
+ *
+ * 🔴 `.range()` sem ordem não é paginação: entre duas páginas o Postgres pode devolver as linhas
+ * em outra ordem, repetindo umas e pulando outras (medido em 2026-09-21: 2.050 lidas → 1.550
+ * únicas). Aqui isso é PAGO: obra repetida na fila vira chamada duplicada; obra pulada fica fora
+ * da revisão. A chave é obrigatória por chamada (PK da tabela) — default seria o que se esquece.
+ */
+function leitor(sb: SupabaseClient) {
+  return async function all<T = Record<string, unknown>>(
+    table: string,
+    select: string,
+    ordem: readonly string[],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mod?: (q: any) => any,
+  ): Promise<T[]> {
+    if (ordem.length === 0) throw new Error(`${table}: paginação sem ordem total`)
+    const rows: T[] = []
+    for (let from = 0; ; from += 1000) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let q: any = sb.from(table).select(select)
+      if (mod) q = mod(q)
+      for (const coluna of ordem) q = q.order(coluna, { ascending: true })
+      q = q.range(from, from + 999)
+      const { data, error } = await q
+      if (error) throw error
+      rows.push(...((data ?? []) as T[]))
+      if (!data || data.length < 1000) break
+    }
+    return rows
+  }
 }
 
 const VERDICT_TOOL: Anthropic.Tool = {
@@ -95,17 +147,21 @@ interface Verdict {
   reason: string
 }
 
-async function main() {
+export async function revisarFila(argv: readonly string[], sb: SupabaseClient): Promise<Resumo> {
+  const opcoes = lerOpcoes(argv)
+  const all = leitor(sb)
+
   // --- monta a fila (sinal fraco, não resolvido) ---
   const ciTags = await all<{ id: string; name: string; adult_indicator: boolean }>(
     "tags",
     "id,name,adult_indicator",
+    ["id"],
     (q) => q.eq("tag_group_id", CI_GROUP),
   )
   const adultTagIds = new Set(ciTags.filter((t) => t.adult_indicator).map((t) => t.id))
   const nameById = new Map(ciTags.map((t) => [t.id, t.name]))
 
-  const wt = await all<{ work_id: string; tag_id: string }>("work_tags", "work_id,tag_id")
+  const wt = await all<{ work_id: string; tag_id: string }>("work_tags", "work_id,tag_id", ["work_id", "tag_id"])
   const adultTagsByWork = new Map<string, string[]>()
   for (const r of wt) {
     if (!adultTagIds.has(r.tag_id)) continue
@@ -116,13 +172,17 @@ async function main() {
   const cs = await all<{ work_id: string; score: number }>(
     "category_scores",
     "work_id,score",
+    ["id"],
     (q) => q.eq("criterion_slug", "adult_content"),
   )
   const scoreByWork = new Map(cs.map((r) => [r.work_id, r.score]))
 
   // --reset: desfaz veredictos anteriores da IA (adult_auto/reason) p/ reprocessar
-  // com insumo melhor. Só toca linhas 'ai_review*' e sem override humano.
-  if (RESET && !DRY) {
+  // com insumo melhor. Só toca linhas 'ai_review*' e sem override humano. É ESCRITA: só com --execute.
+  if (opcoes.reset && !opcoes.executar) {
+    console.log(`[--reset] ignorado: sem --execute nada é gravado (a prévia abaixo NÃO inclui as obras que ele reabriria).`)
+  }
+  if (opcoes.reset && opcoes.executar) {
     const { error, count } = await sb
       .from("works")
       .update({ adult_auto: false, adult_reason: null }, { count: "exact" })
@@ -138,7 +198,7 @@ async function main() {
     is_adult: boolean
     adult_override: boolean | null
     adult_reason: string | null
-  }>("works", "id,title,is_adult,adult_override,adult_reason")
+  }>("works", "id,title,is_adult,adult_override,adult_reason", ["id"])
 
   const queue = works.filter((w) => {
     if (w.is_adult) return false // já é 18+ (auto forte)
@@ -149,16 +209,28 @@ async function main() {
     return hasWeakTag || hasScore // sinal fraco presente
   })
 
+  const toProcess = queue.slice(0, Number.isFinite(opcoes.limite) ? opcoes.limite : queue.length)
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""
+  const alvo = `${isLocalSupabaseUrl(url) ? "LOCAL" : "NUVEM"} (${url.replace(/^https?:\/\//, "") || "?"})`
+
   console.log(`Fila de auditoria (sinal fraco não resolvido): ${queue.length} obras`)
-  if (DRY) {
-    for (const w of queue.slice(0, Number.isFinite(LIMIT) ? LIMIT : queue.length)) {
+  if (!opcoes.executar) {
+    for (const w of toProcess) {
       const tags = adultTagsByWork.get(w.id) ?? []
       const sc = scoreByWork.get(w.id)
       console.log(`  · ${w.title}  {tags: ${tags.join(", ") || "—"}; nota: ${sc ?? "—"}}`)
     }
-    console.log(`\n[dry-run] nada foi chamado nem gravado.`)
-    return
+    console.log(
+      `\n[prévia] nada foi chamado nem gravado. Com --execute: ${toProcess.length} chamadas PAGAS ` +
+        `(${SONNET_MODEL}) e até ${toProcess.length} escritas em works, alvo ${alvo}.`,
+    )
+    return { fila: queue.length, processadas: 0, escritas: 0, executou: false }
   }
+
+  console.log(
+    `\n[--execute] ${toProcess.length} obras · ${toProcess.length} chamadas PAGAS (${SONNET_MODEL}) · ` +
+      `grava works.adult_auto/adult_reason · alvo ${alvo}`,
+  )
 
   // sinopses primárias só das obras da fila
   const ids = queue.map((w) => w.id)
@@ -166,6 +238,7 @@ async function main() {
     ? await all<{ work_id: string; text: string; is_primary: boolean }>(
         "work_synopses",
         "work_id,text,is_primary",
+        ["id"],
         (q) => q.in("work_id", ids),
       )
     : []
@@ -179,6 +252,7 @@ async function main() {
     ? await all<{ work_id: string; text: string; source: string; text_length: number }>(
         "work_reviews",
         "work_id,text,source,text_length",
+        ["id"],
         (q) => q.in("work_id", ids),
       )
     : []
@@ -189,14 +263,14 @@ async function main() {
     revByWork.set(r.work_id, arr)
   }
 
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 6 })
+  const client = getAnthropicClient()
   let nAdult = 0
   let nClean = 0
   let nUncertain = 0
   let inTok = 0
   let outTok = 0
+  let escritas = 0
 
-  const toProcess = queue.slice(0, Number.isFinite(LIMIT) ? LIMIT : queue.length)
   for (let i = 0; i < toProcess.length; i++) {
     const w = toProcess[i]
     const tags = adultTagsByWork.get(w.id) ?? []
@@ -232,13 +306,22 @@ async function main() {
       if (modelRejectsSampling(SONNET_MODEL)) params.thinking = { type: "disabled" }
       else params.temperature = 0
 
-      const msg = await client.messages.create(params)
-      inTok += msg.usage.input_tokens
-      outTok += msg.usage.output_tokens
+      // Pelo wrapper central: guarda de código canônico ANTES do provider, custo e proveniência
+      // em `ai_api_calls`. Nada disso é reimplementado aqui.
+      const { message: msg, usage } = await createLoggedMessage(client, params, {
+        operation: OPERATION,
+        workloadType: "admin",
+        workId: w.id,
+      })
+      inTok += usage.inputTokens
+      outTok += usage.outputTokens
       const tool = msg.content.find((b) => b.type === "tool_use") as Anthropic.ToolUseBlock | undefined
       if (!tool) throw new Error("sem tool_use")
       verdict = tool.input as Verdict
     } catch (err) {
+      // Bloqueio da guarda vale para a fila INTEIRA (é o checkout, não a obra): aborta antes de
+      // qualquer escrita, em vez de "pular" as 228 uma a uma.
+      if (err instanceof PaidCallBlockedError) throw err
       console.warn(`  ⚠️ ${w.title}: falhou (${err instanceof Error ? err.message : err}) — pulando`)
       continue
     }
@@ -265,6 +348,7 @@ async function main() {
       console.warn(`  ⚠️ ${w.title}: update falhou (${error.message})`)
       continue
     }
+    escritas++
     const mark =
       patch.adult_reason === "ai_review" ? "🔞 18+" : patch.adult_reason === "ai_review_clean" ? "limpo" : "incerto"
     console.log(
@@ -272,16 +356,19 @@ async function main() {
     )
   }
 
-  // custo estimado (Sonnet-5 promo $2/$10 por MTok; ver lib/ai/models.ts)
-  const costUsd = (inTok / 1e6) * 2 + (outTok / 1e6) * 10
   console.log(
     `\n=== resumo ===\n18+: ${nAdult} · limpo: ${nClean} · incerto: ${nUncertain}` +
-      `\ntokens in/out: ${inTok}/${outTok} · custo estimado: ~US$${costUsd.toFixed(3)}` +
-      `\n(NÃO logado em ai_api_calls — script direto; is_adult recalcula sozinho pelo generated column)`,
+      `\ntokens in/out: ${inTok}/${outTok} · custo registrado em ai_api_calls (operation = ${OPERATION})` +
+      `\n(is_adult recalcula sozinho pelo generated column)`,
   )
+  return { fila: queue.length, processadas: toProcess.length, escritas, executou: true }
 }
 
-main().catch((e) => {
-  console.error(e)
-  process.exit(1)
-})
+// Só roda quando chamado direto — importar (o teste) não toca banco nem provider.
+if (process.argv[1]?.endsWith("ai-review-adult-uncertain.ts")) {
+  const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+  revisarFila(process.argv.slice(2), sb).catch((e) => {
+    console.error(e instanceof Error ? e.message : e)
+    process.exit(1)
+  })
+}
