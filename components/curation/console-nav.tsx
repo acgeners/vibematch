@@ -24,7 +24,7 @@ import {
 import type { LucideIcon } from "lucide-react"
 import { ACCENT_STYLES } from "@/components/console/console-registry"
 import { Button } from "@/components/ui/button"
-import { decisionCountsByHref } from "@/lib/curation/decision-queues"
+import { decisionCountsByHref, decisionFocusByHref } from "@/lib/curation/decision-queues"
 import type { SettingsAccent } from "@/lib/settings-accent"
 import { useChromeBadges } from "@/components/layout/chrome-badges"
 import { cn } from "@/lib/utils"
@@ -168,6 +168,11 @@ export function ConsoleNav({ settingsGroups, defaultSettingsGroup }: ConsoleNavP
     ...decisionCountsByHref({ curadoria, requests }),
     "/curation/settings": settings,
   }
+  // Com pendência, o item diz O QUE o número conta e o clique abre a lista recortada
+  // nele. 🔴 Sem isso o "1" ficava ao lado de "fila de atributos" e levava à aba no
+  // filtro padrão (~490 obras de reavaliação) — o número parecia errado. Destino e
+  // texto saem de `DECISION_QUEUES`, junto com a contagem.
+  const focus = decisionFocusByHref({ curadoria, requests })
 
   return (
     <aside
@@ -205,7 +210,7 @@ export function ConsoleNav({ settingsGroups, defaultSettingsGroup }: ConsoleNavP
                   />
                 ) : (
                   <Link
-                    href={entry.href}
+                    href={focus[entry.href]?.href ?? entry.href}
                     aria-current={isEntryActive(entry.href, pathname) ? "page" : undefined}
                     className={rowClass(entry.accent, isEntryActive(entry.href, pathname))}
                   >
@@ -213,6 +218,7 @@ export function ConsoleNav({ settingsGroups, defaultSettingsGroup }: ConsoleNavP
                       entry={entry}
                       active={isEntryActive(entry.href, pathname)}
                       count={counts[entry.href] ?? 0}
+                      subtitle={focus[entry.href]?.hint}
                     />
                   </Link>
                 )}

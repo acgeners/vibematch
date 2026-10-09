@@ -5036,6 +5036,14 @@ acusar. Hoje `matchedCount` viaja junto e a aba imprime quantas não couberam.
 função do badge da barra superior —, senão as 556 o deixariam aceso para sempre. Número da aba =
 lista exibida; ponto = decisão esperando. São perguntas diferentes.
 
+🔴 **Por isso o número tem que se EXPLICAR — e o clique tem que abrir o recorte dele.** Mudo, o "1"
+ao lado de "fila de atributos" levava à aba no padrão (492 obras) e foi reportado como errado. Hoje
+`DECISION_QUEUES` carrega `unit` ("1 decisão esperando") e `focusHref` (a lista filtrada no que o
+número conta), e o recorte deriva de `ATTR_DECISION_FILTERS` (`lib/ai-evaluation/attr-eval-filters.ts`),
+o mesmo que a query do badge usa. ⚠️ O default da aba mora no mesmo arquivo: o painel de filtros
+tinha uma cópia defasada que contava o padrão como "Filtros 3" e APAGAVA esse recorte da URL ao
+aplicar. Guardado por `tests/unit/ui/badge-da-curadoria-se-explica.test.tsx` (5 sondas).
+
 🔴 **`wideActions` do `WorkQueueCard` era estreito demais, e rótulo que não cabe QUEBRA EM DUAS
 LINHAS — não alarga o trilho.** Medido no browser (500 cards, card de 594px):
 

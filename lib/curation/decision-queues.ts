@@ -1,4 +1,5 @@
 import type { SettingsAccent } from "@/lib/settings-accent"
+import { ATTR_DECISION_FILTERS } from "@/lib/ai-evaluation/attr-eval-filters"
 
 /**
  * As filas que compõem o badge do gatilho de Curadoria — numa lista só.
@@ -37,7 +38,20 @@ export type DecisionQueueKey = "curadoria" | "requests"
 export interface DecisionQueue {
   /** Chave da contagem — casa com os campos de `SidebarBadgeCounts`. */
   key: DecisionQueueKey
+  /** A página da fila — é por ela que a sidebar acende o item ativo. */
   href: string
+  /**
+   * Onde o NÚMERO se explica: a lista recortada exatamente no que ele conta. É o destino
+   * do clique quando há pendência.
+   *
+   * 🔴 Existe porque `href` abre a aba no filtro PADRÃO, que é outra pergunta: em
+   * `/curation/works` o padrão inclui a reavaliação por reviews novas (~490 obras), e
+   * o badge conta só decisão esperando (1, em 2026-10-09). Clicar num "1" e cair numa
+   * lista de 492 faz o número parecer errado — foi assim que ele foi reportado.
+   */
+  focusHref: string
+  /** O que o número conta, em pt-BR — "1 decisão esperando", "3 pedidos em aberto". */
+  unit: { one: string; other: string }
   /** Título da linha na Visão geral. */
   title: string
   description: string
@@ -54,6 +68,11 @@ export const DECISION_QUEUES: readonly DecisionQueue[] = [
   {
     key: "curadoria",
     href: "/curation/works",
+    // Deriva do mesmo recorte que a query do badge usa — ver `ATTR_DECISION_FILTERS`.
+    focusHref: `/curation/works?filter=${ATTR_DECISION_FILTERS.join(",")}`,
+    // "decisão", e não "revisão": o recorte inclui obra NUNCA avaliada, que pede uma
+    // avaliação (paga), não uma revisão.
+    unit: { one: "decisão esperando", other: "decisões esperando" },
     title: "Avaliar atributos",
     description: "obras sem os 9 critérios de IA, ou com avaliação aguardando revisão",
     accent: "violet",
@@ -61,11 +80,19 @@ export const DECISION_QUEUES: readonly DecisionQueue[] = [
   {
     key: "requests",
     href: "/curation/requests",
+    // A página já abre nos pedidos em aberto, que é o que o número conta.
+    focusHref: "/curation/requests",
+    unit: { one: "pedido em aberto", other: "pedidos em aberto" },
     title: "Pedidos",
     description: "atualização, revisão ou cadastro que um leitor pediu e ninguém resolveu",
     accent: "amber",
   },
 ] as const
+
+/** O número com a unidade: "1 decisão esperando". */
+export function decisionHint(queue: DecisionQueue, count: number): string {
+  return `${count} ${count === 1 ? queue.unit.one : queue.unit.other}`
+}
 
 /** Quantas decisões esperam — o número do badge. */
 export function totalPendingDecisions(counts: Record<DecisionQueueKey, number>): number {
@@ -84,4 +111,22 @@ export function decisionCountsByHref(
   counts: Record<DecisionQueueKey, number>,
 ): Record<string, number> {
   return Object.fromEntries(DECISION_QUEUES.map((q) => [q.href, counts[q.key] ?? 0]))
+}
+
+/**
+ * Para cada fila COM pendência, o destino do clique e o texto que explica o número —
+ * indexado pela rota da fila, como `decisionCountsByHref`.
+ *
+ * Fila zerada fica de fora: sem número não há o que explicar, e o item volta a ser só
+ * um destino (`href`, com a dica fixa dele).
+ */
+export function decisionFocusByHref(
+  counts: Record<DecisionQueueKey, number>,
+): Record<string, { href: string; hint: string }> {
+  const out: Record<string, { href: string; hint: string }> = {}
+  for (const q of DECISION_QUEUES) {
+    const count = counts[q.key] ?? 0
+    if (count > 0) out[q.href] = { href: q.focusHref, hint: decisionHint(q, count) }
+  }
+  return out
 }
