@@ -25,9 +25,16 @@ import { PERSONAL_STATUSES as PERSONAL_STATUS_NAMES, SYNOPSIS_QUALITIES } from "
 import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
 import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 import { CollapseIconTrigger, CollapseTitleTrigger } from "@/components/ui/collapse-trigger"
+import { DEFAULT_ATTR_EVAL_FILTERS, isDefaultAttrEvalFilterSet } from "@/lib/ai-evaluation/attr-eval-filters"
+import type { AttrEvalFilter } from "@/lib/ai-evaluation/attr-eval-filters"
 
-type EvaluationFilter = "pending" | "review-pending" | "low-confidence" | "outdated-model" | "outdated-reviews"
-const DEFAULT_FILTERS: EvaluationFilter[] = ["pending", "review-pending"]
+// 🔴 O default vem da MESMA constante que a página usa pra ler a URL. Até 2026-10-09 este
+// arquivo tinha a cópia antiga (`["pending","review-pending"]`): o padrão aparecia como
+// "Filtros 3", e aplicar exatamente esses dois estados apagava o `filter` da URL —
+// ver o cabeçalho de `attr-eval-filters.ts`.
+type EvaluationFilter = AttrEvalFilter
+const DEFAULT_FILTERS = DEFAULT_ATTR_EVAL_FILTERS
+const isDefaultFilterSet = isDefaultAttrEvalFilterSet
 
 const IA_RK_STATE_OPTIONS: Array<{ id: "stale" | "unranked"; label: string; tooltip: string }> = [
   { id: "stale", label: "Desatualizado", tooltip: "Tem Veredito IA, mas ficou velho (obra editada / re-avaliada / 'Atualizar dados')." },
@@ -50,11 +57,6 @@ const SYNOPSIS_STATE_OPTIONS: Array<{ id: "stale" | "unpredicted" | "predicted";
   { id: "unpredicted", label: "Não previsto", tooltip: "Ainda não tem estimativa de Interesse Sinopse." },
   { id: "predicted", label: "Previsto", tooltip: "Já tem estimativa fresca — pra comparar o valor manual com o da IA." },
 ]
-
-function isDefaultFilterSet(filters: Set<EvaluationFilter> | EvaluationFilter[]) {
-  const set = Array.isArray(filters) ? new Set(filters) : filters
-  return set.size === DEFAULT_FILTERS.length && DEFAULT_FILTERS.every((filter) => set.has(filter))
-}
 
 interface AiEvaluationFiltersProps {
   activeFilters: EvaluationFilter[]

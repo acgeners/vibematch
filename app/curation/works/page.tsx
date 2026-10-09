@@ -40,36 +40,17 @@ import type { FormulaConfig } from "@/types/domain"
 import { loadEvalPrep } from "@/server/queries/eval-prep"
 import { getCuradoriaBadgeUnreadCount } from "@/server/queries/ai-eval-read"
 import type { EvalPrep } from "@/lib/ai-evaluation/eval-readiness"
+// O default e a lista de filtros de estado moram num módulo só, lido também pelo painel
+// (`ai-evaluation-filters.tsx`) — ver o cabeçalho de `attr-eval-filters.ts`.
+import { parseAttrEvalFilters } from "@/lib/ai-evaluation/attr-eval-filters"
+import type { AttrEvalFilter } from "@/lib/ai-evaluation/attr-eval-filters"
+import { DECISION_QUEUES, decisionHint } from "@/lib/curation/decision-queues"
 
-const ALL_FILTERS = ["pending", "review-pending", "low-confidence", "outdated-model", "outdated-reviews"] as const
-export type EvaluationFilter = (typeof ALL_FILTERS)[number]
-
-/**
- * 🔴 **A aba abria VAZIA, e era a causa nº 1 de ela não ser usada.** O default era
- * `["pending","review-pending"]`; contado na NUVEM em 2026-08-19, esses dois filtros
- * dão **0 e 0** — o catálogo está construído, e o trabalho que existe hoje é
- * REAVALIAÇÃO: `outdated-reviews` são **556 obras**. A tela abria zerada e só quem
- * sabia trocar o filtro à mão encontrava alguma coisa.
- *
- * ⚠️ `outdated-model` (929 no clone) fica FORA do default de propósito: ele traz quase
- * o catálogo inteiro — 9 versões de prompt convivem hoje —, e uma fila que é "tudo"
- * não é fila. `outdated-reviews` tem um gatilho por obra (chegou review nova) e é o
- * que a curadoria de fato persegue.
- *
- * ⚠️ O `dot` da aba NÃO acompanha este default — ver `TabCounts.attrDot`.
- */
-const DEFAULT_FILTERS: EvaluationFilter[] = ["pending", "review-pending", "outdated-reviews"]
+export type EvaluationFilter = AttrEvalFilter
+const parseFilters = parseAttrEvalFilters
+// O ponto da aba conta a mesma coisa que o badge da sidebar, e se explica com a mesma frase.
+const CURADORIA_DECISION_QUEUE = DECISION_QUEUES.find((q) => q.key === "curadoria")!
 const DEFAULT_LOW_CONFIDENCE_THRESHOLD = 0.8
-
-function parseFilters(raw: string | string[] | undefined): EvaluationFilter[] {
-  const value = Array.isArray(raw) ? raw.join(",") : raw
-  if (!value) return DEFAULT_FILTERS
-  const parts = value.split(",").map((p) => p.trim()).filter(Boolean)
-  const valid = parts.filter((p): p is EvaluationFilter =>
-    (ALL_FILTERS as readonly string[]).includes(p)
-  )
-  return valid.length > 0 ? valid : DEFAULT_FILTERS
-}
 
 interface EligibleWork {
   id: string
@@ -616,7 +597,14 @@ function EvalTabBar({
   const n = (v: number | undefined) => (counts ? ` (${v ?? 0})` : " (…)")
   return (
     <div className="flex items-center gap-1 border-b border-border/60">
-      <EvalTabLink href={hrefs.attr} active={activeTab === "atributos"} dot={(counts?.attrDot ?? 0) > 0}>IA Atributos{n(counts?.attr)}</EvalTabLink>
+      <EvalTabLink
+        href={hrefs.attr}
+        active={activeTab === "atributos"}
+        dot={(counts?.attrDot ?? 0) > 0}
+        dotLabel={counts ? decisionHint(CURADORIA_DECISION_QUEUE, counts.attrDot) : undefined}
+      >
+        IA Atributos{n(counts?.attr)}
+      </EvalTabLink>
       <EvalTabLink href={hrefs.tagsReviews} active={activeTab === "tags-reviews"}>Tags &amp; Reviews{n(counts?.tagsReviews)}</EvalTabLink>
       {/* Sem `dot`: o digest é backfill pago e opt-in, então NÃO soma no badge da
           barra superior — um contador de 100+ ali faria o badge viver cheio e parar

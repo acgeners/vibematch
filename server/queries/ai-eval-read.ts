@@ -4,6 +4,7 @@ import { fetchAllRows } from "@/lib/supabase/paginate"
 import { getAlignmentQueueWorks, getSynopsisQueueWorks, getUntrackedWorks } from "@/server/queries/recommendations"
 import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
 import { getWorksWithoutTags } from "@/server/queries/works-without-tags"
+import { ATTR_DECISION_EVAL_STATUSES } from "@/lib/ai-evaluation/attr-eval-filters"
 
 /**
  * Filas de /curation/works onde uma pendência pode ser marcada como "lida"
@@ -101,7 +102,13 @@ export async function getEvalReadSummary(
   return { allRead: hasAnyRead && totalUnread === 0, hasAnyRead, totalUnread }
 }
 
-/** Membros (ids) da fila de atributos: pending + review_pending, não-arquivadas. */
+/**
+ * Membros (ids) da fila de atributos: pending + review_pending, não-arquivadas.
+ *
+ * ⚠️ Os status vêm de `ATTR_DECISION_EVAL_STATUSES`, o mesmo recorte de que o clique no
+ * badge deriva o filtro (`DECISION_QUEUES.focusHref`). Escritos aqui à mão, um estado
+ * novo no badge faria o clique abrir uma lista que não bate com o número.
+ */
 async function getAttributesMemberIds(): Promise<string[]> {
   const supabase = createAdminClient()
   const rows = await fetchAllRows<{ id: string }>(
@@ -109,7 +116,7 @@ async function getAttributesMemberIds(): Promise<string[]> {
       supabase
         .from("works")
         .select("id")
-        .in("ai_eval_status", ["pending", "review_pending"])
+        .in("ai_eval_status", [...ATTR_DECISION_EVAL_STATUSES])
         .eq("is_archived", false),
     { orderBy: ["id"], label: "getAttributesMemberIds" },
   )

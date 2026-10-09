@@ -17,6 +17,8 @@ import { cn } from "@/lib/utils"
 
 export const metadata = { title: "Curadoria" }
 
+const CURADORIA_QUEUE = DECISION_QUEUES.find((q) => q.key === "curadoria")!
+
 /**
  * A raiz da console — o estado do catálogo COMPARTILHADO.
  *
@@ -72,10 +74,13 @@ export default async function CuradoriaPage() {
       </header>
 
       <div className="mb-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {/* "Atributos", e não "Fila de atributos": o número é o de decisões esperando,
+            não o tamanho da fila — que no padrão inclui a reavaliação (~490). Rotulado
+            como fila, o 1 parecia errado. A unidade sai de `DECISION_QUEUES`. */}
         <Tile
-          label="Fila de atributos"
+          label="Atributos"
           value={String(curadoria)}
-          note={curadoria === 1 ? "obra não-lida" : "obras não-lidas"}
+          note={curadoria === 1 ? CURADORIA_QUEUE.unit.one : CURADORIA_QUEUE.unit.other}
           accent="violet"
           emphasis={curadoria > 0}
         />
@@ -200,7 +205,9 @@ function buildDecisions(
     const count = counts[queue.key] ?? 0
     if (count <= 0) continue
     rows.push({
-      href: queue.href,
+      // A lista recortada no que o número conta — não a aba no filtro padrão, onde o
+      // número some no meio da reavaliação.
+      href: queue.focusHref,
       title: queue.title,
       description: queue.description,
       count,
