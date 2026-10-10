@@ -88,4 +88,29 @@ function TabsContent({
   )
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent, tabsListVariants }
+/**
+ * Conteúdo de uma aba que mora FORA do painel principal dela — aparece e some junto com a
+ * aba, mas não é um 2º painel.
+ *
+ * O Radix monta todo `Content` como `role="tabpanel"` com um `id` derivado do valor da aba, e o
+ * gatilho aponta pra esse `id` (`aria-controls`). Um 2º `TabsContent` da mesma aba repetiria o
+ * id e anunciaria dois painéis. Aqui os quatro atributos saem (o Radix espalha as props DEPOIS
+ * dos dele, então `undefined` vence), e o gatilho segue apontando só pro painel principal.
+ */
+function TabsExtraContent({
+  className,
+  ...props
+}: Omit<React.ComponentProps<typeof TabsPrimitive.Content>, "id" | "role" | "tabIndex" | "aria-labelledby">) {
+  return (
+    <TabsContent
+      className={className}
+      {...props}
+      id={undefined}
+      role={undefined}
+      tabIndex={undefined}
+      aria-labelledby={undefined}
+    />
+  )
+}
+
+export { Tabs, TabsList, TabsTrigger, TabsContent, TabsExtraContent, tabsListVariants }

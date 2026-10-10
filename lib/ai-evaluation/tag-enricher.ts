@@ -91,7 +91,14 @@ const ENRICH_TOOL = {
   },
 }
 
-function buildSystemPrompt(input: EnrichTagsForGroupInput): string {
+/**
+ * 🔴 Aviso de abuso/violência sexual NÃO é 18+ (decisão de produto de 2026-10-09). Até aqui o
+ * item 4 dizia que "Rape" e "Pedophilia" "podem ser fortes o bastante pra marcar a obra 18+
+ * (adult_level=explicit)" — o oposto do item 3 —, e as tags de estupro criadas de fonte em
+ * 2026-07-27 saíram `adult_indicator_strong`, ligando o gate sozinhas. Exportada pra o teste
+ * conferir o TEXTO que o modelo recebe.
+ */
+export function buildSystemPrompt(input: EnrichTagsForGroupInput): string {
   const subSection = input.approvedSubgroups.length
     ? input.approvedSubgroups
         .map((s) => `- ${s.slug}: ${s.name}${s.description ? ` — ${s.description}` : ""}`)
@@ -109,11 +116,11 @@ function buildSystemPrompt(input: EnrichTagsForGroupInput): string {
 3. 18+ (adult_level): a tag indica conteúdo SEXUAL adulto? Decide se a obra é marcada 18+ (works.is_adult).
    - "explicit": nomeia ou afirma conteúdo sexual EXPLÍCITO mostrado — ato sexual, anatomia genital, pornográfico (ex.: "Oral Sex", "Smut", "Hentai", "Pornographic").
    - "label": rótulo de conteúdo adulto sem afirmar que uma cena é mostrada (ex.: "Adult", "R19", "Sexual Content", "Erotica").
-   - "none": NÃO é indicador sexual. Isto inclui violência, gore, tortura, temas maduros/sombrios, e fatos de enredo ("Sexually Active Protagonist") — retratar violência sexual ou ter sexo na história NÃO é ser sexualmente explícito. Na dúvida, use "none" (conservador).
+   - "none": NÃO é indicador sexual. Isto inclui violência, gore, tortura, temas maduros/sombrios, e fatos de enredo ("Sexually Active Protagonist") — retratar violência sexual ou ter sexo na história NÃO é ser sexualmente explícito. Inclui SEMPRE os avisos de abuso, violência sexual, não-consentimento e pedofilia (ex.: "Rape", "Gang Rape", "Rape as a Start of Relationship", "Sexual Assault", "Pedophilia", "Non-Consensual Relationship", "Drugging/Roofing"): eles descrevem um TEMA — muitas vezes backstory, trauma, abuso mencionado ou evento não mostrado — e não provam que a obra mostre sexo explícito. Na dúvida, use "none" (conservador).
 4. PISO DE NOTA (adult_score_tier): eixo SEPARADO de adult_level — decide o piso mínimo obrigatório da NOTA numérica "conteúdo adulto" (0-10) desta obra, não se ela é marcada 18+.
    - "explicit": a tag NOMEIA um ato ou posição sexual específica RETRATADA (ex.: "Oral Sex", "Cunnilingus", "Handjob") — só quando a tag é específica o bastante que ninguém a usaria numa cena cortada/fade-to-black. Rótulos que AFIRMAM pornografia (Smut/Hentai/Pornographic) também entram aqui.
    - "label": rótulo de FAIXA ADULTA que não afirma cena mostrada (ex.: "Adult", "R19", "Sexual Content", "Erotica") — pode ser adulta por violência, não necessariamente sexo.
-   - "none": USE PARA TUDO O RESTO, mesmo se adult_level="explicit" acima. Em especial: atributos/anatomia (ex.: "Big Breasts", "Big Penis"), dinâmicas/temas (ex.: "BDSM", "Netorare", "Incest"), avisos de conteúdo (ex.: "Rape", "Pedophilia", "Gore", "Sexual Harassment") e fatos de enredo (ex.: "Sexually Active Protagonist") — todos podem ser fortes o bastante pra marcar a obra 18+ (adult_level="explicit") SEM afirmar que uma cena sexual é efetivamente MOSTRADA na obra. Retratar uma dinâmica ou tema não é o mesmo que mostrar o ato. NA MENOR DÚVIDA, use "none" — um falso positivo aqui força a nota pra cima incorretamente.
+   - "none": USE PARA TUDO O RESTO, mesmo se adult_level="explicit" acima. Em especial: atributos/anatomia (ex.: "Big Breasts", "Big Penis"), dinâmicas/temas (ex.: "BDSM", "Netorare", "Incest") e fatos de enredo (ex.: "Sexually Active Protagonist") — todos podem ser fortes o bastante pra marcar a obra 18+ (adult_level="explicit") SEM afirmar que uma cena sexual é efetivamente MOSTRADA na obra. Avisos de conteúdo (ex.: "Rape", "Pedophilia", "Gore", "Sexual Harassment") também são "none" aqui — e são "none" em adult_level (item 3): são aviso de tema sensível, não 18+. Retratar uma dinâmica ou tema não é o mesmo que mostrar o ato. NA MENOR DÚVIDA, use "none" — um falso positivo aqui força a nota pra cima incorretamente.
 
 confidence (0–1): confiança no SINÔNIMO quando houver; sem sinônimo, a confiança da escolha do sub-grupo.
 
