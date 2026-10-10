@@ -14,6 +14,7 @@
     "contracts": "node --env-file=.env.local --env-file=.env.analysis scripts/contratos-postgrest.mjs",
     "test:db-contract": "node scripts/contrato-canonico-db.mjs",
     "test:db-gate-aviso-sexual": "node scripts/gate-aviso-sexual-db.mjs",
+    "test:db-edicao-mixed": "node scripts/edicao-mixed-db.mjs",
     "clean": "rm -rf .next .turbo",
     "clean:all": "rm -rf .next .turbo node_modules",
     "lint": "eslint",

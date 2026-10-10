@@ -311,7 +311,7 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**106 arquivos, remedidos em 2026-09-21**):
+banco declara um dos dois (**107 arquivos, remedidos em 2026-10-10**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
@@ -5568,28 +5568,31 @@ fila**. Hoje as duas telas chamam `formatTimeAgo`.
    `create_by_name`, que não tem obra, fica invisível depois do reload.
 3. **"Atendi" e "Descartar" são indistinguíveis pro leitor** — os dois só fazem a faixa sumir.
 
-## Obra com edição R15 E R19 aparece nos DOIS filtros 18+
+## Edição da obra: `work_edition_state` é a fonte, e `mixed` aparece nos DOIS filtros 18+
 
-Decisão da curadora (2026-09-26, migration **199**): quem oculta conteúdo adulto **não perde**
-a obra (existe uma edição que dá pra ler), e quem filtra "Só 18+" **a encontra** (existe a R19).
+**O estado EDITORIAL mora em `work_edition_state`** (mig 204): `single | mixed | r18_only | unknown`,
+com base, autor e evidência. Ele responde quantas versões existem — não se a obra liga o gate
+(`single` pode ser R18 pelo `adult_auto`). `works.edition_state` e `works.r19_edition` (= `mixed`, por
+CHECK) são espelhos mantidos por gatilho: **não grave à mão**.
 
-| peça | papel |
-|---|---|
-| tag **`R19 disponível`** (`tags.marks_r19_edition`) | a única tag do fato; "Uncensored Version Available" e "Official English R19 Version Available" são **alias** dela |
-| `works.r19_edition` | derivada por gatilho de `work_tags` — **não grave à mão** |
-| gatilho em `work_synopses` | sinopse gravada com o marcador `[R19 disponível]` (ou `R18`) aplica a tag sozinha |
-| `is_adult` = `COALESCE(adult_override, adult_auto AND NOT r19_edition)` | governa **ocultar**; os ~46 leitores dele não mudaram |
-| ramo `"only"` de `getRanking` = `is_adult OR r19_edition` | governa **só 18+** — é o único lugar que precisou mudar |
+| estado | `is_adult` (ocultar) | "Só 18+" (`is_adult OR r19_edition`) |
+|---|---|---|
+| `mixed` | false — aparece pela versão normal | sim, pela R18 |
+| `r18_only` | true (o estado liga o gate) | sim |
+| `unknown` | true — "na dúvida, protege" (sinal R18 sem versão normal provada) | sim |
+| `single` / sem estado | `adult_auto` (gate normal) | se adulta |
 
-🔴 **São duas metades, e cada uma sozinha quebra a regra calada** — sem a 1ª a obra some pra
-quem oculta, sem a 2ª ela some do "Só 18+". Guardado por
-`tests/unit/orchestration/edicao-r19-nos-dois-filtros.test.ts` (2 sondas conferidas).
+`adult_override` vence as quatro linhas. 🔴 **Marcador de sinopse, tag ou alias nunca criam `mixed`**: viram no máximo `unknown` (guarda em
+`work_tags` + gatilho de `work_synopses`). A tag "R19 disponível" é reflexo do estado. `mixed` só vem
+de evidência explícita R15 + R19 do quadrinho (`lib/editions/edition-evidence.ts`, lida da descrição
+CRUA do MangaUpdates e gravada no save por `upsertWorkExternalIds`), de auditoria ou de curadoria.
 
-⚠️ **A decisão MANUAL vence**: `adult_override = true` segue ocultando mesmo com edição R15.
-⚠️ **A nota `adult_content` não muda** — a tag não tem `adult_score_tier`, e a regra da 164
-(marcador de edição não é piso) continua valendo.
-⚠️ **Não confundir com `R19 Version`**, que afirma que a obra CATALOGADA é a edição R19 (piso
-7 + 18+), nem com "R15 but Based on a R19 Novel" (o R19 é do NOVEL — teto 6 na nota).
+⚠️ **Censura × sem censura não é edição normal**, e R19 do NOVEL não contamina o webtoon.
+⚠️ **`adult_override` é decisão da OBRA INTEIRA**: `true` esconde até a versão normal de uma `mixed` (os 6
+`true` das `mixed` auditadas ficam até a página separar nota/tags por edição — fase 2).
+Sinal R19 errado se corrige na ORIGEM (estado/tag), nunca com `adult_override = false`.
+⚠️ Não confundir com a tag `R19 Version` (a obra catalogada É a R19: piso 7 + 18+) nem com "R15 but
+Based on a R19 Novel" (o R19 é do novel — teto 6 na nota). Testes: `npm run test:db-edicao-mixed`.
 
 ## A RAZÃO do limite 18+ tem dono — e quem a estava escrevendo era o modelo
 

@@ -12,7 +12,8 @@
  * 🔴 TUDO numa transação que termina em ROLLBACK. Aplica a migration do REPO sobre o schema REAL da
  * réplica, com 12 cenários montados em obras reais (estado sintético, desfeito no fim):
  *   · o recálculo de `adult_auto`/`adult_reason` (só quem dependia do conjunto);
- *   · override, r19_edition, nota e `adult_score_tier` intocados;
+ *   · override, r19_edition, nota e `adult_score_tier` intocados (com a 204 aplicada, o cenário de
+ *     edição R19 cria o estado `mixed` — a tag deixou de ser a fonte);
  *   · nenhuma obra passa a 18+; nada fora do conjunto causal muda;
  *   · idempotência (2ª aplicação não muda nada) e rollback (`scripts/rollback/203_rollback.sql`
  *     devolve o estado exato de antes).
@@ -83,6 +84,11 @@ begin
   ${CENARIOS.map(([cen], i) => `insert into t_cenario values (${q(cen)}, ids[${i + 1}]);`).join("\n  ")}
 ${CENARIOS.map(([cen, tags, nota, auto, motivo, override]) => `
   ${tags.map((t) => `insert into public.work_tags (work_id, tag_id, source) select (select work_id from t_cenario where cen = ${q(cen)}), id, 'teste-203' from public.tags where slug = ${q(t)} on conflict do nothing;`).join("\n  ")}
+  ${tags.includes("r19-disponivel") ? `-- Depois da 204 a tag "R19 disponível" é REFLEXO do estado de edição: quem faz a obra ser mixed é o estado.
+  if to_regclass('public.work_edition_state') is not null then
+    execute format('insert into public.work_edition_state (work_id, state, basis, decided_by) values (%L, ''mixed'', ''curator'', ''curator'') on conflict (work_id) do update set state = ''mixed''',
+                   (select work_id from t_cenario where cen = ${q(cen)}));
+  end if;` : ""}
   insert into public.category_scores (work_id, criterion_slug, score, source)
     values ((select work_id from t_cenario where cen = ${q(cen)}), 'adult_content', ${nota}, 'manual')
     on conflict (work_id, criterion_slug) do update set score = excluded.score;

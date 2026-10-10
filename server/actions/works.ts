@@ -41,6 +41,7 @@ import { hiatusFieldsFor } from "@/lib/external/hiatus-kind"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
 import { recomputeAdultAuto } from "@/lib/tags/adult-classify"
+import { recordMangaUpdatesEditionEvidence } from "@/lib/editions/record-edition-evidence"
 import { computeAdultContentBounds, clampAdultContentScore } from "@/lib/ai-evaluation/adult-content-rules"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate, ensureAdmin, ensurePermission, ensureSignedIn, getOwnerUserId, getSessionUserId } from "@/server/queries/current-user"
@@ -136,7 +137,13 @@ async function upsertWorkExternalIds(
     .upsert(rows, { onConflict: "work_id,source" })
   if (error) {
     console.error("[upsertWorkExternalIds] failed:", error.message)
+    return
   }
+  // O save acabou de CONFIRMAR o vínculo com o MangaUpdates: é aqui (e não na prévia) que a
+  // evidência de edição vista na hidratação vira estado (mig 204). Os três caminhos de save —
+  // criar, editar e "Atualizar dados" — passam por esta função.
+  const muId = rows.find((r) => r.source === "mangaupdates")?.external_id
+  if (muId) await recordMangaUpdatesEditionEvidence(supabase, workId, muId)
 }
 
 export interface DuplicateWorkForForm {

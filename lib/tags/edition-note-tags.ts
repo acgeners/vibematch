@@ -3,10 +3,11 @@
  * metadado de EDIÇÃO, deliberadamente `adult_indicator` false (ver migração 161 e
  * o comentário em lib/ai-evaluation/adult-content-rules.ts).
  *
- * Desde a migração 199 é UMA tag só, "R19 disponível" (as antigas "Uncensored
- * Version Available" e "Official English R19 Version Available" viraram alias
- * dela). Quem decide filtro e ocultação é `works.r19_edition`, mantida por gatilho
- * a partir de `tags.marks_r19_edition` — este Set serve só à EXIBIÇÃO.
+ * Desde a migração 204 a tag "R19 disponível" é REFLEXO do estado de edição: existe na
+ * obra se e só se `work_edition_state.state = 'mixed'` (normal + R18), mantida pelo
+ * banco. Tag ou alias gravados por fora não a ligam (viram no máximo `unknown`). Quem
+ * decide filtro e ocultação é o estado (`works.edition_state` / `works.r19_edition`) —
+ * este Set serve só à EXIBIÇÃO.
  * Distinto de tags que afirmam que a OBRA CATALOGADA é a edição explícita
  * (ex.: "R19 Version", que já é `adult_indicator_strong`).
  *
