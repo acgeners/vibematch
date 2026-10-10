@@ -1,4 +1,5 @@
 import type { ReviewDigest, ReviewDigestTrait } from "@/lib/ai-recommendation/types"
+import { isDigestCorrupted } from "@/lib/ai-recommendation/digest-integrity"
 
 /**
  * Camada de VISÃO do `review_digest`: transforma o que o modelo devolve no que o card
@@ -205,4 +206,27 @@ export function collectUserRatings(
 /** Só vale desenhar a régua de eixos quando o digest tem traço com eixo. */
 export function digestHasAxes(digest: ReviewDigest | null): boolean {
   return (digest?.salient_traits?.length ?? 0) > 0
+}
+
+/**
+ * O digest pode ir pra tela? Íntegro (sem markup de tool-call vazado) E com consenso.
+ *
+ * É a régua do card "O que dizem as reviews" e também a do aviso compacto da Visão Geral.
+ * Os dois desenham os MESMOS avisos, então decidem pelo mesmo critério: um digest corrompido
+ * não pode ter os avisos escondidos no card e expostos no topo da página.
+ */
+export function isDigestDisplayable(digest: ReviewDigest | null): boolean {
+  return digest != null && !isDigestCorrupted(digest) && Boolean(digest.consensus?.trim())
+}
+
+/**
+ * Avisos de conteúdo que podem ir pra tela, na ordem do digest.
+ *
+ * ⚠️ Lista vazia NÃO quer dizer "obra sem temas sensíveis": ou não há digest exibível, ou as
+ * reviews não relataram nada. Quem consome não escreve "sem avisos". Medido na nuvem em
+ * 2026-10-09: das 1.065 obras ativas, 129 não têm digest e 120 têm a lista vazia.
+ */
+export function displayableContentWarnings(digest: ReviewDigest | null): string[] {
+  if (digest == null || !isDigestDisplayable(digest)) return []
+  return (digest.content_warnings ?? []).filter((w) => typeof w === "string" && w.trim().length > 0)
 }

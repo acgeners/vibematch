@@ -63,6 +63,8 @@ import {
   getWorkEmbeddingProvenance,
 } from "@/server/queries/ai-provenance"
 import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
+import { ContentWarningsSummary } from "@/components/titles/content-warnings"
+import { displayableContentWarnings } from "@/lib/reviews/digest-view"
 import { RegenerateSynopsisAction } from "@/components/works/regenerate-actions"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
 import { isLocalExternalReviewEditorAllowed } from "@/lib/synopsis-interest/local-external-review-gate"
@@ -106,7 +108,7 @@ import { CriterionIcon } from "@/components/titles/criterion-icon"
 import { CriterionBandChip } from "@/components/titles/criterion-band-chip"
 import { CriterionFitBar } from "@/components/titles/criterion-fit-bar"
 import { parseJustification, bandForScore, bandBarBounds, rubricForBand, rubricTitle, RUBRIC_BANDS } from "@/lib/criteria/justification"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent, TabsExtraContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CRITERIA_INFO, PLATFORM_LABELS } from "@/lib/constants/criteria"
 import {
   getPublicationStatusNameById,
@@ -600,6 +602,19 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   const hasEditionNote = hasEditionNoteTag(
     (tags as Array<WorkTagForDisplay | string>).map((tag) => (typeof tag === "string" ? tag : tag.name)),
   )
+  // Avisos de conteúdo do digest de reviews — o MESMO dado e a MESMA régua do card de reviews
+  // (`displayableContentWarnings`). Zero query: `getWorkReviews` já trouxe o digest acima.
+  const contentWarnings = displayableContentWarnings(reviewsSnapshot.digest)
+  const contentWarningsProvenance: AiProvenanceSealProps = {
+    title: "Avisos resumidos por IA",
+    model: aiProvenance.review_digest?.model ?? null,
+    promptVersion: aiProvenance.review_digest?.promptVersion ?? null,
+    at: reviewsSnapshot.digestAt,
+    extra:
+      reviewsSnapshot.digestN != null
+        ? [{ label: "Base", value: `${reviewsSnapshot.digestN} reviews de leitores` }]
+        : undefined,
+  }
   const primaryCover = pickPrimaryCover(work.work_covers)
   const primarySynopsis = pickPrimarySynopsis(work.work_synopses)
   // Quantas sinopses de fonte alimentaram a consolidação (só as com texto — a mesma
@@ -1090,6 +1105,18 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             )}
           </div>
         </div>
+
+        {/* Avisos de conteúdo — temas sensíveis relatados nas reviews. Só na Visão Geral e FORA
+            do AdultGate: o portão desfoca tudo que está abaixo, e o aviso é justamente o que
+            ajuda a decidir se vale revelar. Aviso NÃO é 18+ (quem decide o 18+ é is_adult).
+            ⚠️ É um conteúdo EXTRA da aba (`TabsExtraContent`) porque o painel das abas mora
+            DENTRO do portão — e extra, não um 2º tabpanel: o gatilho segue apontando só para
+            o painel principal. */}
+        {contentWarnings.length > 0 && (
+          <TabsExtraContent value="overview" className="mt-3">
+            <ContentWarningsSummary warnings={contentWarnings} provenance={contentWarningsProvenance} />
+          </TabsExtraContent>
+        )}
 
         {/* Layout principal: sidebar (capa + ações) | conteúdo da aba.
             Envolto no AdultGate: se a obra é 18+ E o usuário optou por ocultar,

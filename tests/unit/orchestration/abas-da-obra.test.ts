@@ -28,13 +28,31 @@ const RAW = readFileSync(resolve(__dirname, "../../../app/catalog/[id]/page.tsx"
  */
 const SOURCE = RAW.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")
 
-/** Recorta o corpo de um `<TabsContent value="…">` — as abas não se aninham. */
-function aba(valor: string): string {
-  const inicio = SOURCE.indexOf(`<TabsContent value="${valor}"`)
-  expect(inicio, `aba ${valor} não existe`).toBeGreaterThan(-1)
-  const fim = SOURCE.indexOf("</TabsContent>", inicio)
-  expect(fim, `aba ${valor} não fecha`).toBeGreaterThan(inicio)
+/**
+ * Onde abre cada bloco da aba — o painel (`<TabsContent … value="…">`) e os conteúdos extras
+ * dela (`<TabsExtraContent … value="…">`). TODAS as ocorrências.
+ *
+ * ⚠️ Uma aba pode ter mais de um bloco: a linha de avisos de conteúdo da Visão Geral mora FORA
+ * do AdultGate, num `TabsExtraContent` da mesma aba. A 1ª versão deste helper pegava só a
+ * primeira ocorrência, e só a escrita `<TabsContent value=` na mesma linha — um bloco com o
+ * `value` na linha de baixo ficava invisível pro teste.
+ */
+function aberturas(valor: string): Array<{ inicio: number; fecho: string }> {
+  const re = new RegExp(`<(TabsContent|TabsExtraContent)\\b[^>]*\\bvalue="${valor}"`, "g")
+  return [...SOURCE.matchAll(re)].map((m) => ({ inicio: m.index ?? -1, fecho: `</${m[1]}>` }))
+}
+
+function corpo({ inicio, fecho }: { inicio: number; fecho: string }): string {
+  const fim = SOURCE.indexOf(fecho, inicio)
+  expect(fim, `bloco em ${inicio} não fecha`).toBeGreaterThan(inicio)
   return SOURCE.slice(inicio, fim)
+}
+
+/** Recorta o corpo da aba (todas as ocorrências, concatenadas) — as abas não se aninham. */
+function aba(valor: string): string {
+  const blocos = aberturas(valor)
+  expect(blocos.length, `aba ${valor} não existe`).toBeGreaterThan(0)
+  return blocos.map(corpo).join("\n")
 }
 
 describe("abas da página da obra", () => {
@@ -113,5 +131,22 @@ describe("abas da página da obra", () => {
     const antesDasAbas = SOURCE.slice(0, SOURCE.indexOf('<TabsContent value="overview"'))
     expect(antesDasAbas).not.toContain("<LinkedSources")
     expect(antesDasAbas).not.toContain("Última avaliação em")
+  })
+
+  it("os avisos de conteúdo têm uma linha compacta na Visão Geral, FORA do portão 18+", () => {
+    // O aviso ajuda a decidir se vale revelar uma obra oculta: dentro do AdultGate ele sairia
+    // desfocado junto com o resto. E ele não é 18+ — o 18+ é `is_adult`, que não lê o aviso.
+    const portao = SOURCE.indexOf("<AdultGate")
+    expect(portao).toBeGreaterThan(-1)
+    const comAviso = aberturas("overview").filter((b) => corpo(b).includes("<ContentWarningsSummary"))
+    expect(comAviso.length, "a linha compacta mora num bloco da aba Visão Geral").toBe(1)
+    expect(comAviso[0].inicio, "e esse bloco fica ANTES do AdultGate").toBeLessThan(portao)
+    // E é conteúdo EXTRA da aba, não um 2º painel (`TabsExtraContent` tira id/role do Radix).
+    expect(comAviso[0].fecho).toBe("</TabsExtraContent>")
+
+    // Mesmo dado e mesma régua do card de reviews — não uma 2ª leitura do digest.
+    expect(SOURCE).toContain("displayableContentWarnings(reviewsSnapshot.digest)")
+    // E os avisos continuam no card de reviews, na aba da IA (não foram movidos).
+    expect(aba("ai")).toContain("<WorkReviewsCard")
   })
 })

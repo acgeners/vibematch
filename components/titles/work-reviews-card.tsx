@@ -22,10 +22,13 @@ import {
   collectUserRatings,
   defaultAxisKey,
   describeRatings,
+  displayableContentWarnings,
   groupTraitsByAxis,
+  isDigestDisplayable,
   ratingHistogram,
   reviewSignal,
 } from "@/lib/reviews/digest-view"
+import { ContentWarningsPanel } from "@/components/titles/content-warnings"
 import type { AxisGroup, RatingBin } from "@/lib/reviews/digest-view"
 import type { WorkReviewsSnapshot } from "@/server/queries/work-reviews"
 import { formatUsdApprox } from "@/lib/format/money"
@@ -200,64 +203,6 @@ function RatingsPanel({ bins, total }: { bins: RatingBin[]; total: number }) {
   )
 }
 
-/**
- * Avisos de conteúdo. Pílulas à vista, texto inteiro no popover (mediana de 3 avisos,
- * 85% das obras têm).
- *
- * ⚠️ **Vermelho, não âmbar (2026-08-12).** O âmbar passou a significar só "desatualizado"
- * (`lib/ui/status-tone.ts`), e o aviso migrou para a família do selo 🔞 18+: os dois são
- * fato sobre a OBRA — quem lê decide —, não estado do sistema.
- *
- * ⚠️ Ele deixou de morar na coluna do topo: ver o comentário do layout, no corpo do card.
- */
-function ContentWarningsPanel({ warnings }: { warnings: string[] }) {
-  return (
-    <div className={cn("flex flex-col gap-2 rounded-xl p-3", STATUS_TONE.content.box)}>
-      <div className={cn("flex items-center gap-1.5 text-xs font-semibold", STATUS_TONE.content.text)}>
-        <AlertTriangle className="size-3.5 shrink-0" />
-        {warnings.length} aviso{warnings.length === 1 ? "" : "s"} de conteúdo
-        <Popover>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              className="ml-auto text-[11.5px] font-semibold text-muted-foreground underline decoration-dotted underline-offset-4 transition-colors hover:text-foreground"
-            >
-              ver
-            </button>
-          </PopoverTrigger>
-          <PopoverContent align="end" className="w-80 space-y-2">
-            <p className="text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">
-              Avisos de conteúdo
-            </p>
-            <ul className="flex flex-col gap-2">
-              {warnings.map((w, i) => (
-                <li key={i} className="flex gap-2 text-[12.5px] leading-relaxed">
-                  <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-red-500" aria-hidden />
-                  {w}
-                </li>
-              ))}
-            </ul>
-          </PopoverContent>
-        </Popover>
-      </div>
-      <div className="flex flex-col items-start gap-1">
-        {warnings.map((w, i) => (
-          <span
-            key={i}
-            title={w}
-            className={cn(
-              "max-w-full truncate rounded-full bg-background/60 px-2 py-0.5 text-[11px] text-muted-foreground",
-              STATUS_TONE.content.ring,
-            )}
-          >
-            {w}
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 /** Quatro barrinhas crescentes — quantas acesas vem de `reviewSignal`. */
 function SignalBars({ bars }: { bars: number }) {
   return (
@@ -368,7 +313,8 @@ export function WorkReviewsCard({ snapshot, workId, provenance }: WorkReviewsCar
   const corrupted = digest != null && isDigestCorrupted(digest)
   // Digest íntegro E com consenso: só então ele pode ser a cara do painel. Sem
   // consenso não há frase de abertura, e a prosa (se houver) serve melhor.
-  const digestLeads = digest != null && !corrupted && Boolean(digest.consensus?.trim())
+  // A régua é DONA ÚNICA (`isDigestDisplayable`): o aviso compacto da Visão Geral decide por ela.
+  const digestLeads = digest != null && isDigestDisplayable(digest)
   const totalReviews = snapshot.total + snapshot.manual.length
   // Fontes = união das raspadas com as das manuais. Contar só `bySource` sub-reporta:
   // uma review manual de uma fonte que nunca foi raspada não aparecia na contagem.
@@ -386,7 +332,7 @@ export function WorkReviewsCard({ snapshot, workId, provenance }: WorkReviewsCar
   // O que EXISTE nesta obra decide o layout do painel (ver o comentário do bloco CIMA).
   const hasRatings = ratings.bins.length > 0
   const hasDivergence = Boolean(digest?.divergence?.trim())
-  const warnings = digest?.content_warnings ?? []
+  const warnings = displayableContentWarnings(digest)
   /**
    * Os avisos de conteúdo vão pro VÃO MAIOR, e ele muda de lugar com o histograma.
    *
