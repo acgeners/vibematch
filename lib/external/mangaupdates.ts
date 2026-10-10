@@ -1,4 +1,7 @@
 import type { PublicationStatus } from "@/types/domain"
+import { extractMangaUpdatesEditionEvidence } from "@/lib/editions/edition-evidence"
+import type { EditionEvidence } from "@/lib/editions/edition-evidence"
+import { rememberEditionEvidence } from "@/lib/editions/edition-evidence-cache"
 import type { ExternalSearchResult } from "./types"
 
 const MU_BASE = "https://api.mangaupdates.com/v1"
@@ -177,6 +180,12 @@ export interface MangaUpdatesDetail {
   /** Texto cru de "Status in Country of Origin" — preservado pra exibir/anotar
    * info que `mapStatus` (enum) e `parseChaptersFromStatus` descartam. */
   statusText?: string
+  /**
+   * Evidência de EDIÇÃO (R15/R19 por bloco) lida da descrição CRUA, antes do `cleanHtml` — que
+   * colapsa as quebras de linha e, junto com a limpeza de sinopse, apagava a linha `R15:`.
+   * Ver `lib/editions/edition-evidence.ts` e a mig 204.
+   */
+  editionEvidence?: EditionEvidence
 }
 
 export async function fetchMangaUpdatesReviews(id: number): Promise<string[]> {
@@ -280,6 +289,15 @@ export async function fetchMangaUpdatesById(id: number): Promise<MangaUpdatesDet
     // scraping is blocked (Cloudflare/rate-limited) or the layout changes.
     const rating = realAvg ?? bayesian
     const votes = typeof data.rating_votes === "number" ? data.rating_votes : undefined
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const categories: string[] = (data.categories ?? []).map((c: any) => c.category as string)
+    // A descrição CRUA ainda tem os blocos "Original Webtoon: R19: … / R15: …"; a sinopse limpa não.
+    // Fica guardada (no servidor) até o save confirmar o vínculo — ver edition-evidence-cache.ts.
+    const editionEvidence = extractMangaUpdatesEditionEvidence({
+      description: typeof data.description === "string" ? data.description : null,
+      categories,
+    })
+    rememberEditionEvidence("mangaupdates", id, editionEvidence)
 
     return {
       title: data.title ?? "",
@@ -292,11 +310,11 @@ export async function fetchMangaUpdatesById(id: number): Promise<MangaUpdatesDet
       chapters: parseChaptersFromStatus(data.status) ?? (typeof data.latest_chapter === "number" ? data.latest_chapter : undefined),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       genres: (data.genres ?? []).map((g: any) => g.genre as string),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      categories: (data.categories ?? []).map((c: any) => c.category as string),
+      categories,
       rating,
       votes,
       statusText: typeof data.status === "string" ? data.status : undefined,
+      editionEvidence,
     }
   } catch {
     return null
