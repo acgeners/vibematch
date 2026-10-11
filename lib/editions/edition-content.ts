@@ -86,11 +86,39 @@ export function warningsForEdition<T>(warnings: ReadonlyArray<T>, edition: Mixed
 const EXPLICIT_TEXT_RE =
   /\b(smut|smutty|sexo expl[ií]cit\w*|sexua\w* expl[ií]cit\w*|sexualmente expl[ií]cit\w*|cenas? (de sexo|sexuais)|sex scenes?|explicit (sex\w*|scenes?)|sexually explicit|expl[ií]cit\w* (sexua\w*|de sexo)|uncensored|n[aã]o censurad\w*|porn\w*|nsfw|r-?19|19\+|lemon|spicy scenes?|steamy)\b/i
 
+// ⚠️ "Explícito" SEM a palavra "sexual" (medido no deploy v42, 2026-10-11): "conteúdo adulto explícito"
+// estava em 36 resumos de avaliação das 140 na versão normal; "conteúdo explícito", "cenas explícitas",
+// "cenas de intimidade explícita", "capítulos explícitos" e "intimidade frequentes e explícitas" nos
+// resumos, sínteses e traços do digest. Só o SUBSTANTIVO de conteúdo adulto conta — "explícito"
+// sozinho não basta: "recomendação explícita", "estupro explícito" (violência sexual é fato das duas
+// edições, mig 203).
+const EXPLICIT_ADULT_RE =
+  /\b(?:conte[uú]do (?:adulto )?|cenas? (?:de intimidade )?|cap[ií]tulos? )expl[ií]cit\w*|\bintimidade(?:\s+[^\s.,;:!?()]+){0,3}?\s+expl[ií]cit\w*/gi
+/**
+ * Ausência, expectativa ou censura logo ANTES do termo: a frase não afirma que a obra tem o conteúdo.
+ * "a falta de conteúdo adulto explícito", "leitores que esperavam conteúdo adulto explícito",
+ * "gostariam de mais conteúdo explícito", "a censura inconsistente do conteúdo explícito".
+ */
+const NAO_AFIRMA_RE =
+  /\b(?:sem|n[aã]o|nem|nenhum\w*|falta|aus[eê]ncia|esperav\w*|esperad\w*|gostari\w*|queri\w*|desej\w*|promet\w*|censur\w*|menos|pouc\w*)\b/i
+
+function affirmsExplicitAdultContent(text: string): boolean {
+  for (const m of text.matchAll(EXPLICIT_ADULT_RE)) {
+    // Só a mesma oração conta: "esperavam ver os filhos, mas receberam cenas de intimidade explícita"
+    // afirma o conteúdo — o "esperavam" é de outra oração.
+    const oracao = text.slice(0, m.index).split(/[.,;:!?()/"—–]/).pop() ?? ""
+    const antes = oracao.trim().split(/\s+/).slice(-3).join(" ")
+    if (NAO_AFIRMA_RE.test(antes) || NAO_AFIRMA_RE.test(m[0])) continue
+    return true
+  }
+  return false
+}
+
 /**
  * O texto cita conteúdo sexual explícito? Na versão normal ele não é mostrado como se descrevesse a
  * R15 — o digest e as reviews MISTURAM as duas edições (97,6% das reviews não dizem qual leram), e
  * separar frase a frase seria fingir uma separação que o dado não tem.
  */
 export function mentionsExplicitSexualContent(text: string | null | undefined): boolean {
-  return !!text && EXPLICIT_TEXT_RE.test(text)
+  return !!text && (EXPLICIT_TEXT_RE.test(text) || affirmsExplicitAdultContent(text))
 }
