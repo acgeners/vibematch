@@ -195,3 +195,83 @@ describe("recálculo por edição — as DUAS previsões (expected_by_edition, m
     for (const r of legado.res.rows) expect(r.expected_by_edition).toBeNull()
   })
 })
+
+/**
+ * A CHANCE segue a disponibilidade da Nota Prevista na obra mixed: edição sem `adult_content`
+ * (`not_rated`) fica sem Chance. Sem isto o imputador pela mediana do treino fabricava uma Chance para
+ * a edição — medido no retrato de produção: as 70 edições sem nota ganhavam Chance (2026-10-11).
+ * Fora das mixed (e para outros atributos faltantes) a imputação segue igual.
+ */
+describe("recálculo por edição — a Chance some junto com a Nota Prevista", () => {
+  it("edição not_rated: sem Nota Prevista E sem Chance (nunca zero)", () => {
+    // w053: as duas edições sem nota · w051: normal 5, R18 sem nota
+    const w053 = normal.porId.get("w053")!
+    expect(w053.chance_score).toBeNull()
+    expect(w053.expected_by_edition!.normal.chance_score).toBeNull()
+    expect(w053.expected_by_edition!.r18.chance_score).toBeNull()
+    expect(r18.porId.get("w051")!.chance_score).toBeNull()
+    expect(normal.porId.get("w051")!.expected_by_edition!.r18.chance_score).toBeNull()
+  })
+
+  it("edição com nota: a Chance continua calculada", () => {
+    for (const id of ["w045", "w050"]) {
+      const p = normal.porId.get(id)!.expected_by_edition!
+      expect(p.normal.chance_score).toEqual(expect.any(Number))
+      expect(p.r18.chance_score).toEqual(expect.any(Number))
+    }
+    expect(normal.porId.get("w051")!.chance_score).toEqual(expect.any(Number))
+  })
+
+  it("sem fallback: a edição sem nota não recebe a Chance da outra (nos dois sentidos)", () => {
+    // w051 tem normal e não tem R18; w052 idem. Com a R18 como padrão, a normal (com nota) segue com
+    // Chance e a R18 (sem nota) fica sem — e vice-versa para a normal sem nota (w053, w054).
+    for (const id of ["w051", "w052"]) {
+      expect(r18.porId.get(id)!.chance_score).toBeNull()
+      expect(r18.porId.get(id)!.expected_by_edition!.normal.chance_score).toEqual(normal.porId.get(id)!.chance_score)
+    }
+    for (const id of ["w053", "w054"]) {
+      expect(normal.porId.get(id)!.chance_score).toBeNull()
+      expect(r18.porId.get(id)!.chance_score).toBeNull()
+    }
+  })
+
+  it("sem fallback R18 → normal: só a R18 com nota (normal not_rated) ⇒ a normal fica sem Chance", () => {
+    // w049 passa a ter a normal SEM nota e a R18 com 9 — o caso "só R18" do retrato de produção.
+    const linhas = LINHAS.map((l) => (l.work_id === "w049" && l.edition === "normal" ? row("w049", "normal", null, "not_rated") : l))
+    const works = catalogo().map((raw) => buildWork(raw, {} as Parameters<typeof buildWork>[1], { edition: "normal", rowsByWork: groupEditionRows(linhas) }))
+    const res = computeRecalc({ works, weights: pesos, config, tasteProfile: null, declaredTagPrefs: [], includeQuality: false, aiQualityByWork: new Map(), fast: true })
+    const w049 = res.rows.find((r) => r.work_id === "w049")!
+    expect(w049.expected_score).toBeNull()
+    expect(w049.chance_score).toBeNull()
+    expect(w049.expected_by_edition!.normal.chance_score).toBeNull()
+    expect(w049.expected_by_edition!.r18.chance_score).toEqual(expect.any(Number))
+    expect(w049.expected_by_edition!.r18.chance_score).toBe(r18.porId.get("w049")!.chance_score)
+  })
+
+  it("Chance disponível ⇔ Nota Prevista disponível, em toda edição de toda obra mixed", () => {
+    for (const run of [normal, r18]) {
+      for (const id of MIXED) {
+        for (const ed of ["normal", "r18"] as const) {
+          const p = run.porId.get(id)!.expected_by_edition![ed]
+          expect(p.chance_score === null).toBe(p.expected_score === null)
+        }
+      }
+    }
+  })
+
+  it("fora das mixed a imputação pela mediana segue: obra sem um atributo continua com Chance", () => {
+    const sem = (raw: RawWork, slug: string): RawWork => ({ ...raw, category_scores: raw.category_scores.filter((c) => c.criterion_slug !== slug) })
+    const cat = () => catalogo().map((raw) => (raw.id === "w010" ? sem(raw, "adult_content") : raw.id === "w011" ? sem(raw, "romance") : raw))
+    const roda = (ctx?: RecalcEditionContext) => {
+      const works = cat().map((raw) => buildWork(raw, {} as Parameters<typeof buildWork>[1], ctx))
+      const res = computeRecalc({ works, weights: pesos, config, tasteProfile: null, declaredTagPrefs: [], includeQuality: false, aiQualityByWork: new Map(), fast: true })
+      return new Map(res.rows.map((r) => [r.work_id, r]))
+    }
+    const semCtx = roda()
+    const comCtx = roda({ edition: "normal", rowsByWork: groupEditionRows(LINHAS) })
+    for (const id of ["w010", "w011"]) {
+      expect(semCtx.get(id)!.chance_score).toEqual(expect.any(Number))
+      expect(comCtx.get(id)!.chance_score).toBe(semCtx.get(id)!.chance_score)
+    }
+  })
+})

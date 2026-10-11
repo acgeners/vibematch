@@ -1493,15 +1493,27 @@ export function computeRecalc(input: RecalcComputeInput) {
   const chancePredictor = trainChancePredictor(chanceTrainInputs, chanceTrainLabels)
   // Treino com o legado; previsão com o mapa da edição — mesmo arranjo da Nota Prevista.
   const chanceScores = chancePredictor.predictScore(works.map((w) => buildChanceInput(w, w.predictionCategoryScores)))
+  /**
+   * Obra mixed: a edição sem `adult_content` (`not_rated`) fica SEM Chance, como fica sem Nota
+   * Prevista. A ausência ali é decisão ("não avaliado para esta edição"), não dado faltando — o
+   * imputador pela mediana fabricaria uma Chance para a edição. Só o mapa de EDIÇÃO: obra não-mixed e
+   * outros atributos faltantes seguem com a imputação de sempre.
+   */
+  const edicaoSemNotaAdulta = (w: WorkComputed, scores: CategoryScoreMap) =>
+    w.editionMaps != null && scores.adult_content == null
   works.forEach((w, i) => {
     w.chanceIsStub = chancePredictor.isStub
-    w.chanceScore = chancePredictor.isStub ? null : Math.round(chanceScores[i] * 100) / 100
+    w.chanceScore =
+      chancePredictor.isStub || edicaoSemNotaAdulta(w, w.predictionCategoryScores)
+        ? null
+        : Math.round(chanceScores[i] * 100) / 100
   })
 
   // ---------- 5c) Obra mixed: a previsão da OUTRA edição ----------
   // As colunas de sempre têm a edição padrão de quem recebe a nota; a outra sai do MESMO preditor
   // (treino intacto, no legado) com o mapa DELA — `expected_by_edition` guarda as duas. Edição sem
-  // `adult_content` fica sem Nota Prevista (o mesmo gate dos 9 atributos), nunca com a da outra.
+  // `adult_content` fica sem Nota Prevista (o mesmo gate dos 9 atributos) e sem Chance
+  // (`edicaoSemNotaAdulta`), nunca com as da outra.
   for (const w of works) {
     if (!w.editionMaps || !w.predictionEdition) continue
     const daPadrao: EditionPrediction = {
@@ -1519,9 +1531,10 @@ export function computeRecalc(input: RecalcComputeInput) {
         continue
       }
       const maps = w.editionMaps[ed]
-      const chance = chancePredictor.isStub
-        ? null
-        : Math.round(chancePredictor.predictScore([buildChanceInput(w, maps.raw)])[0] * 100) / 100
+      const chance =
+        chancePredictor.isStub || edicaoSemNotaAdulta(w, maps.raw)
+          ? null
+          : Math.round(chancePredictor.predictScore([buildChanceInput(w, maps.raw)])[0] * 100) / 100
       const temOsNove = SCORING_CRITERION_SLUGS.every((slug) => maps.raw[slug] != null)
       if (!temOsNove) {
         porEdicao[ed] = {
