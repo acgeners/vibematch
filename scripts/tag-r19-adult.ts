@@ -1,4 +1,11 @@
 /**
+ * 🔴 APOSENTADO em 2026-10-10 — RECUSA rodar. Ele transformava `adult_content >= 7` na tag R19, que é
+ * FORTE e liga o gate 18+ sozinha: a regra "nota alta ⇒ R18" por outra porta. A decisão de 10/10
+ * tirou a nota do gate (gate e nota são dimensões diferentes; a nota tem legado e pisos). Rodado em
+ * 2026-07-09 03:49 UTC: 229 vínculos R19 sem `source`. A migration 211 apaga os 51 que nenhuma fonte
+ * confirma; os 178 confirmados ou ambíguos ficam (auditoria em Auditoria/tags-adultas-e-geral-2026-10-10/r19/).
+ * ⚠️ O "Reverter" abaixo é histórico e PERIGOSO hoje: apagaria também os R19 confirmados por fonte.
+ *
  * Adiciona a tag R19 a todas as obras com adult_content >= 7.
  * DRY-RUN por padrão (read-only). --execute grava (aditivo, ignoreDuplicates,
  * source NULL = igual às tags manuais).
@@ -129,7 +136,10 @@ async function main() {
   console.log(`\n✅ Concluído. Obras qualificadas agora com R19: ${verifyCount}/${qualifyingIds.length}`)
 }
 
-main().catch((e) => {
-  console.error("ERRO:", e)
-  process.exit(1)
-})
+// Recusa ANTES de qualquer leitura ou escrita (ver o cabeçalho). `main` fica para o registro histórico.
+console.error(
+  "🔴 tag-r19-adult.ts está aposentado (2026-10-10): nota alta não pode mais virar a tag R19 forte — " +
+    "isso reintroduz 'adult_content >= 7 ⇒ R18', que a decisão de 10/10 tirou do gate.",
+)
+process.exit(2)
+void main

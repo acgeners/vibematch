@@ -365,8 +365,9 @@ function normalizeExternalPlatformUpdates(
 async function upsertTagsBatch(
   supabase: SupabaseAdminClient,
   names: string[],
+  origin: "manual" | "external" = "manual",
 ): Promise<string[]> {
-  const { ids, createdIds } = await resolveOrCreateTags(supabase, names)
+  const { ids, createdIds } = await resolveOrCreateTags(supabase, names, origin)
   scheduleTagEnrichment(createdIds)
   return ids
 }
@@ -424,7 +425,7 @@ async function syncWorkTags(
       console.error(`[syncWorkTags] upsert work_tags failed (workId=${workId})`, error.message)
     }
   }
-  // Tags mudaram → recomputa a classificação 18+ (monotônico; migração 161).
+  // Tags mudaram → recalcula o gate 18+ (≥1 tag forte; liga e desliga — lib/tags/adult-classify.ts).
   await recomputeAdultAuto(supabase, workId)
   return { changed: toRemove.length > 0 || toAdd.length > 0 }
 }
@@ -664,7 +665,9 @@ async function syncWorkTagsPartial(
   knownGenreIds: string[] = []
 ) {
   if (tags !== undefined) {
-    const uniqueIdsToAdd = [...new Set(await upsertTagsBatch(supabase, tags))]
+    // As tags daqui vêm SEMPRE das fontes (diálogo "Atualizar dados" e `autoRefreshWorkData`).
+    // Antes eram gravadas como `origin=manual`, e tag nova de fonte ficava fora da fila "Tags novas".
+    const uniqueIdsToAdd = [...new Set(await upsertTagsBatch(supabase, tags, "external"))]
     if (uniqueIdsToAdd.length > 0) {
       const { data: existing } = await supabase
         .from("work_tags").select("tag_id").eq("work_id", workId)
@@ -680,6 +683,9 @@ async function syncWorkTagsPartial(
         if (error) {
           console.error(`[syncWorkTagsPartial] upsert work_tags failed (workId=${workId})`, error.message)
         }
+        // Tag adulta JÁ EXISTENTE vinculada aqui não passa pelo enricher (só tag nova passa), e o
+        // gate só era recalculado no `syncWorkTags` do formulário — o vínculo ficava sem efeito.
+        await recomputeAdultAuto(supabase, workId)
       }
     }
   }

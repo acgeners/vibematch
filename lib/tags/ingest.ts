@@ -8,6 +8,7 @@ import { TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
 import { classifyTagsByGroup } from "@/lib/ai-evaluation/tag-classifier"
 import { enrichTagsForGroup } from "@/lib/ai-evaluation/tag-enricher"
 import { recomputeAdultAuto } from "@/lib/tags/adult-classify"
+import type { TagEnrichmentStatus } from "@/lib/tags/enrichment-status"
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>
 
@@ -146,14 +147,27 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
   const tags = (tagsData ?? []) as NewTagRow[]
   if (tags.length === 0) return
 
+  const now = new Date().toISOString()
+  // Desfecho de cada tag (`tags.enrichment_status`, migration 210). Só `done` grava a marca de
+  // revisão do piso; os outros deixam a tag visível como ainda pendente. Nunca uma falha com cara
+  // de decisão: ver `lib/tags/enrichment-status.ts`.
+  const outcome = new Map<string, { status: TagEnrichmentStatus; detail: string | null }>()
+
   // 1. Group classification for tags the catalog couldn't place.
   const ungrouped = tags.filter((t) => !t.tag_group_id)
   if (ungrouped.length > 0) {
     const cls = await classifyTagsByGroup({ tagNames: ungrouped.map((t) => t.name) })
     for (const t of ungrouped) {
-      const gid = cls.byName.get(t.name) ?? cls.fallbackGroupId
-      t.tag_group_id = gid
-      await supabase.from("tags").update({ tag_group_id: gid }).eq("id", t.id)
+      const gid = cls.byName.get(t.name)
+      if (gid) {
+        t.tag_group_id = gid
+        await supabase.from("tags").update({ tag_group_id: gid }).eq("id", t.id)
+      } else if (cls.outcome === "ok") {
+        // O classificador respondeu, mas não sobre esta tag. Antes ela ia para `other` aqui.
+        outcome.set(t.id, { status: "partial", detail: "grupo: o classificador não devolveu grupo válido" })
+      } else {
+        outcome.set(t.id, { status: cls.outcome, detail: `grupo: ${cls.detail ?? cls.outcome}` })
+      }
     }
   }
 
@@ -165,21 +179,20 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
     arr.push(t)
     byGroup.set(t.tag_group_id, arr)
   }
-  if (byGroup.size === 0) return
-
-  const { data: groupRows } = await supabase
-    .from("tag_group")
-    .select("id, slug, group")
-    .in("id", [...byGroup.keys()])
+  const { data: groupRows } = byGroup.size
+    ? await supabase.from("tag_group").select("id, slug, group").in("id", [...byGroup.keys()])
+    : { data: [] }
   const groupById = new Map((groupRows ?? []).map((g) => [g.id as string, g]))
-  const now = new Date().toISOString()
   // Tags que a IA marcou como 18+ nesta rodada — usadas depois pra recomputar o
   // adult_auto das obras que já as carregam (o enriquecimento roda em after()).
   const adultTagIds: string[] = []
 
   for (const [groupId, groupTags] of byGroup) {
     const g = groupById.get(groupId)
-    if (!g) continue
+    if (!g) {
+      for (const t of groupTags) outcome.set(t.id, { status: "partial", detail: "grupo da tag não encontrado" })
+      continue
+    }
     const groupSlug = g.slug as string
 
     const [{ data: subs }, { data: existing }] = await Promise.all([
@@ -206,7 +219,7 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
       ]),
     )
 
-    const result = await enrichTagsForGroup({
+    const enr = await enrichTagsForGroup({
       groupSlug,
       groupName: (g.group as string | null) ?? groupSlug,
       newTags: groupTags.map((t) => ({ name: t.name, slug: t.slug })),
@@ -219,8 +232,15 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
     })
 
     for (const t of groupTags) {
-      const r = result.get(t.name)
-      if (!r) continue
+      if (enr.outcome !== "ok") {
+        outcome.set(t.id, { status: enr.outcome, detail: `enriquecimento: ${enr.detail ?? enr.outcome}` })
+        continue
+      }
+      const r = enr.results.get(t.name)
+      if (!r) {
+        outcome.set(t.id, { status: "partial", detail: "enriquecimento: o modelo não devolveu esta tag" })
+        continue
+      }
 
       // Sub-group → applied.
       let assignedSubgroupId: string | null = null
@@ -288,21 +308,39 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
       // acima; fecha o vazamento estrutural pra tags NOVAS (o rules.ts lê esta
       // coluna, não mais um Set hardcoded no código). Marca reviewed_at mesmo
       // quando a IA decide "none" — sem isso a tag reapareceria pra sempre na
-      // fila de revisão manual (server/actions/tag-review.ts).
-      await supabase
+      // fila de revisão manual (server/actions/tag-review.ts). Só chega aqui quem o modelo
+      // de fato avaliou (`r` existe) — falha e omissão saíram pelos `continue` acima.
+      const { error: doneErr } = await supabase
         .from("tags")
         .update({
           ...(r.adultScoreTier === "explicit" || r.adultScoreTier === "label"
             ? { adult_score_tier: r.adultScoreTier }
             : {}),
           adult_score_tier_reviewed_at: now,
+          enrichment_status: "done",
+          enrichment_at: now,
+          enrichment_detail: null,
         })
         .eq("id", t.id)
+      if (doneErr) console.error(`[enrichNewTags] gravar "done" falhou (${t.name}):`, doneErr.message)
+      outcome.set(t.id, { status: "done", detail: null })
     }
   }
 
-  // Recomputa adult_auto das obras que carregam as tags recém-flagadas como 18+.
-  // recomputeAdultAuto é monotônico (só sobe) e best-effort.
+  // Desfechos que NÃO são decisão: grava o estado e o motivo, e não toca grupo/subgrupo/18+/piso.
+  for (const t of tags) {
+    const o = outcome.get(t.id) ?? { status: "partial" as const, detail: "sem grupo e sem classificação" }
+    if (o.status === "done") continue
+    console.warn(`[enrichNewTags] "${t.name}" ficou ${o.status}: ${o.detail}`)
+    const { error } = await supabase
+      .from("tags")
+      .update({ enrichment_status: o.status, enrichment_at: now, enrichment_detail: o.detail })
+      .eq("id", t.id)
+    if (error) console.error(`[enrichNewTags] gravar status falhou (${t.name}):`, error.message)
+  }
+
+  // Recalcula o gate das obras que carregam as tags recém-flagadas como 18+ (só a FORTE liga;
+  // ver lib/tags/adult-classify.ts). Best-effort.
   if (adultTagIds.length > 0) {
     // `.in(<N tags>)`: quantas linhas volta depende de quantas tags a rodada marcou como
     // 18+. Uma rodada normal marca poucas, mas o TETO é grande — as 167 tags com indicador

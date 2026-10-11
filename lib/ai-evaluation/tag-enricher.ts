@@ -1,6 +1,8 @@
 import "server-only"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { ACTIVE_MODELS } from "@/lib/ai/models"
+import { providerDetailOf, providerOutcomeOf } from "@/lib/tags/enrichment-status"
+import type { ProviderOutcome } from "@/lib/tags/enrichment-status"
 
 const MODEL = ACTIVE_MODELS.haiku
 
@@ -135,26 +137,33 @@ ${existingSection}
 Regras: responda SEMPRE chamando a tool enrich_tags, com uma entrada por tag nova. Use apenas slugs das listas acima (ou "none").`
 }
 
-// Returns a map keyed by new-tag name. Names not returned by the model get a
-// neutral result (no sub-group, no synonym).
+export interface EnrichTagsForGroupResult {
+  /**
+   * Nome → resultado, SÓ para as tags sobre as quais o modelo respondeu. Tag ausente = o modelo
+   * não decidiu nada sobre ela.
+   *
+   * 🔴 Até a migration 210 este mapa vinha pré-preenchido com um resultado NEUTRO para toda tag
+   * (sem subgrupo, `adult_level=none`, `adult_score_tier=none`) e era devolvido assim também quando
+   * a chamada nem acontecia — sem chave, guard de proveniência, erro do provider. O neutro era
+   * indistinguível de uma decisão, e `enrichNewTags` gravava a marca de revisão em cima dele.
+   */
+  results: Map<string, EnrichResult>
+  outcome: ProviderOutcome
+  detail: string | null
+}
+
 export async function enrichTagsForGroup(
   input: EnrichTagsForGroupInput,
-): Promise<Map<string, EnrichResult>> {
-  const out = new Map<string, EnrichResult>()
-  for (const t of input.newTags) {
-    out.set(t.name, {
-      subgroupSlug: null,
-      synonymOfSlug: null,
-      confidence: 0,
-      adultLevel: "none",
-      adultScoreTier: "none",
-    })
+): Promise<EnrichTagsForGroupResult> {
+  const results = new Map<string, EnrichResult>()
+  if (input.newTags.length === 0) return { results, outcome: "ok", detail: null }
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return { results, outcome: "provider_not_called", detail: "ANTHROPIC_API_KEY ausente" }
   }
-  if (input.newTags.length === 0) return out
-  if (!process.env.ANTHROPIC_API_KEY) return out
 
   const subSlugs = new Set(input.approvedSubgroups.map((s) => s.slug))
   const existingSlugs = new Set(input.existingTags.map((t) => t.slug))
+  const asked = new Set(input.newTags.map((t) => t.name))
 
   let raw: RawClassification[] = []
   try {
@@ -182,12 +191,13 @@ export async function enrichTagsForGroup(
     const payload = toolUse?.input as { results?: RawClassification[] } | undefined
     raw = payload?.results ?? []
   } catch (error) {
-    console.error("[tag-enricher] failed; sem enriquecimento", error)
-    return out
+    const outcome = providerOutcomeOf(error)
+    console.error(`[tag-enricher] ${outcome}: nenhuma tag enriquecida`, error)
+    return { results, outcome, detail: providerDetailOf(error) }
   }
 
   for (const r of raw) {
-    if (!r.tag_name || !out.has(r.tag_name)) continue
+    if (!r.tag_name || !asked.has(r.tag_name)) continue
     const subgroupSlug = r.subgroup_slug && subSlugs.has(r.subgroup_slug) ? r.subgroup_slug : null
     const synonymOfSlug = r.synonym_of_slug && existingSlugs.has(r.synonym_of_slug) ? r.synonym_of_slug : null
     const confidence = typeof r.confidence === "number" ? r.confidence : 0
@@ -195,7 +205,7 @@ export async function enrichTagsForGroup(
       r.adult_level === "explicit" || r.adult_level === "label" ? r.adult_level : "none"
     const adultScoreTier: AdultScoreTier =
       r.adult_score_tier === "explicit" || r.adult_score_tier === "label" ? r.adult_score_tier : "none"
-    out.set(r.tag_name, { subgroupSlug, synonymOfSlug, confidence, adultLevel, adultScoreTier })
+    results.set(r.tag_name, { subgroupSlug, synonymOfSlug, confidence, adultLevel, adultScoreTier })
   }
-  return out
+  return { results, outcome: "ok", detail: null }
 }
