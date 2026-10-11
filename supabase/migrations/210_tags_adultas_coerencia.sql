@@ -1,7 +1,8 @@
 -- 210 — Gate 18+ só por tag FORTE; tags adultas reclassificadas; aliases; proveniência do enriquecimento
 --
--- 🔴 NÃO APLICADA. Escrita e ensaiada só num retrato descartável da nuvem (`retrato_tags`, backup de
--- 2026-10-10T16:58Z + 204/205). Conferida por `npm run test:db-tags-adultas`.
+-- ✅ APLICADA EM PRODUÇÃO em 2026-10-11 03:53Z, na mesma transação que a 211 e a 212 (PR #553,
+-- merge 2603971; código no ar na release Fly v41). Ensaiada antes em retratos descartáveis da nuvem
+-- (o último: backup de 2026-10-11T03:50Z) e conferida por `npm run test:db-tags-adultas`.
 --
 -- DECISÕES DE PRODUTO EM QUE ISTO SE APOIA (Ana, 2026-10-10, fechadas — não reabrir aqui):
 --   · o gate 18+ protege contra conteúdo sexual EXPLICITAMENTE mostrado/descrito — não contra obra

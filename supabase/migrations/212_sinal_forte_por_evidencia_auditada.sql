@@ -1,7 +1,8 @@
 -- 212 — Sinal forte que faltava, por evidência auditada: Smut (10 obras) e Pornographic (2)
 --
--- 🔴 NÃO APLICADA. Escrita e ensaiada só em retratos descartáveis da nuvem (o último: backup de
--- 2026-10-11T03:32Z). Conferida por `npm run test:db-tags-adultas` (que aplica 210 → 211 → 212).
+-- ✅ APLICADA EM PRODUÇÃO em 2026-10-11 03:53Z, na mesma transação que a 210 e a 211 (PR #553,
+-- merge 2603971; código no ar na release Fly v41). Ensaiada antes em retratos descartáveis da nuvem
+-- (o último: backup de 2026-10-11T03:50Z) e conferida por `npm run test:db-tags-adultas`.
 --
 -- POR QUE EXISTE: com o gate só por tag forte (210) e sem os R19 que a nota inventou (211), estas 12
 -- obras sairiam do 18+ — mas a auditoria obra a obra (Auditoria/tags-adultas-e-geral-2026-10-10/

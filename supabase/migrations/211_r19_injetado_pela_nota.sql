@@ -1,7 +1,8 @@
 -- 211 — Remove os vínculos R19 que a nota inventou (sem confirmação independente)
 --
--- 🔴 NÃO APLICADA. Escrita e ensaiada só num retrato descartável da nuvem (`retrato_tags`).
--- Conferida por `npm run test:db-tags-adultas` (que aplica 210 + 211).
+-- ✅ APLICADA EM PRODUÇÃO em 2026-10-11 03:53Z, na mesma transação que a 210 e a 212 (PR #553,
+-- merge 2603971; código no ar na release Fly v41). Ensaiada antes em retratos descartáveis da nuvem
+-- e conferida por `npm run test:db-tags-adultas` (que aplica 210 → 211 → 212).
 --
 -- POR QUE EXISTE: em 2026-07-09 03:49 UTC, `scripts/tag-r19-adult.ts` vinculou a tag R19 (forte) a
 -- toda obra com `adult_content >= 7` que ainda não a tinha — 229 vínculos, `source` NULL. Era a regra
