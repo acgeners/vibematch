@@ -5732,9 +5732,11 @@ sem gate do próprio `server/actions/ai.ts` **criaria um endpoint HTTP público 
 ⚠️ **Duas das 7 são do SISTEMA, não do modelo:** *"Fonte externa classifica como 'pornographic';
 …não pode ficar abaixo de 8.0"* é razão de uma versão anterior — hoje `pornographic` implica
 **9,0**. 🔴 Essa camada é a **única que o `adult-content-retroactive-bounds` não consegue
-reaplicar**: `contentRating` não é persistido em coluna nenhuma, só a avaliação o busca em
-runtime (`lib/external/index.ts`). Ou seja, mudança no `CONTENT_RATING_BOUNDS` **não tem
-backfill possível** — a nota fica no piso da versão antiga até alguém reavaliar, e nada acusa.
+reaplicar**: `contentRating` não tem coluna própria — só a avaliação o busca em runtime
+(`lib/external/index.ts`), e o valor fica preservado apenas dentro do `raw_response` das avaliações
+que o registraram (`externalContentRating`; nas versões novas, `adultContentBounds.explicitSignals`).
+Ou seja, mudança no `CONTENT_RATING_BOUNDS` **não tem backfill pronto** — a nota fica no piso da
+versão antiga até alguém reavaliar, e nada acusa.
 Quem acusa, agora, é este contador.
 
 ## A auditoria de critérios IA foi APOSENTADA (2026-08-16) — e o motivo não é qualidade
