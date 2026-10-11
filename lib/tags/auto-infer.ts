@@ -97,7 +97,7 @@ export async function inferAndPersistTagsForWork(
       console.error("[inferAndPersistTagsForWork] upsert falhou:", error.message)
       return 0
     }
-    // Uma tag explícita recém-inferida pode tornar a obra 18+ — recomputa (monotônico).
+    // Uma tag FORTE recém-inferida torna a obra 18+ (regra: ≥1 tag forte — lib/tags/adult-classify.ts).
     await recomputeAdultAuto(supabase, workId)
     return insertRows.length
   } catch (err) {

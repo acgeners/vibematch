@@ -45,7 +45,7 @@ Existem, mas não justificam frente agora. Corrigir quando o código for tocado 
   medido não justificou mudança. A Strategy B sai quando as rotuladas tiverem `fantasy` real
   ([fato] hoje 36 de 238).
 - **Tooltip do Radix sem `TooltipProvider` global:** só providers locais; esquecer um derruba a página.
-- **`contentRatings` só em runtime:** mudança em `CONTENT_RATING_BOUNDS` não tem backfill possível.
+- **`contentRatings` sem coluna própria:** o valor só fica no `raw_response` das avaliações que o registraram; mudança em `CONTENT_RATING_BOUNDS` não tem backfill pronto.
 - **Migrations não reconstroem o banco** (sem `CREATE TABLE` de `criteria` etc.; dois `132_*`).
   Mitigado pelo `schema.sql.gz` do backup semanal.
 - **Comix sem descoberta automática de hid:** obra nova precisa de hid manual ou ausência declarada

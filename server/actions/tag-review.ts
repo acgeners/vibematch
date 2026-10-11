@@ -128,17 +128,17 @@ export async function setTagAdult(tagId: string, level: AdultLevel): Promise<{ o
     console.error("[setTagAdult] falhou", error.message)
     return { ok: false }
   }
-  // Recomputa adult_auto (monotônico) das obras com essa tag.
-  if (indicator) {
-    // A tag mais usada do catálogo tem 894 vínculos — abaixo do corte de 1000, mas é o
-    // número de HOJE, e truncar aqui deixaria obras sem recomputar o flag 18+.
-    const wt = await fetchAllRows<{ work_id: string }>(
-      () => supabase.from("work_tags").select("work_id").eq("tag_id", tagId),
-      { orderBy: ["work_id", "tag_id"], label: "setTagAdultIndicator.work_tags" },
-    )
-    const workIds = [...new Set(wt.map((r) => r.work_id))]
-    for (const w of workIds) await recomputeAdultAuto(supabase, w)
-  }
+  // Recalcula o gate das obras com essa tag, nos DOIS sentidos: a regra é "≥1 tag forte"
+  // (lib/tags/adult-classify.ts), então rebaixar a flag também muda o gate. Antes só recalculava ao
+  // subir, porque a regra antiga era monotônica.
+  // A tag mais usada do catálogo tem 894 vínculos — abaixo do corte de 1000, mas é o
+  // número de HOJE, e truncar aqui deixaria obras sem recomputar o flag 18+.
+  const wt = await fetchAllRows<{ work_id: string }>(
+    () => supabase.from("work_tags").select("work_id").eq("tag_id", tagId),
+    { orderBy: ["work_id", "tag_id"], label: "setTagAdultIndicator.work_tags" },
+  )
+  const workIds = [...new Set(wt.map((r) => r.work_id))]
+  for (const w of workIds) await recomputeAdultAuto(supabase, w)
   revalidatePath("/curation/settings")
   return { ok: true }
 }

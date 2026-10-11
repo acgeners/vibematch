@@ -2,9 +2,8 @@ import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { ACTIVE_MODELS } from "@/lib/ai/models"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
-
-// Fallback tag_group when classification can't decide or fails.
-const OTHER_TAG_GROUP_ID = "606e6239-515b-46c5-b985-9f41f948cdc9"
+import { providerDetailOf, providerOutcomeOf } from "@/lib/tags/enrichment-status"
+import type { ProviderOutcome } from "@/lib/tags/enrichment-status"
 
 const MODEL = ACTIVE_MODELS.haiku
 
@@ -21,10 +20,19 @@ interface ClassifierInput {
 }
 
 export interface TagClassification {
-  /** Name → tag_group_id. Always defined for every input name. */
+  /**
+   * Nome → tag_group_id, SÓ para os nomes que o modelo de fato classificou com um slug válido
+   * (inclusive `other`, quando é o MODELO quem diz que nada encaixa). Nome ausente = não
+   * classificado: quem chama NÃO deve inventar um grupo para ele.
+   *
+   * 🔴 Até a migration 210 este mapa vinha preenchido com `other` para todo nome quando a chamada
+   * falhava — e a falha virava "decisão" no banco (ver `lib/tags/enrichment-status.ts`).
+   */
   byName: Map<string, string>
-  /** ID of the fallback group used when a name couldn't be classified. */
-  fallbackGroupId: string
+  /** O que aconteceu com a chamada. */
+  outcome: ProviderOutcome
+  /** Motivo, quando `outcome` não é "ok". */
+  detail: string | null
 }
 
 async function loadTagGroups(): Promise<TagGroupRow[]> {
@@ -89,8 +97,8 @@ async function callClassifier(
   tagNames: string[]
 ): Promise<Array<{ tag_name: string; group_slug: string }>> {
   if (!process.env.ANTHROPIC_API_KEY) {
-    console.warn("[tag-classifier] ANTHROPIC_API_KEY ausente; usando fallback")
-    return []
+    // Lançar (e não devolver []) é o que separa "não chamei" de "chamei e o modelo não classificou".
+    throw new Error("ANTHROPIC_API_KEY ausente: classificador de grupo não chamado")
   }
 
   const client = getAnthropicClient({ maxRetries: 6 })
@@ -131,34 +139,29 @@ async function callClassifier(
 }
 
 export async function classifyTagsByGroup({ tagNames }: ClassifierInput): Promise<TagClassification> {
-  const result: TagClassification = {
-    byName: new Map(),
-    fallbackGroupId: OTHER_TAG_GROUP_ID,
-  }
+  const result: TagClassification = { byName: new Map(), outcome: "ok", detail: null }
   if (tagNames.length === 0) return result
 
   const groups = await loadTagGroups()
-  const idBySlug = new Map(groups.map((g) => [g.slug, g.id]))
-  const otherId = idBySlug.get("other") ?? OTHER_TAG_GROUP_ID
-  result.fallbackGroupId = otherId
-
   if (groups.length === 0) {
-    for (const name of tagNames) result.byName.set(name, otherId)
-    return result
+    // Sem a lista de grupos não há prompt — e nada foi chamado.
+    return { ...result, outcome: "provider_not_called", detail: "tag_group não carregou" }
   }
+  const idBySlug = new Map(groups.map((g) => [g.slug, g.id]))
 
   let classifications: Array<{ tag_name: string; group_slug: string }> = []
   try {
     classifications = await callClassifier(buildSystemPrompt(groups), tagNames)
   } catch (error) {
-    console.error("[tag-classifier] classifier failed; usando fallback", error)
+    const outcome = providerOutcomeOf(error)
+    console.error(`[tag-classifier] ${outcome}: nenhum grupo atribuído`, error)
+    return { ...result, outcome, detail: providerDetailOf(error) }
   }
 
-  const byNameRaw = new Map(classifications.map((c) => [c.tag_name, c.group_slug]))
-  for (const name of tagNames) {
-    const slug = byNameRaw.get(name)
-    const groupId = slug ? idBySlug.get(slug) : undefined
-    result.byName.set(name, groupId ?? otherId)
+  // Slug fora da lista e nome omitido ficam FORA do mapa: o modelo não decidiu sobre eles.
+  for (const c of classifications) {
+    const groupId = idBySlug.get(c.group_slug)
+    if (groupId && tagNames.includes(c.tag_name)) result.byName.set(c.tag_name, groupId)
   }
   return result
 }

@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button"
 /**
  * Portão de conteúdo adulto (18+) na página da obra. Só entra em ação quando o
  * usuário ligou "ocultar conteúdo 18+" nas preferências E a obra é 18+
- * (adult_content >= 7 — decidido no server). Não some a obra (link direto não
+ * (`works.is_adult`, decidido no server: tag forte, override e estado de edição — a nota
+ * adult_content não entra no gate). Não some a obra (link direto não
  * quebra): desfoca a capa + o conteúdo e pede confirmação pra revelar (só nesta
  * sessão). Quando `gated` é false, é um passthrough sem custo de layout.
  */
