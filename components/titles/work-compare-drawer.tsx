@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import {
   ArrowDown,
@@ -311,6 +311,8 @@ export function WorkCompareDrawer({
   // tabela quando a Bússola está na tela (lá não há linha nem amplitude que ele explique).
   const [differentialsOpen, setDifferentialsOpen] = useState(false)
   const router = useRouter()
+  // `?adult=` da lista: a edição das obras mixed no comparador é a MESMA da lista (fase 2 de mixed).
+  const adultFilter = useSearchParams()?.get("adult") ?? null
   // Bump pra forçar o re-fetch das obras após o desempate por IA (repovoar a
   // linha "Veredito IA." com os alignment_score recém-computados).
   const [reloadKey, setReloadKey] = useState(0)
@@ -431,7 +433,7 @@ export function WorkCompareDrawer({
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetchCompareWorks(ids)
+    fetchCompareWorks(ids, { adultFilter })
       .then((data) => {
         if (cancelled) return
         fetchedForOpenRef.current = true
@@ -450,7 +452,7 @@ export function WorkCompareDrawer({
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, parentIdsSortedKey, reloadKey])
+  }, [open, parentIdsSortedKey, reloadKey, adultFilter])
 
   // Commita uma ordem de colunas vinda do grid (arrasto). Recebe ids porque a
   // ordem exibida lá pode estar ordenada por uma linha — índice de tela não

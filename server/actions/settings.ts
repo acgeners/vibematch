@@ -4,8 +4,12 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { ensureAdmin, getCurrentUserSettingsId } from "@/server/queries/current-user"
-import { recalculateScoresNowResult } from "@/server/recalc/queue"
+import { after } from "next/server"
+import { ensureAdmin, ensureSignedIn, getCurrentUserSettingsId, getOwnerUserId, getSessionUserId } from "@/server/queries/current-user"
+import { markRecalcPending, recalculateScoresInBackground, recalculateScoresNowResult } from "@/server/recalc/queue"
+import { recalculateForUser } from "@/server/recalc/user-recalc"
+import { createUserClient } from "@/lib/supabase/user"
+import { parseMixedEdition } from "@/lib/editions/mixed-edition"
 import {
   computeCalibration,
   computeBucketBreakdown,
@@ -340,8 +344,73 @@ export async function setHideAdultContent(enabled: boolean) {
 
   if (error) return { error: error.message }
 
+  // Fase 2 de mixed: ocultar 18+ força a edição NORMAL, que é a que entra na previsão das obras
+  // mixed. Sem recalc, a Nota Prevista delas fica escondida (calculada para a outra edição) até o
+  // próximo — honesto, mas desnecessário.
+  const userId = await getSessionUserId()
+  if (userId && (await scheduleUserPredictionRecalc(userId, "setHideAdultContent"))) {
+    await markRecalcPending("setHideAdultContent", { changed: ["mixed_edition_preference"], actorId: userId })
+    recalculateScoresInBackground("setHideAdultContent")
+  }
+
   revalidatePath("/preferences")
   return { error: null }
+}
+
+/**
+ * A edição PADRÃO das obras `mixed` para esta conta (`normal` | `r18` | null = normal). Ocultar 18+
+ * continua forçando a normal — esta preferência vale para quem não oculta.
+ *
+ * Cliente de SESSÃO: a RLS de `user_settings` prende a escrita à linha da pessoa no banco.
+ */
+export async function setPreferredMixedEdition(value: string | null) {
+  const edition = value == null ? null : parseMixedEdition(value)
+  if (value != null && edition == null) return { error: "Edição inválida." }
+  const auth = await ensureSignedIn()
+  if (!auth.ok) return { error: auth.error }
+
+  const supabase = await createUserClient()
+  const { data, error } = await supabase
+    .from("user_settings")
+    .update({ preferred_mixed_edition: edition })
+    .eq("current_user_id", auth.userId)
+    .select("id")
+  if (error) return { error: error.message }
+  if (!data?.length) return { error: "user_settings sem linha pro usuário atual." }
+
+  if (await scheduleUserPredictionRecalc(auth.userId, "setPreferredMixedEdition")) {
+    await markRecalcPending("setPreferredMixedEdition", { changed: ["mixed_edition_preference"], actorId: auth.userId })
+    recalculateScoresInBackground("setPreferredMixedEdition")
+  }
+  revalidatePath("/preferences")
+  revalidatePath("/catalog/[id]", "page")
+  revalidatePath("/ranking")
+  return { error: null }
+}
+
+/**
+ * A edição padrão mudou ⇒ o `adult_content` que entra na previsão das mixed mudou. Para quem NÃO é
+ * o dono, agenda o recalc dele em `after()` e devolve false. Para o dono devolve true: quem chama
+ * marca o recalc global com o contexto LITERAL (o inventário de `markRecalcPending` lê o source) e
+ * dispara o recálculo em background na hora (`recalculateScoresInBackground`, deduplicado pela
+ * orquestração).
+ *
+ * 🔴 A ORDEM importa: marcar ANTES de disparar. O disparo só roda com pendência (force=false), e se
+ * ele falhar a marca fica — o recálculo sai depois pela regra de 1h ou pelo "Recalcular notas". Sem o
+ * disparo, a Nota Prevista das telas que leem a edição padrão (home, similares, hover, descobrir,
+ * minha lista) ficava a da preferência ANTERIOR por 1h ou mais.
+ */
+async function scheduleUserPredictionRecalc(userId: string, context: string): Promise<boolean> {
+  const ownerId = await getOwnerUserId()
+  if (userId === ownerId) return true
+  after(async () => {
+    try {
+      await recalculateForUser(userId)
+    } catch (err) {
+      console.error(`[${context}] recalc do usuário falhou:`, err)
+    }
+  })
+  return false
 }
 
 export interface ScoreColorPercentilesUpdate {

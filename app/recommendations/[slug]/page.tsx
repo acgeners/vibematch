@@ -221,6 +221,7 @@ export default async function RunDetailPage({ params }: PageProps) {
                 work_id: r.work_id,
                 alignment_score: r.alignment_score,
                 justification: r.justification,
+                justificationHiddenForEdition: r.justificationHiddenForEdition,
                 top_match_factors: r.top_match_factors,
                 risks: r.risks,
                 confidence: r.confidence,

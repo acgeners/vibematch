@@ -4,7 +4,7 @@ import { fetchAllRows } from "@/lib/supabase/paginate"
 
 /** O select de `works` do recálculo global (catálogo; as colunas pessoais vêm do espelho). */
 export const RECALC_WORKS_SELECT = `id, publication_status_id, total_chapters, is_archived,
-         year, year_end, original_title,
+         year, year_end, original_title, edition_state,
          art_signal,
          category_scores(criterion_slug, score, source),
          platform_ratings(id, platform, rating, vote_count),
@@ -34,7 +34,7 @@ export function fetchRecalcWorks(supabase: Pick<SupabaseClient, "from">, page = 
 
 /** O select de `works` do recálculo POR USUÁRIO — sem `art_signal` (a arte é do catálogo). */
 export const USER_RECALC_WORKS_SELECT = `id, publication_status_id, total_chapters, is_archived,
-           year, year_end, original_title,
+           year, year_end, original_title, edition_state,
            category_scores(criterion_slug, score, source),
            platform_ratings(id, platform, rating, vote_count),
            work_tags(tags(name, tag_group_id))`

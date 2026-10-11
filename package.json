@@ -16,6 +16,7 @@
     "test:db-gate-aviso-sexual": "node scripts/gate-aviso-sexual-db.mjs",
     "test:db-edicao-mixed": "node scripts/edicao-mixed-db.mjs",
     "test:db-tags-adultas": "node scripts/tags-adultas-db.mjs",
+    "test:db-edicao-fase2": "node scripts/edicao-fase2-db.mjs",
     "clean": "rm -rf .next .turbo",
     "clean:all": "rm -rf .next .turbo node_modules",
     "lint": "eslint",

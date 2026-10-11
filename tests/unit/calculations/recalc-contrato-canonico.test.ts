@@ -86,7 +86,7 @@ describe.each([
 ])("%s — preflight do contrato de scoring", (_nome, rodar) => {
   it("enforce ligado + contrato incompatível: aborta ANTES de ler o catálogo", async () => {
     db.contrato = linha(["s10-outro"], true)
-    await expect(rodar()).rejects.toThrow(/INCOMPATÍVEL[\s\S]*s9-fantasy-b-v1[\s\S]*s10-outro/)
+    await expect(rodar()).rejects.toThrow(new RegExp(`INCOMPATÍVEL[\\s\\S]*${SCORING_CONTRACT}[\\s\\S]*s10-outro`))
     expect(db.tabelas).toEqual(["canonical_contract"])
     expect(db.upserts).toEqual([])
   })

@@ -227,6 +227,14 @@ export async function getHideAdultContent(_admin?: AdminClient): Promise<boolean
   return (row?.hide_adult_content as boolean | undefined) ?? false
 }
 
+// Edição padrão das obras `mixed` (migration 213): "normal" | "r18" | null (= normal). Anônimo ou
+// sem linha → null. Lido da MESMA linha memoizada — zero consulta extra.
+export async function getPreferredMixedEdition(): Promise<"normal" | "r18" | null> {
+  const row = await getCurrentUserSettingsRow()
+  const v = row?.preferred_mixed_edition
+  return v === "normal" || v === "r18" ? v : null
+}
+
 export interface ReviewSynthesisToggles {
   summaryEnabled: boolean
   digestEnabled: boolean

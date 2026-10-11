@@ -17,6 +17,8 @@ import { PostReadingWeightsForm } from "@/components/settings/post-reading-weigh
 import { PostReadingWeightSuggestionsPanel } from "@/components/settings/post-reading-weight-suggestions-panel"
 import { RankingPreferencesForm } from "@/components/settings/ranking-preferences-form"
 import { HideAdultContentToggle } from "@/components/settings/hide-adult-content-toggle"
+import { MixedEditionPreference } from "@/components/settings/mixed-edition-preference"
+import { getMixedEditionSettings } from "@/server/queries/edition-scores"
 import { SavedRankingFilters } from "@/components/settings/saved-ranking-filters"
 import { ScoreColorPercentilesForm } from "@/components/settings/score-color-percentiles-form"
 import { CriterionColorPercentilesForm } from "@/components/settings/criterion-color-percentiles-form"
@@ -137,8 +139,13 @@ async function ItemBody({ section, isAdmin }: { section: SettingsSection; isAdmi
     }
 
     case "adult-content": {
-      const hideAdult = await getHideAdultContent()
-      return <HideAdultContentToggle initialHidden={hideAdult} />
+      const [hideAdult, editionSettings] = await Promise.all([getHideAdultContent(), getMixedEditionSettings()])
+      return (
+        <div className="space-y-4">
+          <HideAdultContentToggle initialHidden={hideAdult} />
+          <MixedEditionPreference initial={editionSettings.preference} hideAdult={hideAdult} />
+        </div>
+      )
     }
 
     case "preference-rules": {

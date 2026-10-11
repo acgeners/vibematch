@@ -57,6 +57,17 @@ import {
 } from "@/lib/ai-recommendation/taste-profile-heuristic"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { SCORING_CRITERION_SLUGS } from "@/lib/calculations/scoring-features"
+import {
+  adultContentFor,
+  asPersistedEditionPrediction,
+  defaultMixedEdition,
+  groupEditionRows,
+  isMixedEditionState,
+  MIXED_EDITIONS,
+  scoresForEdition,
+} from "@/lib/editions/mixed-edition"
+import type { EditionPrediction, EditionScoreRow, MixedEdition, PredictionByEdition } from "@/lib/editions/mixed-edition"
+import { fetchAllEditionScores, loadMixedEditionSettingsFor } from "@/server/queries/edition-scores"
 import { readFantasyDrift, scoringCriteriaSignature } from "@/server/queries/fantasy-drift"
 import { SCORING_CONTRACT, conferirContratoDoCalculo, mensagemDeContratoQuebrado } from "@/lib/calculations/scoring-contract"
 import { exigirContratoDeScoring } from "@/server/queries/canonical-contract"
@@ -131,6 +142,24 @@ export interface RawWork {
    * estimador de arte, que é critério de ordenação/filtro. Ver `lib/art/`.
    */
   art_signal?: unknown
+  /** `works.edition_state` (mig 204). Só `mixed` tem nota por edição. */
+  edition_state?: string | null
+}
+
+/**
+ * Contexto de EDIÇÃO do recálculo (migrations 213/214): a edição PADRÃO de quem recebe a nota
+ * (`defaultMixedEdition`) — a das colunas de sempre (`expected_*`, `chance_*`) — e as linhas de
+ * `work_edition_scores` por obra. A outra edição também é prevista e vai para `expected_by_edition`.
+ */
+export interface RecalcEditionContext {
+  edition: MixedEdition
+  rowsByWork: Map<string, EditionScoreRow[]>
+}
+
+/** Os mapas de notas VISTOS numa edição (cru e calibrado). */
+interface EditionMaps {
+  raw: CategoryScoreMap
+  calibrated: CategoryScoreMap
 }
 
 interface WorkComputed {
@@ -157,6 +186,26 @@ interface WorkComputed {
    * lib/calculations/fantasy-scoring-transition.ts). Só diagnóstico — não é persistido.
    */
   fantasyScoringSource: FantasyScoringSource
+  /**
+   * 🔴 O mapa da PREVISÃO. Em obra `mixed` com contexto de edição, é `categoryScores` com o
+   * `adult_content` da EDIÇÃO (ou SEM ele, quando a edição não tem nota — e aí o gate dos 9 atributos
+   * deixa a Nota Prevista nula, que é o "não avaliado para esta edição"). Nos demais casos, é o
+   * próprio `categoryScores` (mesma referência).
+   *
+   * ⚠️ O TREINO continua com `categoryScores`: os rótulos das obras mixed não dizem qual edição a
+   * pessoa leu, e trocar a feature de um rótulo por outra edição mudaria o modelo por suposição.
+   */
+  predictionCategoryScores: CategoryScoreMap
+  predictionCategoryScoresCalibrated: CategoryScoreMap
+  /** A edição das colunas de sempre (null em obra não-mixed). Vai para `expected_edition`. */
+  predictionEdition: MixedEdition | null
+  /** Obra mixed com contexto: os mapas de CADA edição (a padrão é `predictionCategoryScores`). */
+  editionMaps: Record<MixedEdition, EditionMaps> | null
+  /** Obra mixed com contexto: a previsão das DUAS edições. Vai para `expected_by_edition`. */
+  expectedByEdition: PredictionByEdition | null
+  /** IA(n) e CriterionFit sobre o mapa da previsão (iguais aos de treino fora das mixed). */
+  predIaEvalNormalizedCalibrated: number
+  predCriterionFitScore: number | null
   platformRatings: PlatformRating[]
   totalVotes: number
   tags: Array<{ name: string; group: string | null }>
@@ -208,7 +257,7 @@ function detectOrigin(originalTitle: string | null): string {
   return "other"
 }
 
-export function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed {
+export function buildWork(raw: RawWork, biasMap: AttributeBiasMap, edition?: RecalcEditionContext): WorkComputed {
   const categoryScores: CategoryScoreMap = {}
   const withSource: Partial<Record<CriterionSlug, CategoryScoreWithSource>> = {}
   for (const cs of raw.category_scores ?? []) {
@@ -232,6 +281,38 @@ export function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed
   // calibração, de propósito: o legado entra cru. Não toca nas linhas de `category_scores`.
   const fantasyScoring = resolveTransitionalFantasy(raw.category_scores ?? [])
   applyTransitionalFantasy({ raw: categoryScores, calibrated: categoryScoresCalibrated }, fantasyScoring)
+
+  // Nota por EDIÇÃO (migs 213/214): só na previsão, só em obra mixed, nunca da outra edição. As DUAS
+  // edições têm mapa; a padrão vira o mapa das colunas de sempre, a outra é prevista à parte.
+  let predictionCategoryScores: CategoryScoreMap = categoryScores
+  let predictionCategoryScoresCalibrated: CategoryScoreMap = categoryScoresCalibrated
+  let predictionEdition: MixedEdition | null = null
+  let editionMaps: Record<MixedEdition, EditionMaps> | null = null
+  if (edition && isMixedEditionState(raw.edition_state)) {
+    const legacySource = withSource.adult_content?.source
+    const mapsFor = (ed: MixedEdition): EditionMaps => {
+      const resolution = adultContentFor(
+        { isMixed: true, legacyScore: categoryScores.adult_content, editionRows: edition.rowsByWork.get(raw.id) },
+        ed,
+      )
+      // O offset de viés (Fase 1.5) só corrige nota de ORIGEM IA. A nota da edição herda a origem da
+      // legada quando É a legada (`reused_existing`); baseline e curadoria passam crus.
+      const editionSource: CategoryScoreWithSource["source"] =
+        resolution.kind === "edition" && resolution.row.source === "reused_existing" && legacySource ? legacySource : "manual"
+      const calibratedAdult =
+        resolution.kind === "edition"
+          ? applyBiasToCategoryScores({ adult_content: { value: resolution.score, source: editionSource } }, biasMap).adult_content
+          : null
+      const calibrated = { ...categoryScoresCalibrated }
+      if (calibratedAdult != null) calibrated.adult_content = calibratedAdult
+      else delete calibrated.adult_content
+      return { raw: scoresForEdition(categoryScores, resolution), calibrated }
+    }
+    editionMaps = { normal: mapsFor("normal"), r18: mapsFor("r18") }
+    predictionEdition = edition.edition
+    predictionCategoryScores = editionMaps[edition.edition].raw
+    predictionCategoryScoresCalibrated = editionMaps[edition.edition].calibrated
+  }
   const platformRatings: PlatformRating[] = (raw.platform_ratings ?? []).map(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (p: any) => ({
@@ -288,6 +369,13 @@ export function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed
     categoryScores,
     categoryScoresCalibrated,
     fantasyScoringSource: fantasyScoring.source,
+    predictionCategoryScores,
+    predictionCategoryScoresCalibrated,
+    predictionEdition,
+    editionMaps,
+    expectedByEdition: null,
+    predIaEvalNormalizedCalibrated: 0,
+    predCriterionFitScore: null,
     platformRatings,
     totalVotes: sumVotes(platformRatings),
     tags,
@@ -336,6 +424,20 @@ function buildExpectedInput(w: WorkComputed): ExpectedScoreInput {
     runLength: w.runLength,
     origin: w.origin,
     postScores: w.postScores,
+  }
+}
+
+/**
+ * Input da PREVISÃO — o de treino com o mapa da edição (obra mixed) no lugar do legado. Fora das
+ * mixed é idêntico a `buildExpectedInput`.
+ */
+function buildExpectedPredictionInput(w: WorkComputed): ExpectedScoreInput {
+  if (w.predictionCategoryScoresCalibrated === w.categoryScoresCalibrated) return buildExpectedInput(w)
+  return {
+    ...buildExpectedInput(w),
+    categoryScores: w.predictionCategoryScoresCalibrated,
+    iaEvalNormalized: w.predIaEvalNormalizedCalibrated,
+    criterionFitScore: w.predCriterionFitScore,
   }
 }
 
@@ -531,7 +633,7 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   //
   // `loadOwnerLabels` falha alto se os rótulos sumirem — porque um Ridge sem rótulos não
   // reclama: ele cai na média do treino e devolve 878 notas plausíveis e erradas.
-  const [worksRes, weightsRes, configRes, tasteProfile, declaredTagPrefs, ownerLabels, artLabels] =
+  const [worksRes, weightsRes, configRes, tasteProfile, declaredTagPrefs, ownerLabels, artLabels, editionCtx] =
     await Promise.all([
       // 🔴 `.limit(2000)` NÃO é honrado — o PostgREST corta em 1000. Medido em 2026-09-08:
       // 1.010 obras ativas na nuvem, então 10 delas ficavam FORA do recalc: nunca entravam
@@ -556,6 +658,12 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
       // Rótulos de arte DO DONO — mesmo motivo do `getOwnerUserId` acima: sem sessão, resolver
       // pelo usuário corrente treinaria o estimador do catálogo no gosto de outra pessoa.
       getOwnerUserId().then((id) => loadArtLabels(id, supabase)),
+      // Nota por EDIÇÃO das obras mixed (migs 213/214) + a edição padrão DO DONO — explícito, pelo
+      // mesmo motivo do perfil acima: sem sessão, "o usuário corrente" seria o singleton por acaso.
+      getOwnerUserId().then(async (id): Promise<RecalcEditionContext> => {
+        const [rows, settings] = await Promise.all([fetchAllEditionScores(supabase), loadMixedEditionSettingsFor(id, supabase)])
+        return { edition: defaultMixedEdition(settings), rowsByWork: groupEditionRows(rows) }
+      }),
     ])
 
   if (worksRes.error) throw new Error(worksRes.error.message)
@@ -567,7 +675,7 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   // (features, Ridge, chance, viés) continua vendo exatamente a mesma forma de sempre — é o
   // que permite exigir que as 882 `expected_score` saiam IDÊNTICAS.
   const rawWorks = withOwnerLabels(worksRes.data as RawWork[], ownerLabels)
-  const works = rawWorks.map((raw) => buildWork(raw, biasMap))
+  const works = rawWorks.map((raw) => buildWork(raw, biasMap, editionCtx))
 
   // L0+ (Pago): pra obras SEM pós-leitura do user (não-lidas), preenche
   // postScores com a estimativa de qualidade da IA (ai_quality_predictions).
@@ -1065,6 +1173,10 @@ export function computeRecalc(input: RecalcComputeInput) {
     w.iaEvalNormalizedCalibrated = normalizeGPT(
       calculateGPT(w.categoryScoresCalibrated, effectiveWeights),
     )
+    w.predIaEvalNormalizedCalibrated =
+      w.predictionCategoryScoresCalibrated === w.categoryScoresCalibrated
+        ? w.iaEvalNormalizedCalibrated
+        : normalizeGPT(calculateGPT(w.predictionCategoryScoresCalibrated, effectiveWeights))
   }
 
   // Global mean precisa dos platform_avg de todos. Calcular em 2 passes:
@@ -1114,6 +1226,10 @@ export function computeRecalc(input: RecalcComputeInput) {
       w.lovedTagOverlap = weightedTagOverlap(w.tags, effectiveProfile.loved_tags)
       w.avoidedTagOverlap = weightedTagOverlap(w.tags, effectiveProfile.avoided_tags)
       w.criterionFitScore = criterionAlignment(w.categoryScoresCalibrated, effectiveProfile.criterion_preferences)
+      w.predCriterionFitScore =
+        w.predictionCategoryScoresCalibrated === w.categoryScoresCalibrated
+          ? w.criterionFitScore
+          : criterionAlignment(w.predictionCategoryScoresCalibrated, effectiveProfile.criterion_preferences)
     }
   }
 
@@ -1131,7 +1247,8 @@ export function computeRecalc(input: RecalcComputeInput) {
   // Mantém precisão do legacy (ratio ~0.98×) E dá interpretabilidade da
   // contribuição de cada axis pra o waterfall.
   const expectedTrainInputs = trainSet.map(buildExpectedInput)
-  const expectedAllInputs = works.map(buildExpectedInput)
+  // Treino com o mapa legado; previsão com o da edição (obra mixed). Ver `predictionCategoryScores`.
+  const expectedAllInputs = works.map(buildExpectedPredictionInput)
   const expectedPredictor = trainExpectedPredictor(expectedTrainInputs, trainTargets, includeQuality)
   const expectedPredictions = expectedPredictor.predict(expectedAllInputs)
 
@@ -1193,7 +1310,9 @@ export function computeRecalc(input: RecalcComputeInput) {
     // avaliação). Nesses casos deixamos expected_score = null: some de todas as
     // telas (badges gateiam em `expected_score != null`; o ranking joga essas
     // obras pro fim via -Infinity). Presença é source-independente (IA/import/manual).
-    const hasAiAttributes = SCORING_CRITERION_SLUGS.every((slug) => w.categoryScores[slug] != null)
+    // 🔴 Sobre o mapa da PREVISÃO: obra mixed sem nota na edição fica sem Nota Prevista — nunca a da
+    // outra edição, nunca a misturada.
+    const hasAiAttributes = SCORING_CRITERION_SLUGS.every((slug) => w.predictionCategoryScores[slug] != null)
     if (!hasAiAttributes) {
       w.expectedScore = null
       w.expectedBaseline = null
@@ -1346,7 +1465,7 @@ export function computeRecalc(input: RecalcComputeInput) {
     else if (p.stance === "avoid") declaredAvoidNames.add(nm)
   }
   const INTEREST_ORDINAL: Record<string, number> = { "♥": 1, "♥♥": 2, "♥♥♥": 3, "♥♥♥♥": 4 }
-  const buildChanceInput = (w: WorkComputed): ChanceInput => {
+  const buildChanceInput = (w: WorkComputed, scores: CategoryScoreMap = w.categoryScores): ChanceInput => {
     const nTags = Math.max(w.tags.length, 1)
     let love = 0
     let avoid = 0
@@ -1357,7 +1476,7 @@ export function computeRecalc(input: RecalcComputeInput) {
     }
     const band = effectiveInterestByWork.get(w.id) ?? w.synopsisQuality ?? null
     return {
-      categoryScores: w.categoryScores,
+      categoryScores: scores,
       declaredLovedFrac: love / nTags,
       declaredAvoidedFrac: avoid / nTags,
       personalFit: w.personalFit,
@@ -1372,11 +1491,72 @@ export function computeRecalc(input: RecalcComputeInput) {
     chanceTrainLabels.push(w.userScore >= CHANCE_LIKED_THRESHOLD ? 1 : 0)
   }
   const chancePredictor = trainChancePredictor(chanceTrainInputs, chanceTrainLabels)
-  const chanceScores = chancePredictor.predictScore(works.map(buildChanceInput))
+  // Treino com o legado; previsão com o mapa da edição — mesmo arranjo da Nota Prevista.
+  const chanceScores = chancePredictor.predictScore(works.map((w) => buildChanceInput(w, w.predictionCategoryScores)))
   works.forEach((w, i) => {
     w.chanceIsStub = chancePredictor.isStub
     w.chanceScore = chancePredictor.isStub ? null : Math.round(chanceScores[i] * 100) / 100
   })
+
+  // ---------- 5c) Obra mixed: a previsão da OUTRA edição ----------
+  // As colunas de sempre têm a edição padrão de quem recebe a nota; a outra sai do MESMO preditor
+  // (treino intacto, no legado) com o mapa DELA — `expected_by_edition` guarda as duas. Edição sem
+  // `adult_content` fica sem Nota Prevista (o mesmo gate dos 9 atributos), nunca com a da outra.
+  for (const w of works) {
+    if (!w.editionMaps || !w.predictionEdition) continue
+    const daPadrao: EditionPrediction = {
+      expected_score: w.expectedScore,
+      expected_baseline: w.expectedBaseline,
+      expected_quality_adj: w.expectedQualityAdj,
+      expected_is_stub: w.expectedIsStub,
+      chance_score: w.chanceScore,
+      chance_is_stub: w.chanceIsStub,
+    }
+    const porEdicao = {} as PredictionByEdition
+    for (const ed of MIXED_EDITIONS) {
+      if (ed === w.predictionEdition) {
+        porEdicao[ed] = daPadrao
+        continue
+      }
+      const maps = w.editionMaps[ed]
+      const chance = chancePredictor.isStub
+        ? null
+        : Math.round(chancePredictor.predictScore([buildChanceInput(w, maps.raw)])[0] * 100) / 100
+      const temOsNove = SCORING_CRITERION_SLUGS.every((slug) => maps.raw[slug] != null)
+      if (!temOsNove) {
+        porEdicao[ed] = {
+          expected_score: null,
+          expected_baseline: null,
+          expected_quality_adj: null,
+          expected_is_stub: expectedPredictor.isStub,
+          chance_score: chance,
+          chance_is_stub: chancePredictor.isStub,
+        }
+        continue
+      }
+      const [p] = expectedPredictor.predict([
+        {
+          ...buildExpectedInput(w),
+          categoryScores: maps.calibrated,
+          iaEvalNormalized: normalizeGPT(calculateGPT(maps.calibrated, effectiveWeights)),
+          criterionFitScore: effectiveProfile
+            ? criterionAlignment(maps.calibrated, effectiveProfile.criterion_preferences)
+            : null,
+        },
+      ])
+      porEdicao[ed] = {
+        expected_score: applyObsAdjustment(p.expected, w.observationAdjustment),
+        expected_baseline: p.expected - p.qualityAdj,
+        expected_quality_adj: p.qualityAdj,
+        expected_is_stub: expectedPredictor.isStub,
+        chance_score: chance,
+        chance_is_stub: chancePredictor.isStub,
+      }
+    }
+    // Com as MESMAS casas das colunas de sempre (que o banco arredonda ao gravar): sem isto a página
+    // (que lê daqui) e a home/hover (que leem a coluna) arredondam a mesma previsão de pontos diferentes.
+    w.expectedByEdition = { normal: asPersistedEditionPrediction(porEdicao.normal), r18: asPersistedEditionPrediction(porEdicao.r18) }
+  }
 
   // ---------- 6) Bulk upsert calculated_scores ----------
   const rows = works.map((w) => ({
@@ -1394,6 +1574,10 @@ export function computeRecalc(input: RecalcComputeInput) {
     expected_baseline: w.expectedBaseline,
     expected_quality_adj: w.expectedQualityAdj,
     expected_is_stub: w.expectedIsStub,
+    // Obra mixed (mig 213): a edição das colunas acima e as previsões das DUAS edições. Quem conhece a
+    // edição ativa lê `expected_by_edition` (`predictionForEdition`); NULL nas não-mixed.
+    expected_edition: w.predictionEdition,
+    expected_by_edition: w.expectedByEdition,
     personal_fit: w.personalFit,
     personal_fit_percentile: w.personalFitPercentile,
     chance_score: w.chanceScore,

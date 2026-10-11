@@ -13,7 +13,21 @@ import { Button } from "@/components/ui/button"
  * quebra): desfoca a capa + o conteúdo e pede confirmação pra revelar (só nesta
  * sessão). Quando `gated` é false, é um passthrough sem custo de layout.
  */
-export function AdultGate({ gated, children }: { gated: boolean; children: ReactNode }) {
+export function AdultGate({
+  gated,
+  children,
+  variant = "work",
+  normalHref,
+}: {
+  gated: boolean
+  children: ReactNode
+  /**
+   * `r18-edition`: obra `mixed` aberta na versão R18 por quem oculta 18+ (fase 2). O texto diz que é
+   * a EDIÇÃO R18 e oferece voltar à normal; revelar vale só nesta visita e não muda a preferência.
+   */
+  variant?: "work" | "r18-edition"
+  normalHref?: string
+}) {
   const [revealed, setRevealed] = useState(false)
 
   if (!gated || revealed) return <>{children}</>
@@ -31,10 +45,13 @@ export function AdultGate({ gated, children }: { gated: boolean; children: React
           <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-full bg-red-500/15 text-red-600 dark:text-red-300">
             <ShieldAlert className="size-5" />
           </div>
-          <p className="text-base font-bold text-foreground">Conteúdo adulto (18+)</p>
+          <p className="text-base font-bold text-foreground">
+            {variant === "r18-edition" ? "Versão R18 desta obra" : "Conteúdo adulto (18+)"}
+          </p>
           <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
-            Você optou por ocultar obras 18+ nas preferências. A capa e o conteúdo desta obra ficam
-            desfocados até você revelar.
+            {variant === "r18-edition"
+              ? "Você optou por ocultar conteúdo 18+. Esta é a versão R18 — mostrar vale só agora e não muda a sua preferência."
+              : "Você optou por ocultar obras 18+ nas preferências. A capa e o conteúdo desta obra ficam desfocados até você revelar."}
           </p>
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
             <Button
@@ -43,9 +60,15 @@ export function AdultGate({ gated, children }: { gated: boolean; children: React
             >
               Mostrar assim mesmo
             </Button>
-            <Button asChild variant="ghost" size="sm">
-              <a href="/preferences?g=conteudo">Ajustar preferências</a>
-            </Button>
+            {variant === "r18-edition" && normalHref ? (
+              <Button asChild variant="ghost" size="sm">
+                <a href={normalHref}>Voltar à versão normal</a>
+              </Button>
+            ) : (
+              <Button asChild variant="ghost" size="sm">
+                <a href="/preferences?g=conteudo">Ajustar preferências</a>
+              </Button>
+            )}
           </div>
         </div>
       </div>

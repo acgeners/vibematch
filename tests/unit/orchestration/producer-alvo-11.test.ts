@@ -87,7 +87,8 @@ describe("o CÁLCULO fica nos 9, com fantasy no slot do legado", () => {
    */
   it("a guarda de expected_score pede o vetor de 9, não a lista do banco", () => {
     const s = src("server/actions/calculations.ts")
-    expect(s).toContain("SCORING_CRITERION_SLUGS.every((slug) => w.categoryScores[slug] != null)")
+    // Sobre o mapa da PREVISÃO (fase 2 de mixed) — o vetor de 9 é o mesmo.
+    expect(s).toContain("SCORING_CRITERION_SLUGS.every((slug) => w.predictionCategoryScores[slug] != null)")
     // ⚠️ `not.toContain` aqui é inútil: a string do vetor de 9 CONTÉM a da lista do banco.
     // A fronteira `(?<!SCORING_)` é o que separa as duas — sem ela o caso passa sempre.
     expect(

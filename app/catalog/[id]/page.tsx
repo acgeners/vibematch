@@ -10,6 +10,21 @@ import { ApprovalBadge, ApprovalActions } from "@/components/titles/approval-con
 import { getMyOpenRequestsForWork } from "@/server/queries/curation-requests"
 import { formatTimeAgo, formatProvenanceWhen } from "@/lib/date-utils"
 import { AdultGate } from "@/components/titles/adult-gate"
+import { EditionSelector } from "@/components/titles/edition-selector"
+import {
+  adultContentFor,
+  EDITION_LABEL,
+  editionScoreProvenance,
+  isMixedEditionState,
+  parseMixedEdition,
+  predictionForEdition,
+  resolveMixedEdition,
+} from "@/lib/editions/mixed-edition"
+import type { EditionScoreRow } from "@/lib/editions/mixed-edition"
+import { mentionsExplicitSexualContent, tagsForEdition, warningsForEdition } from "@/lib/editions/edition-content"
+import { reviewsForEdition } from "@/lib/editions/edition-reviews"
+import { fetchTagEditionFlags, getEditionScoresForWork, getMixedEditionSettings, withTagFlags } from "@/server/queries/edition-scores"
+import type { TagEditionFlags } from "@/server/queries/edition-scores"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { ComixResolutionWatcher } from "@/components/titles/comix-resolution-watcher"
 import { UpdateProgressWatcher } from "@/components/titles/update-progress-watcher"
@@ -137,6 +152,8 @@ import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
 
 interface TitleDetailPageProps {
   params: Promise<{ id: string }>
+  /** `?edition=normal|r18` (obra mixed) e `?adult=hide|only` (quando vem de uma lista filtrada). */
+  searchParams?: Promise<{ edition?: string; adult?: string }>
 }
 
 type DetailTag = {
@@ -363,8 +380,9 @@ export async function generateMetadata({ params }: TitleDetailPageProps): Promis
   return slug ? { title, alternates: { canonical: `/catalog/${slug}` } } : { title }
 }
 
-export default async function TitleDetailPage({ params }: TitleDetailPageProps) {
+export default async function TitleDetailPage({ params, searchParams }: TitleDetailPageProps) {
   const { id } = await params
+  const sp = (await searchParams) ?? {}
 
   /**
    * 🔴 AQUI NÃO SE REDIRECIONA — a obra é servida na URL em que foi pedida (UUID, slug
@@ -409,6 +427,20 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   }
 
   if (!work) notFound()
+
+  // Obra `mixed` (fase 2): UMA obra com DUAS edições. Só ela tem seletor e nota por edição.
+  const isMixedWork = isMixedEditionState(work.edition_state)
+  const [editionRows, editionSettings, tagEditionFlags] = await Promise.all([
+    isMixedWork ? getEditionScoresForWork(work.id as string) : Promise.resolve([] as EditionScoreRow[]),
+    isMixedWork ? getMixedEditionSettings() : Promise.resolve(null),
+    // As flags que decidem a edição de cada tag — só para obra mixed (fora do select compartilhado).
+    isMixedWork
+      ? fetchTagEditionFlags(
+          createAdminClient(),
+          ((work.tags ?? []) as Array<{ id?: unknown }>).map((t) => (typeof t?.id === "string" ? t.id : "")),
+        )
+      : Promise.resolve(new Map<string, TagEditionFlags>()),
+  ])
 
   const configClient = createAdminClient()
   const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, openingStructure, sources, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData, hideAdultContent, archivedCovers, favoriteFolderMenu, aiProvenance, alignmentModel, embeddingProvenance] = await Promise.all([
@@ -517,6 +549,48 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     if (cs.source) scoreSourceMap[cs.criterion_slug] = cs.source
   }
   /**
+   * 🔴 EDIÇÃO ATIVA (obra mixed, fase 2). A precedência é a de `resolveMixedEdition`: ocultar 18+
+   * força a normal (a R18 só abre com `?edition=r18` e confirmação), `?adult=only` força a R18, depois
+   * a URL, a preferência da conta e o fallback normal. O `adult_content` de `category_scores` é a
+   * nota MISTURADA das duas edições — na página ele é TROCADO pela nota da edição ativa, ou some
+   * ("não avaliado para esta edição"). Nunca a da outra edição.
+   */
+  const editionResolution = isMixedWork
+    ? resolveMixedEdition({
+        hideAdult: editionSettings?.hideAdult ?? false,
+        adultFilter: sp.adult === "hide" || sp.adult === "only" ? sp.adult : null,
+        urlEdition: parseMixedEdition(sp.edition),
+        preference: editionSettings?.preference ?? null,
+      })
+    : null
+  const activeEdition = editionResolution?.edition ?? null
+  const adultResolution = adultContentFor(
+    { isMixed: isMixedWork, legacyScore: scoreMap.adult_content, editionRows },
+    activeEdition,
+  )
+  const editionProvenance = editionScoreProvenance(adultResolution)
+  if (isMixedWork) {
+    if (adultResolution.kind === "edition") scoreMap.adult_content = adultResolution.score
+    else delete scoreMap.adult_content
+    // O crédito de autor de `category_scores` (calibrada, editada, limite) é da nota MISTURADA.
+    delete scoreSourceMap.adult_content
+  }
+  /** Texto que cita conteúdo sexual explícito não é mostrado na versão NORMAL como se a descrevesse. */
+  const hideOnNormal = (text: string | null | undefined): boolean =>
+    activeEdition === "normal" && mentionsExplicitSexualContent(text)
+  /**
+   * Nota Prevista / Chance de obra mixed: as DA EDIÇÃO ATIVA (`expected_by_edition`, mig 213). Linha
+   * sem a previsão da edição — ou gravada antes da fase 2, sobre a nota misturada — vira "não
+   * calculada para esta edição". Nunca a da outra edição. Dono: `predictionForEdition`.
+   */
+  const editionPrediction = predictionForEdition(work.calculated_scores, isMixedWork, activeEdition)
+  work.calculated_scores = editionPrediction.row
+  // "Não calculada para esta edição": a linha não tem a previsão da edição, ou a edição não tem nota
+  // de conteúdo adulto (o gate dos 9 atributos zera a previsão). Falta de OUTRO atributo não entra
+  // aqui — aí a mensagem de sempre ("após avaliação IA") é a verdadeira.
+  const predictionHiddenForEdition =
+    editionPrediction.view === "absent" || (editionPrediction.view === "edition" && adultResolution.kind === "absent")
+  /**
    * Tem NOTA de critério? Dono único da pergunta — o botão de avaliar e o card de
    * "Notas por critério" a fazem, e duas cópias divergiriam no primeiro critério novo.
    *
@@ -540,6 +614,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       ? work.is_adult
       : adultScore != null && adultScore >= 7
   const gateAdult = isAdult && hideAdultContent
+  /** Quem oculta 18+ e abriu a R18 de uma mixed: mostra só depois de confirmar (preferência intacta). */
+  const gateR18Edition = editionResolution?.requiresConfirmation === true
   // Faixas ideais do perfil (criterion_preferences): a cor e a barra medem o FIT (distância da sua
   // faixa), não a altura no catálogo. Sem entrada pro slug → tier neutro, sem zona ideal na barra.
   const criterionPrefs = (tasteProfileRow?.profile.criterion_preferences ?? {}) as Partial<
@@ -598,13 +674,29 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     : null
 
   const genres = Array.isArray(work.genres) ? work.genres.filter(Boolean) : []
-  const tags = Array.isArray(work.tags) ? work.tags.filter(Boolean) : []
+  // Na versão NORMAL de uma mixed, saem as tags da R18 E as adultas de edição desconhecida (régua de 3
+  // classes pelas flags do banco); as compartilhadas ficam. Ver lib/editions/edition-content.ts.
+  const rawTags = (Array.isArray(work.tags) ? work.tags.filter(Boolean) : []) as Array<WorkTagForDisplay | string>
+  const tags: Array<WorkTagForDisplay | string> =
+    isMixedWork && activeEdition === "normal"
+      ? (() => {
+          const objetos = rawTags.filter((t): t is WorkTagForDisplay => typeof t !== "string")
+          const visiveis = new Set(tagsForEdition(withTagFlags(objetos, tagEditionFlags), "normal").map((t) => t.id))
+          // Tag sem id não tem flag a consultar: oculta na normal (lado seguro).
+          return objetos.filter((t) => typeof t.id === "string" && visiveis.has(t.id))
+        })()
+      : rawTags
   const hasEditionNote = hasEditionNoteTag(
     (tags as Array<WorkTagForDisplay | string>).map((tag) => (typeof tag === "string" ? tag : tag.name)),
   )
   // Avisos de conteúdo do digest de reviews — o MESMO dado e a MESMA régua do card de reviews
   // (`displayableContentWarnings`). Zero query: `getWorkReviews` já trouxe o digest acima.
-  const contentWarnings = displayableContentWarnings(reviewsSnapshot.digest)
+  // Na versão normal, sai o aviso que descreve só a R18 (sexo explícito); violência sexual, violência
+  // e temas gerais ficam — são da história, que é a mesma nas duas edições.
+  const contentWarnings = warningsForEdition(displayableContentWarnings(reviewsSnapshot.digest), activeEdition, (w) =>
+    typeof w === "string" ? w : JSON.stringify(w),
+  )
+  const editionReviews = reviewsForEdition(reviewsSnapshot, activeEdition)
   const contentWarningsProvenance: AiProvenanceSealProps = {
     title: "Avisos resumidos por IA",
     model: aiProvenance.review_digest?.model ?? null,
@@ -963,6 +1055,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       <ComixResolutionWatcher workId={work.id} createdAt={work.created_at} />
       <UpdateProgressWatcher workId={work.id} />
 
+      {/* Obra mixed: UMA obra, DUAS edições. O seletor fica antes das abas porque vale para a página
+          inteira (nota, tags, avisos, reviews, Nota Prevista). Só mixed — single, r18_only e unknown
+          têm uma edição só. */}
+      {editionResolution && <EditionSelector basePath={`/catalog/${id}`} resolution={editionResolution} />}
+
       <Tabs defaultValue="overview" className="w-full">
         {/* Tabs navbar (full width, 5 abas com wrap responsivo) */}
         <TabsList className={tabsListClass}>
@@ -1098,7 +1195,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   {LABELS.expected_score.full}
                 </span>
-                <span title="Aparece após a avaliação IA dos atributos da obra">
+                <span
+                  title={
+                    predictionHiddenForEdition
+                      ? `Nota Prevista não calculada para a ${activeEdition === "r18" ? "versão R18" : "versão normal"}`
+                      : "Aparece após a avaliação IA dos atributos da obra"
+                  }
+                >
                   <ScoreBadge score={null} size="md" />
                 </span>
               </div>
@@ -1121,7 +1224,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         {/* Layout principal: sidebar (capa + ações) | conteúdo da aba.
             Envolto no AdultGate: se a obra é 18+ E o usuário optou por ocultar,
             capa + conteúdo saem desfocados atrás de um portão de revelar. */}
-        <AdultGate gated={gateAdult}>
+        <AdultGate
+          gated={gateAdult || gateR18Edition}
+          variant={gateR18Edition && !gateAdult ? "r18-edition" : "work"}
+          normalHref={`/catalog/${id}?edition=normal`}
+        >
         <div className="mt-5 grid gap-6 md:grid-cols-[240px_minmax(0,1fr)] lg:grid-cols-[260px_minmax(0,1fr)]">
           {/* Sidebar persistente — visível em todas as abas */}
           <aside className="space-y-4">
@@ -1388,9 +1495,15 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               abaixo (p90 61,5%). Ou seja: ele NÃO conta o enredo, ele caracteriza tom e
               tipo, que é exatamente o contexto que as nove notas pedem. Empilhado sob a
               sinopse eram dois parágrafos cinzas disputando o mesmo olhar. */}
-          {latestAiEval?.summary && (
+          {latestAiEval?.summary && !hideOnNormal(latestAiEval.summary) && (
             <p className="mb-4 border-b border-border/50 pb-3.5 whitespace-pre-line text-sm leading-6 text-foreground/85">
               {latestAiEval.summary}
+            </p>
+          )}
+          {latestAiEval?.summary && hideOnNormal(latestAiEval.summary) && (
+            <p className="mb-4 border-b border-border/50 pb-3.5 text-sm leading-6 text-muted-foreground">
+              O resumo da avaliação cita conteúdo sexual explícito, que é da versão R18 — ele não é mostrado
+              como se descrevesse a versão normal.
             </p>
           )}
           {/* 🔴 GRADE COMPACTA (2026-08-19): a lista mostra nome, nota e faixa; a
@@ -1443,7 +1556,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   iaSuggested != null &&
                   clampAdultContentScore(iaSuggested, adultContentBounds) === score,
               })
-              const isUserEdited = autor === "curadoria"
+              const isUserEdited = autor === "curadoria" && !(isMixedWork && slug === "adult_content")
               /**
                * Quarto autor (migration 197): a nota é HERDADA do critério misto — cópia do
                * `fantasy_nobility` da obra, com `source: legacy_split_copy`. Nenhum modelo a
@@ -1464,10 +1577,20 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                * EXATAMENTE o valor. "A nota subiu e existe um piso" não basta: outras 4 notas
                * do catálogo estão movidas por caminhos que este crédito não deve reivindicar.
                */
-              const isBoundLimited = autor === "limite"
+              const isBoundLimited = autor === "limite" && !(isMixedWork && slug === "adult_content")
               const isCalibrated = isCalibratedSource
-              const sourceText = isCalibrated ? calibrated.justification : aiScore?.justification
-              const parsed = sourceText ? parseJustification(sourceText) : null
+              /**
+               * 🔴 Obra mixed, `adult_content`: a nota é a da EDIÇÃO ativa e quem fala por ela é a
+               * procedência da edição — não a justificativa da avaliação, que leu as DUAS edições
+               * misturadas. Exceção: a nota reaproveitada (`reused_existing`) É a da avaliação, e a
+               * justificativa dela é a prova da atribuição.
+               */
+              const isEditionScore = isMixedWork && slug === "adult_content"
+              const editionUsesEval = isEditionScore && adultResolution.kind === "edition" && adultResolution.row.source === "reused_existing"
+              const rawSourceText = isCalibrated ? calibrated.justification : aiScore?.justification
+              const sourceText = isEditionScore && !editionUsesEval ? null : rawSourceText
+              const textHiddenOnNormal = !isEditionScore && hideOnNormal(sourceText)
+              const parsed = sourceText && !textHiddenOnNormal ? parseJustification(sourceText) : null
               const band = score != null ? bandForScore(score) : null
               const [bandLo, bandHi] = band ? bandBarBounds(band) : [null, null]
 
@@ -1544,6 +1667,21 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       {` · antes ${calibrated.previousScore.toFixed(1)}`}
                     </p>
                   )}
+                  {isEditionScore && editionProvenance && activeEdition && (
+                    /* Procedência da nota DA EDIÇÃO — sem cor de estado, como os outros créditos. O
+                       baseline diz que NÃO é avaliação: é o que impede o 5,0 de ser lido como "a IA leu". */
+                    <div className="space-y-1">
+                      <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                        {EDITION_LABEL[activeEdition]} · {editionProvenance.label}
+                      </p>
+                      <p className="text-xs leading-relaxed text-muted-foreground">{editionProvenance.detail}</p>
+                    </div>
+                  )}
+                  {textHiddenOnNormal && (
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      A justificativa cita conteúdo sexual explícito, que é da versão R18.
+                    </p>
+                  )}
                   {parsed?.detail && (
                     <p className="text-xs leading-relaxed text-muted-foreground">{parsed.detail}</p>
                   )}
@@ -1573,7 +1711,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       {/* A síntese estruturada e o resumo em prosa são gerações SEPARADAS, com
           modelos e datas próprios — por isso as duas descem no mesmo objeto. */}
       <WorkReviewsCard
-        snapshot={reviewsSnapshot}
+        snapshot={editionReviews.snapshot}
+        editionView={
+          activeEdition === "normal"
+            ? { synthesisHidden: editionReviews.synthesisHidden, reviewsHidden: editionReviews.reviewsHidden }
+            : null
+        }
         workId={work.id as string}
         provenance={{
           digestModel: aiProvenance.review_digest?.model ?? null,
@@ -1691,10 +1834,19 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               ) : (
                 // Sem os 9 atributos IA não há Nota Prevista real (ver expected.ts /
                 // gate no recalc). Estado explícito no lugar do número oculto.
-                <div className="text-right shrink-0" title="Aparece após a avaliação IA dos atributos da obra">
+                <div
+                  className="text-right shrink-0"
+                  title={
+                    predictionHiddenForEdition
+                      ? "A Nota Prevista desta obra foi calculada para a outra edição (ou antes da separação por edição)."
+                      : "Aparece após a avaliação IA dos atributos da obra"
+                  }
+                >
                   <p className="text-xs font-medium text-muted-foreground">{LABELS.expected_score.full}</p>
                   <p className="text-3xl font-black font-mono leading-none text-muted-foreground">—</p>
-                  <p className="text-xs text-muted-foreground">após avaliação IA</p>
+                  <p className="text-xs text-muted-foreground">
+                    {predictionHiddenForEdition ? "não calculada para esta edição" : "após avaliação IA"}
+                  </p>
                 </div>
               )}
             </div>

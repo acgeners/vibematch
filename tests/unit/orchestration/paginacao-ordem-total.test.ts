@@ -47,6 +47,7 @@ const CHAVES_UNICAS: Record<string, string[][]> = {
   tags: [["id"], ["slug"]],
   user_calculated_scores: [["user_id", "work_id"]],
   user_work_state: [["user_id", "work_id"]],
+  work_edition_scores: [["work_id", "edition", "criterion_slug"]], // PK (migration 213)
   work_embeddings: [["work_id"]],
   work_external_ids: [["id"], ["work_id", "source"]],
   work_external_reviews_manual: [["id"]],

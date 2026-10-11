@@ -71,6 +71,13 @@ const INVENTARIO: Record<string, boolean> = {
   comixEnrich: true, // após `enrichComixDataForWork`, por obra (after() de createWork)
   comixHidsPending: true, // UMA marcação depois do laço do mop-up pós-lote
   comixResilient: true, // fase 0 GRATUITA da cascata — antes do checkpoint de custo
+
+  // ── Entraram com a fase 2 de mixed (2026-10-10) ────────────────────────────
+  // A edição PADRÃO (preferência; ocultar 18+ força a normal) decide qual adult_content entra na
+  // previsão das obras mixed. Declaram `mixed_edition_preference` — o gate pula quando quem mudou
+  // não é o dono (o recalc per-user dele roda em after()).
+  setPreferredMixedEdition: true,
+  setHideAdultContent: true,
 }
 
 /**

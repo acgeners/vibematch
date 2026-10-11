@@ -75,11 +75,17 @@ export function mensagemDeContratoQuebrado(c: ContratoDoCalculo): string {
  * O CONTRATO DE SCORING que este código implementa — o nome que o banco confere antes de aceitar
  * resultado de recalc (`canonical_contract.scoring_contracts`, migration 202).
  *
- * `s9-fantasy-b-v1` =
+ * `s9-fantasy-b-edicao-v1` =
  *   · os 9 de `SCORING_CRITERION_SLUGS` (`setting_era` e `angst` FORA);
  *   · Strategy B de `fantasy` (`fantasy-scoring-transition.ts`): o slot lê o legado
  *     `fantasy_nobility` quando existe e o `fantasy` real só como fallback;
- *   · v1 da combinação acima.
+ *   · obra `mixed` (migs 213/214): a PREVISÃO (Nota Prevista e Chance) é feita para as DUAS edições,
+ *     cada uma com o `adult_content` DELA (`work_edition_scores`) — nula na edição sem nota, nunca a da
+ *     outra. As colunas de sempre ficam com a edição padrão de quem recebe a nota (`defaultMixedEdition`,
+ *     gravada em `expected_edition`); as duas vão em `expected_by_edition`. O TREINO continua com o
+ *     legado de `category_scores` (os rótulos não dizem qual edição a pessoa leu).
+ *   · v1 da combinação acima. O anterior, `s9-fantasy-b-v1`, é o mesmo sem a regra de edição — e linha
+ *     gravada por ele NÃO é lida como previsão de edição (`EDITION_AWARE_SCORING_CONTRACTS`).
  *
  * 🔴 POR QUE EXISTE: o contrato de slugs logo acima compara CONJUNTOS — e em 02–03/10/2026 um
  * checkout sem a Strategy B passou por ele (o slot `fantasy` existe nos dois códigos; o que muda é
@@ -92,4 +98,4 @@ export function mensagemDeContratoQuebrado(c: ContratoDoCalculo): string {
  * durante a janela deploy × migration). `tests/unit/orchestration/contrato-canonico-pin.test.ts`
  * fixa este nome ao que ele descreve e à migration.
  */
-export const SCORING_CONTRACT = "s9-fantasy-b-v1" as const
+export const SCORING_CONTRACT = "s9-fantasy-b-edicao-v1" as const

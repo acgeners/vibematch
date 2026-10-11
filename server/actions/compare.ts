@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getWorksByIds } from "@/server/queries/works"
+import { isMixedEditionState } from "@/lib/editions/mixed-edition"
 import type { HiatusFields } from "@/lib/works/hiatus-display"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 import { getVerdictScale } from "@/server/queries/verdict-scale"
@@ -95,14 +96,22 @@ const GROUP_ID_TO_LABEL: Record<string, string> = Object.fromEntries(
 import { titleToSlug } from "@/lib/utils"
 import { coverCandidates, pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
 
-export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
+export async function fetchCompareWorks(
+  ids: string[],
+  /**
+   * O `?adult=` da lista de onde o comparador abriu: a edição das obras `mixed` tem de ser a MESMA da
+   * lista (`?adult=only` ⇒ R18; `hide` ⇒ normal). Valor desconhecido é ignorado — é endpoint público.
+   */
+  opts: { adultFilter?: string | null } = {},
+): Promise<CompareWork[]> {
   const unique = Array.from(new Set(ids.filter(Boolean))).slice(0, MAX_COMPARE_WORKS)
   if (unique.length === 0) return []
+  const adultFilter = opts.adultFilter === "hide" || opts.adultFilter === "only" ? opts.adultFilter : null
 
   const supabase = createAdminClient()
   const verdictScale = await getVerdictScale()
   const [works, aiJustifications, tagCatalog, declaredPrefs, profileRow, membership, predictions, weightsConfig] = await Promise.all([
-    getWorksByIds(unique),
+    getWorksByIds(unique, { adultFilter }),
     supabase
       .from("ai_evaluations")
       .select(`
@@ -185,6 +194,14 @@ function mapWorkToCompare(
   for (const cs of work.category_scores ?? []) {
     scoreByCrit[cs.criterion_slug] = Number(cs.score)
   }
+  // Obra mixed: a justificativa de `adult_content` é da avaliação que leu as DUAS edições misturadas.
+  // Ela só fala pela nota da edição quando essa nota É a dela (`reused_existing`); senão, sai.
+  const adultEditionSource = (work.category_scores ?? []).find((cs) => cs.criterion_slug === "adult_content") as
+    | { edition_source?: string }
+    | undefined
+  const dropAdultJustification =
+    isMixedEditionState((work as { edition_state?: unknown }).edition_state) &&
+    adultEditionSource?.edition_source !== "reused_existing"
 
   const tags = (work.tags as Array<{ slug?: string; name?: string; tag_group_id?: string | null }> ?? [])
     .filter(Boolean)
@@ -263,7 +280,7 @@ function mapWorkToCompare(
     criteria: CRITERION_SLUGS.map((slug) => ({
       slug,
       score: scoreByCrit[slug] ?? null,
-      aiJustification: justifications?.get(slug) ?? null,
+      aiJustification: slug === "adult_content" && dropAdultJustification ? null : (justifications?.get(slug) ?? null),
     })),
   }
 }

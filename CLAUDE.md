@@ -5594,6 +5594,37 @@ Sinal R19 errado se corrige na ORIGEM (estado/tag), nunca com `adult_override = 
 ⚠️ Não confundir com a tag `R19 Version` (a obra catalogada É a R19: piso 7 + 18+) nem com "R15 but
 Based on a R19 Novel" (o R19 é do novel — teto 6 na nota). Testes: `npm run test:db-edicao-mixed`.
 
+### Fase 2: `adult_content` e a Nota Prevista são POR EDIÇÃO nas `mixed` (migrations 213–215)
+
+**Nunca herdar.** Em obra `mixed`, `category_scores.adult_content` é a nota misturada (legado: não é
+exibida nem prevista). A nota de cada edição mora em `work_edition_scores`; sem linha ou `not_rated` ⇒
+"não avaliado para esta edição", nunca a da outra edição. Dono: `adultContentFor` (`lib/editions/mixed-edition.ts`).
+- O baseline 5,0 da normal (`inferred_base`) NÃO é avaliação (`provisional` + `baixa`, travados por CHECK).
+  Não vale para obra com R18 só nos extras (`work_edition_state.r18_extra_chapters`) nem sem R18 sexual provada.
+- Não existe nota R18 "por regra": existência da R18 ou piso de tag sozinhos não viram nota de edição.
+
+**Previsão:** o recálculo prevê as DUAS edições com o MESMO modelo (treino no legado) e grava
+`expected_by_edition`; as colunas de sempre ficam com a edição padrão de quem recebe a nota
+(`expected_edition`). Quem conhece a edição ativa lê por `predictionForEdition`, que só confia em linha
+gravada por contrato de `EDITION_AWARE_SCORING_CONTRACTS` (linha do contrato antigo = previsão misturada).
+A cópia por edição é gravada com as MESMAS casas das colunas (`asPersistedEditionPrediction`, que arredonda
+como o `numeric` do banco — não `Math.round`): sem isso página e home arredondavam a mesma nota diferente.
+Trocar a edição padrão (preferência ou ocultar 18+) recalcula na hora, também para o dono.
+
+**Edição ativa** (`resolveMixedEdition`): ocultar 18+ ⇒ normal (a R18 só com `?edition=r18` + confirmação,
+sem mudar preferência) · `?adult=only` ⇒ R18 · `?edition=` · `preferred_mixed_edition` · normal.
+Anônimo nunca herda a preferência do dono (`getCurrentUserSettingsRow` é só da sessão).
+
+**Na normal saem** tags `r18` e `desconhecida` (classe pelas FLAGS do banco, sem lista de slug —
+`tagEditionClass`, `lib/editions/edition-content.ts`), avisos de sexo explícito e o texto livre que o cita
+(`mentionsExplicitSexualContent` — as duas ordens, "sexual explícito" e "explícito sexual"). Violência
+sexual fica nas duas. As flags de edição das tags são lidas à parte (`fetchTagEditionFlags`), fora do select
+compartilhado.
+
+**Publicação, nesta ordem:** 213 + 214 → deploy (contrato `s9-fantasy-b-edicao-v1`, `enforce` ligado)
+→ recálculo na nuvem → 215 (libera 5 overrides; One Last Night fica) → tirar `s9-fantasy-b-v1` da
+lista. Teste: `npm run test:db-edicao-fase2`.
+
 ## A RAZÃO do limite 18+ tem dono — e quem a estava escrevendo era o modelo
 
 🔴 Duas coisas escreviam a nota de `adult_content` e só uma escrevia a explicação. O fluxo de

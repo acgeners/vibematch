@@ -90,11 +90,18 @@ describe("contrato canônico: código × migrations", () => {
  * O que cada nome de contrato DESCREVE. Mudou a lista de slugs ou a regra do slot `fantasy`?
  * Então o cálculo é outro: crie um nome NOVO aqui, troque `SCORING_CONTRACT` e a migration.
  */
-const DESCRITORES: Record<string, { slugs: readonly string[]; foraDoScoring: readonly string[]; fantasia: "legado-primeiro" }> = {
+const DESCRITORES: Record<string, { slugs: readonly string[]; foraDoScoring: readonly string[]; fantasia: "legado-primeiro"; edicao: "nenhuma" | "previsao-por-edicao" }> = {
   "s9-fantasy-b-v1": {
     slugs: ["romance", "couple_dynamics", "fantasy", "action_adventure", "adult_content", "protagonist", "humor", "drama", "tragedy"],
     foraDoScoring: ["setting_era", "angst"],
     fantasia: "legado-primeiro",
+    edicao: "nenhuma",
+  },
+  "s9-fantasy-b-edicao-v1": {
+    slugs: ["romance", "couple_dynamics", "fantasy", "action_adventure", "adult_content", "protagonist", "humor", "drama", "tragedy"],
+    foraDoScoring: ["setting_era", "angst"],
+    fantasia: "legado-primeiro",
+    edicao: "previsao-por-edicao",
   },
 }
 

@@ -266,7 +266,8 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
   const groupOptions = isPseudo ? allGroups : allGroups.filter((g) => g.id !== listId)
 
   const orderedIds = entries.map((e) => e.workId)
-  const works = await getWorksByIds(orderedIds)
+  // A MESMA edição de contexto da ordenação (obra mixed: ?adult=only ⇒ R18, ocultar ⇒ normal).
+  const works = await getWorksByIds(orderedIds, { adultFilter: filters.adultFilter ?? null })
   const isPaid = canAi
 
   const entryById = new Map(entries.map((e) => [e.workId, e]))

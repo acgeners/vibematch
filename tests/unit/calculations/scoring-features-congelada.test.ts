@@ -167,8 +167,9 @@ describe("arquitetura: os consumidores de CÁLCULO não podem voltar a CRITERION
 
   it("a guarda de expected_score exige os 9, nunca a lista do banco", () => {
     const src = readFileSync("server/actions/calculations.ts", "utf8")
+    // Sobre o mapa da PREVISÃO (fase 2 de mixed: o adult_content da edição) — o vetor é o mesmo.
     expect(src).toContain(
-      "SCORING_CRITERION_SLUGS.every((slug) => w.categoryScores[slug] != null)",
+      "SCORING_CRITERION_SLUGS.every((slug) => w.predictionCategoryScores[slug] != null)",
     )
   })
 

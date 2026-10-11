@@ -14,6 +14,8 @@ import { getAllActiveSynopsisPredictions } from "@/server/queries/synopsis-quali
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { getHideAdultContent } from "@/server/queries/current-user"
+import { fetchEditionScoresFor, getMixedEditionSettings } from "@/server/queries/edition-scores"
+import { adultContentFor, groupEditionRows, isMixedEditionState, predictionForEdition, resolveMixedEdition, scoresForEdition } from "@/lib/editions/mixed-edition"
 import { selectByIdsInChunks, fetchAllRows } from "@/lib/supabase/paginate"
 import { titleTokens, workMatchesQuery } from "@/lib/title-match"
 import { displaySortValue } from "@/lib/ranking/display-sort"
@@ -320,9 +322,9 @@ export type RankingOrderEntry = Pick<RankingEntry, "workId" | "rank">
 const RANKING_WORKS_SELECT = `
   id, title, publication_status_id, ai_eval_status,
   hiatus_kind, hiatus_kind_confidence, publication_status_note,
-  total_chapters, is_archived, is_adult,
+  total_chapters, is_archived, is_adult, edition_state,
   canonical_synopsis, year, updated_at,
-  calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, chance_score, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, art_percentile, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
+  calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, expected_edition, expected_by_edition, scoring_contract, chance_score, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, art_percentile, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
   category_scores(criterion_slug, score),
   work_covers(url, is_primary, position)
 `
@@ -335,8 +337,8 @@ const RANKING_WORKS_SELECT = `
  */
 const RANKING_WORKS_SELECT_ORDERING_ONLY = `
   id, title, publication_status_id, ai_eval_status,
-  total_chapters, is_archived, is_adult, year, updated_at,
-  calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, chance_score, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, art_percentile, alignment_score, alignment_confidence:alignment_payload->confidence, alignment_stale),
+  total_chapters, is_archived, is_adult, edition_state, year, updated_at,
+  calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, expected_edition, expected_by_edition, scoring_contract, chance_score, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, art_percentile, alignment_score, alignment_confidence:alignment_payload->confidence, alignment_stale),
   category_scores(criterion_slug, score)
 `
 
@@ -773,6 +775,22 @@ export async function getRanking(
   const personal = await personalPromise
   const scoresReader = await scoresReaderPromise
   const verdictScale = await verdictScalePromise
+  // Obras `mixed` (fase 2): a nota de conteúdo adulto e a Nota Prevista são da EDIÇÃO de contexto
+  // da lista — ocultar 18+ (conta ou `?adult=hide`) ⇒ normal; `?adult=only` ⇒ R18; senão a
+  // preferência da conta; senão normal. Só consulta quando há obra mixed no resultado (2 linhas
+  // leves por obra, sem `evidence`).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mixedIds = (data ?? []).filter((w: any) => isMixedEditionState(w.edition_state)).map((w: any) => w.id as string)
+  const [editionRows, editionSettings] =
+    mixedIds.length > 0
+      ? await Promise.all([fetchEditionScoresFor(supabase, mixedIds), getMixedEditionSettings()])
+      : [[], null]
+  const editionByWork = groupEditionRows(editionRows)
+  const contextEdition = resolveMixedEdition({
+    hideAdult,
+    adultFilter: filters.adultFilter ?? null,
+    preference: editionSettings?.preference ?? null,
+  }).edition
 
   const personalStatusSymbolsById = new Map(
     personalStatusOptions.map((status) => [status.id, status.symbol])
@@ -795,9 +813,19 @@ export async function getRanking(
     // dono). Pro dono, `get()` devolve exatamente essas colunas; pros demais, as linhas dela.
     const state = personal.get(w.id)
     const personalStatusId = state.personalStatusId
-    const scores: Record<string, number> = {}
+    let scores: Record<string, number> = {}
     for (const cs of w.category_scores ?? []) {
       scores[cs.criterion_slug] = cs.score
+    }
+    // 🔴 Obra mixed: o adult_content da EDIÇÃO de contexto, ou nenhum ("não avaliado para esta
+    // edição") — nunca a nota misturada de category_scores nem a da outra edição. Os filtros
+    // min/max e a ordenação por critério, logo abaixo, leem este mapa.
+    const isMixed = isMixedEditionState(w.edition_state)
+    if (isMixed) {
+      scores = scoresForEdition(
+        scores,
+        adultContentFor({ isMixed, legacyScore: scores.adult_content, editionRows: editionByWork.get(w.id) }, contextEdition),
+      )
     }
     const synopsisPred = synopsisPredictions.get(w.id) ?? null
 
@@ -816,6 +844,10 @@ export async function getRanking(
     // A linha de scores de QUEM OLHA. Os campos de catálogo (platform_avg, total_votes) passam
     // intactos; os pessoais (Nota Prevista, Chance, Alinhamento) viram os dela — ou null.
     w.calculated_scores = scoresReader.overlay(w.id, w.calculated_scores)
+    // Nota Prevista/Chance de obra mixed: as da EDIÇÃO de contexto (`expected_by_edition`). Sem ela —
+    // ou linha gravada antes da fase 2, sobre a nota misturada — o número some e a obra cai para o fim
+    // de quem ordena por ele. Nunca a previsão da outra edição.
+    w.calculated_scores = predictionForEdition(w.calculated_scores, isMixed, contextEdition).row
 
     return {
       rank: 0,

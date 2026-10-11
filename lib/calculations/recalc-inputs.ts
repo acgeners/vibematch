@@ -53,6 +53,11 @@ export const CATALOG_RECALC_INPUTS = [
    * é percentil sobre o catálogo inteiro.
    */
   "catalog_membership",
+  /**
+   * `work_edition_scores` (migs 213/214) → o `adult_content` da EDIÇÃO na previsão das obras mixed
+   * (Nota Prevista e Chance). Só a previsão: o treino segue com `category_scores`.
+   */
+  "edition_scores",
 ] as const
 
 /**
@@ -72,6 +77,11 @@ export const PERSONAL_RECALC_INPUTS = [
   "tag_preferences",
   /** Perfil de gosto corrente → loved/avoided tags → os 3 sinais de fit. */
   "taste_profile",
+  /**
+   * `preferred_mixed_edition` e `hide_adult_content` → a edição PADRÃO (`defaultMixedEdition`) cujo
+   * `adult_content` entra na previsão das obras mixed.
+   */
+  "mixed_edition_preference",
 ] as const
 
 export const RECALC_INPUTS = [...CATALOG_RECALC_INPUTS, ...PERSONAL_RECALC_INPUTS] as const

@@ -5,6 +5,8 @@ import { HIATUS_SELECT_COLUMNS, hiatusFieldsFromRow } from "@/lib/works/hiatus-d
 import type { HiatusFields } from "@/lib/works/hiatus-display"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { CRITERION_SLUGS } from "@/types/domain"
+import { adultContentFor, defaultMixedEdition, groupEditionRows, isMixedEditionState, scoresForEdition } from "@/lib/editions/mixed-edition"
+import { fetchEditionScoresFor, getMixedEditionSettings } from "@/server/queries/edition-scores"
 
 /**
  * As obras da vitrine PÚBLICA — para quem não tem sessão.
@@ -48,6 +50,12 @@ export interface SpotlightWork extends PublicShowcaseWork {
  * Escolha determinística (a melhor por `platform_avg` que satisfaz os requisitos), nunca
  * aleatória — sorteio aqui mudaria o hero a cada request, quebrando cache e tornando a página
  * impossível de conferir.
+ *
+ * 🔴 Obra `mixed` (fase 2): o `adult_content` de `category_scores` é a nota MISTURADA das duas
+ * edições. A vitrine mostra a edição de quem olha (visitante ⇒ normal) — a nota DESSA edição, ou
+ * nenhuma; e sem ela a obra não tem os critérios completos e não é escolhida. Nunca a da R18.
+ * ⚠️ O baseline 5,0 (`provisional`) também não serve: a vitrine apresenta as notas como "leitura da
+ * IA", e o baseline NÃO é avaliação — mostrá-lo aqui, sem procedência, o faria passar por uma.
  */
 export async function getSpotlightWork(): Promise<SpotlightWork | null> {
   const supabase = createAdminClient()
@@ -56,7 +64,7 @@ export async function getSpotlightWork(): Promise<SpotlightWork | null> {
     .from("calculated_scores")
     .select(
       `platform_avg, total_votes,
-       works!inner(id, title, is_archived, is_adult, publication_status_id, total_chapters,
+       works!inner(id, title, is_archived, is_adult, edition_state, publication_status_id, total_chapters,
                    ${HIATUS_SELECT_COLUMNS},
                    work_covers(url, is_primary, position),
                    category_scores(criterion_slug, score))`,
@@ -76,6 +84,7 @@ export async function getSpotlightWork(): Promise<SpotlightWork | null> {
       id: string
       title: string
       is_adult?: boolean | null
+      edition_state?: string | null
       publication_status_id: number | null
       total_chapters: number | null
       hiatus_kind?: HiatusKind | null
@@ -86,16 +95,26 @@ export async function getSpotlightWork(): Promise<SpotlightWork | null> {
     }
   }>
 
+  // Só consulta nota por edição se alguma candidata for mixed (2 linhas leves por obra).
+  const mixedIds = rows.filter((r) => !r.works.is_adult && isMixedEditionState(r.works.edition_state)).map((r) => r.works.id)
+  const [editionRows, settings] =
+    mixedIds.length > 0 ? await Promise.all([fetchEditionScoresFor(supabase, mixedIds), getMixedEditionSettings()]) : [[], null]
+  const editionByWork = groupEditionRows(editionRows)
+  const edition = defaultMixedEdition({ hideAdult: settings?.hideAdult ?? false, preference: settings?.preference ?? null })
+
   for (const row of rows) {
     if (row.works.is_adult) continue
     const coverUrls = coverCandidates(row.works.work_covers)
     if (coverUrls.length === 0) continue
 
-    const bySlug = new Map(
-      (row.works.category_scores ?? [])
-        .filter((c) => c.score != null)
-        .map((c) => [c.criterion_slug, c.score as number]),
-    )
+    const legado: Record<string, number> = {}
+    for (const c of row.works.category_scores ?? []) if (c.score != null) legado[c.criterion_slug] = c.score
+    const isMixed = isMixedEditionState(row.works.edition_state)
+    const resolucao = adultContentFor({ isMixed, legacyScore: legado.adult_content, editionRows: editionByWork.get(row.works.id) }, edition)
+    // Nota provisória (baseline) não é leitura: a obra fica de fora como se não tivesse a nota.
+    if (resolucao.kind === "edition" && resolucao.row.status !== "rated") continue
+    const daEdicao = scoresForEdition(legado, resolucao)
+    const bySlug = new Map(Object.entries(daEdicao))
     if (CRITERION_SLUGS.some((s) => !bySlug.has(s))) continue
 
     return {
