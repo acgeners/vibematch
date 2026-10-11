@@ -82,3 +82,34 @@ describe("a régua só vale na versão NORMAL de obra mixed", () => {
     expect(reviewsForEdition(snapshot(frase), "normal").snapshot.summary).toBe(frase)
   })
 })
+
+/**
+ * Os três textos ambíguos que o v43 deixou visíveis, decididos em 2026-10-11 (todos dos dados):
+ * - "tornando-se mais explícito depois" revela a versão mais explícita → sai da normal;
+ * - "some of the chapters are very explicit" afirma conteúdo explícito sem atribuição segura → sai;
+ * - "graficamente explícito" sobre uma cena de violência sexual é fato da história → FICA.
+ */
+describe("resíduos do v43", () => {
+  it.each([
+    "A arte melhora ao longo da série, embora o conteúdo adulto seja inicialmente censurado (R-15), tornando-se mais explícito depois.",
+    "My only gripe is that some of the chapters are very explicit and really only feel like fan service",
+  ])("sai da versão normal: %s", (frase) => {
+    expect(mentionsExplicitSexualContent(frase)).toBe(true)
+  })
+
+  it.each([
+    // violência sexual descrita como gráfica: fato das duas edições (mig 203)
+    "o momento em que o ML estupra a FL sob influência de brainwashing é amplamente criticado por ser graficamente explícito e praticamente ignorado pela trama",
+    // "fica mais explícito" sem conteúdo adulto na frase, e com negação
+    "A trama fica mais explícita sobre o passado da protagonista.",
+    "o conteúdo adulto não fica mais explícito depois",
+    // inglês: negação, expectativa, outro sujeito
+    "The tags are there but it's not explicit so people are bound to be curious.",
+    "the scenes aren't very explicit",
+    "nothing explicit so some panel are like what even is this body part supposed to be",
+    "I think the mature version should actually mean more explicit.",
+    "She makes it pretty explicit since the very first chapter that something is wrong",
+  ])("fica na versão normal: %s", (frase) => {
+    expect(mentionsExplicitSexualContent(frase)).toBe(false)
+  })
+})

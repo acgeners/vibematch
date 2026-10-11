@@ -102,8 +102,31 @@ const EXPLICIT_ADULT_RE =
 const NAO_AFIRMA_RE =
   /\b(?:sem|n[aã]o|nem|nenhum\w*|falta|aus[eê]ncia|esperav\w*|esperad\w*|gostari\w*|queri\w*|desej\w*|promet\w*|censur\w*|menos|pouc\w*)\b/i
 
+/**
+ * O conteúdo adulto FICA mais explícito — revela a versão mais explícita: "o conteúdo adulto é
+ * inicialmente censurado (R-15), tornando-se mais explícito depois". Só com conteúdo adulto na mesma
+ * frase ("a trama fica mais explícita sobre o passado" não conta). ⚠️ "Graficamente explícito" sobre
+ * uma cena de violência sexual NÃO entra: é fato da história, das duas edições (mig 203).
+ */
+const FICA_MAIS_EXPLICITO_RE = /\b(?:torn\w*|fic\w*)(?:-se)?\s+(?:ainda\s+)?mais\s+expl[ií]cit\w*/gi
+const CONTEXTO_ADULTO_RE = /conte[uú]do adulto|\bcenas?\b|\bsexo\b|sexua|[ií]ntim|\bsmut\b|\br-?15\b|censur/i
+/** Inglês, com substantivo de conteúdo como sujeito: "some of the chapters are very explicit". */
+const EN_EXPLICIT_RE =
+  /\b(?:chapters?|scenes?|content|parts?|panels?)\s+(?:is|are|was|were|gets?|got|becomes?|became)\s+(?:(?:very|really|pretty|quite|super|so|extremely|too|fairly|rather)\s+)?explicit\b/i
+
+function fraseEm(text: string, i: number): string {
+  const ini = Math.max(text.lastIndexOf(".", i), text.lastIndexOf("!", i), text.lastIndexOf("?", i)) + 1
+  const fim = text.slice(i).search(/[.!?]/)
+  return text.slice(ini, fim < 0 ? undefined : i + fim)
+}
+
 function affirmsExplicitAdultContent(text: string): boolean {
-  for (const m of text.matchAll(EXPLICIT_ADULT_RE)) {
+  if (EN_EXPLICIT_RE.test(text)) return true
+  const achados = [
+    ...[...text.matchAll(EXPLICIT_ADULT_RE)],
+    ...[...text.matchAll(FICA_MAIS_EXPLICITO_RE)].filter((m) => CONTEXTO_ADULTO_RE.test(fraseEm(text, m.index))),
+  ]
+  for (const m of achados) {
     // Só a mesma oração conta: "esperavam ver os filhos, mas receberam cenas de intimidade explícita"
     // afirma o conteúdo — o "esperavam" é de outra oração.
     const oracao = text.slice(0, m.index).split(/[.,;:!?()/"—–]/).pop() ?? ""
