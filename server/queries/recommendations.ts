@@ -11,6 +11,9 @@ import { getCurrentUserId, getSessionUserId } from "@/server/queries/current-use
 import { getPersonalStateReader, EMPTY_PERSONAL_STATE } from "@/server/queries/user-work-state"
 import type { PersonalStateReader } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
+import { defaultMixedEdition, isMixedEditionState } from "@/lib/editions/mixed-edition"
+import { mentionsExplicitSexualContent } from "@/lib/editions/edition-content"
+import { getMixedEditionSettings, visibleTagIdsOnNormal } from "@/server/queries/edition-scores"
 import {
   isFullyReadPersonalStatus,
   isUnreadPersonalStatus,
@@ -1493,6 +1496,8 @@ export interface RecommendationRunWithWorks {
     work_id: string
     alignment_score: number
     justification: string
+    /** Obra mixed na versão normal: a justificativa citava conteúdo da R18 e saiu (fase 2). */
+    justificationHiddenForEdition: boolean
     top_match_factors: string[]
     risks: string[]
     confidence: number | null
@@ -1550,21 +1555,37 @@ export async function getRecommendationRun(idOrSlug: string): Promise<Recommenda
   )
 
   const worksById = new Map<string, FavoriteCandidate>()
+  /** Obras mixed exibidas na versão NORMAL nesta run (fase 2). */
+  const normalEditionWorkIds = new Set<string>()
   if (workIds.length > 0) {
     // Reusa o `userId` da sessão resolvido no topo. Aqui havia um segundo
     // `getCurrentUserId(supabase)`: hoje inofensivo (o early-return de anônimo vem antes),
     // mas fazia a proteção depender de OUTRA linha — bastava alguém mover o guard pra o
     // estado de leitura do dono voltar a vazar. Foi o teste de arquitetura que apontou.
+    // `edition_state` só aqui (não no select compartilhado): é a exibição da run que precisa da edição.
     const { data: worksData } = await supabase
       .from("works")
-      .select(CANDIDATE_WORK_SELECT)
+      .select(`${CANDIDATE_WORK_SELECT}, edition_state`)
       .eq("user_work_state.user_id", userId)
       .in("id", workIds)
     // Exibição da run histórica: a justificativa já está congelada no `results`.
     const biasMap = await loadBiasMapForRecs(supabase)
-    for (const row of worksData ?? []) {
-      const id = (row as { id: string }).id
-      worksById.set(id, mapRowToCandidate(row, biasMap))
+    // 🔴 Obra `mixed` (fase 2) na edição padrão de quem olha: na NORMAL saem as tags da R18 e as adultas
+    // de edição desconhecida (`visibleTagIdsOnNormal` — a mesma régua da página e das listas).
+    const rows = (worksData ?? []) as unknown as Array<{ id: string; edition_state?: string | null; work_tags?: Array<{ tag_id?: string | null }> | null }>
+    const mixedRows = rows.filter((r) => isMixedEditionState(r.edition_state))
+    if (mixedRows.length > 0 && defaultMixedEdition(await getMixedEditionSettings()) === "normal") {
+      const visiveis = await visibleTagIdsOnNormal(
+        supabase,
+        mixedRows.map((r) => ({ id: r.id, tagIds: (r.work_tags ?? []).map((wt) => wt.tag_id ?? "").filter(Boolean) })),
+      )
+      for (const r of mixedRows) {
+        normalEditionWorkIds.add(r.id)
+        r.work_tags = (r.work_tags ?? []).filter((wt) => wt.tag_id != null && visiveis.get(r.id)?.has(wt.tag_id))
+      }
+    }
+    for (const row of rows) {
+      worksById.set(row.id, mapRowToCandidate(row, biasMap))
     }
   }
 
@@ -1583,12 +1604,19 @@ export async function getRecommendationRun(idOrSlug: string): Promise<Recommenda
     })
     .map((r) => {
       const work = worksById.get(r.work_id as string) ?? null
+      // Na versão NORMAL de uma mixed, o texto do ranker que cita conteúdo sexual explícito (da R18)
+      // não é mostrado como se descrevesse a normal — mesma régua do resumo na página da obra.
+      const naNormal = normalEditionWorkIds.has(r.work_id as string)
+      const justification = r.justification ?? ""
+      const justificationHidden = naNormal && mentionsExplicitSexualContent(justification)
+      const semExplicito = (xs: string[]) => (naNormal ? xs.filter((x) => !mentionsExplicitSexualContent(x)) : xs)
       return {
         work_id: r.work_id as string,
         alignment_score: Number(r.alignment_score),
-        justification: r.justification ?? "",
-        top_match_factors: Array.isArray(r.top_match_factors) ? r.top_match_factors : [],
-        risks: Array.isArray(r.risks) ? r.risks : [],
+        justification: justificationHidden ? "" : justification,
+        justificationHiddenForEdition: justificationHidden,
+        top_match_factors: semExplicito(Array.isArray(r.top_match_factors) ? r.top_match_factors : []),
+        risks: semExplicito(Array.isArray(r.risks) ? r.risks : []),
         confidence: r.confidence != null ? Number(r.confidence) : null,
         work,
         coverUrls: work?.coverUrls ?? [],

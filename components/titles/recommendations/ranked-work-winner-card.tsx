@@ -4,6 +4,7 @@ import Link from "next/link"
 import { AlertTriangle, CheckCircle2, Crown, ExternalLink, ImageOff, Lightbulb, Trophy } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { AdultBadge } from "@/components/ui/adult-badge"
+import { JUSTIFICATIVA_DA_R18 } from "@/components/titles/recommendations/ranked-work-featured-card"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { CoverImage } from "@/components/ui/cover-image"
 import { cn, titleToSlug } from "@/lib/utils"
@@ -134,7 +135,7 @@ export function RankedWorkWinnerCard({ ranked, totalCount }: RankedWorkWinnerCar
 
           {/* Justification paragraph in the middle column */}
           <p className="text-sm leading-relaxed text-foreground/90 mt-4 italic border-l-2 border-border/80 pl-3">
-            {justification}
+            {ranked.justificationHiddenForEdition ? JUSTIFICATIVA_DA_R18 : justification}
           </p>
         </div>
 

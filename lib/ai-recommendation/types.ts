@@ -235,6 +235,11 @@ export interface RankedCandidate extends RankedWork {
   work: CandidateWorkInput
   /** Candidatas de capa (ver MAX_COVER_CANDIDATES) — a UI cai pra próxima se a 1ª morrer. */
   coverUrls: string[]
+  /**
+   * Obra `mixed` vista na versão NORMAL (fase 2): a justificativa do ranker citava conteúdo sexual
+   * explícito (da R18) e saiu — o card diz isso em vez de mostrá-la como se descrevesse a normal.
+   */
+  justificationHiddenForEdition?: boolean
 }
 
 // ============================================================

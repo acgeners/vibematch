@@ -165,7 +165,8 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
   const total = entries.length
   const offset = (page - 1) * pageSize
   const pageIds = entries.slice(offset, offset + pageSize).map((e) => e.workId)
-  const works = await getWorksByIds(pageIds)
+  // A MESMA edição de contexto da ordenação (obra mixed: ?adult=only ⇒ R18, ocultar ⇒ normal).
+  const works = await getWorksByIds(pageIds, { adultFilter: filters.adultFilter ?? null })
   // Régua do Veredito (migration 193) — descreve o catálogo, então vem do servidor.
   const verdictScale = await getVerdictScale()
 

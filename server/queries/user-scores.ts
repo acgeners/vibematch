@@ -40,6 +40,9 @@ export const PERSONAL_SCORE_FIELDS = [
   "expected_is_stub",
   "expected_baseline",
   "expected_quality_adj",
+  /** Obra mixed: a edição das colunas acima e as previsões das DUAS edições (mig 213). Pessoais como elas. */
+  "expected_edition",
+  "expected_by_edition",
   "calc_score",
   "chance_score",
   "chance_is_stub",
@@ -67,6 +70,13 @@ export const PERSONAL_SCORE_FIELDS = [
    * este campo passa a ser lido como os demais.
    */
   "art_percentile",
+  /**
+   * O contrato com que a linha foi calculada (mig 202). Pessoal como a linha: quem lê a previsão por
+   * edição de uma obra mixed só a confia se o contrato da linha DELA conhece edição
+   * (`predictionForEdition`). Sem isto o overlay misturaria o contrato do dono com a previsão de outra
+   * pessoa.
+   */
+  "scoring_contract",
 ] as const
 
 export type PersonalScoreField = (typeof PERSONAL_SCORE_FIELDS)[number]
@@ -177,7 +187,7 @@ async function loadUserScores(userId: string): Promise<Map<string, Record<string
     const { data, error } = await supabase
       .from("user_calculated_scores")
       .select(
-        `work_id, expected_score, expected_is_stub, expected_baseline, expected_quality_adj,
+        `work_id, expected_score, expected_is_stub, expected_baseline, expected_quality_adj, expected_edition, expected_by_edition, scoring_contract,
          calc_score, chance_score, chance_is_stub,
          personal_fit, personal_fit_percentile, tag_overlap_net,
          alignment_score, alignment_run_id, alignment_justification, alignment_at,

@@ -191,10 +191,12 @@ export async function recalculateScoresNowResult() {
 /**
  * Recálculo orquestrado em BACKGROUND (force=false): só roda se houver pendência.
  * Substitui a coalescência in-process antiga — a dedup/coalescência agora é da
- * orquestração (single-flight + job durável). Usado pelo auto-recalc e pelo
- * fallback do markRecalcPending. Best-effort (engole erro).
+ * orquestração (single-flight + job durável). Usado pelo auto-recalc, pelo
+ * fallback do markRecalcPending e pela troca de edição padrão do DONO
+ * (`server/actions/settings.ts`). Best-effort (engole erro): quem chama marca a
+ * pendência ANTES, e é ela que garante o recálculo se este falhar.
  */
-function recalculateScoresInBackground(context: string): void {
+export function recalculateScoresInBackground(context: string): void {
   after(async () => {
     try {
       const out = await ensureRecalculateScores(recalcDeps(false))

@@ -47,6 +47,12 @@ interface WorkReviewsCardProps {
     digestPromptVersion?: string | null
     summaryModel: string | null
   }
+  /**
+   * Obra `mixed` vista na VERSÃO NORMAL (fase 2): as reviews são da obra inteira (97,6% não dizem a
+   * edição), e o que cita conteúdo sexual explícito já saiu do `snapshot` (`reviewsForEdition`). O
+   * card só DIZ isso — sem esta faixa, a lista mais curta e a síntese ausente pareceriam defeito.
+   */
+  editionView?: { synthesisHidden: boolean; reviewsHidden: number } | null
 }
 
 // Reviews abaixo disto não geram resumo (espelha review-summarizer.ts e settings-pending.ts).
@@ -226,7 +232,7 @@ function ratingColor(rating: number | null): string {
   return "text-rose-600 dark:text-rose-300"
 }
 
-export function WorkReviewsCard({ snapshot, workId, provenance }: WorkReviewsCardProps) {
+export function WorkReviewsCard({ snapshot, workId, provenance, editionView }: WorkReviewsCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [proseOpen, setProseOpen] = useState(false)
   const [execOpen, setExecOpen] = useState(false)
@@ -461,7 +467,20 @@ export function WorkReviewsCard({ snapshot, workId, provenance }: WorkReviewsCar
       </CardHeader>
 
       <CardContent className="@container flex flex-col gap-4 pt-0">
-        {digestLeads && digest ? (
+        {editionView && (
+          <p className="rounded-md bg-muted/50 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+            <span className="font-medium text-foreground">Versão normal.</span> As reviews são da obra
+            inteira — a maioria não diz qual edição o leitor leu.
+            {editionView.reviewsHidden > 0 &&
+              ` ${editionView.reviewsHidden} ${editionView.reviewsHidden === 1 ? "review citando" : "reviews citando"} conteúdo sexual explícito ficam na versão R18.`}
+          </p>
+        )}
+        {editionView?.synthesisHidden ? (
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            A síntese das reviews cita conteúdo sexual explícito, que é da versão R18 — ela não é mostrada
+            como se descrevesse a versão normal.
+          </p>
+        ) : digestLeads && digest ? (
           <>
             {/* CIMA — o layout SEGUE O DADO (2026-08-12).
                 A coluna fixa de 292px existia sempre, e medido nas 852 obras com síntese

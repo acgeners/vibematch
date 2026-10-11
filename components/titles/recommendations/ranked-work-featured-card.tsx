@@ -10,6 +10,9 @@ import { cn, titleToSlug } from "@/lib/utils"
 import { LABELS } from "@/lib/constants/ui-labels"
 import type { RankedCandidate } from "@/lib/ai-recommendation/types"
 
+/** Obra mixed na versão normal (fase 2): o texto do ranker citava conteúdo da R18. */
+export const JUSTIFICATIVA_DA_R18 = "A justificativa cita conteúdo sexual explícito, que é da versão R18 — ela não é mostrada como se descrevesse a versão normal."
+
 interface RankedWorkFeaturedCardProps {
   rank: number
   ranked: RankedCandidate
@@ -115,7 +118,7 @@ export function RankedWorkFeaturedCard({ rank, ranked }: RankedWorkFeaturedCardP
         </div>
 
         <p className="text-xs leading-relaxed text-muted-foreground mt-0.5">
-          {justification}
+          {ranked.justificationHiddenForEdition ? JUSTIFICATIVA_DA_R18 : justification}
         </p>
 
         {/* Real work tags displayed at the bottom of the card */}

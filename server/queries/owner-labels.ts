@@ -149,6 +149,9 @@ const PERSONAL_SCORE_COLUMNS = [
   "expected_is_stub",
   "expected_baseline",
   "expected_quality_adj",
+  /** Obra mixed: a edição das colunas acima e as previsões das DUAS edições (mig 213). Pessoais como elas. */
+  "expected_edition",
+  "expected_by_edition",
   "calc_score",
   "chance_score",
   "chance_is_stub",

@@ -16,6 +16,8 @@ import { foldTitle, titleTokens, workMatchesQuery } from "@/lib/title-match"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
+import { fetchEditionScoresFor, getMixedEditionSettings, visibleTagIdsOnNormal } from "@/server/queries/edition-scores"
+import { adultContentFor, groupEditionRows, isMixedEditionState, predictionForEdition, resolveMixedEdition } from "@/lib/editions/mixed-edition"
 
 const WORK_WITH_RELATIONS_SELECT = `
   *,
@@ -772,7 +774,11 @@ export async function getWorkWithAiEvaluations(id: string) {
   }
 }
 
-export async function getWorksByIds(ids: string[]): Promise<WorkWithRelations[]> {
+export async function getWorksByIds(
+  ids: string[],
+  /** O `?adult=` da lista que ordenou estes ids — a edição das obras mixed tem de ser a MESMA. */
+  opts: { adultFilter?: "hide" | "only" | null } = {},
+): Promise<WorkWithRelations[]> {
   if (ids.length === 0) return []
   const supabase = createAdminClient()
   const { data, error } = await supabase
@@ -783,12 +789,67 @@ export async function getWorksByIds(ids: string[]): Promise<WorkWithRelations[]>
   if (error) throw new Error(error.message)
 
   const byId = new Map(((data ?? []) as Array<{ id: string }>).map((row) => [row.id, row]))
-  return withPersonalState(
+  const works = await withPersonalState(
     ids
       .map((id) => byId.get(id))
       .filter((row): row is NonNullable<typeof row> => Boolean(row))
       .map(normalizeWorkRelations),
   )
+  return withEditionView(works, opts.adultFilter ?? null)
+}
+
+/**
+ * Obras `mixed` vistas na EDIÇÃO de contexto (fase 2) — listas, comparador, favoritos, heatmap. Troca o
+ * `adult_content` de `category_scores` (a nota MISTURADA das duas edições) pela nota da edição, ou o
+ * remove ("não avaliado para esta edição"); troca a Nota Prevista/Chance pelas da edição
+ * (`predictionForEdition`); e, na NORMAL, tira as tags da R18 e as adultas de edição desconhecida
+ * (`tagsForEdition`). Sem obra mixed na página, não consulta nada.
+ *
+ * ⚠️ A página da obra NÃO passa por aqui: ela resolve a edição pela URL (`?edition=`).
+ */
+async function withEditionView(
+  works: WorkWithRelations[],
+  adultFilter: "hide" | "only" | null,
+): Promise<WorkWithRelations[]> {
+  const mixedIds = new Set(
+    works.filter((w) => isMixedEditionState((w as { edition_state?: unknown }).edition_state)).map((w) => w.id),
+  )
+  if (mixedIds.size === 0) return works
+  const admin = createAdminClient()
+  const settings = await getMixedEditionSettings()
+  const edition = resolveMixedEdition({ hideAdult: settings.hideAdult, adultFilter, preference: settings.preference }).edition
+  const tagIdsOf = (w: WorkWithRelations) =>
+    ((w.tags ?? []) as Array<{ id?: unknown }>).map((t) => (typeof t?.id === "string" ? t.id : "")).filter(Boolean)
+  const [rows, visiveisPorObra] = await Promise.all([
+    fetchEditionScoresFor(admin, [...mixedIds]),
+    edition === "normal"
+      ? visibleTagIdsOnNormal(admin, works.filter((w) => mixedIds.has(w.id)).map((w) => ({ id: w.id, tagIds: tagIdsOf(w) })))
+      : Promise.resolve(new Map<string, Set<string>>()),
+  ])
+  const rowsByWork = groupEditionRows(rows)
+  return works.map((w) => {
+    if (!mixedIds.has(w.id)) return w
+    const res = adultContentFor({ isMixed: true, legacyScore: null, editionRows: rowsByWork.get(w.id) }, edition)
+    const category_scores = (w.category_scores ?? [])
+      .map((cs) =>
+        cs.criterion_slug !== "adult_content"
+          ? cs
+          : res.kind === "edition"
+            ? // `edition_source` diz de onde veio o número da edição; `source` segue sendo o da linha legada
+              // (nenhum consumidor de lista o lê — conferido: comparador e tabela só leem `score`).
+              { ...cs, score: res.score, ai_evaluation_id: null, edition_source: res.row.source }
+            : null,
+      )
+      .filter((cs): cs is NonNullable<typeof cs> => cs != null)
+    const calculated_scores = predictionForEdition(w.calculated_scores, true, edition).row
+    // Tag sem id não tem flag a consultar: oculta na normal (lado seguro).
+    const visiveis = visiveisPorObra.get(w.id)
+    const tags =
+      edition === "normal"
+        ? ((w.tags ?? []) as Array<{ id?: unknown }>).filter((t) => typeof t?.id === "string" && visiveis?.has(t.id))
+        : w.tags
+    return { ...w, category_scores, calculated_scores, tags: tags as typeof w.tags, active_edition: edition }
+  })
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
