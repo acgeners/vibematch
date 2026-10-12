@@ -30,17 +30,18 @@ describe("selo 18+ — a matriz da decisão de produto", () => {
 describe("selo 18+ — acompanha a troca de edição pela URL", () => {
   const pela = (ctx: Parameters<typeof resolveMixedEdition>[0]) => selo(true, resolveMixedEdition(ctx).edition, false)
   it("?edition=normal ⇒ sem selo; ?edition=r18 ⇒ com selo", () => {
-    expect(pela({ hideAdult: false, urlEdition: "normal" })).toBe(false)
-    expect(pela({ hideAdult: false, urlEdition: "r18" })).toBe(true)
+    expect(pela({ hideAdult: false, signedIn: true, urlEdition: "normal" })).toBe(false)
+    expect(pela({ hideAdult: false, signedIn: true, urlEdition: "r18" })).toBe(true)
   })
-  it("sem ?edition vale a preferência (normal por padrão); ?adult=only abre a R18", () => {
-    expect(pela({ hideAdult: false })).toBe(false)
-    expect(pela({ hideAdult: false, preference: "r18" })).toBe(true)
-    expect(pela({ hideAdult: false, adultFilter: "only" })).toBe(true)
+  it("sem ?edition: logado que vê 18+ abre a R18 (selo); anônimo e extras abrem a normal; ?adult=only abre a R18", () => {
+    expect(pela({ hideAdult: false, signedIn: true })).toBe(true)
+    expect(pela({ hideAdult: false, signedIn: false })).toBe(false)
+    expect(pela({ hideAdult: false, signedIn: true, r18OnlyInExtras: true })).toBe(false)
+    expect(pela({ hideAdult: false, signedIn: false, adultFilter: "only" })).toBe(true)
   })
   it("quem oculta 18+ cai na normal (sem selo); pedindo a R18, ela vem atrás da confirmação — com selo", () => {
-    expect(pela({ hideAdult: true })).toBe(false)
-    expect(pela({ hideAdult: true, urlEdition: "r18" })).toBe(true)
+    expect(pela({ hideAdult: true, signedIn: true })).toBe(false)
+    expect(pela({ hideAdult: true, signedIn: true, urlEdition: "r18" })).toBe(true)
   })
 })
 

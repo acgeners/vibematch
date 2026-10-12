@@ -128,7 +128,7 @@ nome de diretório de `exemplo`) e todo escritor chama `podar("<família>")`. Aj
 pela env declarada em cada uma — `BACKUP_KEEP` (5), `PULL_KEEP` (3), `PUSH_STAGE_KEEP` (2),
 `PUSH_EVALS_KEEP` (3), `COFRE_KEEP` (5), `SYNOPSIS_LAB_KEEP` (3), e mais 5.
 
-⚠️ **São 15 hoje**, e esta linha já disse **7** e **11** — a lista de envs acima cobre 6 delas.
+⚠️ **São 16 hoje**, e esta linha já disse **7** e **11** — a lista de envs acima cobre 6 delas.
 Contagem em prosa não acusa a própria defasagem: **não a repita aqui, leia o `FAMILIAS`.**
 
 🔴 **E essa frase não bastou: a linha defasou de 11 para 14 com o aviso escrito nela mesma.** É a
@@ -311,12 +311,12 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**107 arquivos, remedidos em 2026-10-10**):
+banco declara um dos dois (**108 arquivos, remedidos em 2026-10-12**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **45** | só LÊ ⇒ vai pro local, de graça |
-| `ALVO: NUVEM` no cabeçalho | **50** | GRAVA ⇒ tem que ir pra nuvem |
+| `ALVO: NUVEM` no cabeçalho | **51** | GRAVA ⇒ tem que ir pra nuvem |
 | (não tocam o banco) | 9 | fora da régua — entrou o `smoke-browser.mjs`, que só abre rota |
 
 🔴 **A régua tem DOIS rótulos e o mundo tem TRÊS casos — `smoke-logado.mjs` é o terceiro.**
@@ -4052,10 +4052,10 @@ faz `relatar()` devolver `false`. É o "declara o que esperava achar" do título
 
 ### Onde vale, e a válvula
 
-Aplicado a **10 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos`
+Aplicado a **11 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos`
 · `normalizar-titulos-alternativos` · `reverter-calibracao-auto-aplicada` ·
 `backfill-faixa-citada` · `repick-dead-covers` · `seed-art-signal` · `tag-r19-adult` ·
-`push-opening-structure`.
+`push-opening-structure` · `recalcular-vies-da-dona`.
 
 ⚠️ **`funil.nadaAFazer("…")` substitui o `console.log` da frase**, e não é estilo: separados,
 volta a ser possível imprimir a conclusão sem a evidência, que é o estado exato que custou o

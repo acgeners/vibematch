@@ -16,8 +16,9 @@ import { foldTitle, titleTokens, workMatchesQuery } from "@/lib/title-match"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
-import { fetchEditionScoresFor, getMixedEditionSettings, visibleTagIdsOnNormal } from "@/server/queries/edition-scores"
+import { fetchEditionScoresFor, getMixedEditionSettings, getR18ExtrasWorkIds, visibleTagIdsOnNormal } from "@/server/queries/edition-scores"
 import { adultContentFor, groupEditionRows, isMixedEditionState, predictionForEdition, resolveMixedEdition } from "@/lib/editions/mixed-edition"
+import type { MixedEdition } from "@/lib/editions/mixed-edition"
 
 const WORK_WITH_RELATIONS_SELECT = `
   *,
@@ -517,6 +518,8 @@ async function withPersonalState(works: WorkWithRelations[]): Promise<WorkWithRe
       chapters_read: state.chaptersRead,
       last_read_at: state.lastReadAt,
       user_score: state.userScore,
+      // A versão (obra mixed) que a avaliação descreve — mig 216. `null` sem avaliação ou histórica.
+      read_edition: state.readEdition,
       observations: state.observations,
       observation_adjustment: state.observationAdjustment,
       synopsis_quality: state.synopsisQuality,
@@ -816,19 +819,32 @@ async function withEditionView(
   )
   if (mixedIds.size === 0) return works
   const admin = createAdminClient()
-  const settings = await getMixedEditionSettings()
-  const edition = resolveMixedEdition({ hideAdult: settings.hideAdult, adultFilter, preference: settings.preference }).edition
+  const [settings, r18ExtrasWorkIds] = await Promise.all([getMixedEditionSettings(), getR18ExtrasWorkIds()])
+  // Por OBRA: a R18 só nos extras deixa a normal como padrão daquela obra.
+  const editionOf = new Map(
+    [...mixedIds].map((id) => [
+      id,
+      resolveMixedEdition({
+        hideAdult: settings.hideAdult,
+        signedIn: settings.signedIn,
+        r18OnlyInExtras: r18ExtrasWorkIds.has(id),
+        adultFilter,
+      }).edition,
+    ]),
+  )
   const tagIdsOf = (w: WorkWithRelations) =>
     ((w.tags ?? []) as Array<{ id?: unknown }>).map((t) => (typeof t?.id === "string" ? t.id : "")).filter(Boolean)
+  const naNormal = works.filter((w) => editionOf.get(w.id) === "normal")
   const [rows, visiveisPorObra] = await Promise.all([
     fetchEditionScoresFor(admin, [...mixedIds]),
-    edition === "normal"
-      ? visibleTagIdsOnNormal(admin, works.filter((w) => mixedIds.has(w.id)).map((w) => ({ id: w.id, tagIds: tagIdsOf(w) })))
+    naNormal.length > 0
+      ? visibleTagIdsOnNormal(admin, naNormal.map((w) => ({ id: w.id, tagIds: tagIdsOf(w) })))
       : Promise.resolve(new Map<string, Set<string>>()),
   ])
   const rowsByWork = groupEditionRows(rows)
   return works.map((w) => {
     if (!mixedIds.has(w.id)) return w
+    const edition = editionOf.get(w.id) as MixedEdition
     const res = adultContentFor({ isMixed: true, legacyScore: null, editionRows: rowsByWork.get(w.id) }, edition)
     const category_scores = (w.category_scores ?? [])
       .map((cs) =>

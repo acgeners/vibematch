@@ -42,6 +42,7 @@ import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
 import { recomputeAdultAuto } from "@/lib/tags/adult-classify"
 import { recordMangaUpdatesEditionEvidence } from "@/lib/editions/record-edition-evidence"
+import { editionContextFrom } from "@/lib/editions/read-edition"
 import { computeAdultContentBounds, clampAdultContentScore } from "@/lib/ai-evaluation/adult-content-rules"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate, ensureAdmin, ensurePermission, ensureSignedIn, getOwnerUserId, getSessionUserId } from "@/server/queries/current-user"
@@ -2438,7 +2439,15 @@ function ratingPatchFrom(data: WorkStatusValues): TasteStatePatch {
   }
 }
 
-export async function updateWorkStatus(id: string, values: WorkStatusValues) {
+export async function updateWorkStatus(
+  id: string,
+  values: WorkStatusValues,
+  /**
+   * A versão ATIVA na tela da obra (obra mixed, mig 216): vira a versão de uma avaliação NOVA. Uma
+   * avaliação existente mantém a dela — trocar é `setEvaluationEdition`. Ver lib/editions/read-edition.ts.
+   */
+  activeEdition?: string | null,
+) {
   const gate = await ensureReadingStateWriter()
   if (!gate.ok) return { error: { _root: [gate.error] } }
   const parsed = workStatusSchema.safeParse(values)
@@ -2589,8 +2598,9 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
   // ── Não-dono: TUDO dela (acompanhamento + gosto) vai pra `user_work_state`. `works` NÃO é
   // tocada — nem a nota, nem as observações. É o que impede a nota dela de virar o rótulo que
   // treina o modelo DELE.
+  const editionContext = editionContextFrom(activeEdition)
   if (!gate.isOwner) {
-    const write = await writeReadingState(gate.userId, [id], personalState)
+    const write = await writeReadingState(gate.userId, [id], personalState, editionContext)
     if (write.error) return { error: { _root: [write.error] } }
 
     // O MODELO DELA (Fatia 2b). Sem prediction ledger e sem `formula_config`: aquilo mede e
@@ -2619,7 +2629,7 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
   // ── Dono: MESMO destino que qualquer outra pessoa (Fase E). O `update` em `works` que existia
   // aqui gravava o mesmo `personalState` que a linha abaixo já grava no espelho — inclusive a
   // nota que treina o Ridge, que desde a Fase B é lida do espelho. Era uma cópia sem leitor.
-  const mirror = await writeReadingState(gate.userId, [id], personalState)
+  const mirror = await writeReadingState(gate.userId, [id], personalState, editionContext)
   if (mirror.error) return { error: { _root: [mirror.error] } }
 
   // Medição prospectiva: decidida no escritor acima (label-transition.ts). Sem leitura suficiente

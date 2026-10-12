@@ -79,10 +79,15 @@ export const PERSONAL_RECALC_INPUTS = [
   /** Perfil de gosto corrente → loved/avoided tags → os 3 sinais de fit. */
   "taste_profile",
   /**
-   * `preferred_mixed_edition` e `hide_adult_content` → a edição PADRÃO (`defaultMixedEdition`) cujo
-   * `adult_content` entra na previsão das obras mixed.
+   * `hide_adult_content` → a versão PADRÃO (`defaultMixedEdition`) cujo `adult_content` entra na
+   * previsão das obras mixed.
    */
   "mixed_edition_preference",
+  /**
+   * `user_work_state.read_edition` (mig 216) → a versão cujo `adult_content` acompanha o RÓTULO no
+   * treino. Trocar a versão de uma avaliação muda a entrada do treino sem mudar a nota.
+   */
+  "read_edition",
 ] as const
 
 export const RECALC_INPUTS = [...CATALOG_RECALC_INPUTS, ...PERSONAL_RECALC_INPUTS] as const

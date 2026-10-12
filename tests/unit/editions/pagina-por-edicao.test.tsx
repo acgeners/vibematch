@@ -19,7 +19,7 @@ const semComentarios = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace
 
 describe("seletor de edição", () => {
   it("dois links de URL (?edition=normal|r18), a ativa marcada — não é switch", () => {
-    render(<EditionSelector basePath="/catalog/obra" resolution={resolveMixedEdition({ hideAdult: false, preference: "r18" })} />)
+    render(<EditionSelector basePath="/catalog/obra" resolution={resolveMixedEdition({ hideAdult: false, signedIn: true })} />)
     const normal = screen.getByRole("link", { name: "Versão normal" })
     const r18 = screen.getByRole("link", { name: "Versão R18" })
     expect(normal.getAttribute("href")).toBe("/catalog/obra?edition=normal")
@@ -29,7 +29,7 @@ describe("seletor de edição", () => {
     expect(screen.queryByRole("switch")).toBeNull()
   })
   it("ocultar 18+ força a normal e o texto diz que a R18 pede confirmação", () => {
-    render(<EditionSelector basePath="/catalog/obra" resolution={resolveMixedEdition({ hideAdult: true, preference: "r18" })} />)
+    render(<EditionSelector basePath="/catalog/obra" resolution={resolveMixedEdition({ hideAdult: true, signedIn: true })} />)
     expect(screen.getByRole("link", { name: "Versão normal" }).getAttribute("aria-current")).toBe("page")
     expect(screen.getByText(/a versão R18 pede confirmação e sua preferência não muda/)).toBeTruthy()
   })

@@ -81,7 +81,7 @@ export async function loadLabelsFor(
          synopsis_interest_skipped,
          post_story_score, post_fl_score, post_ml_score, post_character_development_score,
          post_pacing_score, post_art_visual_score, post_impact_immersion_score,
-         post_originality_score`,
+         post_originality_score, read_edition`,
       )
       .eq("user_id", ownerId)
       .order("work_id", { ascending: true })
@@ -135,6 +135,9 @@ export function withOwnerLabels<T extends { id: string }>(
     for (const col of PERSONAL_COLUMNS) {
       personal[col] = own ? ((own as Record<string, unknown>)[col] ?? null) : null
     }
+    // A versão que a avaliação descreve (mig 216) — só o recálculo a lê (mapa de TREINO da obra mixed).
+    // Fora de PERSONAL_COLUMNS de propósito: aquela lista também descreve a view `works_owner`.
+    personal.read_edition = own ? ((own as Record<string, unknown>).read_edition ?? null) : null
     return { ...row, ...personal }
   })
 }

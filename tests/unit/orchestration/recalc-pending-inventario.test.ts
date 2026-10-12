@@ -72,12 +72,16 @@ const INVENTARIO: Record<string, boolean> = {
   comixHidsPending: true, // UMA marcação depois do laço do mop-up pós-lote
   comixResilient: true, // fase 0 GRATUITA da cascata — antes do checkpoint de custo
 
-  // ── Entraram com a fase 2 de mixed (2026-10-10) ────────────────────────────
-  // A edição PADRÃO (preferência; ocultar 18+ força a normal) decide qual adult_content entra na
-  // previsão das obras mixed. Declaram `mixed_edition_preference` — o gate pula quando quem mudou
-  // não é o dono (o recalc per-user dele roda em after()).
-  setPreferredMixedEdition: true,
+  // ── Entrou com a fase 2 de mixed (2026-10-10) ──────────────────────────────
+  // Desde 2026-10-12 ocultar/ver 18+ É a preferência que decide a versão PADRÃO das obras mixed (e
+  // o adult_content que entra na previsão). Declara `mixed_edition_preference` — o gate pula quando
+  // quem mudou não é o dono (o recalc per-user dele roda em after()). `setPreferredMixedEdition`
+  // saiu junto com o controle da preferência de versão.
   setHideAdultContent: true,
+  // A troca EXPLÍCITA da versão da avaliação (mig 216). Declara `read_edition`: muda a versão cujo
+  // adult_content acompanha o rótulo no treino, sem mudar a nota. Só a dona chega aqui (a leitora
+  // recalcula em after()).
+  setEvaluationEdition: true,
 
   // ── Entrou com o controle "Edições da obra" (2026-10-12) ───────────────────
   // A curadoria declara o estado de edição e a nota de conteúdo adulto de cada edição de uma mixed.

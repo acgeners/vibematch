@@ -84,7 +84,7 @@ export async function submitPostReadingAttributes(
   }
 
   // Lê user_attribute_assessment e grava attribute_bias — as duas são suas.
-  await recomputeAttributeBias(userId, userDb)
+  await recomputeAttributeBias(userId, userDb, supabase)
   // A pós-leitura entra no recalc global por UM caminho só: o `attribute_bias`,
   // que desloca on-read as notas de origem IA. (As 8 colunas `post_*_score` NÃO
   // são features — `QUALITY_NUMERIC_FEATURES` é vazio.) Marca pendente em vez de

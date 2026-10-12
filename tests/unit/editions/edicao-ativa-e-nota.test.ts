@@ -29,33 +29,52 @@ const linha = (edition: "normal" | "r18", score: number | null, source: EditionS
   confidence: source === "inferred_base" ? "baixa" : null,
 })
 
-describe("qual edição está ativa (precedência fechada em 2026-10-10)", () => {
-  it("ocultar 18+ força a normal — mesmo com preferência R18", () => {
-    expect(resolveMixedEdition({ hideAdult: true, preference: "r18" })).toEqual({ edition: "normal", source: "hide_adult", requiresConfirmation: false })
+describe("qual versão está ativa (precedência de 2026-10-12: a padrão segue a preferência de 18+)", () => {
+  const logado = { hideAdult: false, signedIn: true }
+  it("logado + adulto permitido ⇒ R18 é a padrão", () => {
+    expect(resolveMixedEdition(logado)).toEqual({ edition: "r18", source: "account", requiresConfirmation: false })
   })
-  it("?adult=hide força a normal", () => {
-    expect(resolveMixedEdition({ hideAdult: false, adultFilter: "hide", preference: "r18" }).edition).toBe("normal")
+  it("logado + adulto oculto ⇒ NORMAL", () => {
+    expect(resolveMixedEdition({ hideAdult: true, signedIn: true })).toEqual({ edition: "normal", source: "hide_adult", requiresConfirmation: false })
   })
-  it("ocultar 18+ + pedir a R18 na mão ⇒ R18 COM confirmação (a preferência não é tocada)", () => {
-    expect(resolveMixedEdition({ hideAdult: true, urlEdition: "r18", preference: null })).toEqual({ edition: "r18", source: "url", requiresConfirmation: true })
+  it("anônimo ⇒ NORMAL", () => {
+    expect(resolveMixedEdition({ hideAdult: false, signedIn: false })).toEqual({ edition: "normal", source: "anonymous", requiresConfirmation: false })
   })
-  it("?adult=only força a R18 — vence a URL e a preferência", () => {
-    expect(resolveMixedEdition({ hideAdult: false, adultFilter: "only", urlEdition: "normal", preference: "normal" })).toEqual({ edition: "r18", source: "adult_filter_only", requiresConfirmation: false })
+  it("R18 só nos extras ⇒ NORMAL, mesmo para quem vê 18+", () => {
+    expect(resolveMixedEdition({ ...logado, r18OnlyInExtras: true })).toEqual({ edition: "normal", source: "extras_only", requiresConfirmation: false })
   })
-  it("?edition= escolhe a edição", () => {
-    expect(resolveMixedEdition({ hideAdult: false, urlEdition: "r18", preference: "normal" }).edition).toBe("r18")
-    expect(resolveMixedEdition({ hideAdult: false, urlEdition: "normal", preference: "r18" }).edition).toBe("normal")
+  it("Normal escolhida à mão vence a padrão R18", () => {
+    expect(resolveMixedEdition({ ...logado, urlEdition: "normal" })).toEqual({ edition: "normal", source: "url", requiresConfirmation: false })
   })
-  it("sem URL nem filtro vale a preferência da conta", () => {
-    expect(resolveMixedEdition({ hideAdult: false, preference: "r18" })).toEqual({ edition: "r18", source: "preference", requiresConfirmation: false })
+  it("R18 à mão nos extras e anônimo: a escolhida", () => {
+    expect(resolveMixedEdition({ ...logado, r18OnlyInExtras: true, urlEdition: "r18" }).edition).toBe("r18")
+    expect(resolveMixedEdition({ hideAdult: false, signedIn: false, urlEdition: "r18" }).edition).toBe("r18")
   })
-  it("sem preferência ⇒ NORMAL", () => {
-    expect(resolveMixedEdition({ hideAdult: false })).toEqual({ edition: "normal", source: "fallback", requiresConfirmation: false })
+  it("R18 à mão respeita a proteção: com adulto oculto, pede confirmação", () => {
+    expect(resolveMixedEdition({ hideAdult: true, signedIn: true, urlEdition: "r18" })).toEqual({ edition: "r18", source: "url", requiresConfirmation: true })
   })
-  it("a edição padrão do recálculo é a mesma régua sem URL e sem filtro", () => {
-    expect(defaultMixedEdition({ hideAdult: false, preference: "r18" })).toBe("r18")
-    expect(defaultMixedEdition({ hideAdult: true, preference: "r18" })).toBe("normal")
-    expect(defaultMixedEdition({ hideAdult: false, preference: null })).toBe("normal")
+  it("?adult=hide força a normal (proteção vem antes de tudo)", () => {
+    expect(resolveMixedEdition({ ...logado, adultFilter: "hide" }).edition).toBe("normal")
+    expect(resolveMixedEdition({ ...logado, adultFilter: "hide", urlEdition: "normal" }).edition).toBe("normal")
+  })
+  it("?adult=only força a R18 — vence a URL e os extras", () => {
+    expect(resolveMixedEdition({ ...logado, adultFilter: "only", urlEdition: "normal" })).toEqual({ edition: "r18", source: "adult_filter_only", requiresConfirmation: false })
+    expect(resolveMixedEdition({ ...logado, adultFilter: "only", r18OnlyInExtras: true }).edition).toBe("r18")
+  })
+  it("a padrão do recálculo é a mesma régua sem URL e sem filtro", () => {
+    expect(defaultMixedEdition({ hideAdult: false, signedIn: true })).toBe("r18")
+    expect(defaultMixedEdition({ hideAdult: true, signedIn: true })).toBe("normal")
+    expect(defaultMixedEdition({ hideAdult: false, signedIn: true, r18OnlyInExtras: true })).toBe("normal")
+    expect(defaultMixedEdition({ hideAdult: false, signedIn: false })).toBe("normal")
+  })
+  it("`preferred_mixed_edition` não muda mais a padrão: a regra nem recebe esse campo", () => {
+    // Quem passasse a preferência antiga (do banco) seria ignorado — e o tipo não tem o campo.
+    const comPrefAntiga = { ...logado, preference: "normal" } as unknown as Parameters<typeof resolveMixedEdition>[0]
+    expect(resolveMixedEdition(comPrefAntiga).edition).toBe("r18")
+    const fonte = readFileSync(join(process.cwd(), "lib/editions/mixed-edition.ts"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "")
+    expect(fonte).not.toMatch(/preference/i)
   })
 })
 

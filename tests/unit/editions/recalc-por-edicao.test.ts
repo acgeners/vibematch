@@ -5,10 +5,12 @@ import { asPersistedEditionPrediction, groupEditionRows, type EditionPrediction,
 import type { FormulaConfig, ScoreWeight } from "@/types/domain"
 
 /**
- * A Nota Prevista de uma obra `mixed` usa o `adult_content` da EDIÇÃO (migs 213/214) — e só na
- * PREVISÃO. O treino segue com o legado de `category_scores`, porque os rótulos não dizem qual
- * edição a pessoa leu. Duas consequências que este arquivo trava:
- *   · o MODELO é idêntico com ou sem edição (mesmos coeficientes), e nenhuma obra não-mixed muda;
+ * A Nota Prevista de uma obra `mixed` usa o `adult_content` da EDIÇÃO (migs 213/214) na PREVISÃO. No
+ * TREINO, desde a mig 216 o rótulo usa a versão LIDA quando ela é conhecida
+ * (`treino-pela-versao-lida.test.ts`); aqui nenhum rótulo tem versão (`read_edition` ausente = o
+ * histórico), então o treino segue com o legado de `category_scores`. O que este arquivo trava:
+ *   · sem versão lida, o MODELO é idêntico com ou sem edição (mesmos coeficientes), e nenhuma obra
+ *     não-mixed muda;
  *   · obra mixed sem nota na edição fica SEM Nota Prevista (o gate dos 9 atributos), nunca com a
  *     nota da outra edição.
  */
@@ -70,8 +72,16 @@ const pesos: ScoreWeight[] = SCORING_CRITERION_SLUGS.map((slug, i) => ({
 }))
 const config = { score_weights_auto: false, formula_version: "teste", gpt_mean: null, cv_mae_expected_stage1: null, expected_ridge_coefficients: null } as unknown as FormulaConfig
 
+/**
+ * O contexto do recálculo cuja versão PADRÃO é `edition` em toda obra: desde 2026-10-12 ela sai de
+ * ocultar 18+ (oculto ⇒ normal; visível ⇒ R18), sem obra "R18 só nos extras" aqui.
+ */
+function ctxDe(edition: MixedEdition, rowsByWork: RecalcEditionContext["rowsByWork"]): RecalcEditionContext {
+  return { hideAdult: edition === "normal", r18ExtrasWorkIds: new Set(), rowsByWork }
+}
+
 function rodar(edition?: MixedEdition) {
-  const ctx: RecalcEditionContext | undefined = edition ? { edition, rowsByWork: groupEditionRows(LINHAS) } : undefined
+  const ctx: RecalcEditionContext | undefined = edition ? ctxDe(edition, groupEditionRows(LINHAS)) : undefined
   const works = catalogo().map((raw) => buildWork(raw, {} as Parameters<typeof buildWork>[1], ctx))
   const res = computeRecalc({
     works, weights: pesos, config, tasteProfile: null, declaredTagPrefs: [], includeQuality: false,
@@ -136,7 +146,7 @@ describe("recálculo por edição — a previsão usa a nota da edição", () =>
 
   it("obra mixed sem NENHUMA linha de edição fica sem Nota Prevista (ausência, não a nota misturada)", () => {
     const works = catalogo().map((raw) =>
-      buildWork(raw, {} as Parameters<typeof buildWork>[1], { edition: "normal", rowsByWork: new Map() }),
+      buildWork(raw, {} as Parameters<typeof buildWork>[1], ctxDe("normal", new Map())),
     )
     const res = computeRecalc({ works, weights: pesos, config, tasteProfile: null, declaredTagPrefs: [], includeQuality: false, aiQualityByWork: new Map(), fast: true })
     for (const r of res.rows.filter((x) => MIXED.includes(x.work_id))) expect(r.expected_score).toBeNull()
@@ -238,7 +248,7 @@ describe("recálculo por edição — a Chance some junto com a Nota Prevista", 
   it("sem fallback R18 → normal: só a R18 com nota (normal not_rated) ⇒ a normal fica sem Chance", () => {
     // w049 passa a ter a normal SEM nota e a R18 com 9 — o caso "só R18" do retrato de produção.
     const linhas = LINHAS.map((l) => (l.work_id === "w049" && l.edition === "normal" ? row("w049", "normal", null, "not_rated") : l))
-    const works = catalogo().map((raw) => buildWork(raw, {} as Parameters<typeof buildWork>[1], { edition: "normal", rowsByWork: groupEditionRows(linhas) }))
+    const works = catalogo().map((raw) => buildWork(raw, {} as Parameters<typeof buildWork>[1], ctxDe("normal", groupEditionRows(linhas))))
     const res = computeRecalc({ works, weights: pesos, config, tasteProfile: null, declaredTagPrefs: [], includeQuality: false, aiQualityByWork: new Map(), fast: true })
     const w049 = res.rows.find((r) => r.work_id === "w049")!
     expect(w049.expected_score).toBeNull()
@@ -268,7 +278,7 @@ describe("recálculo por edição — a Chance some junto com a Nota Prevista", 
       return new Map(res.rows.map((r) => [r.work_id, r]))
     }
     const semCtx = roda()
-    const comCtx = roda({ edition: "normal", rowsByWork: groupEditionRows(LINHAS) })
+    const comCtx = roda(ctxDe("normal", groupEditionRows(LINHAS)))
     for (const id of ["w010", "w011"]) {
       expect(semCtx.get(id)!.chance_score).toEqual(expect.any(Number))
       expect(comCtx.get(id)!.chance_score).toBe(semCtx.get(id)!.chance_score)

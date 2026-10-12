@@ -222,6 +222,11 @@ export interface Work {
   synopsis_quality_source: SynopsisQualitySource | null
   observation_adjustment: number
   user_score: number | null
+  /**
+   * Versão (obra mixed) que a avaliação de QUEM OLHA descreve — `user_work_state.read_edition`, mig 216.
+   * Só existe no overlay pessoal; a linha de `works` não tem a coluna.
+   */
+  read_edition?: "normal" | "r18" | null
   post_story_score: number | null
   post_fl_score: number | null
   post_ml_score: number | null

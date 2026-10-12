@@ -5,6 +5,8 @@ import { PROMPT_VERSION } from "@/lib/ai-evaluation/service"
 import { SCORING_CONTRACT } from "@/lib/calculations/scoring-contract"
 import { NON_SCORING_CRITERION_SLUGS, SCORING_CRITERION_SLUGS } from "@/lib/calculations/scoring-features"
 import { resolveTransitionalFantasy } from "@/lib/calculations/fantasy-scoring-transition"
+import { buildWork, type RawWork } from "@/server/actions/calculations"
+import { groupEditionRows, type EditionScoreRow } from "@/lib/editions/mixed-edition"
 
 /**
  * PIN do contrato canônico (migration 202): o código e o banco têm de descrever o MESMO contrato.
@@ -90,18 +92,37 @@ describe("contrato canônico: código × migrations", () => {
  * O que cada nome de contrato DESCREVE. Mudou a lista de slugs ou a regra do slot `fantasy`?
  * Então o cálculo é outro: crie um nome NOVO aqui, troque `SCORING_CONTRACT` e a migration.
  */
-const DESCRITORES: Record<string, { slugs: readonly string[]; foraDoScoring: readonly string[]; fantasia: "legado-primeiro"; edicao: "nenhuma" | "previsao-por-edicao" }> = {
+const DESCRITORES: Record<
+  string,
+  {
+    slugs: readonly string[]
+    foraDoScoring: readonly string[]
+    fantasia: "legado-primeiro"
+    edicao: "nenhuma" | "previsao-por-edicao"
+    /** O `adult_content` do RÓTULO de uma obra mixed no treino: o legado misturado, ou o da versão lida (mig 216). */
+    treino: "legado" | "versao-lida"
+  }
+> = {
   "s9-fantasy-b-v1": {
     slugs: ["romance", "couple_dynamics", "fantasy", "action_adventure", "adult_content", "protagonist", "humor", "drama", "tragedy"],
     foraDoScoring: ["setting_era", "angst"],
     fantasia: "legado-primeiro",
     edicao: "nenhuma",
+    treino: "legado",
   },
   "s9-fantasy-b-edicao-v1": {
     slugs: ["romance", "couple_dynamics", "fantasy", "action_adventure", "adult_content", "protagonist", "humor", "drama", "tragedy"],
     foraDoScoring: ["setting_era", "angst"],
     fantasia: "legado-primeiro",
     edicao: "previsao-por-edicao",
+    treino: "legado",
+  },
+  "s9-fantasy-b-edicao-v2": {
+    slugs: ["romance", "couple_dynamics", "fantasy", "action_adventure", "adult_content", "protagonist", "humor", "drama", "tragedy"],
+    foraDoScoring: ["setting_era", "angst"],
+    fantasia: "legado-primeiro",
+    edicao: "previsao-por-edicao",
+    treino: "versao-lida",
   },
 }
 
@@ -119,6 +140,24 @@ describe(`SCORING_CONTRACT ${SCORING_CONTRACT} descreve o scoring que o código 
 
   it("setting_era e angst ficam FORA do cálculo", () => {
     for (const s of d.foraDoScoring) expect(NON_SCORING_CRITERION_SLUGS as readonly string[], bump).toContain(s)
+  })
+
+  it("treino: o rótulo de uma obra mixed com versão conhecida usa a nota que o contrato descreve", () => {
+    const raw = {
+      id: "m1", publication_status_id: null, total_chapters: 50, synopsis_quality: "♥♥", observation_adjustment: 0,
+      user_score: 8, read_edition: "r18", is_archived: false, year: 2020, year_end: null, original_title: null,
+      post_story_score: null, post_fl_score: null, post_ml_score: null, post_character_development_score: null,
+      post_pacing_score: null, post_art_visual_score: null, post_impact_immersion_score: null, post_originality_score: null,
+      category_scores: d.slugs.map((slug) => ({ criterion_slug: slug, score: slug === "adult_content" ? 8 : 5, source: "ai_accepted" })),
+      platform_ratings: [], work_tags: [], edition_state: "mixed",
+    } as unknown as RawWork
+    const linha = (edition: "normal" | "r18", score: number): EditionScoreRow => ({
+      work_id: "m1", edition, criterion_slug: "adult_content", score, source: "ai_evaluated", status: "rated", confidence: "alta",
+    })
+    const w = buildWork(raw, {} as Parameters<typeof buildWork>[1], {
+      hideAdult: false, r18ExtrasWorkIds: new Set(), rowsByWork: groupEditionRows([linha("normal", 4), linha("r18", 9.5)]),
+    })
+    expect(w.trainCategoryScores.adult_content, bump).toBe(d.treino === "versao-lida" ? 9.5 : 8)
   })
 
   it("Strategy B: o slot fantasy lê o legado quando existe e o real só como fallback", () => {

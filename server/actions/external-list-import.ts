@@ -195,7 +195,8 @@ async function applyUpdate(
 
   // Importar a lista do MAL/AniList traz NOTA e capítulos — dado pessoal, e em massa. Vai pro
   // estado de QUEM IMPORTOU, pelo cliente de sessão (RLS valendo — estamos numa request).
-  const write = await writeReadingState(userId, [workId], update)
+  // A nota de uma lista externa não diz qual versão foi lida (obra mixed, mig 216): versão desconhecida.
+  const write = await writeReadingState(userId, [workId], update, { kind: "unknown" })
   if (write.error) throw new Error(write.error)
   return true
 }
@@ -231,7 +232,7 @@ async function createWorkFromEntry(
     .single()
   if (error) throw new Error(error.message)
 
-  const write = await writeReadingState(userId, [data.id], personal)
+  const write = await writeReadingState(userId, [data.id], personal, { kind: "unknown" })
   if (write.error) throw new Error(write.error)
 
   return data.id

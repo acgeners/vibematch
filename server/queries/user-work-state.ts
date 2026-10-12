@@ -6,6 +6,10 @@ import { getSessionUserId, getOwnerUserId, ensureSignedIn, ensurePermission } fr
 import { writeWithLabelTransitions } from "@/lib/server/predictions/label-transition"
 import { createLabelTransitionDeps } from "@/lib/server/predictions/label-transition-io"
 import type { SynopsisQuality, SynopsisQualitySource } from "@/types/domain"
+import { parseMixedEdition } from "@/lib/editions/mixed-edition"
+import type { MixedEdition } from "@/lib/editions/mixed-edition"
+import type { ReadEditionContext } from "@/lib/editions/read-edition"
+import { groupRowsByPlan, planReadEditionsForWrite } from "./read-edition-plan"
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // Estado de LEITURA per-usuário — FATIA 1 (PLANO-MULTIUSER-FASE2.md §13)
@@ -78,6 +82,11 @@ export interface PersonalWorkState {
   synopsisQualityPredictionId: string | null
   synopsisInterestSkipped: boolean
   postScores: Record<PostReadingColumn, number | null>
+  /**
+   * A versão que a avaliação descreve (obra mixed, mig 216): `normal` | `r18`, ou `null` — sem
+   * avaliação, ou avaliação histórica de versão desconhecida. Dono da regra: `lib/editions/read-edition.ts`.
+   */
+  readEdition: MixedEdition | null
 }
 
 const EMPTY_POST_SCORES = Object.fromEntries(
@@ -100,6 +109,7 @@ export const EMPTY_PERSONAL_STATE: PersonalWorkState = {
   chaptersRead: null,
   lastReadAt: null,
   userScore: null,
+  readEdition: null,
   observations: null,
   observationAdjustment: 0,
   synopsisQuality: null,
@@ -116,6 +126,8 @@ export interface WorkReadingColumns {
   chapters_read?: number | null
   last_read_at?: string | null
   user_score?: number | null
+  /** Mig 216 — ver `PersonalWorkState.readEdition`. */
+  read_edition?: string | null
   observations?: string | null
   observation_adjustment?: number | null
   synopsis_quality?: SynopsisQuality | string | null
@@ -185,6 +197,7 @@ function stateFromMirrorRow(row: WorkReadingColumns): PersonalWorkState {
     synopsisQualityPredictionId: row.synopsis_quality_prediction_id ?? null,
     synopsisInterestSkipped: Boolean(row.synopsis_interest_skipped ?? false),
     postScores,
+    readEdition: parseMixedEdition(row.read_edition),
   }
 }
 
@@ -276,7 +289,7 @@ async function loadUserWorkState(userId: string): Promise<Map<string, PersonalWo
          synopsis_interest_skipped,
          post_story_score, post_fl_score, post_ml_score, post_character_development_score,
          post_pacing_score, post_art_visual_score, post_impact_immersion_score,
-         post_originality_score`,
+         post_originality_score, read_edition`,
       )
       .eq("user_id", userId)
       .order("work_id", { ascending: true })
@@ -398,6 +411,9 @@ export type TasteStatePatch = Partial<{
 
 export type PersonalStatePatch = ReadingStatePatch & TasteStatePatch
 
+/** `readEditionsWritten`: quantas linhas tiveram a versão da avaliação gravada/limpa (mig 216). */
+export type WriteResult = { error: string | null; readEditionsWritten?: number }
+
 /**
  * Grava o estado pessoal de UM usuário em N obras. Upsert idempotente.
  *
@@ -410,18 +426,25 @@ export async function writeReadingState(
   userId: string,
   workIds: string[],
   patch: PersonalStatePatch,
-): Promise<{ error: string | null }> {
+  editionContext: ReadEditionContext = { kind: "default" },
+): Promise<WriteResult> {
   const ids = Array.from(new Set(workIds.filter(Boolean)))
   if (ids.length === 0) return { error: null }
 
   const supabase = await createUserClient()
+  // A versão da avaliação (obra mixed, mig 216) — ver lib/editions/read-edition.ts.
+  const plano = await planReadEditionsForWrite(
+    { userId, workIds: ids, patch, context: editionContext },
+    { stateClient: supabase },
+  )
+  if (plano.error) return { error: plano.error }
+  if (Object.keys(patch).length === 0 && plano.plans.size === 0) return { error: null }
+
   const now = new Date().toISOString()
-  const rows = ids.map((workId) => ({
-    user_id: userId,
-    work_id: workId,
-    ...patch,
-    updated_at: now,
-  }))
+  const grupos = groupRowsByPlan(
+    ids.map((workId) => ({ user_id: userId, work_id: workId, ...patch, updated_at: now })),
+    plano.plans,
+  )
 
   // A nota passa por AQUI em todo caminho de sessão (form, status, nota rápida, ficha de gosto,
   // criar obra, import de lista). É o ponto único que captura a previsão PRÉ-nota — ver
@@ -433,14 +456,16 @@ export async function writeReadingState(
     source: "writeReadingState",
     deps: createLabelTransitionDeps({ userId, stateClient: supabase, ledgerClient: supabase }),
     write: async () => {
-      const { error } = await supabase
-        .from("user_work_state")
-        .upsert(rows, { onConflict: "user_id,work_id" })
-      if (error) return { error: `Falha salvando o seu estado: ${error.message}` }
+      for (const rows of grupos) {
+        const { error } = await supabase
+          .from("user_work_state")
+          .upsert(rows, { onConflict: "user_id,work_id" })
+        if (error) return { error: `Falha salvando o seu estado: ${error.message}` }
+      }
       return { error: null }
     },
   })
-  return result
+  return result.error ? result : { error: null, readEditionsWritten: plano.plans.size }
 }
 
 /** `undefined` = o patch não toca a nota; `null` = a nota está sendo APAGADA. */
@@ -467,12 +492,21 @@ export async function mirrorOwnerState(
   ownerId: string,
   workIds: string[],
   patch: PersonalStatePatch,
-): Promise<{ error: string | null }> {
+  editionContext: ReadEditionContext = { kind: "default" },
+): Promise<WriteResult> {
   const ids = Array.from(new Set(workIds.filter(Boolean)))
   if (ids.length === 0) return { error: null }
-  if (Object.keys(patch).length === 0) return { error: null }
+  if (Object.keys(patch).length === 0 && editionContext.kind !== "explicit") return { error: null }
 
   const supabase = createAdminClient()
+  // A versão da avaliação (obra mixed, mig 216) — mesma regra do `writeReadingState`.
+  const plano = await planReadEditionsForWrite(
+    { userId: ownerId, workIds: ids, patch, context: editionContext },
+    { stateClient: supabase, catalogClient: supabase },
+  )
+  if (plano.error) return { error: plano.error }
+  if (Object.keys(patch).length === 0 && plano.plans.size === 0) return { error: null }
+
   const now = new Date().toISOString()
 
   // Mesmo ponto único de `writeReadingState`, pelo caminho SEM sessão (service role, `ownerId`
@@ -484,23 +518,26 @@ export async function mirrorOwnerState(
     source: "mirrorOwnerState",
     deps: createLabelTransitionDeps({ userId: ownerId, stateClient: supabase, ledgerClient: supabase }),
     write: async () => {
-      // Em blocos: o upsert de 800+ linhas de uma vez estoura o payload do PostgREST.
+      // Em blocos: o upsert de 800+ linhas de uma vez estoura o payload do PostgREST. E, dentro do
+      // bloco, um upsert por plano de versão (`groupRowsByPlan`).
       for (let i = 0; i < ids.length; i += 500) {
-        const rows = ids.slice(i, i + 500).map((workId) => ({
+        const bloco = ids.slice(i, i + 500).map((workId) => ({
           user_id: ownerId,
           work_id: workId,
           ...patch,
           updated_at: now,
         }))
-        const { error } = await supabase
-          .from("user_work_state")
-          .upsert(rows, { onConflict: "user_id,work_id" })
-        if (error) return { error: `Falha espelhando o estado do dono: ${error.message}` }
+        for (const rows of groupRowsByPlan(bloco, plano.plans)) {
+          const { error } = await supabase
+            .from("user_work_state")
+            .upsert(rows, { onConflict: "user_id,work_id" })
+          if (error) return { error: `Falha espelhando o estado do dono: ${error.message}` }
+        }
       }
       return { error: null }
     },
   })
-  return result
+  return result.error ? result : { error: null, readEditionsWritten: plano.plans.size }
 }
 
 /**

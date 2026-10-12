@@ -30,8 +30,9 @@ export type EditionChoiceSource =
   | "adult_filter_hide" // o filtro da lista pediu "esconder 18+" ⇒ normal
   | "adult_filter_only" // o filtro da lista pediu "só 18+" ⇒ R18
   | "url" //               ?edition= na página
-  | "preference" //        user_settings.preferred_mixed_edition
-  | "fallback" //          nada disso ⇒ normal
+  | "extras_only" //       a R18 desta obra está só nos extras ⇒ normal
+  | "account" //           conta logada que não oculta 18+ ⇒ R18
+  | "anonymous" //         visitante sem conta ⇒ normal
 
 export interface EditionResolution {
   edition: MixedEdition
@@ -46,21 +47,30 @@ export interface EditionResolution {
 export interface EditionContext {
   /** `user_settings.hide_adult_content` de quem olha (anônimo: false). */
   hideAdult: boolean
+  /** Há sessão. O visitante anônimo não declarou interesse em 18+ ⇒ normal. */
+  signedIn: boolean
+  /**
+   * A R18 DESTA obra está só nos extras/side stories (`work_edition_state.r18_extra_chapters`): a
+   * história principal é normal, então a versão padrão é a normal mesmo para quem vê 18+.
+   */
+  r18OnlyInExtras?: boolean
   /** `?adult=` das listas (`hide` | `only`). */
   adultFilter?: "hide" | "only" | null
   /** `?edition=` da página da obra. */
   urlEdition?: MixedEdition | null
-  /** `user_settings.preferred_mixed_edition` (anônimo: null). */
-  preference?: MixedEdition | null
 }
 
 /**
- * Precedência (decisão de produto de 2026-10-10):
+ * Precedência (decisão de produto de 2026-10-12 — a preferência de 18+ resolve o padrão; a escolha de
+ * versão é exceção pontual):
  *   1. ocultar 18+ (conta ou `?adult=hide`) ⇒ normal — a R18 só abre com `?edition=r18` E confirmação;
  *   2. `?adult=only` ⇒ R18;
  *   3. `?edition=` ⇒ a escolhida;
- *   4. preferência da conta;
- *   5. fallback ⇒ normal.
+ *   4. R18 só nos extras ⇒ normal;
+ *   5. conta logada (que não oculta 18+) ⇒ R18;
+ *   6. anônimo ⇒ normal.
+ * ⚠️ `user_settings.preferred_mixed_edition` NÃO entra mais: duas preferências globais podiam se
+ * contradizer, e a de 18+ é a que decide. A coluna fica no banco, sem leitor.
  */
 export function resolveMixedEdition(ctx: EditionContext): EditionResolution {
   const url = ctx.urlEdition ?? null
@@ -70,16 +80,18 @@ export function resolveMixedEdition(ctx: EditionContext): EditionResolution {
   }
   if (ctx.adultFilter === "only") return { edition: "r18", source: "adult_filter_only", requiresConfirmation: false }
   if (url) return { edition: url, source: "url", requiresConfirmation: false }
-  if (ctx.preference) return { edition: ctx.preference, source: "preference", requiresConfirmation: false }
-  return { edition: "normal", source: "fallback", requiresConfirmation: false }
+  if (ctx.r18OnlyInExtras) return { edition: "normal", source: "extras_only", requiresConfirmation: false }
+  if (ctx.signedIn) return { edition: "r18", source: "account", requiresConfirmation: false }
+  return { edition: "normal", source: "anonymous", requiresConfirmation: false }
 }
 
 /**
- * A edição PADRÃO de uma pessoa — a que o recálculo usa na Nota Prevista/Chance das obras `mixed`
- * (não há URL nem filtro em background). Mesma régua da página, sem os dois parâmetros.
+ * A edição PADRÃO de uma pessoa NUMA OBRA — a que o recálculo usa na Nota Prevista/Chance das obras
+ * `mixed` (não há URL nem filtro em background). Mesma régua da página, sem os dois parâmetros. É por
+ * obra porque a R18 só nos extras muda o padrão daquela obra.
  */
-export function defaultMixedEdition(ctx: Pick<EditionContext, "hideAdult" | "preference">): MixedEdition {
-  return resolveMixedEdition({ hideAdult: ctx.hideAdult, preference: ctx.preference ?? null }).edition
+export function defaultMixedEdition(ctx: Pick<EditionContext, "hideAdult" | "signedIn" | "r18OnlyInExtras">): MixedEdition {
+  return resolveMixedEdition({ hideAdult: ctx.hideAdult, signedIn: ctx.signedIn, r18OnlyInExtras: ctx.r18OnlyInExtras }).edition
 }
 
 /**
@@ -256,7 +268,12 @@ export const ABSENT_EDITION_PREDICTION: EditionPrediction = {
  * linha dele não pode ser lida como previsão de edição nenhuma. Ao trocar `SCORING_CONTRACT`, o nome
  * novo entra aqui (o pin `contrato-canonico-pin.test.ts` cobra).
  */
-export const EDITION_AWARE_SCORING_CONTRACTS: ReadonlySet<string> = new Set(["s9-fantasy-b-edicao-v1"])
+export const EDITION_AWARE_SCORING_CONTRACTS: ReadonlySet<string> = new Set([
+  "s9-fantasy-b-edicao-v1",
+  // v2 (mig 217): a mesma previsão por edição; muda só o TREINO (rótulo pela versão lida). Linha v1 e
+  // linha v2 convivem entre o deploy e o recálculo, e as duas são lidas como previsão por edição.
+  "s9-fantasy-b-edicao-v2",
+])
 
 export type PredictionView = "own" | "edition" | "absent"
 
