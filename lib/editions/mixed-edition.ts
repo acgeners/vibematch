@@ -82,6 +82,16 @@ export function defaultMixedEdition(ctx: Pick<EditionContext, "hideAdult" | "pre
   return resolveMixedEdition({ hideAdult: ctx.hideAdult, preference: ctx.preference ?? null }).edition
 }
 
+/**
+ * O selo "18+" ao lado do título. Obra `mixed`: quem decide é a EDIÇÃO ATIVA — R18 sim, normal não.
+ * O gate global (`is_adult`) não serve aqui: numa mixed ele é falso por construção (mig 204) e só um
+ * `adult_override` o liga — e aí ligaria nas DUAS edições, afirmando "18+" sobre a versão normal.
+ * Fora das mixed, o gate de sempre. Só o SELO: o portão de conteúdo (ocultar 18+) segue no gate.
+ */
+export function showsAdultBadge(input: { isMixed: boolean; activeEdition: MixedEdition | null; isAdult: boolean }): boolean {
+  return input.isMixed ? input.activeEdition === "r18" : input.isAdult
+}
+
 // ── A nota da edição ────────────────────────────────────────────────────────────────────────
 
 export const EDITION_SCORE_SOURCES = [
