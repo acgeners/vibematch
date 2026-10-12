@@ -19,6 +19,7 @@ import {
   parseMixedEdition,
   predictionForEdition,
   resolveMixedEdition,
+  showsAdultBadge,
 } from "@/lib/editions/mixed-edition"
 import type { EditionScoreRow } from "@/lib/editions/mixed-edition"
 import { mentionsExplicitSexualContent, tagsForEdition, warningsForEdition } from "@/lib/editions/edition-content"
@@ -1034,10 +1035,11 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
             </span>
           )}
           {!aprovada && <ApprovalBadge />}
-          {isAdult && (
+          {/* Obra mixed: o selo segue a EDIÇÃO ATIVA (R18 sim, normal não), não o gate global. */}
+          {showsAdultBadge({ isMixed: isMixedWork, activeEdition, isAdult }) && (
             <span
               className="inline-flex items-center gap-2 rounded-full border border-red-500/40 bg-red-50 px-3.5 py-1.5 text-base font-bold text-red-800 dark:bg-red-950/40 dark:text-red-200"
-              title="Conteúdo adulto (18+) — nota de conteúdo adulto ≥ 7"
+              title={isMixedWork ? "Versão R18 da obra — conteúdo adulto (18+)" : "Conteúdo adulto (18+) — nota de conteúdo adulto ≥ 7"}
             >
               🔞 18+
             </span>
