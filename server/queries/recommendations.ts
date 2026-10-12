@@ -13,7 +13,7 @@ import type { PersonalStateReader } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { defaultMixedEdition, isMixedEditionState } from "@/lib/editions/mixed-edition"
 import { mentionsExplicitSexualContent } from "@/lib/editions/edition-content"
-import { getMixedEditionSettings, visibleTagIdsOnNormal } from "@/server/queries/edition-scores"
+import { getMixedEditionSettings, getR18ExtrasWorkIds, visibleTagIdsOnNormal } from "@/server/queries/edition-scores"
 import {
   isFullyReadPersonalStatus,
   isUnreadPersonalStatus,
@@ -1573,8 +1573,18 @@ export async function getRecommendationRun(idOrSlug: string): Promise<Recommenda
     // 🔴 Obra `mixed` (fase 2) na edição padrão de quem olha: na NORMAL saem as tags da R18 e as adultas
     // de edição desconhecida (`visibleTagIdsOnNormal` — a mesma régua da página e das listas).
     const rows = (worksData ?? []) as unknown as Array<{ id: string; edition_state?: string | null; work_tags?: Array<{ tag_id?: string | null }> | null }>
-    const mixedRows = rows.filter((r) => isMixedEditionState(r.edition_state))
-    if (mixedRows.length > 0 && defaultMixedEdition(await getMixedEditionSettings()) === "normal") {
+    const allMixed = rows.filter((r) => isMixedEditionState(r.edition_state))
+    // Por OBRA (a R18 só nos extras deixa a normal como padrão): só as que abrem na normal filtram tags.
+    const [settings, r18ExtrasWorkIds] =
+      allMixed.length > 0 ? await Promise.all([getMixedEditionSettings(), getR18ExtrasWorkIds()]) : [null, new Set<string>()]
+    const mixedRows = settings
+      ? allMixed.filter(
+          (r) =>
+            defaultMixedEdition({ hideAdult: settings.hideAdult, signedIn: settings.signedIn, r18OnlyInExtras: r18ExtrasWorkIds.has(r.id) }) ===
+            "normal",
+        )
+      : []
+    if (mixedRows.length > 0) {
       const visiveis = await visibleTagIdsOnNormal(
         supabase,
         mixedRows.map((r) => ({ id: r.id, tagIds: (r.work_tags ?? []).map((wt) => wt.tag_id ?? "").filter(Boolean) })),

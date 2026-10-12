@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 /**
- * Trocar a edição padrão das obras `mixed` muda o `adult_content` que entra na Nota Prevista. A conta
- * leitora já recalculava na hora (`recalculateForUser` em `after()`); a DONA só marcava a pendência, e
- * as telas que leem a edição padrão (home, similares, hover, descobrir, minha lista) ficavam com a
- * previsão da preferência ANTERIOR por 1h ou mais. Agora a dona marca E dispara o recálculo em
- * background — nessa ordem, para a marca ser o plano B se o disparo falhar.
+ * Ocultar/ver 18+ É a preferência que escolhe a versão PADRÃO das obras `mixed` (decisão de
+ * 2026-10-12; `preferred_mixed_edition` saiu da experiência) — e muda o `adult_content` que entra na
+ * Nota Prevista. A conta leitora recalcula na hora (`recalculateForUser` em `after()`); a DONA marca
+ * a pendência E dispara o recálculo em background — nessa ordem, para a marca ser o plano B se o
+ * disparo falhar.
  */
 vi.mock("server-only", () => ({}))
 
@@ -61,41 +61,33 @@ beforeEach(() => {
   recalculateForUser.mockClear()
 })
 
-describe("dona troca a edição padrão — marca a pendência E recalcula em background, nessa ordem", () => {
+describe("dona liga/desliga ocultar 18+ — marca a pendência E recalcula em background, nessa ordem", () => {
   it.each([
-    ["normal → r18", "r18"],
-    ["r18 → normal", "normal"],
+    ["ocultar (padrão R18 → normal)", true],
+    ["mostrar (padrão normal → R18)", false],
   ])("%s", async (_caso, valor) => {
-    const { setPreferredMixedEdition } = await import("@/server/actions/settings")
-    expect(await setPreferredMixedEdition(valor)).toEqual({ error: null })
-    expect(gravado).toEqual([{ preferred_mixed_edition: valor }])
-    expect(markRecalcPending).toHaveBeenCalledWith("setPreferredMixedEdition", { changed: ["mixed_edition_preference"], actorId: OWNER })
+    const { setHideAdultContent } = await import("@/server/actions/settings")
+    expect(await setHideAdultContent(valor)).toEqual({ error: null })
+    expect(gravado).toEqual([{ hide_adult_content: valor }])
+    expect(markRecalcPending).toHaveBeenCalledWith("setHideAdultContent", { changed: ["mixed_edition_preference"], actorId: OWNER })
     // A marca vem ANTES do disparo: é ela que segura o recálculo se o disparo falhar.
-    expect(ordem).toEqual(["mark:setPreferredMixedEdition", "bg:setPreferredMixedEdition"])
+    expect(ordem).toEqual(["mark:setHideAdultContent", "bg:setHideAdultContent"])
     // O recálculo da dona é o GLOBAL (calculated_scores) — nunca o per-user.
     expect(afters).toHaveLength(0)
     expect(recalculateForUser).not.toHaveBeenCalled()
   })
 
-  it("ocultar 18+ (que força a normal) segue o mesmo caminho", async () => {
-    const { setHideAdultContent } = await import("@/server/actions/settings")
-    expect(await setHideAdultContent(true)).toEqual({ error: null })
-    expect(ordem).toEqual(["mark:setHideAdultContent", "bg:setHideAdultContent"])
-  })
-
-  it("valor inválido não grava, não marca e não recalcula", async () => {
-    const { setPreferredMixedEdition } = await import("@/server/actions/settings")
-    expect(await setPreferredMixedEdition("ambas")).toEqual({ error: "Versão inválida." })
-    expect(gravado).toHaveLength(0)
-    expect(ordem).toEqual([])
+  it("a action antiga da preferência de versão não existe mais", async () => {
+    const settings = await import("@/server/actions/settings")
+    expect("setPreferredMixedEdition" in settings).toBe(false)
   })
 })
 
-describe("conta leitora — comportamento de antes, intacto", () => {
+describe("conta leitora — recalcula só a DELA", () => {
   it("recalcula a previsão DELA em after(); não marca nem dispara o recálculo global", async () => {
     sessao = LEITORA
-    const { setPreferredMixedEdition } = await import("@/server/actions/settings")
-    expect(await setPreferredMixedEdition("r18")).toEqual({ error: null })
+    const { setHideAdultContent } = await import("@/server/actions/settings")
+    expect(await setHideAdultContent(false)).toEqual({ error: null })
     expect(markRecalcPending).not.toHaveBeenCalled()
     expect(recalculateScoresInBackground).not.toHaveBeenCalled()
     expect(afters).toHaveLength(1)

@@ -3,8 +3,7 @@ import { cache } from "react"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchAllRows } from "@/lib/supabase/paginate"
-import { getHideAdultContent, getPreferredMixedEdition } from "@/server/queries/current-user"
-import { parseMixedEdition } from "@/lib/editions/mixed-edition"
+import { getHideAdultContent, getSessionUserId } from "@/server/queries/current-user"
 import { tagsForEdition } from "@/lib/editions/edition-content"
 import type { EditionScoreRow, MixedEdition } from "@/lib/editions/mixed-edition"
 
@@ -41,6 +40,22 @@ export async function getEditionScoresForWork(workId: string): Promise<EditionSc
   if (error) throw new Error(`work_edition_scores: ${error.message}`)
   return normalize(data)
 }
+
+/**
+ * As obras `mixed` cuja R18 está SÓ nos extras/side stories (`work_edition_state.r18_extra_chapters`).
+ * Nelas a versão padrão é a normal para todo mundo (`resolveMixedEdition`). Hoje são 10 — paginado
+ * mesmo assim, em ordem total pela PK.
+ */
+export async function fetchR18ExtrasWorkIds(supabase: Pick<SupabaseClient, "from">): Promise<Set<string>> {
+  const rows = await fetchAllRows<{ work_id: string }>(
+    () => supabase.from("work_edition_state").select("work_id").eq("state", "mixed").eq("r18_extra_chapters", true),
+    { orderBy: ["work_id"], label: "work_edition_state.r18_extra_chapters" },
+  )
+  return new Set(rows.map((r) => r.work_id))
+}
+
+/** O mesmo conjunto, memoizado por requisição (páginas e listas). */
+export const getR18ExtrasWorkIds = cache(async (): Promise<Set<string>> => fetchR18ExtrasWorkIds(createAdminClient()))
 
 /**
  * TODAS as linhas (recálculo, listas). Paginado em ordem total pela PK — hoje cabem numa página,
@@ -138,22 +153,23 @@ export async function visibleTagIdsOnNormal(
 
 export interface MixedEditionSettings {
   hideAdult: boolean
-  preference: MixedEdition | null
+  /** Há sessão. Anônimo ⇒ normal por padrão (não declarou interesse em 18+). */
+  signedIn: boolean
 }
 
 /**
- * Preferências de edição de QUEM OLHA. Anônimo: não oculta 18+ e não tem preferência (⇒ normal pelo
- * fallback). Nunca herda as do dono.
+ * Preferências de edição de QUEM OLHA. Anônimo: não oculta 18+, mas também não declarou interesse ⇒
+ * normal. Nunca herda as do dono.
  */
 export const getMixedEditionSettings = cache(async (): Promise<MixedEditionSettings> => {
-  // As duas leem a MESMA linha memoizada de `user_settings` (anônimo ⇒ null ⇒ defaults).
-  const [hideAdult, preference] = await Promise.all([getHideAdultContent(), getPreferredMixedEdition()])
-  return { hideAdult, preference }
+  const [hideAdult, sessionId] = await Promise.all([getHideAdultContent(), getSessionUserId()])
+  return { hideAdult, signedIn: sessionId != null }
 })
 
 /**
- * As mesmas preferências de um usuário EXPLÍCITO (recálculo em background, sem sessão). Linha
- * ausente ⇒ defaults; erro LANÇA (o recálculo não pode adivinhar a edição de ninguém).
+ * As mesmas preferências de um usuário EXPLÍCITO (recálculo em background, sem sessão — mas é uma
+ * CONTA, então `signedIn`). Linha ausente ⇒ não oculta 18+; erro LANÇA (o recálculo não pode adivinhar
+ * a edição de ninguém).
  */
 export async function loadMixedEditionSettingsFor(
   userId: string,
@@ -161,11 +177,11 @@ export async function loadMixedEditionSettingsFor(
 ): Promise<MixedEditionSettings> {
   const { data, error } = await supabase
     .from("user_settings")
-    .select("hide_adult_content, preferred_mixed_edition")
+    .select("hide_adult_content")
     .eq("current_user_id", userId)
     .limit(1)
     .maybeSingle()
   if (error) throw new Error(`user_settings (edição de ${userId}): ${error.message}`)
-  const row = (data ?? {}) as { hide_adult_content?: boolean | null; preferred_mixed_edition?: string | null }
-  return { hideAdult: row.hide_adult_content === true, preference: parseMixedEdition(row.preferred_mixed_edition) }
+  const row = (data ?? {}) as { hide_adult_content?: boolean | null }
+  return { hideAdult: row.hide_adult_content === true, signedIn: true }
 }

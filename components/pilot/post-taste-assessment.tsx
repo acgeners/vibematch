@@ -22,6 +22,8 @@ interface Props {
    * status muda. Quando false, a linha vira um selo travado e é gravada vazia.
    */
   endingApplicable: boolean
+  /** Versão ATIVA na tela (obra mixed, mig 216) — a de uma avaliação NOVA. Ver lib/editions/read-edition.ts. */
+  activeEdition?: "normal" | "r18" | null
 }
 
 type SaveState = "idle" | "saving" | "saved"
@@ -31,7 +33,7 @@ type SaveState = "idle" | "saving" | "saved"
  * leitura. Nota direta (não calculada da média — ver PLANO-ARQUITETURA-NOTAS.md).
  * Autosave em `pilot_taste_scores`.
  */
-export function PostTasteAssessment({ workId, criteria, initialScores, endingApplicable }: Props) {
+export function PostTasteAssessment({ workId, criteria, initialScores, endingApplicable, activeEdition = null }: Props) {
   const aspects = useMemo(() => criteria.filter((c) => !c.isOverall), [criteria])
   const overall = useMemo(() => criteria.find((c) => c.isOverall) ?? null, [criteria])
   const endingKey = useMemo(() => criteria.find((c) => c.allowsNa)?.key, [criteria])
@@ -41,10 +43,10 @@ export function PostTasteAssessment({ workId, criteria, initialScores, endingApp
   const [hint, setHint] = useState<{ stars: number; text: string } | null>(null)
   const [save, setSave] = useState<SaveState>("idle")
 
-  const stateRef = useRef({ scores, endingApplicable })
+  const stateRef = useRef({ scores, endingApplicable, activeEdition })
   useEffect(() => {
-    stateRef.current = { scores, endingApplicable }
-  }, [scores, endingApplicable])
+    stateRef.current = { scores, endingApplicable, activeEdition }
+  }, [scores, endingApplicable, activeEdition])
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const scheduleSave = () => {
@@ -55,7 +57,7 @@ export function PostTasteAssessment({ workId, criteria, initialScores, endingApp
       // Regra autoritativa no save: obra não terminada → "Final" vazio + ending_na.
       const payload =
         s.endingApplicable || !endingKey ? s.scores : { ...s.scores, [endingKey]: null }
-      savePilotTaste(workId, payload, !s.endingApplicable)
+      savePilotTaste(workId, payload, !s.endingApplicable, s.activeEdition)
         .then((r) => setSave(r.ok ? "saved" : "idle"))
         .catch(() => setSave("idle"))
     }, 550)

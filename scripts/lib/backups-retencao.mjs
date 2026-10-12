@@ -149,6 +149,17 @@ export const FAMILIAS = [
     env: "ADULT_CONTENT_RAZAO_KEEP",
   },
   {
+    id: "vies-dona",
+    dono: "recalcular-vies-da-dona.ts",
+    // Datado, um diretório por --execute com as linhas de attribute_bias da conta principal ANTES da
+    // gravação (~13 linhas, alguns KB). É o que o --restaurar devolve — o banco não tem PITR.
+    oQueE: "attribute_bias da conta principal antes do recálculo pela régua da versão lida",
+    casa: (n) => /^vies-dona-\d{4}/.test(n),
+    exemplo: "vies-dona-2026-10-12T21-30-00-000Z",
+    keepPadrao: 10,
+    env: "VIES_DONA_KEEP",
+  },
+  {
     id: "normalizar-titulos",
     dono: "normalizar-titulos.ts",
     // Datado, um diretório por execução com o par (antes, depois) de cada obra tocada.

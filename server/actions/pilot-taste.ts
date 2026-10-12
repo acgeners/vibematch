@@ -10,6 +10,8 @@ import { ensureReadingStateWriter, writeReadingState } from "@/server/queries/us
 import { canRateReadingState } from "@/lib/reading-gate"
 import { markRecalcPending } from "@/server/recalc/queue"
 import { recalculateForUser } from "@/server/recalc/user-recalc"
+import { editionContextFrom } from "@/lib/editions/read-edition"
+import type { ReadEditionContext } from "@/lib/editions/read-edition"
 
 const ALLOWED = new Set<number>([2, 4, 6.5, 8, 10])
 
@@ -27,6 +29,11 @@ export async function savePilotTaste(
   workId: string,
   scores: Partial<Record<TasteScoreKey, number | null>>,
   endingNa: boolean,
+  /**
+   * A versão ATIVA na tela da obra (obra mixed, mig 216) — vira a versão de uma avaliação NOVA. Fora
+   * da página (o wizard do `/pilot-taste`), ausente: vale a versão padrão da conta naquela obra.
+   */
+  activeEdition?: string | null,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const gate = await ensureReadingStateWriter()
   if (!gate.ok) return { ok: false, error: gate.error }
@@ -56,7 +63,7 @@ export async function savePilotTaste(
   // A nota de gosto passou a SER a nota pessoal (`user_score`) — o rótulo que treina o
   // Ridge, a Chance e o ledger de previsão DESTE usuário. Deriva-a dos 7 eixos fixos
   // (sem o Final) e persiste no estado pessoal dele.
-  await applyTasteDerivedUserScore(gate.userId, gate.isOwner, workId, scores)
+  await applyTasteDerivedUserScore(gate.userId, gate.isOwner, workId, scores, editionContextFrom(activeEdition))
 
   return { ok: true }
 }
@@ -82,6 +89,7 @@ async function applyTasteDerivedUserScore(
   isOwner: boolean,
   workId: string,
   scores: Partial<Record<TasteScoreKey, number | null>>,
+  editionContext: ReadEditionContext,
 ): Promise<void> {
   const label = computeTasteUserScore(scores)
   if (label == null) return // faltam eixos — não gravamos média parcial (ver computeTasteUserScore)
@@ -114,7 +122,7 @@ async function applyTasteDerivedUserScore(
 
   if (prevUserScore != null && Number(prevUserScore) === label) return // nada mudou
 
-  const write = await writeReadingState(userId, [workId], { user_score: label })
+  const write = await writeReadingState(userId, [workId], { user_score: label }, editionContext)
   if (write.error) {
     console.error("[savePilotTaste] falha gravando user_score:", write.error)
     return

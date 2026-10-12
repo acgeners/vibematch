@@ -17,6 +17,8 @@ import { canRateReadingState, chaptersNeededForRating, MIN_READ_PCT_FOR_RATING }
 import { DEFAULT_POST_READING_WEIGHTS } from "@/lib/constants/post-reading-criteria"
 import type { PostReadingScoreField } from "@/lib/constants/post-reading-criteria"
 import { ClearRatingButton } from "./clear-rating-button"
+import { EvaluationEditionLine } from "./evaluation-edition-line"
+import type { MixedEdition } from "@/lib/editions/mixed-edition"
 
 /** Os 8 critérios craft, derivados da tabela de pesos — não relistados à mão. */
 const CRAFT_FIELDS = Object.keys(DEFAULT_POST_READING_WEIGHTS) as PostReadingScoreField[]
@@ -47,6 +49,11 @@ interface PostReadingFlowProps {
   formId?: string
   /** Chamado após salvar com sucesso (ex.: fechar o dialog). */
   onSaved?: () => void
+  /**
+   * Obra mixed na página da obra (mig 216): a versão ATIVA na tela e a versão da avaliação gravada.
+   * Ausente fora da página (diálogo de status) — aí as escritas usam a versão padrão da conta.
+   */
+  edition?: { active: MixedEdition; evaluation: MixedEdition | null }
 }
 
 /**
@@ -69,6 +76,7 @@ export function PostReadingFlow({
   tasteScores = {} as Record<TasteScoreKey, number | null>,
   formId = "work-status-form",
   onSaved,
+  edition,
 }: PostReadingFlowProps) {
   const [liveStatus, setLiveStatus] = useState<WorkStatusValues["personal_status"]>(
     statusInitial.personal_status,
@@ -98,6 +106,9 @@ export function PostReadingFlow({
   // mandou tudo) — sem round-trip extra e sem mais um endpoint público só pra contar.
   const craftFilled = CRAFT_FIELDS.filter((f) => statusInitial[f] != null).length
   const tasteFilled = Object.values(tasteScores).filter((v) => v != null).length
+  // A avaliação existe se qualquer parte dela existe (nota, pós-leitura, piloto) — a mesma régua de
+  // `EVALUATION_COLUMNS` no servidor, que é quem decide de verdade.
+  const hasEvaluation = statusInitial.user_score != null || craftFilled > 0 || tasteFilled > 0
 
   // Atributos que a IA avaliou (sem nota da IA não há o que comparar/salvar).
   const ratedSlugs = useMemo(
@@ -133,6 +144,14 @@ export function PostReadingFlow({
 
   return (
     <div className="space-y-5">
+      {edition && (hasEvaluation || isVisible) && (
+        <EvaluationEditionLine
+          workId={workId}
+          hasEvaluation={hasEvaluation}
+          evaluationEdition={edition.evaluation}
+          activeEdition={edition.active}
+        />
+      )}
       <WorkStatusForm
         workId={workId}
         totalChapters={totalChapters}
@@ -150,6 +169,7 @@ export function PostReadingFlow({
         formId={formId}
         onSaved={onSaved}
         onStateChange={setFormState}
+        activeEdition={edition?.active ?? null}
       />
       {orphanScore != null && (
         <div className="flex items-start gap-2 rounded-md bg-amber-500/10 p-3 text-sm text-muted-foreground ring-1 ring-amber-500/30">
@@ -178,6 +198,7 @@ export function PostReadingFlow({
           criteria={tasteCriteria}
           initialScores={tasteScores}
           endingApplicable={isFullyReadPersonalStatus(liveStatus)}
+          activeEdition={edition?.active ?? null}
         />
       )}
       {isVisible && (

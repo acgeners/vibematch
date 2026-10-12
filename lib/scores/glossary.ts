@@ -603,7 +603,8 @@ export const RECALC_INPUT_LABELS: Record<RecalcInput, string> = {
   attribute_bias: "o seu viés de atributo",
   tag_preferences: "as tags que você ama e evita",
   taste_profile: "o seu perfil de gosto",
-  mixed_edition_preference: "a versão que você vê por padrão (normal ou R18)",
+  mixed_edition_preference: "ocultar ou ver conteúdo 18+ (decide a versão padrão: normal ou R18)",
+  read_edition: "a versão (normal ou R18) registrada na sua avaliação",
 }
 
 export const RECALC_CATALOGO = CATALOG_RECALC_INPUTS

@@ -24,7 +24,7 @@ import {
 import type { EditionScoreRow } from "@/lib/editions/mixed-edition"
 import { mentionsExplicitSexualContent, tagsForEdition, warningsForEdition } from "@/lib/editions/edition-content"
 import { reviewsForEdition } from "@/lib/editions/edition-reviews"
-import { fetchTagEditionFlags, getEditionScoresForWork, getMixedEditionSettings, withTagFlags } from "@/server/queries/edition-scores"
+import { fetchTagEditionFlags, getEditionScoresForWork, getMixedEditionSettings, getR18ExtrasWorkIds, withTagFlags } from "@/server/queries/edition-scores"
 import type { TagEditionFlags } from "@/server/queries/edition-scores"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { ComixResolutionWatcher } from "@/components/titles/comix-resolution-watcher"
@@ -431,9 +431,10 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
 
   // Obra `mixed` (fase 2): UMA obra com DUAS edições. Só ela tem seletor e nota por edição.
   const isMixedWork = isMixedEditionState(work.edition_state)
-  const [editionRows, editionSettings, tagEditionFlags] = await Promise.all([
+  const [editionRows, editionSettings, r18ExtrasWorkIds, tagEditionFlags] = await Promise.all([
     isMixedWork ? getEditionScoresForWork(work.id as string) : Promise.resolve([] as EditionScoreRow[]),
     isMixedWork ? getMixedEditionSettings() : Promise.resolve(null),
+    isMixedWork ? getR18ExtrasWorkIds() : Promise.resolve(null),
     // As flags que decidem a edição de cada tag — só para obra mixed (fora do select compartilhado).
     isMixedWork
       ? fetchTagEditionFlags(
@@ -552,16 +553,17 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
   /**
    * 🔴 EDIÇÃO ATIVA (obra mixed, fase 2). A precedência é a de `resolveMixedEdition`: ocultar 18+
    * força a normal (a R18 só abre com `?edition=r18` e confirmação), `?adult=only` força a R18, depois
-   * a URL, a preferência da conta e o fallback normal. O `adult_content` de `category_scores` é a
-   * nota MISTURADA das duas edições — na página ele é TROCADO pela nota da edição ativa, ou some
+   * a URL; sem nada disso, R18 só nos extras ⇒ normal, conta logada ⇒ R18, anônimo ⇒ normal. O
+   * `adult_content` de `category_scores` é a nota MISTURADA das duas edições — na página ele é TROCADO pela nota da edição ativa, ou some
    * ("não avaliado para esta edição"). Nunca a da outra edição.
    */
   const editionResolution = isMixedWork
     ? resolveMixedEdition({
         hideAdult: editionSettings?.hideAdult ?? false,
+        signedIn: editionSettings?.signedIn ?? false,
+        r18OnlyInExtras: r18ExtrasWorkIds?.has(work.id as string) ?? false,
         adultFilter: sp.adult === "hide" || sp.adult === "only" ? sp.adult : null,
         urlEdition: parseMixedEdition(sp.edition),
-        preference: editionSettings?.preference ?? null,
       })
     : null
   const activeEdition = editionResolution?.edition ?? null
@@ -1766,6 +1768,11 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
                 existingAssessment={postAttrExisting}
                 tasteCriteria={tasteCriteria}
                 tasteScores={tasteScoresData.scores}
+                edition={
+                  isMixedWork && activeEdition
+                    ? { active: activeEdition, evaluation: work.read_edition ?? null }
+                    : undefined
+                }
               />
             </TabsContent>
 

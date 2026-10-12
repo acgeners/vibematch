@@ -197,6 +197,11 @@ export interface WorkStatusFormProps {
   /** Recebe o estado de submit (saving + canSubmit) sempre que muda — pro parent
    *  controlar o botão externo de Salvar. */
   onStateChange?: (state: { saving: boolean; canSubmit: boolean }) => void
+  /**
+   * A versão ATIVA na tela (obra mixed, mig 216): se este save CRIAR a avaliação, ela é registrada
+   * nesta versão. Uma avaliação existente mantém a dela. Fora da página da obra, ausente.
+   */
+  activeEdition?: "normal" | "r18" | null
 }
 
 export function WorkStatusForm({
@@ -217,6 +222,7 @@ export function WorkStatusForm({
   submitLabel,
   formId,
   onStateChange,
+  activeEdition = null,
 }: WorkStatusFormProps) {
   const refresh = useRefresh()
   const [saving, setSaving] = useState(false)
@@ -372,7 +378,7 @@ export function WorkStatusForm({
       normalized[field] = normalizePostReadingScore(normalized[field])
     }
 
-    const result = await updateWorkStatus(workId, normalized)
+    const result = await updateWorkStatus(workId, normalized, activeEdition)
 
     if ("error" in result && result.error) {
       setSaving(false)

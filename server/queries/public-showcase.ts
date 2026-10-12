@@ -6,7 +6,7 @@ import type { HiatusFields } from "@/lib/works/hiatus-display"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { adultContentFor, defaultMixedEdition, groupEditionRows, isMixedEditionState, scoresForEdition } from "@/lib/editions/mixed-edition"
-import { fetchEditionScoresFor, getMixedEditionSettings } from "@/server/queries/edition-scores"
+import { fetchEditionScoresFor, getMixedEditionSettings, getR18ExtrasWorkIds } from "@/server/queries/edition-scores"
 
 /**
  * As obras da vitrine PÚBLICA — para quem não tem sessão.
@@ -97,10 +97,17 @@ export async function getSpotlightWork(): Promise<SpotlightWork | null> {
 
   // Só consulta nota por edição se alguma candidata for mixed (2 linhas leves por obra).
   const mixedIds = rows.filter((r) => !r.works.is_adult && isMixedEditionState(r.works.edition_state)).map((r) => r.works.id)
-  const [editionRows, settings] =
-    mixedIds.length > 0 ? await Promise.all([fetchEditionScoresFor(supabase, mixedIds), getMixedEditionSettings()]) : [[], null]
+  const [editionRows, settings, r18ExtrasWorkIds] =
+    mixedIds.length > 0
+      ? await Promise.all([fetchEditionScoresFor(supabase, mixedIds), getMixedEditionSettings(), getR18ExtrasWorkIds()])
+      : [[], null, new Set<string>()]
   const editionByWork = groupEditionRows(editionRows)
-  const edition = defaultMixedEdition({ hideAdult: settings?.hideAdult ?? false, preference: settings?.preference ?? null })
+  const editionFor = (workId: string) =>
+    defaultMixedEdition({
+      hideAdult: settings?.hideAdult ?? false,
+      signedIn: settings?.signedIn ?? false,
+      r18OnlyInExtras: r18ExtrasWorkIds.has(workId),
+    })
 
   for (const row of rows) {
     if (row.works.is_adult) continue
@@ -110,7 +117,7 @@ export async function getSpotlightWork(): Promise<SpotlightWork | null> {
     const legado: Record<string, number> = {}
     for (const c of row.works.category_scores ?? []) if (c.score != null) legado[c.criterion_slug] = c.score
     const isMixed = isMixedEditionState(row.works.edition_state)
-    const resolucao = adultContentFor({ isMixed, legacyScore: legado.adult_content, editionRows: editionByWork.get(row.works.id) }, edition)
+    const resolucao = adultContentFor({ isMixed, legacyScore: legado.adult_content, editionRows: editionByWork.get(row.works.id) }, editionFor(row.works.id))
     // Nota provisória (baseline) não é leitura: a obra fica de fora como se não tivesse a nota.
     if (resolucao.kind === "edition" && resolucao.row.status !== "rated") continue
     const daEdicao = scoresForEdition(legado, resolucao)

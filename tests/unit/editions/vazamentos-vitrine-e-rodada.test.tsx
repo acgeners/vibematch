@@ -40,14 +40,14 @@ function fakeClient(porTabela: Record<string, unknown>) {
   }
 }
 
-const settings = { hideAdult: false, preference: null as "normal" | "r18" | null }
+/** Desde 2026-10-12 a versão padrão segue a SESSÃO e ocultar 18+ (anônimo ⇒ normal; logado ⇒ R18 salvo oculto). */
+const settings = { hideAdult: false, session: "u1" as string | null }
 let banco: Record<string, unknown> = {}
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => fakeClient(banco) }))
 vi.mock("@/server/queries/current-user", () => ({
-  getSessionUserId: async () => "u1",
+  getSessionUserId: async () => settings.session,
   getCurrentUserId: async () => "u1",
   getHideAdultContent: async () => settings.hideAdult,
-  getPreferredMixedEdition: async () => settings.preference,
 }))
 vi.mock("@/lib/calculations/attribute-bias", async (orig) => ({ ...(await orig<object>()), getBiasMap: async () => ({}) }))
 
@@ -68,7 +68,7 @@ const ed = (work_id: string, edition: string, score: number | null, source: stri
 })
 
 describe("vitrine pública — a obra mixed mostra a nota DA EDIÇÃO de quem olha (visitante ⇒ normal)", () => {
-  beforeEach(() => { vi.resetModules(); settings.hideAdult = false; settings.preference = null })
+  beforeEach(() => { vi.resetModules(); settings.hideAdult = false; settings.session = null })
 
   it("mixed no topo com nota AVALIADA da normal: aparece com ela — nunca o 9,5 misturado", async () => {
     banco = {
@@ -109,7 +109,7 @@ describe("vitrine pública — a obra mixed mostra a nota DA EDIÇÃO de quem ol
 })
 
 describe("rodada de recomendação — cards da versão normal", () => {
-  beforeEach(() => { vi.resetModules(); settings.hideAdult = false; settings.preference = null })
+  beforeEach(() => { vi.resetModules(); settings.hideAdult = true; settings.session = "u1" })
 
   const tag = (id: string, name: string) => ({ tag_id: id, tags: { name, tag_group_id: null } })
   const obra = (id: string, edition_state: string | null) => ({
@@ -131,11 +131,14 @@ describe("rodada de recomendação — cards da versão normal", () => {
       { work_id: "single", alignment_score: 80, justification: "Obra com conteúdo sexual explícito.", top_match_factors: [], risks: [] },
     ],
   }
-  const montar = () => {
-    banco = { recommendation_runs: run, works: [obra("mixed", "mixed"), obra("single", "single")], tags: FLAGS }
+  const montar = (extras: string[] = []) => {
+    banco = {
+      recommendation_runs: run, works: [obra("mixed", "mixed"), obra("single", "single")], tags: FLAGS,
+      work_edition_state: extras.map((work_id) => ({ work_id })),
+    }
   }
 
-  it("na NORMAL a mixed perde as tags da R18 e as de edição desconhecida; ficam 'R19 disponível' e as sem sinal", async () => {
+  it("quem oculta 18+ abre a NORMAL: a mixed perde as tags da R18 e as de edição desconhecida; ficam 'R19 disponível' e as sem sinal", async () => {
     montar()
     const { getRecommendationRun } = await import("@/server/queries/recommendations")
     const r = await getRecommendationRun("r1")
@@ -156,8 +159,8 @@ describe("rodada de recomendação — cards da versão normal", () => {
     expect(single.justification).toMatch(/explícito/)
   })
 
-  it("quem prefere a R18 vê a mixed inteira (a versão R18 é inclusiva)", async () => {
-    settings.preference = "r18"
+  it("quem vê 18+ abre a R18 por padrão: a mixed inteira (a versão R18 é inclusiva)", async () => {
+    settings.hideAdult = false
     montar()
     const { getRecommendationRun } = await import("@/server/queries/recommendations")
     const mixed = (await getRecommendationRun("r1"))!.ranked.find((x) => x.work_id === "mixed")!
@@ -165,10 +168,9 @@ describe("rodada de recomendação — cards da versão normal", () => {
     expect(mixed.justificationHiddenForEdition).toBe(false)
   })
 
-  it("ocultar 18+ força a normal mesmo com preferência R18", async () => {
-    settings.preference = "r18"
-    settings.hideAdult = true
-    montar()
+  it("R18 só nos extras ⇒ a normal, mesmo para quem vê 18+", async () => {
+    settings.hideAdult = false
+    montar(["mixed"])
     const { getRecommendationRun } = await import("@/server/queries/recommendations")
     const mixed = (await getRecommendationRun("r1"))!.ranked.find((x) => x.work_id === "mixed")!
     expect(mixed.work!.tags.map((t) => t.name)).not.toContain("Cunnilingus")

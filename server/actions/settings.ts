@@ -5,11 +5,9 @@ import { promisify } from "node:util"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { after } from "next/server"
-import { ensureAdmin, ensureSignedIn, getCurrentUserSettingsId, getOwnerUserId, getSessionUserId } from "@/server/queries/current-user"
+import { ensureAdmin, getCurrentUserSettingsId, getOwnerUserId, getSessionUserId } from "@/server/queries/current-user"
 import { markRecalcPending, recalculateScoresInBackground, recalculateScoresNowResult } from "@/server/recalc/queue"
 import { recalculateForUser } from "@/server/recalc/user-recalc"
-import { createUserClient } from "@/lib/supabase/user"
-import { parseMixedEdition } from "@/lib/editions/mixed-edition"
 import {
   computeCalibration,
   computeBucketBreakdown,
@@ -344,9 +342,9 @@ export async function setHideAdultContent(enabled: boolean) {
 
   if (error) return { error: error.message }
 
-  // Fase 2 de mixed: ocultar 18+ força a edição NORMAL, que é a que entra na previsão das obras
-  // mixed. Sem recalc, a Nota Prevista delas fica escondida (calculada para a outra edição) até o
-  // próximo — honesto, mas desnecessário.
+  // Fase 2 de mixed: ocultar 18+ É a preferência que escolhe a versão padrão das obras mixed (oculto ⇒
+  // normal; visível ⇒ R18, salvo R18 só nos extras). Ela entra na previsão, então recalcula. Sem
+  // recalc, a Nota Prevista delas fica escondida (calculada para a outra versão) até o próximo.
   const userId = await getSessionUserId()
   if (userId && (await scheduleUserPredictionRecalc(userId, "setHideAdultContent"))) {
     await markRecalcPending("setHideAdultContent", { changed: ["mixed_edition_preference"], actorId: userId })
@@ -354,37 +352,6 @@ export async function setHideAdultContent(enabled: boolean) {
   }
 
   revalidatePath("/preferences")
-  return { error: null }
-}
-
-/**
- * A edição PADRÃO das obras `mixed` para esta conta (`normal` | `r18` | null = normal). Ocultar 18+
- * continua forçando a normal — esta preferência vale para quem não oculta.
- *
- * Cliente de SESSÃO: a RLS de `user_settings` prende a escrita à linha da pessoa no banco.
- */
-export async function setPreferredMixedEdition(value: string | null) {
-  const edition = value == null ? null : parseMixedEdition(value)
-  if (value != null && edition == null) return { error: "Versão inválida." }
-  const auth = await ensureSignedIn()
-  if (!auth.ok) return { error: auth.error }
-
-  const supabase = await createUserClient()
-  const { data, error } = await supabase
-    .from("user_settings")
-    .update({ preferred_mixed_edition: edition })
-    .eq("current_user_id", auth.userId)
-    .select("id")
-  if (error) return { error: error.message }
-  if (!data?.length) return { error: "user_settings sem linha pro usuário atual." }
-
-  if (await scheduleUserPredictionRecalc(auth.userId, "setPreferredMixedEdition")) {
-    await markRecalcPending("setPreferredMixedEdition", { changed: ["mixed_edition_preference"], actorId: auth.userId })
-    recalculateScoresInBackground("setPreferredMixedEdition")
-  }
-  revalidatePath("/preferences")
-  revalidatePath("/catalog/[id]", "page")
-  revalidatePath("/ranking")
   return { error: null }
 }
 

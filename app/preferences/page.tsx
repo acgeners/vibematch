@@ -17,8 +17,6 @@ import { PostReadingWeightsForm } from "@/components/settings/post-reading-weigh
 import { PostReadingWeightSuggestionsPanel } from "@/components/settings/post-reading-weight-suggestions-panel"
 import { RankingPreferencesForm } from "@/components/settings/ranking-preferences-form"
 import { HideAdultContentToggle } from "@/components/settings/hide-adult-content-toggle"
-import { MixedEditionPreference } from "@/components/settings/mixed-edition-preference"
-import { getMixedEditionSettings } from "@/server/queries/edition-scores"
 import { SavedRankingFilters } from "@/components/settings/saved-ranking-filters"
 import { ScoreColorPercentilesForm } from "@/components/settings/score-color-percentiles-form"
 import { CriterionColorPercentilesForm } from "@/components/settings/criterion-color-percentiles-form"
@@ -139,11 +137,16 @@ async function ItemBody({ section, isAdmin }: { section: SettingsSection; isAdmi
     }
 
     case "adult-content": {
-      const [hideAdult, editionSettings] = await Promise.all([getHideAdultContent(), getMixedEditionSettings()])
+      const hideAdult = await getHideAdultContent()
       return (
         <div className="space-y-4">
           <HideAdultContentToggle initialHidden={hideAdult} />
-          <MixedEditionPreference initial={editionSettings.preference} hideAdult={hideAdult} />
+          {/* A mesma preferência escolhe a versão das obras com versão normal e R18 — não há outra a
+              configurar (`resolveMixedEdition`). A troca pontual é na própria obra. */}
+          <p className="border-t pt-4 text-sm text-muted-foreground">
+            Obras com versão normal e versão R18 abrem na {hideAdult ? "versão normal" : "versão R18"}, conforme
+            esta opção. Você pode trocar a versão em cada obra.
+          </p>
         </div>
       )
     }
