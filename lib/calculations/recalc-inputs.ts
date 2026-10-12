@@ -55,7 +55,8 @@ export const CATALOG_RECALC_INPUTS = [
   "catalog_membership",
   /**
    * `work_edition_scores` (migs 213/214) → o `adult_content` da EDIÇÃO na previsão das obras mixed
-   * (Nota Prevista e Chance). Só a previsão: o treino segue com `category_scores`.
+   * (Nota Prevista e Chance). Só a previsão: o treino segue com `category_scores`. Cobre também o
+   * ESTADO de edição (`works.edition_state`), que decide se a obra usa nota por edição.
    */
   "edition_scores",
 ] as const

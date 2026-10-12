@@ -113,7 +113,7 @@ describe("o save grava a evidência — pela régua da ingestão", () => {
   })
 })
 
-describe("arquitetura: o vínculo confirmado é o ÚNICO ponto que grava evidência", () => {
+describe("arquitetura: só os donos declarados gravam o estado de edição (ingestão e curadoria)", () => {
   const ROOT = path.resolve(__dirname, "../../..")
   const semComentarios = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
 
@@ -126,7 +126,16 @@ describe("arquitetura: o vínculo confirmado é o ÚNICO ponto que grava evidên
     expect(corpo).toMatch(/source === "mangaupdates"/)
   })
 
-  it("nenhum código do app grava r19_edition, edition_state ou work_edition_state fora do dono", () => {
+  /**
+   * Os DOIS escritores de `work_edition_state`, cada um com a sua autoria:
+   *   · a ingestão do MangaUpdates (`decided_by = 'auto'`), que nunca sobrescreve auditoria/curadoria;
+   *   · o controle "Edições da obra" da curadoria (`basis = decided_by = 'curator'`, 2026-10-12) —
+   *     a decisão humana explícita, que é o que a obra mixed nova não tinha.
+   * Um terceiro precisa ser decidido aqui, não descoberto depois.
+   */
+  const DONOS_DO_ESTADO = new Set(["lib/editions/record-edition-evidence.ts", "server/actions/work-editions.ts"])
+
+  it("nenhum código do app grava r19_edition, edition_state ou work_edition_state fora dos donos", () => {
     const dirs = ["lib", "server", "app", "components"]
     const ofensores: string[] = []
     const walk = (dir: string) => {
@@ -140,7 +149,7 @@ describe("arquitetura: o vínculo confirmado é o ÚNICO ponto que grava evidên
           const gravaPonte = /\.(update|insert|upsert)\(\s*\{[^}]*\b(r19_edition|edition_state)\s*:/.test(src)
           const gravaEstado = /from\("work_edition_state"\)[\s\S]{0,200}\.(insert|upsert|update|delete)\(/.test(src)
           if (gravaPonte) ofensores.push(`${rel}: grava r19_edition/edition_state`)
-          if (gravaEstado && rel !== "lib/editions/record-edition-evidence.ts") ofensores.push(`${rel}: grava work_edition_state`)
+          if (gravaEstado && !DONOS_DO_ESTADO.has(rel)) ofensores.push(`${rel}: grava work_edition_state`)
         }
       }
     }

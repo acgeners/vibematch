@@ -78,6 +78,14 @@ const INVENTARIO: Record<string, boolean> = {
   // não é o dono (o recalc per-user dele roda em after()).
   setPreferredMixedEdition: true,
   setHideAdultContent: true,
+
+  // ── Entrou com o controle "Edições da obra" (2026-10-12) ───────────────────
+  // A curadoria declara o estado de edição e a nota de conteúdo adulto de cada edição de uma mixed.
+  // Declara `edition_scores`: o estado decide SE a obra usa nota por edição, e a nota é a que entra
+  // na previsão. Entrada de catálogo — vale seja quem for que mude.
+  saveWorkEditionCuration: true,
+  // Remover a decisão da curadoria marca só quando a obra entra ou sai de `mixed` — é o que a previsão lê.
+  revertWorkEditionCuration: true,
 }
 
 /**

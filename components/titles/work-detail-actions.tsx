@@ -13,6 +13,7 @@ import {
   Edit,
   FolderPlus,
   Heart,
+  Layers,
   MoreHorizontal,
   RefreshCw,
   RotateCcw,
@@ -28,6 +29,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Input } from "@/components/ui/input"
 import type { ListPickerOption } from "@/server/queries/lists"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
+import { WorkEditionsDialog } from "@/components/titles/work-editions-dialog"
 import { useWorkStatusGate } from "@/components/titles/work-status-gate"
 import { useCan, useIsAdmin, useCanWriteOwnState } from "@/components/layout/admin-context"
 import { Button } from "@/components/ui/button"
@@ -480,6 +482,7 @@ export function MoreActionsMenu({
   const refresh = useRefresh()
   const [isPending, startTransition] = useTransition()
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [editionsOpen, setEditionsOpen] = useState(false)
 
   const handleArchive = () => {
     startTransition(async () => {
@@ -544,6 +547,12 @@ export function MoreActionsMenu({
           </DropdownMenuItem>
 
           <DropdownMenuSeparator />
+          {/* Dizer que a obra TEM versão R18 é o estado de edição — não o "Marcar como 18+", que
+              esconde a obra inteira (e vence o estado no portão). */}
+          <DropdownMenuItem onSelect={() => setEditionsOpen(true)} disabled={isPending}>
+            <Layers className="h-4 w-4" />
+            Edições da obra…
+          </DropdownMenuItem>
           {isAdult ? (
             <DropdownMenuItem onSelect={() => handleAdult(false)} disabled={isPending}>
               <ShieldOff className="h-4 w-4" />
@@ -577,6 +586,8 @@ export function MoreActionsMenu({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <WorkEditionsDialog workId={workId} open={editionsOpen} onOpenChange={setEditionsOpen} />
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
