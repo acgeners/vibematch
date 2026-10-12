@@ -85,7 +85,7 @@ describe("dona troca a edição padrão — marca a pendência E recalcula em ba
 
   it("valor inválido não grava, não marca e não recalcula", async () => {
     const { setPreferredMixedEdition } = await import("@/server/actions/settings")
-    expect(await setPreferredMixedEdition("ambas")).toEqual({ error: "Edição inválida." })
+    expect(await setPreferredMixedEdition("ambas")).toEqual({ error: "Versão inválida." })
     expect(gravado).toHaveLength(0)
     expect(ordem).toEqual([])
   })

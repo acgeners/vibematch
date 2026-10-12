@@ -78,7 +78,7 @@ export function WorkEditionsDialog({
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
       <DialogContent className="sm:max-w-[min(36rem,calc(100vw-4rem))]">
         <DialogHeader>
-          <DialogTitle>Edições da obra</DialogTitle>
+          <DialogTitle>Versões da obra</DialogTitle>
           <DialogDescription>
             Diga se esta obra tem uma versão normal e uma versão R18. Isso decide o que quem oculta 18+ consegue ver.
           </DialogDescription>
@@ -180,8 +180,8 @@ function EditionsForm({
           !res.data.changed
             ? "Nada mudou."
             : res.data.recalcMarked
-              ? `Edições da obra salvas. ${RECALC_PENDENTE}`
-              : "Edições da obra salvas.",
+              ? `Versões da obra salvas. ${RECALC_PENDENTE}`
+              : "Versões da obra salvas.",
         )
         onClose()
         refresh()
@@ -205,7 +205,7 @@ function EditionsForm({
                 escolha o gatilho ficava vazio (visto no browser). `""` é o placeholder do Radix. */}
             <Select value={state ?? ""} onValueChange={(v) => setState(v as CuratedEditionState)}>
               <SelectTrigger id="edition-state" className="w-full">
-                <SelectValue placeholder="Sem decisão — tratada como edição única">
+                <SelectValue placeholder="Sem decisão — tratada como versão única">
                   {selectedOptionLabel(STATE_OPTIONS, state)}
                 </SelectValue>
               </SelectTrigger>
@@ -245,7 +245,7 @@ function EditionsForm({
                 <p className="text-xs text-muted-foreground">Descarte as mudanças acima para remover a decisão.</p>
               )}
               {current.canRevert && (
-                <p className="text-xs text-muted-foreground">As notas por edição ficam como estão.</p>
+                <p className="text-xs text-muted-foreground">As notas por versão ficam como estão.</p>
               )}
             </div>
           )}
@@ -259,7 +259,7 @@ function EditionsForm({
 
           {isMixed && (
             <div className="flex flex-col gap-3 rounded-lg border p-3">
-              <p className="text-sm font-medium">Nota de conteúdo adulto por edição</p>
+              <p className="text-sm font-medium">Nota de conteúdo adulto por versão</p>
               {MIXED_EDITIONS.map((edition) => (
                 <ScoreRow
                   key={edition}
@@ -271,14 +271,14 @@ function EditionsForm({
                 />
               ))}
               <p className="text-xs text-muted-foreground">
-                Edição sem nota fica sem Nota Prevista nela. Nada é copiado de uma edição para a outra.
+                Versão sem nota fica sem Nota Prevista. Nada é copiado de uma versão para a outra.
               </p>
             </div>
           )}
 
           {!isMixed && Object.keys(current.scores).length > 0 && (
             <p className="text-xs text-muted-foreground">
-              As notas por edição já gravadas ficam guardadas e só voltam a valer se a obra voltar a ter duas edições.
+              As notas por versão já gravadas ficam guardadas e só voltam a valer se a obra voltar a ter duas versões.
             </p>
           )}
 

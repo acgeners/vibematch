@@ -71,7 +71,7 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
-describe("diálogo Edições da obra", () => {
+describe("diálogo Versões da obra", () => {
   it("mostra a nota atual de cada edição com a procedência, e o Salvar nasce desligado", async () => {
     await abrir(base)
     expect(screen.getByText("Hoje: 9,0 · Da avaliação da obra")).toBeTruthy()
@@ -105,15 +105,15 @@ describe("diálogo Edições da obra", () => {
 
   it("obra SEM decisão não vira 'uma edição só' por acidente: só grava depois de escolher", async () => {
     await abrir({ ...base, state: null, decidedBy: null, basis: null, decidedAt: null, scores: {} })
-    expect(screen.getByText("Sem decisão — tratada como edição única")).toBeTruthy()
+    expect(screen.getByText("Sem decisão — tratada como versão única")).toBeTruthy()
     expect(salvar().disabled).toBe(true)
-    expect(screen.queryByText(/Nota de conteúdo adulto por edição/)).toBeNull()
+    expect(screen.queryByText(/Nota de conteúdo adulto por versão/)).toBeNull()
 
     escolher(screen.getByRole("combobox", { name: "Estado" }), "Versão normal + versão R18")
     // Visto no browser: o gatilho ficava VAZIO depois da escolha (o Select começava sem valor
     // controlado). A escolha valia — só não aparecia.
     expect(screen.getByRole("combobox", { name: "Estado" }).textContent).toContain("Versão normal + versão R18")
-    expect(screen.getByText(/Nota de conteúdo adulto por edição/)).toBeTruthy()
+    expect(screen.getByText(/Nota de conteúdo adulto por versão/)).toBeTruthy()
     fireEvent.click(screen.getByRole("checkbox"))
     fireEvent.click(salvar())
     await waitFor(() =>
@@ -127,13 +127,13 @@ describe("diálogo Edições da obra", () => {
 
   it("com 'Marcar como 18+' ligado, avisa que ele vence o estado", async () => {
     await abrir({ ...base, adultOverride: true })
-    expect(screen.getByText(/marcada como 18\+ à mão, e isso vence o estado de edição/)).toBeTruthy()
+    expect(screen.getByText(/marcada como 18\+ à mão, e isso vence o estado das versões/)).toBeTruthy()
   })
 
   it("fora de mixed, as notas por edição somem e o diálogo diz que elas ficam guardadas", async () => {
     await abrir(base)
     escolher(screen.getByRole("combobox", { name: "Estado" }), "Só versão R18")
-    expect(screen.queryByText(/Nota de conteúdo adulto por edição/)).toBeNull()
+    expect(screen.queryByText(/Nota de conteúdo adulto por versão/)).toBeNull()
     expect(screen.getByText(/ficam guardadas e só voltam a valer/)).toBeTruthy()
     expect(screen.getByText("A obra inteira é 18+.")).toBeTruthy()
   })
@@ -146,7 +146,7 @@ describe("diálogo Edições da obra", () => {
   it("decisão da curadoria: mostra para onde volta e remove com um clique", async () => {
     await abrir(curada)
     expect(screen.getByText("Volta para: Versão normal + versão R18 (auditoria).")).toBeTruthy()
-    expect(screen.getByText("As notas por edição ficam como estão.")).toBeTruthy()
+    expect(screen.getByText("As notas por versão ficam como estão.")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Remover decisão da curadoria" }))
     await waitFor(() => expect(revertWorkEditionCuration).toHaveBeenCalledWith("obra-1"))
     expect(saveWorkEditionCuration).not.toHaveBeenCalled()

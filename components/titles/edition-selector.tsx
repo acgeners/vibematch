@@ -27,15 +27,15 @@ export function EditionSelector({
         : resolution.source === "adult_filter_only"
           ? "O filtro da lista mostra só 18+."
           : resolution.source === "preference"
-            ? "Pela sua preferência de edição."
+            ? "Pela sua preferência de versão."
             : resolution.source === "fallback"
-              ? "Esta obra tem duas edições; a normal é a padrão."
+              ? "Esta obra tem duas versões; a normal é a padrão."
               : resolution.requiresConfirmation
                 ? "Versão R18 aberta só nesta visita — sua preferência de ocultar 18+ continua."
                 : null
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5" data-slot="edition-selector">
-      <div role="group" aria-label="Edição da obra" className="inline-flex rounded-lg border bg-muted/40 p-0.5">
+      <div role="group" aria-label="Versão da obra" className="inline-flex rounded-lg border bg-muted/40 p-0.5">
         {MIXED_EDITIONS.map((ed: MixedEdition) => {
           const ativa = ed === resolution.edition
           return (

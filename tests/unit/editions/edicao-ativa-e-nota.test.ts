@@ -96,8 +96,8 @@ describe("procedência: o baseline não se passa por avaliação", () => {
     expect(p?.label).toBe("Nota-base provisória (inferida)")
     expect(p?.detail).toMatch(/Não é avaliação/)
   })
-  it("ausência = 'Não avaliado para esta edição'", () => {
-    expect(editionScoreProvenance({ kind: "absent", edition: "r18", row: null })?.label).toBe("Não avaliado para esta edição")
+  it("ausência = 'Não avaliado para esta versão'", () => {
+    expect(editionScoreProvenance({ kind: "absent", edition: "r18", row: null })?.label).toBe("Não avaliado para esta versão")
   })
   it("baseline = provisório + inferido + baixa confiança, e não existe fonte 'por regra'", () => {
     expect(EDITION_SCORE_SOURCES).not.toContain("rule_derived")

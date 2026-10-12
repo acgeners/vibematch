@@ -596,14 +596,14 @@ export const RECALC_INPUT_LABELS: Record<RecalcInput, string> = {
   original_title: "o título original (de onde sai o país)",
   work_tags: "as tags da obra",
   catalog_membership: "a obra entrar ou sair do catálogo",
-  edition_scores: "a nota de conteúdo adulto de cada edição (obras com versão normal e R18)",
+  edition_scores: "a nota de conteúdo adulto de cada versão (obras com versão normal e R18)",
   user_score: "uma nota sua",
   observation_adjustment: "o seu ajuste por observação",
   synopsis_quality: "o seu Interesse",
   attribute_bias: "o seu viés de atributo",
   tag_preferences: "as tags que você ama e evita",
   taste_profile: "o seu perfil de gosto",
-  mixed_edition_preference: "a edição que você vê por padrão (normal ou R18)",
+  mixed_edition_preference: "a versão que você vê por padrão (normal ou R18)",
 }
 
 export const RECALC_CATALOGO = CATALOG_RECALC_INPUTS

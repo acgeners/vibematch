@@ -365,7 +365,7 @@ export async function setHideAdultContent(enabled: boolean) {
  */
 export async function setPreferredMixedEdition(value: string | null) {
   const edition = value == null ? null : parseMixedEdition(value)
-  if (value != null && edition == null) return { error: "Edição inválida." }
+  if (value != null && edition == null) return { error: "Versão inválida." }
   const auth = await ensureSignedIn()
   if (!auth.ok) return { error: auth.error }
 

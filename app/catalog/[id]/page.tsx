@@ -1840,14 +1840,14 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
                   className="text-right shrink-0"
                   title={
                     predictionHiddenForEdition
-                      ? "A Nota Prevista desta obra foi calculada para a outra edição (ou antes da separação por edição)."
+                      ? "A Nota Prevista desta obra foi calculada para a outra versão (ou antes da separação por versão)."
                       : "Aparece após a avaliação IA dos atributos da obra"
                   }
                 >
                   <p className="text-xs font-medium text-muted-foreground">{LABELS.expected_score.full}</p>
                   <p className="text-3xl font-black font-mono leading-none text-muted-foreground">—</p>
                   <p className="text-xs text-muted-foreground">
-                    {predictionHiddenForEdition ? "não calculada para esta edição" : "após avaliação IA"}
+                    {predictionHiddenForEdition ? "não calculada para esta versão" : "após avaliação IA"}
                   </p>
                 </div>
               )}

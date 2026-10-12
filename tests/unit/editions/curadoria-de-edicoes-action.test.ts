@@ -410,7 +410,7 @@ describe("Remover decisão da curadoria", () => {
     estado.set(W, { ...structuredClone(AUDIT_MIXED), state: "single" })
     await salvar("mixed")
     antesDeEscreverEstado = () => estado.set(W, { ...estado.get(W)!, decided_by: "auto", state: "unknown" })
-    expect(await remover()).toEqual({ error: "A decisão de edição mudou enquanto o diálogo estava aberto. Reabra e confira." })
+    expect(await remover()).toEqual({ error: "A decisão sobre as versões mudou enquanto o diálogo estava aberto. Reabra e confira." })
     expect(estado.get(W)).toMatchObject({ decided_by: "auto", state: "unknown" })
   })
 
@@ -419,7 +419,7 @@ describe("Remover decisão da curadoria", () => {
     // A escrita filtra por decided_by = curator: outro escritor troca o autor depois da LEITURA.
     antesDeEscreverEstado = () => estado.set(W, { ...estado.get(W)!, decided_by: "auto" })
     const res = await remover()
-    expect(res).toEqual({ error: "A decisão de edição mudou enquanto o diálogo estava aberto. Reabra e confira." })
+    expect(res).toEqual({ error: "A decisão sobre as versões mudou enquanto o diálogo estava aberto. Reabra e confira." })
     expect(estado.get(W)).toMatchObject({ decided_by: "auto" })
   })
 })

@@ -28,11 +28,11 @@ export function EditionNoteBadge({ className }: { className?: string }) {
             )}
           >
             <span aria-hidden>ℹ️</span>
-            Edição R19 disponível
+            Versão R19 disponível
           </Badge>
         </TooltipTrigger>
         <TooltipContent className="max-w-64">
-          Esta obra tem uma edição R15 e uma R19. Por isso ela aparece no filtro &quot;Só 18+&quot; e não é
+          Esta obra tem uma versão R15 e uma R19. Por isso ela aparece no filtro &quot;Só 18+&quot; e não é
           ocultada para quem esconde conteúdo adulto.
         </TooltipContent>
       </Tooltip>
