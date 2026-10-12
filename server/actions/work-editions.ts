@@ -165,7 +165,7 @@ async function replaceWithNotRated(
     ok: false,
     error:
       `ATENÇÃO: a nota anterior (${apagada.score ?? "sem nota"}, ${String(apagada.source)}) foi apagada e não pôde ser restaurada — ` +
-      `a edição ficou sem registro. Refaça a decisão. (${ins.error.message} · ${back.error.message})`,
+      `a versão ficou sem registro. Refaça a decisão. (${ins.error.message} · ${back.error.message})`,
   }
 }
 
@@ -195,7 +195,7 @@ export async function saveWorkEditionCuration(
     const { error } = await supabase
       .from("work_edition_state")
       .upsert({ work_id: workId, ...plan.state }, { onConflict: "work_id" })
-    if (error) return { error: `Estado de edição: ${error.message}` }
+    if (error) return { error: `Estado das versões: ${error.message}` }
   }
 
   const falhas: string[] = []
@@ -221,7 +221,7 @@ export async function saveWorkEditionCuration(
   if (recalcMarked) await markRecalcPending("saveWorkEditionCuration", { changed: ["edition_scores"] })
   revalidateWork(workId)
 
-  if (falhas.length > 0) return { error: `Nota por edição não gravada — ${falhas.join(" · ")}` }
+  if (falhas.length > 0) return { error: `Nota por versão não gravada — ${falhas.join(" · ")}` }
   return { data: { changed: true, recalcMarked } }
 }
 
@@ -254,8 +254,8 @@ export async function revertWorkEditionCuration(
       ? tabela.delete().eq("work_id", workId).eq("decided_by", "curator").select("work_id")
       : tabela.update(plan.row).eq("work_id", workId).eq("decided_by", "curator").select("work_id")
   const { data, error } = await write
-  if (error) return { error: `Estado de edição: ${error.message}` }
-  if (!data || data.length === 0) return { error: "A decisão de edição mudou enquanto o diálogo estava aberto. Reabra e confira." }
+  if (error) return { error: `Estado das versões: ${error.message}` }
+  if (!data || data.length === 0) return { error: "A decisão sobre as versões mudou enquanto o diálogo estava aberto. Reabra e confira." }
 
   if (plan.kind === "apagar") {
     // Sem estado anterior, "sem decisão" é ausência de linha — o registro da decisão vai para o log.

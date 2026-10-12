@@ -69,7 +69,7 @@ export function AdultScoreTierTool({ initialQueue }: { initialQueue: AdultScoreT
                 )}
                 {EDITION_NOTE_TAG_NAMES.has(item.name) && (
                   <p className="mt-1 text-xs text-sky-700 dark:text-sky-300">
-                    📎 Metadado de EDIÇÃO (&ldquo;existe uma versão R19 em outra fonte&rdquo;), não afirma que
+                    📎 Metadado de VERSÃO (&ldquo;existe uma versão R19 em outra fonte&rdquo;), não afirma que
                     a obra catalogada é explícita — o piso correto costuma ser &ldquo;Sem piso&rdquo;.
                   </p>
                 )}

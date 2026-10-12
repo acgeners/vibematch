@@ -470,7 +470,7 @@ export function WorkReviewsCard({ snapshot, workId, provenance, editionView }: W
         {editionView && (
           <p className="rounded-md bg-muted/50 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
             <span className="font-medium text-foreground">Versão normal.</span> As reviews são da obra
-            inteira — a maioria não diz qual edição o leitor leu.
+            inteira — a maioria não diz qual versão o leitor leu.
             {editionView.reviewsHidden > 0 &&
               ` ${editionView.reviewsHidden} ${editionView.reviewsHidden === 1 ? "review citando conteúdo sexual explícito fica" : "reviews citando conteúdo sexual explícito ficam"} na versão R18.`}
           </p>

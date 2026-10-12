@@ -58,7 +58,7 @@ describe("action e leitura da preferência (lidas do source)", () => {
 
   it("a action valida o valor, exige sessão e grava pelo cliente de SESSÃO", () => {
     expect(corpo).toMatch(/parseMixedEdition\(value\)/)
-    expect(corpo).toMatch(/Edição inválida/)
+    expect(corpo).toMatch(/Versão inválida/)
     expect(corpo.slice(0, corpo.indexOf("revalidatePath"))).toMatch(/ensureSignedIn\(\)/)
     expect(corpo.slice(0, corpo.indexOf("revalidatePath"))).toMatch(/createUserClient\(\)/)
     expect(corpo.slice(0, corpo.indexOf("revalidatePath"))).not.toMatch(/createAdminClient\(\)/)

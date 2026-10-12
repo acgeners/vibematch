@@ -19,10 +19,10 @@ export const CURATED_EDITION_STATES = ["single", "mixed", "r18_only", "unknown"]
 export type CuratedEditionState = (typeof CURATED_EDITION_STATES)[number]
 
 export const EDITION_STATE_LABEL: Record<CuratedEditionState, string> = {
-  single: "Uma edição só",
+  single: "Uma versão só",
   mixed: "Versão normal + versão R18",
   r18_only: "Só versão R18",
-  unknown: "Indefinido (há sinal de R18, sem edição normal provada)",
+  unknown: "Indefinido (há sinal de R18, sem versão normal provada)",
 }
 
 /**
@@ -33,17 +33,17 @@ export const EDITION_STATE_LABEL: Record<CuratedEditionState, string> = {
 export const EDITION_STATE_EFFECT: Record<CuratedEditionState, string> = {
   single: "O 18+ segue a classificação automática da obra (tags e nota de conteúdo adulto).",
   mixed:
-    "Quem oculta 18+ vê a versão normal; a R18 fica atrás da confirmação. Cada edição usa a própria nota de conteúdo adulto na Nota Prevista.",
+    "Quem oculta 18+ vê a versão normal; a R18 fica atrás da confirmação. Cada versão usa a própria nota de conteúdo adulto na Nota Prevista.",
   r18_only: "A obra inteira é 18+.",
-  unknown: "A obra fica 18+ até haver prova de uma edição normal.",
+  unknown: "A obra fica 18+ até haver prova de uma versão normal.",
 }
 
 /** Aviso quando o "Marcar como 18+" está ligado: ele vence o estado no portão. */
 export function adultOverrideWarning(adultOverride: boolean | null): string | null {
   if (adultOverride === null) return null
   return adultOverride
-    ? "Esta obra está marcada como 18+ à mão, e isso vence o estado de edição: ela fica oculta inteira para quem esconde 18+. Para uma obra com versão normal e R18, use “18+: voltar ao automático” no menu."
-    : "Esta obra está marcada como não-18+ à mão, e isso vence o estado de edição: ela aparece inteira para quem esconde 18+, inclusive se for só R18."
+    ? "Esta obra está marcada como 18+ à mão, e isso vence o estado das versões: ela fica oculta inteira para quem esconde 18+. Para uma obra com versão normal e R18, use “18+: voltar ao automático” no menu."
+    : "Esta obra está marcada como não-18+ à mão, e isso vence o estado das versões: ela aparece inteira para quem esconde 18+, inclusive se for só R18."
 }
 
 /** Nota com vírgula, uma casa (a grade é de 0,5). */
@@ -372,7 +372,7 @@ export function describeRevertTarget(plan: RevertPlan): string | null {
     case "sem_registro":
       return "Esta decisão não guardou o estado anterior, então não há para onde voltar."
     case "apagar":
-      return "Volta para: sem decisão (tratada como edição única)."
+      return "Volta para: sem decisão (tratada como versão única)."
     case "restaurar":
       return `Volta para: ${EDITION_STATE_LABEL[plan.row.state]} (${DECIDED_BY_LABEL[plan.row.decided_by]}).`
   }

@@ -57,7 +57,7 @@ describe("página da obra — fiação por edição (lida do source)", () => {
     expect(page).toMatch(/adultContentFor\(\s*\{ isMixed: isMixedWork, legacyScore: scoreMap\.adult_content, editionRows \}/)
     expect(page).toMatch(/if \(adultResolution\.kind === "edition"\) scoreMap\.adult_content = adultResolution\.score\s*else delete scoreMap\.adult_content/)
   })
-  it("nota ausente mostra a procedência ('Não avaliado para esta edição')", () => {
+  it("nota ausente mostra a procedência ('Não avaliado para esta versão')", () => {
     expect(page).toMatch(/isEditionScore && editionProvenance && activeEdition/)
     expect(page).toMatch(/editionProvenance\.label/)
   })

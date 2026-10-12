@@ -37,7 +37,7 @@ export function MixedEditionPreference({
         setValue(anterior)
         toast.error(res.error)
       } else {
-        toast.success(next === "r18" ? "Obras com duas edições abrem na versão R18." : "Obras com duas edições abrem na versão normal.")
+        toast.success(next === "r18" ? "Obras com duas versões abrem na versão R18." : "Obras com duas versões abrem na versão normal.")
       }
     })
   }
@@ -46,11 +46,11 @@ export function MixedEditionPreference({
     <div className="space-y-2 border-t pt-4">
       <p className="text-sm font-medium text-foreground">Obras com versão normal e versão R18</p>
       <p className="text-sm text-muted-foreground">
-        Qual edição abre por padrão. A nota de conteúdo adulto, as tags e os avisos seguem a edição escolhida, e
+        Qual versão abre por padrão. A nota de conteúdo adulto, as tags e os avisos seguem a versão escolhida, e
         você pode trocar em cada obra.
         {hideAdult && " Enquanto obras 18+ estiverem ocultas, a versão normal é a que vale."}
       </p>
-      <div role="radiogroup" aria-label="Edição padrão" className="inline-flex flex-wrap rounded-lg border bg-muted/40 p-0.5">
+      <div role="radiogroup" aria-label="Versão padrão" className="inline-flex flex-wrap rounded-lg border bg-muted/40 p-0.5">
         {OPCOES.map((o) => (
           <button
             key={o.label}

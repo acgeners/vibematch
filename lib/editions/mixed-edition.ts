@@ -189,7 +189,7 @@ export function editionScoreProvenance(resolution: AdultContentResolution): { la
   if (resolution.kind === "legacy") return null
   if (resolution.kind === "absent") {
     return {
-      label: "Não avaliado para esta edição",
+      label: "Não avaliado para esta versão",
       detail:
         resolution.edition === "normal"
           ? "Ainda não há nota de conteúdo adulto da versão normal. A nota da versão R18 não vale aqui."
@@ -201,14 +201,14 @@ export function editionScoreProvenance(resolution: AdultContentResolution): { la
       return {
         label: "Nota-base provisória (inferida)",
         detail:
-          "Não é avaliação. Edição não adulta de uma obra com versão R18 sexual confirmada: presume-se conteúdo sexual atenuado/censurado, sem evidência suficiente de cenas explícitas nesta edição.",
+          "Não é avaliação. Versão não adulta de uma obra com versão R18 sexual confirmada: presume-se conteúdo sexual atenuado/censurado, sem evidência suficiente de cenas explícitas nesta versão.",
       }
     case "curator_confirmed":
-      return { label: "Confirmada pela curadoria", detail: "A curadoria confirmou a nota desta edição a partir das reviews existentes." }
+      return { label: "Confirmada pela curadoria", detail: "A curadoria confirmou a nota desta versão a partir das reviews existentes." }
     case "ai_evaluated":
-      return { label: "Avaliada para esta edição", detail: "Avaliação de IA feita especificamente para esta edição." }
+      return { label: "Avaliada para esta versão", detail: "Avaliação de IA feita especificamente para esta versão." }
     case "reused_existing":
-      return { label: "Da avaliação da obra", detail: "A nota da avaliação existente foi atribuída a esta edição pela auditoria de edições." }
+      return { label: "Da avaliação da obra", detail: "A nota da avaliação existente foi atribuída a esta versão pela auditoria de versões." }
     default:
       return null
   }

@@ -551,7 +551,7 @@ export function MoreActionsMenu({
               esconde a obra inteira (e vence o estado no portão). */}
           <DropdownMenuItem onSelect={() => setEditionsOpen(true)} disabled={isPending}>
             <Layers className="h-4 w-4" />
-            Edições da obra…
+            Versões da obra…
           </DropdownMenuItem>
           {isAdult ? (
             <DropdownMenuItem onSelect={() => handleAdult(false)} disabled={isPending}>
