@@ -44,6 +44,11 @@ Existem, mas não justificam frente agora. Corrigir quando o código for tocado 
   obra nova usa `fantasy` real como fallback → pequeno viés em obra nova com nobreza forte. Impacto
   medido não justificou mudança. A Strategy B sai quando as rotuladas tiverem `fantasy` real
   ([fato] hoje 36 de 238).
+- **"Não avaliado" por edição sem atomicidade de banco:** [fato] o controle "Edições da obra" troca
+  nota → `not_rated` com DELETE…RETURNING + INSERT e, se o INSERT falha, reinsere a linha apagada
+  (testado com falha real no banco local). Se a reinserção também falhar, a edição fica sem linha —
+  erro explícito na tela e a linha inteira no log. Atomicidade de verdade = função SQL/RPC
+  (migration); hardening futuro, não bloqueador (decisão de 12/10).
 - **Tooltip do Radix sem `TooltipProvider` global:** só providers locais; esquecer um derruba a página.
 - **`contentRatings` sem coluna própria:** o valor só fica no `raw_response` das avaliações que o registraram; mudança em `CONTENT_RATING_BOUNDS` não tem backfill pronto.
 - **Migrations não reconstroem o banco** (sem `CREATE TABLE` de `criteria` etc.; dois `132_*`).
