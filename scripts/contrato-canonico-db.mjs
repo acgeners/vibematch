@@ -25,6 +25,7 @@
  * registradas na migration).
  */
 import { spawnSync } from "node:child_process"
+import { readFileSync } from "node:fs"
 import path from "node:path"
 
 const ROOT = path.resolve(import.meta.dirname, "..")
@@ -55,7 +56,16 @@ const upsertUcs = (u, w, exp, contrato) => {
     on conflict (user_id, work_id) do update set ${cols.map((c) => `${c} = excluded.${c}`).join(", ")}`
 }
 
-const OK = "s9-fantasy-b-v1"
+// O contrato que o código grava hoje, lido do source — nunca escrito aqui (uma cópia envelheceria).
+const OK = readFileSync(path.join(ROOT, "lib/calculations/scoring-contract.ts"), "utf8").match(
+  /export const SCORING_CONTRACT = "([^"]+)"/,
+)?.[1]
+if (!OK) {
+  console.error("🔴 não achei `export const SCORING_CONTRACT = \"…\"` em lib/calculations/scoring-contract.ts")
+  process.exit(1)
+}
+// Retirados da lista pela migration 218: um writer antigo que os declare tem de ser RECUSADO.
+const RETIRADOS = ["s9-fantasy-b-v1", "s9-fantasy-b-edicao-v1"]
 
 /** `stmt` TEM de ser recusado pela guarda da 202 (P0001 com "contrato canônico" na mensagem). */
 const recusa = (caso, stmt) => `
@@ -78,6 +88,9 @@ const sql = `
 \\set ON_ERROR_STOP 1
 begin;
 \\i ${MIGRATION}
+-- A 202 sozinha insere a lista da época ({s9-fantasy-b-v1}). O estado canônico de hoje é o da 218: só o
+-- contrato que o código grava. Modela-se aqui (dentro da transação) para o teste valer sobre a lista vigente.
+update public.canonical_contract set scoring_contracts = array[${q(OK)}] where id = 1;
 do $teste$
 declare
   w1 uuid; w2 uuid; wn uuid; u uuid; wu uuid; ev uuid;
@@ -109,6 +122,7 @@ begin
   end if;
   ${recusa("antigo sem scoring_contract · linha existente já canônica", upsertCs("w2", "6.1", null))}
   ${recusa("novo com contrato incorreto", upsertCs("w1", "7.2", "s9-sem-strategy-b"))}
+  ${RETIRADOS.map((c) => recusa(`contrato retirado pela 218 (${c})`, upsertCs("w1", "7.2", c))).join("\n")}
   ${recusa("UPDATE puro de scoring sem contrato validado", "update public.calculated_scores set expected_score = 1.0 where work_id = w2")}
   ${aceita("UPDATE fora do scoring: alignment_stale", "update public.calculated_scores set alignment_stale = true where work_id = w2")}
   ${aceita("UPDATE fora do scoring: art_estimate", "update public.calculated_scores set art_estimate = 6.5, art_percentile = 70 where work_id = w2")}
@@ -122,6 +136,7 @@ begin
   -- scoring: user_calculated_scores (o espelho per-user)
   ${aceita("espelho · novo com contrato correto", upsertUcs("u", "wu", "7.3", OK))}
   ${recusa("espelho · antigo sem scoring_contract · linha existente já canônica", upsertUcs("u", "wu", "6.0", null))}
+  ${RETIRADOS.map((c) => recusa(`espelho · contrato retirado pela 218 (${c})`, upsertUcs("u", "wu", "6.0", c))).join("\n")}
   ${aceita("espelho · upsert do Veredito (só alignment_*)", "insert into public.user_calculated_scores (user_id, work_id, alignment_score, updated_at) values (u, wu, 61, now()) on conflict (user_id, work_id) do update set alignment_score = excluded.alignment_score, updated_at = excluded.updated_at")}
 
   -- avaliação

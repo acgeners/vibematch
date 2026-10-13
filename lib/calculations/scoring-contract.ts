@@ -89,7 +89,8 @@ export function mensagemDeContratoQuebrado(c: ContratoDoCalculo): string {
  *
  * Linhagem: `s9-fantasy-b-v1` (sem regra de edição) → `s9-fantasy-b-edicao-v1` (previsão por edição,
  * treino SEMPRE no legado) → `-edicao-v2` (o treino passa a distinguir normal × R18). Linha gravada por
- * `s9-fantasy-b-v1` NÃO é lida como previsão de edição (`EDITION_AWARE_SCORING_CONTRACTS`).
+ * `s9-fantasy-b-v1` NÃO é lida como previsão de edição (`EDITION_AWARE_SCORING_CONTRACTS`). A mig 218 tira
+ * `s9-fantasy-b-v1` e `s9-fantasy-b-edicao-v1` da lista do banco: só a v2 pode ser GRAVADA (a leitura não muda).
  *
  * 🔴 POR QUE EXISTE: o contrato de slugs logo acima compara CONJUNTOS — e em 02–03/10/2026 um
  * checkout sem a Strategy B passou por ele (o slot `fantasy` existe nos dois códigos; o que muda é

@@ -269,6 +269,7 @@ export const ABSENT_EDITION_PREDICTION: EditionPrediction = {
  * novo entra aqui (o pin `contrato-canonico-pin.test.ts` cobra).
  */
 export const EDITION_AWARE_SCORING_CONTRACTS: ReadonlySet<string> = new Set([
+  // edicao-v1 fica para LER linha antiga: a mig 218 só proíbe GRAVAR com ele (na nuvem, 0 linhas em 13/10).
   "s9-fantasy-b-edicao-v1",
   // v2 (mig 217): a mesma previsão por edição; muda só o TREINO (rótulo pela versão lida). Linha v1 e
   // linha v2 convivem entre o deploy e o recálculo, e as duas são lidas como previsão por edição.

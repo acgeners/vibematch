@@ -4752,8 +4752,13 @@ numa transação que termina em ROLLBACK — nada persiste; sem o stack, falha).
 ⚠️ **Trocar `PROMPT_VERSION` ou `SCORING_CONTRACT` (`lib/calculations/scoring-contract.ts`) exige
 migration atualizando `canonical_contract` no MESMO PR**, com os dois valores na lista durante a
 janela entre migration e deploy. `tests/unit/orchestration/contrato-canonico-pin.test.ts` reprova a
-divergência — e fixa o que `s9-fantasy-b-v1` descreve (os 9 slugs, Strategy B): mudar a semântica do
-scoring sem trocar o NOME do contrato também reprova.
+divergência — e fixa o que cada nome de contrato descreve (os 9 slugs, Strategy B, regra de edição):
+mudar a semântica do scoring sem trocar o NOME do contrato também reprova.
+
+⚠️ **Retirar contrato antigo da lista é migration PRÓPRIA** (ex.: 218), só depois de o código novo estar
+no ar e o recálculo ter gravado só o contrato novo; linha histórica com contrato NULO não bloqueia nem é
+reescrita. Depois dela, voltar o app para código que grava o contrato retirado exige rodar o rollback da
+migration ANTES. Teste: `npm run test:db-retirada-contratos`.
 
 🔴 **Scoring se grava por UPSERT com `scoring_contract`, nunca por UPDATE solto.** O writer antigo é
 barrado porque o Postgres dispara o `BEFORE INSERT` sobre a linha PROPOSTA antes do `ON CONFLICT`;
