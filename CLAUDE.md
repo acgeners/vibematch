@@ -4759,6 +4759,8 @@ mudar a semântica do scoring sem trocar o NOME do contrato também reprova.
 no ar e o recálculo ter gravado só o contrato novo; linha histórica com contrato NULO não bloqueia nem é
 reescrita. Depois dela, voltar o app para código que grava o contrato retirado exige rodar o rollback da
 migration ANTES. Teste: `npm run test:db-retirada-contratos`.
+🔴 **Hoje (mig 218, 13/10/2026) só `s9-fantasy-b-edicao-v2` é aceito.** A v49+ grava v2; checkout antigo que grave v1 ou
+edicao-v1 falha por design. Voltar o app para a v48 ou anterior exige `scripts/rollback/218_rollback.sql` ANTES.
 
 🔴 **Scoring se grava por UPSERT com `scoring_contract`, nunca por UPDATE solto.** O writer antigo é
 barrado porque o Postgres dispara o `BEFORE INSERT` sobre a linha PROPOSTA antes do `ON CONFLICT`;
@@ -5593,13 +5595,13 @@ de evidência explícita R15 + R19 do quadrinho (`lib/editions/edition-evidence.
 CRUA do MangaUpdates e gravada no save por `upsertWorkExternalIds`), de auditoria ou de curadoria.
 
 ⚠️ **Censura × sem censura não é edição normal**, e R19 do NOVEL não contamina o webtoon.
-⚠️ **`adult_override` é decisão da OBRA INTEIRA**: `true` esconde até a versão normal de uma `mixed` (os 6
-`true` das `mixed` auditadas ficam até a página separar nota/tags por edição — fase 2).
+⚠️ **`adult_override` é decisão da OBRA INTEIRA**: `true` esconde até a versão normal de uma `mixed` (hoje só
+One Last Night; a 215 liberou as outras 5).
 Sinal R19 errado se corrige na ORIGEM (estado/tag), nunca com `adult_override = false`.
 ⚠️ Não confundir com a tag `R19 Version` (a obra catalogada É a R19: piso 7 + 18+) nem com "R15 but
 Based on a R19 Novel" (o R19 é do novel — teto 6 na nota). Testes: `npm run test:db-edicao-mixed`.
 
-### Fase 2: `adult_content` e a Nota Prevista são POR EDIÇÃO nas `mixed` (migrations 213–215)
+### Fase 2: `adult_content` e a Nota Prevista são POR EDIÇÃO nas `mixed` (migrations 213–218)
 
 **Nunca herdar.** Em obra `mixed`, `category_scores.adult_content` é a nota misturada (legado: não é
 exibida nem prevista). A nota de cada edição mora em `work_edition_scores`; sem linha ou `not_rated` ⇒
@@ -5608,16 +5610,20 @@ exibida nem prevista). A nota de cada edição mora em `work_edition_scores`; se
   Não vale para obra com R18 só nos extras (`work_edition_state.r18_extra_chapters`) nem sem R18 sexual provada.
 - Não existe nota R18 "por regra": existência da R18 ou piso de tag sozinhos não viram nota de edição.
 
-**Previsão:** o recálculo prevê as DUAS edições com o MESMO modelo (treino no legado) e grava
+**Previsão:** o recálculo prevê as DUAS edições com o MESMO modelo e grava
 `expected_by_edition`; as colunas de sempre ficam com a edição padrão de quem recebe a nota
 (`expected_edition`). Quem conhece a edição ativa lê por `predictionForEdition`, que só confia em linha
 gravada por contrato de `EDITION_AWARE_SCORING_CONTRACTS` (linha do contrato antigo = previsão misturada).
 A cópia por edição é gravada com as MESMAS casas das colunas (`asPersistedEditionPrediction`, que arredonda
 como o `numeric` do banco — não `Math.round`): sem isso página e home arredondavam a mesma nota diferente.
-Trocar a edição padrão (preferência ou ocultar 18+) recalcula na hora, também para o dono.
+Trocar a edição padrão (ocultar 18+) recalcula na hora, também para o dono.
+**Treino e `attribute_bias` pela versão LIDA:** a avaliação grava `user_work_state.read_edition` (mig 216); o rótulo de
+uma mixed usa o `adult_content` dessa versão, e sem nota nela fica sem o atributo (nunca o da outra). Sem versão
+conhecida, o legado. Avaliação de obra não-mixed não tem versão.
 
 **Edição ativa** (`resolveMixedEdition`): ocultar 18+ ⇒ normal (a R18 só com `?edition=r18` + confirmação,
-sem mudar preferência) · `?adult=only` ⇒ R18 · `?edition=` · `preferred_mixed_edition` · normal.
+sem mudar preferência) · `?adult=only` ⇒ R18 · `?edition=` · R18 só nos extras ⇒ normal · logado ⇒ R18 · anônimo
+⇒ normal. `preferred_mixed_edition` não é lida (coluna legada).
 Anônimo nunca herda a preferência do dono (`getCurrentUserSettingsRow` é só da sessão).
 
 **Na normal saem** tags `r18` e `desconhecida` (classe pelas FLAGS do banco, sem lista de slug —
@@ -5626,9 +5632,8 @@ Anônimo nunca herda a preferência do dono (`getCurrentUserSettingsRow` é só 
 sexual fica nas duas. As flags de edição das tags são lidas à parte (`fetchTagEditionFlags`), fora do select
 compartilhado.
 
-**Publicação, nesta ordem:** 213 + 214 → deploy (contrato `s9-fantasy-b-edicao-v1`, `enforce` ligado)
-→ recálculo na nuvem → 215 (libera 5 overrides; One Last Night fica) → tirar `s9-fantasy-b-v1` da
-lista. Teste: `npm run test:db-edicao-fase2`.
+**Publicada em 13/10/2026** (Fly v49, migs 213–218, contrato `s9-fantasy-b-edicao-v2`). Testes:
+`npm run test:db-edicao-fase2` e `npm run test:db-retirada-contratos`.
 
 ## A RAZÃO do limite 18+ tem dono — e quem a estava escrevendo era o modelo
 
