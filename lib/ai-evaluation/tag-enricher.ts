@@ -30,7 +30,8 @@ export interface EnrichResult {
   subgroupSlug: string | null
   /** slug of an existing tag this one is a near-synonym of, or null. */
   synonymOfSlug: string | null
-  confidence: number
+  /** 0–1. `null` = o modelo não mandou um número válido (vai como NULL, nunca como 0 inventado). */
+  confidence: number | null
   /**
    * 18+: "explicit" = nomeia/afirma conteúdo sexual EXPLÍCITO mostrado (ato,
    * anatomia, pornográfico) → adult_indicator + strong. "label" = rótulo de
@@ -139,33 +140,84 @@ Regras: responda SEMPRE chamando a tool enrich_tags, com uma entrada por tag nov
 
 export interface EnrichTagsForGroupResult {
   /**
-   * Nome → resultado, SÓ para as tags sobre as quais o modelo respondeu. Tag ausente = o modelo
-   * não decidiu nada sobre ela.
+   * Nome → resultado, SÓ para as tags sobre as quais o modelo respondeu com um item VÁLIDO e
+   * COMPLETO. Tag ausente = o modelo não decidiu nada sobre ela.
    *
    * 🔴 Até a migration 210 este mapa vinha pré-preenchido com um resultado NEUTRO para toda tag
    * (sem subgrupo, `adult_level=none`, `adult_score_tier=none`) e era devolvido assim também quando
    * a chamada nem acontecia — sem chave, guard de proveniência, erro do provider. O neutro era
    * indistinguível de uma decisão, e `enrichNewTags` gravava a marca de revisão em cima dele.
+   *
+   * 🔴 E até 2026-10-13 o mesmo acontecia CAMPO A CAMPO numa resposta que chegou: `adult_level`
+   * fora do enum ou ausente virava "none", subgrupo inexistente virava "nenhum subgrupo", e um item
+   * cortado por `max_tokens` (o `partialParse` do SDK descarta a string incompleta) também. Hoje
+   * esses itens vão para `invalid`, com o motivo, e a tag não é dada como classificada.
    */
   results: Map<string, EnrichResult>
+  /** Nome → por que o item desta tag foi recusado (inválido, incompleto ou truncado). */
+  invalid: Map<string, string>
   outcome: ProviderOutcome
   detail: string | null
+}
+
+const ADULT_ENUM = ["none", "label", "explicit"] as const
+
+/**
+ * Valida UM item da resposta. Os três campos que viram decisão gravada — subgrupo, `adult_level` e
+ * `adult_score_tier` — precisam vir presentes e dentro do contrato; ausência ou valor inválido NÃO
+ * se converte em "none". Sinônimo e confiança são tolerantes de propósito: nenhum dos dois grava uma
+ * decisão negativa (sinônimo inválido = nenhuma proposta; confiança inválida = NULL).
+ */
+function validateItem(
+  r: RawClassification,
+  subSlugs: Set<string>,
+  existingSlugs: Set<string>,
+): { ok: true; result: EnrichResult } | { ok: false; reason: string } {
+  const sub = r.subgroup_slug
+  if (typeof sub !== "string" || sub.trim() === "") return { ok: false, reason: "campo ausente: subgroup_slug" }
+  if (sub !== "none" && !subSlugs.has(sub)) {
+    return { ok: false, reason: `subgrupo inválido: "${sub}" não é um subgrupo aprovado do grupo` }
+  }
+  for (const field of ["adult_level", "adult_score_tier"] as const) {
+    const v = r[field]
+    if (v === undefined || v === null || v === "") return { ok: false, reason: `campo ausente: ${field}` }
+    if (!(ADULT_ENUM as readonly string[]).includes(v)) {
+      return { ok: false, reason: `valor fora do contrato: ${field}="${String(v)}"` }
+    }
+  }
+  const synonymOfSlug = r.synonym_of_slug && existingSlugs.has(r.synonym_of_slug) ? r.synonym_of_slug : null
+  const confidence =
+    typeof r.confidence === "number" && Number.isFinite(r.confidence) && r.confidence >= 0 && r.confidence <= 1
+      ? r.confidence
+      : null
+  return {
+    ok: true,
+    result: {
+      subgroupSlug: sub === "none" ? null : sub,
+      synonymOfSlug,
+      confidence,
+      adultLevel: r.adult_level as AdultLevel,
+      adultScoreTier: r.adult_score_tier as AdultScoreTier,
+    },
+  }
 }
 
 export async function enrichTagsForGroup(
   input: EnrichTagsForGroupInput,
 ): Promise<EnrichTagsForGroupResult> {
   const results = new Map<string, EnrichResult>()
-  if (input.newTags.length === 0) return { results, outcome: "ok", detail: null }
+  const invalid = new Map<string, string>()
+  if (input.newTags.length === 0) return { results, invalid, outcome: "ok", detail: null }
   if (!process.env.ANTHROPIC_API_KEY) {
-    return { results, outcome: "provider_not_called", detail: "ANTHROPIC_API_KEY ausente" }
+    return { results, invalid, outcome: "provider_not_called", detail: "ANTHROPIC_API_KEY ausente" }
   }
 
   const subSlugs = new Set(input.approvedSubgroups.map((s) => s.slug))
   const existingSlugs = new Set(input.existingTags.map((t) => t.slug))
   const asked = new Set(input.newTags.map((t) => t.name))
 
-  let raw: RawClassification[] = []
+  let raw: unknown = []
+  let truncated = false
   try {
     const client = getAnthropicClient({ maxRetries: 4 })
     const { message } = await createLoggedMessage(
@@ -188,24 +240,40 @@ export async function enrichTagsForGroup(
     const toolUse = message.content.find(
       (b): b is Extract<typeof b, { type: "tool_use" }> => b.type === "tool_use",
     )
-    const payload = toolUse?.input as { results?: RawClassification[] } | undefined
+    const payload = toolUse?.input as { results?: unknown } | undefined
     raw = payload?.results ?? []
+    truncated = message.stop_reason === "max_tokens"
   } catch (error) {
     const outcome = providerOutcomeOf(error)
     console.error(`[tag-enricher] ${outcome}: nenhuma tag enriquecida`, error)
-    return { results, outcome, detail: providerDetailOf(error) }
+    return { results, invalid, outcome, detail: providerDetailOf(error) }
   }
 
-  for (const r of raw) {
-    if (!r.tag_name || !asked.has(r.tag_name)) continue
-    const subgroupSlug = r.subgroup_slug && subSlugs.has(r.subgroup_slug) ? r.subgroup_slug : null
-    const synonymOfSlug = r.synonym_of_slug && existingSlugs.has(r.synonym_of_slug) ? r.synonym_of_slug : null
-    const confidence = typeof r.confidence === "number" ? r.confidence : 0
-    const adultLevel: AdultLevel =
-      r.adult_level === "explicit" || r.adult_level === "label" ? r.adult_level : "none"
-    const adultScoreTier: AdultScoreTier =
-      r.adult_score_tier === "explicit" || r.adult_score_tier === "label" ? r.adult_score_tier : "none"
-    results.set(r.tag_name, { subgroupSlug, synonymOfSlug, confidence, adultLevel, adultScoreTier })
+  if (!Array.isArray(raw)) {
+    // A chamada voltou, mas sem a lista: nenhuma tag tem resposta utilizável.
+    for (const name of asked) invalid.set(name, "resposta inválida: `results` não é uma lista")
+    return { results, invalid, outcome: "ok", detail: null }
   }
-  return { results, outcome: "ok", detail: null }
+
+  raw.forEach((item, i) => {
+    if (!item || typeof item !== "object") return // sem tag_name não há a quem atribuir: vira "omitida"
+    const r = item as RawClassification
+    if (typeof r.tag_name !== "string" || !asked.has(r.tag_name)) return
+    // `max_tokens`: os itens ANTERIORES foram fechados (o modelo já emitiu o seguinte); o ÚLTIMO pode
+    // ter sido cortado em qualquer campo, e o parser parcial do SDK o devolve "completo" sem o resto.
+    if (truncated && i === raw.length - 1) {
+      results.delete(r.tag_name)
+      invalid.set(r.tag_name, "resposta truncada (max_tokens): o item desta tag pode estar incompleto")
+      return
+    }
+    const v = validateItem(r, subSlugs, existingSlugs)
+    if (!v.ok) {
+      results.delete(r.tag_name)
+      invalid.set(r.tag_name, v.reason)
+      return
+    }
+    // Item duplicado com um inválido antes: a resposta sobre esta tag não é confiável.
+    if (!invalid.has(r.tag_name)) results.set(r.tag_name, v.result)
+  })
+  return { results, invalid, outcome: "ok", detail: null }
 }

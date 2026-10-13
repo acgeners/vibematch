@@ -40,6 +40,8 @@ export type RecalcCodeProvenance = {
   branch: string | null
   dirty: boolean | null
   in_origin_main: boolean | null
+  /** HEAD igual à ponta da ref local `origin/main` — é o que decide `canonical` (13/10/2026). */
+  at_origin_main: boolean | null
   canonical: boolean | null
   override_used: boolean
   /** Só quando o override foi de fato usado. */
@@ -75,7 +77,7 @@ export function assertRecalcCodeAllowed(): RecalcCodeProvenance {
   if (p.override_used) {
     console.warn(
       `[recalc-guard] recálculo NÃO CANÔNICO liberado por ${RECALC_OVERRIDE_ENV} ("${p.override_reason}") — ` +
-        `${p.branch ?? "(detached)"} @ ${p.sha?.slice(0, 7) ?? "?"} · dirty=${p.dirty} · in_origin_main=${p.in_origin_main}`,
+        `${p.branch ?? "(detached)"} @ ${p.sha?.slice(0, 7) ?? "?"} · dirty=${p.dirty} · at_origin_main=${p.at_origin_main} · in_origin_main=${p.in_origin_main}`,
     )
   }
   return p
@@ -92,6 +94,7 @@ function toJobProvenance(decision: CodeGateDecision): RecalcCodeProvenance {
     branch: p.branch,
     dirty: p.dirty,
     in_origin_main: p.in_origin_main,
+    at_origin_main: p.at_origin_main,
     canonical: p.canonical,
     override_used: overrideUsed,
   }

@@ -11,6 +11,7 @@ const DEFAULTS: Record<string, Row> = {
     tag_group_id: null, tag_subgroup_id: null, adult_indicator: false, adult_indicator_strong: false,
     origin: "manual", reviewed_at: null, adult_score_tier: null, adult_score_tier_reviewed_at: null,
     marks_r19_edition: false, enrichment_status: "pending", enrichment_at: null, enrichment_detail: null,
+    human_decisions: {},
   },
   works: { adult_auto: false, adult_reason: null, adult_override: null },
 }
@@ -18,6 +19,12 @@ const DEFAULTS: Record<string, Row> = {
 export class FakeDb {
   tables: Record<string, Row[]> = {}
   log: Array<{ table: string; op: string; payload?: unknown }> = []
+  /**
+   * Injeção de erro do PostgREST: devolve a mensagem para a operação que deve falhar (nada é
+   * aplicado nela), ou null. É assim que os testes provam que uma escrita que falhou não termina
+   * em "sucesso" — sem isto o fake nunca erra, e a checagem de `error` fica sem exercício.
+   */
+  failWhen: ((q: { table: string; op: string; payload?: unknown }) => string | null) | null = null
   rows(t: string): Row[] {
     return (this.tables[t] ??= [])
   }
@@ -50,11 +57,14 @@ class Q {
   private mode: "many" | "single" | "maybe" = "many"
   private rangeArg?: [number, number]
   private limitN?: number
+  private headCount = false
   constructor(private db: FakeDb, private table: string) {}
 
-  select(cols?: string) {
-    if (this.op === "select") this.cols = cols
-    else this.returning = true
+  select(cols?: string, opts?: { count?: string; head?: boolean }) {
+    if (this.op === "select") {
+      this.cols = cols
+      this.headCount = Boolean(opts?.head && opts?.count)
+    } else this.returning = true
     return this
   }
   eq(c: string, v: unknown) { this.filters.push((r) => r[c] === v); return this }
@@ -73,7 +83,7 @@ class Q {
   update(obj: Row) { this.op = "update"; this.payload = obj; return this }
   delete() { this.op = "delete"; return this }
 
-  then<T>(res: (v: { data: unknown; error: null }) => T, rej?: (e: unknown) => T) {
+  then<T>(res: (v: { data: unknown; error: { message: string } | null; count?: number }) => T, rej?: (e: unknown) => T) {
     try {
       return Promise.resolve(res(this.exec()))
     } catch (e) {
@@ -87,10 +97,13 @@ class Q {
     return { id: randomUUID(), created_at: new Date().toISOString(), ...(DEFAULTS[this.table] ?? {}), ...r }
   }
 
-  private exec(): { data: unknown; error: null } {
+  private exec(): { data: unknown; error: { message: string } | null; count?: number } {
     const t = this.db.rows(this.table)
     this.db.log.push({ table: this.table, op: this.op, payload: this.payload })
+    const falha = this.db.failWhen?.({ table: this.table, op: this.op, payload: this.payload })
+    if (falha) return { data: null, error: { message: falha } }
     if (this.op === "select") {
+      if (this.headCount) return { data: null, count: t.filter((r) => this.match(r)).length, error: null }
       let out = t.filter((r) => this.match(r)).map((r) => ({ ...r }))
       for (const e of parseEmbeds(this.cols)) {
         for (const r of out) {

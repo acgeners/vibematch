@@ -8,6 +8,12 @@ import { recomputeAdultAuto } from "@/lib/tags/adult-classify"
 import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { GENRE_PROPOSAL_MIN_OCCURRENCES } from "@/lib/tags/genre-proposals"
+import { enrichNewTags } from "@/lib/tags/ingest"
+import { enrichmentNeedsRecovery } from "@/lib/tags/enrichment-view"
+import { loadNewTagsQueue } from "@/server/queries/new-tags-queue"
+import { humanDecisionPatches } from "@/server/queries/tag-human-decisions"
+import { parseHumanDecisions } from "@/lib/tags/enrichment-view"
+import type { HumanDecisionField, HumanDecisions } from "@/lib/tags/enrichment-view"
 
 // ============================================================
 // Revisão de tags/gêneros criados automaticamente das fontes (mig 165).
@@ -27,6 +33,32 @@ export interface NewTagRow {
   origin: string
   createdAt: string
   workCount: number
+  /** `tags.enrichment_status` — decide se grupo e 18+ desta linha são decisão de alguém. */
+  enrichmentStatus: string
+  /** Motivo gravado quando a classificação automática não terminou. */
+  enrichmentDetail: string | null
+  /** Quais campos um HUMANO decidiu, e quando (`tags.human_decisions`, migration 219). */
+  humanDecisions: HumanDecisions
+}
+
+/**
+ * Grava o valor canônico de UMA tag JUNTO com a proveniência humana dos `fields` — um UPDATE só.
+ * Decidir um campo não faz a tag inteira virar `curated`: `enrichment_status` continua dizendo o que a
+ * AUTOMAÇÃO fez, e `human_decisions` diz, campo a campo, o que um humano decidiu.
+ */
+async function gravarDecisaoHumana(
+  supabase: ReturnType<typeof createAdminClient>,
+  tagId: string,
+  fields: HumanDecisionField[],
+  valores: Record<string, unknown>,
+): Promise<{ error: string | null }> {
+  const prov = await humanDecisionPatches(supabase, [tagId], fields)
+  if (!prov.ok) return { error: prov.error }
+  const { error } = await supabase
+    .from("tags")
+    .update({ ...valores, human_decisions: prov.patches.get(tagId) })
+    .eq("id", tagId)
+  return { error: error?.message ?? null }
 }
 
 export interface GenreProposalRow {
@@ -45,24 +77,19 @@ function adultLevelOf(indicator: boolean, strong: boolean): AdultLevel {
 
 // ---- Tags novas ----------------------------------------------------------
 
-/** Tags criadas de fonte e ainda não revisadas (origin='external' ∧ reviewed_at null). */
+/**
+ * A fila "Tags novas": tags de fonte ainda não revisadas ∪ tags de QUALQUER origem cuja classificação
+ * automática não terminou (regra em `server/queries/new-tags-queue.ts`, a mesma do contador da aba).
+ * 🔴 Erro de leitura LANÇA: devolver `[]` desenharia "Nenhuma tag nova para revisar 🎉" sobre uma
+ * falha.
+ */
 export async function listNewTags(): Promise<NewTagRow[]> {
   const gate = await ensureAdmin()
   if (!gate.ok) return []
   const supabase = createAdminClient()
 
-  const { data: tags, error } = await supabase
-    .from("tags")
-    .select("id, name, slug, tag_group_id, adult_indicator, adult_indicator_strong, origin, created_at")
-    .eq("origin", "external")
-    .is("reviewed_at", null)
-    .order("created_at", { ascending: false })
-    .limit(2000)
-  if (error) {
-    console.error("[listNewTags] falhou", error.message)
-    return []
-  }
-  if (!tags?.length) return []
+  const tags = await loadNewTagsQueue(supabase)
+  if (!tags.length) return []
 
   // Contagem de obras por tag (dedup em JS — a fila de pendentes é pequena).
   const ids = tags.map((t) => t.id as string)
@@ -91,8 +118,58 @@ export async function listNewTags(): Promise<NewTagRow[]> {
       origin: t.origin as string,
       createdAt: t.created_at as string,
       workCount: counts.get(t.id as string) ?? 0,
+      enrichmentStatus: t.enrichment_status,
+      enrichmentDetail: t.enrichment_detail,
+      humanDecisions: parseHumanDecisions(t.human_decisions),
     }
   })
+}
+
+export type ReprocessTagResult =
+  | { ok: true; status: string; detail: string | null }
+  | { ok: false; error: string }
+
+/**
+ * Reprocessa a classificação automática de UMA tag que não terminou (status em
+ * `ENRICHMENT_NEEDS_RECOVERY`), reusando o `enrichNewTags` da ingestão — não há caminho paralelo.
+ *
+ * 🔴 CHAMADA PAGA (Claude Haiku: classificador de grupo, quando a tag não tem grupo, + enriquecedor).
+ * Só por clique do curador, depois do popup de custo do painel; nada aqui é automático, agendado ou
+ * em lote. Recusa tag com classificação registrada (`done`, `curated`, `legacy`): não há o que
+ * reprocessar, e pagar de novo sobrescreveria uma decisão.
+ *
+ * Roda SÍNCRONO (não em `after()`): o painel precisa do desfecho real para dizer se concluiu.
+ */
+export async function reprocessTagEnrichment(tagId: string): Promise<ReprocessTagResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: gate.error }
+  const supabase = createAdminClient()
+  const { data: tag, error } = await supabase
+    .from("tags")
+    .select("id, enrichment_status")
+    .eq("id", tagId)
+    .maybeSingle()
+  if (error) return { ok: false, error: `não consegui ler a tag (${error.message})` }
+  if (!tag) return { ok: false, error: "tag não encontrada" }
+  if (!enrichmentNeedsRecovery(tag.enrichment_status as string)) {
+    return { ok: false, error: `a classificação desta tag já está registrada (${tag.enrichment_status}); nada a reprocessar` }
+  }
+
+  try {
+    await enrichNewTags([tagId])
+  } catch (err) {
+    // Erro de server action vira mensagem genérica no cliente em produção: devolve o motivo.
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+
+  const { data: depois, error: depoisErr } = await supabase
+    .from("tags")
+    .select("enrichment_status, enrichment_detail")
+    .eq("id", tagId)
+    .maybeSingle()
+  revalidatePath("/curation/settings")
+  if (depoisErr || !depois) return { ok: false, error: `reprocessado, mas não consegui ler o resultado (${depoisErr?.message ?? "tag sumiu"})` }
+  return { ok: true, status: depois.enrichment_status as string, detail: (depois.enrichment_detail as string | null) ?? null }
 }
 
 /** Marca tags como revisadas (saem da fila). */
@@ -120,12 +197,12 @@ export async function setTagAdult(tagId: string, level: AdultLevel): Promise<{ o
   const supabase = createAdminClient()
   const indicator = level !== "none"
   const strong = level === "explicit"
-  const { error } = await supabase
-    .from("tags")
-    .update({ adult_indicator: indicator, adult_indicator_strong: strong })
-    .eq("id", tagId)
+  const { error } = await gravarDecisaoHumana(supabase, tagId, ["adult"], {
+    adult_indicator: indicator,
+    adult_indicator_strong: strong,
+  })
   if (error) {
-    console.error("[setTagAdult] falhou", error.message)
+    console.error("[setTagAdult] falhou", error)
     return { ok: false }
   }
   // Recalcula o gate das obras com essa tag, nos DOIS sentidos: a regra é "≥1 tag forte"
@@ -222,15 +299,14 @@ export async function setTagScoreTier(tagId: string, tier: AdultScoreTier): Prom
   const gate = await ensureAdmin()
   if (!gate.ok) return { ok: false }
   const supabase = createAdminClient()
-  const { error } = await supabase
-    .from("tags")
-    .update({
-      adult_score_tier: tier === "none" ? null : tier,
-      adult_score_tier_reviewed_at: new Date().toISOString(),
-    })
-    .eq("id", tagId)
+  // A marca `adult_score_tier_reviewed_at` é a MESMA que o enriquecedor grava (é ela que tira a tag da
+  // fila "Piso adulto"); quem distingue humano de IA é `human_decisions.adult_score_tier`.
+  const { error } = await gravarDecisaoHumana(supabase, tagId, ["adult_score_tier"], {
+    adult_score_tier: tier === "none" ? null : tier,
+    adult_score_tier_reviewed_at: new Date().toISOString(),
+  })
   if (error) {
-    console.error("[setTagScoreTier] falhou", error.message)
+    console.error("[setTagScoreTier] falhou", error)
     return { ok: false }
   }
   revalidatePath("/curation/settings")
@@ -244,9 +320,9 @@ export async function changeTagGroup(tagId: string, groupSlug: string): Promise<
   const groupId = (TAG_GROUP_IDS as Record<string, string>)[groupSlug]
   if (!groupId) return { ok: false }
   const supabase = createAdminClient()
-  const { error } = await supabase.from("tags").update({ tag_group_id: groupId }).eq("id", tagId)
+  const { error } = await gravarDecisaoHumana(supabase, tagId, ["group"], { tag_group_id: groupId })
   if (error) {
-    console.error("[changeTagGroup] falhou", error.message)
+    console.error("[changeTagGroup] falhou", error)
     return { ok: false }
   }
   revalidatePath("/curation/settings")

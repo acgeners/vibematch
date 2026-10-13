@@ -9,6 +9,7 @@ import { classifyTagsByGroup } from "@/lib/ai-evaluation/tag-classifier"
 import { enrichTagsForGroup } from "@/lib/ai-evaluation/tag-enricher"
 import { recomputeAdultAuto } from "@/lib/tags/adult-classify"
 import type { TagEnrichmentStatus } from "@/lib/tags/enrichment-status"
+import { parseHumanDecisions } from "@/lib/tags/enrichment-view"
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>
 
@@ -131,19 +132,29 @@ interface NewTagRow {
   name: string
   slug: string
   tag_group_id: string | null
+  human_decisions: unknown
 }
 
 // For each new tag: ensure a group (AI if missing), assign an approved sub-group
 // (applied), and propose a cluster (pending) when it's a near-synonym of an
 // existing tag. Non-destructive — never merges.
+//
+// 🔴 HUMANO VENCE, campo a campo (`tags.human_decisions`, migration 219). Quando uma tag já tem um
+// campo decidido por um humano (o caso do "Reprocessar com IA" depois de uma correção parcial), o
+// enriquecimento NÃO grava aquele campo: grupo (o classificador só roda em tag sem grupo), subgrupo,
+// sinal 18+ e piso. A proveniência humana nunca é tocada aqui. `done` continua querendo dizer "o modelo
+// respondeu sobre esta tag e o resultado foi aplicado" — aos campos que nenhum humano tinha decidido.
 export async function enrichNewTags(createdIds: string[]): Promise<void> {
   if (createdIds.length === 0) return
   const supabase = createAdminClient()
 
-  const { data: tagsData } = await supabase
+  const { data: tagsData, error: tagsErr } = await supabase
     .from("tags")
-    .select("id, name, slug, tag_group_id")
+    .select("id, name, slug, tag_group_id, human_decisions")
     .in("id", createdIds)
+  // Sem as tags não há o que gravar — nem o estado. Lança (quem chama loga ou mostra) em vez de
+  // voltar calado com a tag `pending` para sempre.
+  if (tagsErr) throw new Error(`[enrichNewTags] leitura das tags falhou: ${tagsErr.message}`)
   const tags = (tagsData ?? []) as NewTagRow[]
   if (tags.length === 0) return
 
@@ -160,11 +171,17 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
     for (const t of ungrouped) {
       const gid = cls.byName.get(t.name)
       if (gid) {
+        // 🔴 Só segue para o enriquecimento com o grupo GRAVADO. Antes o erro era ignorado: a tag
+        // seguia com o grupo só em memória e terminava `done` sem grupo no banco.
+        const { error } = await supabase.from("tags").update({ tag_group_id: gid }).eq("id", t.id)
+        if (error) {
+          outcome.set(t.id, { status: "partial", detail: `grupo: o modelo classificou, mas a gravação falhou (${error.message})` })
+          continue
+        }
         t.tag_group_id = gid
-        await supabase.from("tags").update({ tag_group_id: gid }).eq("id", t.id)
       } else if (cls.outcome === "ok") {
         // O classificador respondeu, mas não sobre esta tag. Antes ela ia para `other` aqui.
-        outcome.set(t.id, { status: "partial", detail: "grupo: o classificador não devolveu grupo válido" })
+        outcome.set(t.id, { status: "partial", detail: `grupo: ${cls.invalid.get(t.name) ?? "o classificador não devolveu grupo válido"}` })
       } else {
         outcome.set(t.id, { status: cls.outcome, detail: `grupo: ${cls.detail ?? cls.outcome}` })
       }
@@ -195,7 +212,7 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
     }
     const groupSlug = g.slug as string
 
-    const [{ data: subs }, { data: existing }] = await Promise.all([
+    const [{ data: subs, error: subsErr }, { data: existing, error: existingErr }] = await Promise.all([
       supabase
         .from("tag_subgroup")
         .select("id, slug, name, description")
@@ -203,6 +220,14 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
         .eq("status", "approved"),
       supabase.from("tags").select("id, name, slug, tag_subgroup_id").eq("tag_group_id", groupId),
     ])
+
+    // Leitura falhou ⇒ o prompt diria "este grupo não tem sub-grupos" e o modelo responderia "none":
+    // uma falha de banco gravada como "nenhum subgrupo aplicável". Para antes de pagar a chamada.
+    if (subsErr || existingErr) {
+      const msg = (subsErr ?? existingErr)!.message
+      for (const t of groupTags) outcome.set(t.id, { status: "partial", detail: `contexto do grupo não carregou (${msg})` })
+      continue
+    }
 
     const newIds = new Set(groupTags.map((t) => t.id))
     const existingTags = (existing ?? []).filter((t) => !newIds.has(t.id as string))
@@ -236,30 +261,46 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
         outcome.set(t.id, { status: enr.outcome, detail: `enriquecimento: ${enr.detail ?? enr.outcome}` })
         continue
       }
+      const recusa = enr.invalid.get(t.name)
+      if (recusa) {
+        // Resposta inválida, incompleta ou truncada sobre ESTA tag: nada dela vira decisão.
+        outcome.set(t.id, { status: "partial", detail: `enriquecimento: ${recusa}` })
+        continue
+      }
       const r = enr.results.get(t.name)
       if (!r) {
         outcome.set(t.id, { status: "partial", detail: "enriquecimento: o modelo não devolveu esta tag" })
         continue
       }
 
-      // Sub-group → applied.
+      // 🔴 Cada escrita da classificação é CONFERIDA. Se uma falha, a tag não vira `done`: fica
+      // `partial` com o que não foi gravado no motivo (o que já gravou fica, e o motivo diz o resto).
+      const falhas: string[] = []
+      const humano = parseHumanDecisions(t.human_decisions)
+
+      // Sub-group → applied (salvo decisão humana sobre o subgrupo, inclusive "nenhum").
       let assignedSubgroupId: string | null = null
-      if (r.subgroupSlug && subBySlug.has(r.subgroupSlug)) {
+      if (r.subgroupSlug && subBySlug.has(r.subgroupSlug) && !humano.subgroup) {
         const sub = subBySlug.get(r.subgroupSlug)!
-        assignedSubgroupId = sub.id as string
-        await supabase.from("tags").update({ tag_subgroup_id: sub.id }).eq("id", t.id)
-        await supabase.from("tag_subgroup_assignment").upsert(
-          {
-            tag_id: t.id,
-            subgroup_id: sub.id as string,
-            group_slug: groupSlug,
-            confidence: r.confidence,
-            status: "applied",
-            reviewed_at: now,
-            applied_at: now,
-          },
-          { onConflict: "tag_id" },
-        )
+        const { error: subErr } = await supabase.from("tags").update({ tag_subgroup_id: sub.id }).eq("id", t.id)
+        if (subErr) {
+          falhas.push(`subgrupo (${subErr.message})`)
+        } else {
+          const { error: asgErr } = await supabase.from("tag_subgroup_assignment").upsert(
+            {
+              tag_id: t.id,
+              subgroup_id: sub.id as string,
+              group_slug: groupSlug,
+              confidence: r.confidence,
+              status: "applied",
+              reviewed_at: now,
+              applied_at: now,
+            },
+            { onConflict: "tag_id" },
+          )
+          if (asgErr) falhas.push(`registro do subgrupo (${asgErr.message})`)
+          else assignedSubgroupId = sub.id as string
+        }
       }
 
       // Cluster (synonym) → pending proposal (never auto-merge). Só propõe se a
@@ -270,6 +311,7 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
         canonical &&
         canonical.id !== t.id &&
         canonical.subgroupId === assignedSubgroupId &&
+        r.confidence !== null &&
         r.confidence >= SYNONYM_PROPOSAL_THRESHOLD
       ) {
         // Dedup: skip if a pending proposal in this group already involves this tag.
@@ -296,13 +338,18 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
       // 18+: grava adult_indicator/_strong a partir da classificação da IA. Só sobe
       // (nunca desmarca uma tag já flagada pela curadoria). As tags do catálogo já
       // vêm com o flag da semente/migração 161; aqui cobrimos as CRIADAS de fonte.
-      if (r.adultLevel !== "none") {
+      if (r.adultLevel !== "none" && !humano.adult) {
         const strong = r.adultLevel === "explicit"
-        await supabase
+        const { error: adultErr } = await supabase
           .from("tags")
           .update({ adult_indicator: true, ...(strong ? { adult_indicator_strong: true } : {}) })
           .eq("id", t.id)
-        adultTagIds.push(t.id)
+        if (adultErr) falhas.push(`sinal 18+ (${adultErr.message})`)
+        else adultTagIds.push(t.id)
+      }
+      if (falhas.length > 0) {
+        outcome.set(t.id, { status: "partial", detail: `gravação falhou: ${falhas.join("; ")} — a classificação não foi aplicada por inteiro` })
+        continue
       }
       // Piso da NOTA adult_content (migração 174) — eixo independente do flag
       // acima; fecha o vazamento estrutural pra tags NOVAS (o rules.ts lê esta
@@ -310,19 +357,25 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
       // quando a IA decide "none" — sem isso a tag reapareceria pra sempre na
       // fila de revisão manual (server/actions/tag-review.ts). Só chega aqui quem o modelo
       // de fato avaliou (`r` existe) — falha e omissão saíram pelos `continue` acima.
+      // Piso decidido por um humano: nem o valor nem a marca dele são reescritos.
+      const pisoDaIa = !humano.adult_score_tier
       const { error: doneErr } = await supabase
         .from("tags")
         .update({
-          ...(r.adultScoreTier === "explicit" || r.adultScoreTier === "label"
+          ...(pisoDaIa && (r.adultScoreTier === "explicit" || r.adultScoreTier === "label")
             ? { adult_score_tier: r.adultScoreTier }
             : {}),
-          adult_score_tier_reviewed_at: now,
+          ...(pisoDaIa ? { adult_score_tier_reviewed_at: now } : {}),
           enrichment_status: "done",
           enrichment_at: now,
           enrichment_detail: null,
         })
         .eq("id", t.id)
-      if (doneErr) console.error(`[enrichNewTags] gravar "done" falhou (${t.name}):`, doneErr.message)
+      if (doneErr) {
+        // Piso + marca + `done` vão numa escrita só; se ela falhou, nada disso foi gravado.
+        outcome.set(t.id, { status: "partial", detail: `gravação falhou: piso/marca de conclusão (${doneErr.message})` })
+        continue
+      }
       outcome.set(t.id, { status: "done", detail: null })
     }
   }

@@ -15,18 +15,26 @@ import { execFileSync } from "node:child_process"
  *
  * ── A regra ─────────────────────────────────────────────────────────────────────────────────
  * Só entra quando o processo está FORA do Fly E o alvo do banco é a NUVEM. Aí exige código
- * canônico: nenhum arquivo RASTREADO modificado, e HEAD contido na ref LOCAL `origin/main`.
+ * canônico: nenhum arquivo RASTREADO modificado, e HEAD IGUAL à ref LOCAL `origin/main`.
  *
  *   · Fly → permite: produção só recebe `origin/main`, pelo `deploy.sh`.
  *   · banco local → permite: nada é gravado onde leitores veem.
  *   · arquivos NÃO rastreados → não bloqueiam (o checkout de trabalho vive cheio deles, e um
  *     arquivo novo só entra no bundle se algum rastreado o importar — e aí este já está sujo).
- *   · branch ≠ main NÃO bloqueia por si: branch já mergeada tem HEAD dentro de `origin/main`.
+ *   · HEAD só CONTIDO em `origin/main` (ancestral, ou branch já mergeada) → BLOQUEIA. Até
+ *     2026-10-13 bastava estar contido, e isso deixava passar código VELHO: o checkout canônico
+ *     parado em `1a2e6a8` (anterior ao #553) era "canônico" e rodava contra a nuvem o enriquecedor
+ *     de tags que transforma falha em decisão e o gate 18+ que a migration 210 aposentou. Decisão da
+ *     Ana (13/10): contra a nuvem, só a PONTA de `origin/main`.
  *   · git indeterminável, ou `origin/main` ausente → BLOQUEIA (fail closed): não dá para provar
  *     que o código é canônico, e o erro caro é pagar.
  *
- * ⚠️ `origin/main` é a ref LOCAL — não prova o estado do GitHub. Defasada, ela recusa código que
- * já foi mergeado; a saída é `git fetch`, nunca desligar a guarda.
+ * ⚠️ `origin/main` é a ref LOCAL — não prova o estado do GitHub. Defasada nos dois sentidos: recusa
+ * o checkout que já está na ponta nova, e ACEITA um checkout igual a uma ponta antiga. A saída é
+ * `git fetch` + atualizar o checkout, nunca desligar a guarda.
+ *
+ * ⚠️ Ela só protege a partir do código que a contém: um checkout anterior a esta regra roda a
+ * guarda antiga (a de ancestralidade).
  *
  * ── O override ──────────────────────────────────────────────────────────────────────────────
  * `PAID_CLOUD_NONCANONICAL_REASON="<motivo>"` permite DELIBERADAMENTE uma chamada não canônica
@@ -53,6 +61,8 @@ export type GitProbe =
       dirtyTracked: boolean
       /** `null` = a ref local `origin/main` não existe. */
       inOriginMain: boolean | null
+      /** HEAD é EXATAMENTE a ref local `origin/main`. `null` = a ref não existe. */
+      atOriginMain: boolean | null
     }
   | { ok: false; error: string }
 
@@ -65,6 +75,8 @@ export interface CodeProvenance {
   dirty: boolean | null
   /** `null` = indeterminado (ref ausente ou git indisponível). */
   in_origin_main: boolean | null
+  /** HEAD igual à ponta da ref local `origin/main` — é isto que decide `canonical`. */
+  at_origin_main: boolean | null
   canonical: boolean | null
   override_reason?: string
   git_error?: string
@@ -149,7 +161,7 @@ export function decideRecalcCloudRun(input: {
 }
 
 function vazio(runtime: CodeRuntime, target: "cloud" | "local"): CodeProvenance {
-  return { runtime, target, sha: null, branch: null, dirty: null, in_origin_main: null, canonical: null }
+  return { runtime, target, sha: null, branch: null, dirty: null, in_origin_main: null, at_origin_main: null, canonical: null }
 }
 
 /** Proveniência de um processo LOCAL a partir da sonda. Git indeterminado ⇒ `canonical: null` (fail closed). */
@@ -162,7 +174,8 @@ function provenanceFromGit(git: GitProbe | null, target: "cloud" | "local"): Cod
         branch: git.branch,
         dirty: git.dirtyTracked,
         in_origin_main: git.inOriginMain,
-        canonical: git.dirtyTracked === false && git.inOriginMain === true,
+        at_origin_main: git.atOriginMain,
+        canonical: git.dirtyTracked === false && git.atOriginMain === true,
       }
     : { ...vazio("local", target), git_error: git?.ok === false ? git.error : "git não consultado" }
 }
@@ -176,14 +189,17 @@ function porqueNaoCanonico(p: CodeProvenance): string {
   if (p.in_origin_main === null) return "a ref local origin/main não existe"
   if (p.dirty && p.in_origin_main === false) return "há arquivos rastreados modificados E o HEAD não está em origin/main"
   if (p.dirty) return "há arquivos rastreados modificados"
-  return "o HEAD não está contido em origin/main (ref local — se acabou de mergear, rode `git fetch` e tente de novo)"
+  if (p.in_origin_main === true) {
+    return "o HEAD está contido em origin/main mas não é a ponta dele (checkout DESATUALIZADO — rode `git fetch` e atualize o checkout para origin/main)"
+  }
+  return "o HEAD não está em origin/main (ref local — se acabou de mergear, rode `git fetch` e atualize o checkout para origin/main)"
 }
 
 function mensagemDeBloqueio(p: CodeProvenance): string {
   return (
     `Chamada paga RECUSADA antes do provider: este processo local está apontado para o banco da NUVEM ` +
     `e o código não é o canônico — ${porqueNaoCanonico(p)}. Checkout: ${ondeEsta(p)}. ` +
-    `Rode a partir de um checkout limpo contido em origin/main, aponte o banco para o local, ` +
+    `Rode a partir de um checkout limpo exatamente em origin/main, aponte o banco para o local, ` +
     `ou, se o experimento for deliberado, defina ${OVERRIDE_ENV}="<motivo>".`
   )
 }
@@ -193,8 +209,8 @@ function mensagemDeRecalcBloqueado(p: CodeProvenance): string {
   return (
     `Recálculo da nuvem BLOQUEADO: este checkout local não está no código canônico — ` +
     `${porqueNaoCanonico(p)}. Checkout: ${ondeEsta(p)}. Nada foi calculado nem gravado, e o ` +
-    `recálculo continua pendente. Rode-o a partir de um checkout limpo contido em origin/main ` +
-    `(código já mergeado).`
+    `recálculo continua pendente. Rode-o a partir de um checkout limpo exatamente em origin/main ` +
+    `(a ponta, atualizada com \`git fetch\`).`
   )
 }
 
@@ -224,11 +240,13 @@ export function probeGit(cwd: string = process.cwd()): GitProbe {
   if (status.status !== 0) return { ok: false, error: "git status falhou" }
   const ref = git(["rev-parse", "--verify", "-q", "refs/remotes/origin/main"], cwd)
   let inOriginMain: boolean | null = null
+  let atOriginMain: boolean | null = null
   if (ref.status === 0) {
+    atOriginMain = ref.out === head.out
     const anc = git(["merge-base", "--is-ancestor", "HEAD", "refs/remotes/origin/main"], cwd)
     if (anc.status === 0) inOriginMain = true
     else if (anc.status === 1) inOriginMain = false
     else return { ok: false, error: "merge-base falhou" }
   }
-  return { ok: true, sha: head.out, branch, dirtyTracked: status.out.length > 0, inOriginMain }
+  return { ok: true, sha: head.out, branch, dirtyTracked: status.out.length > 0, inOriginMain, atOriginMain }
 }
