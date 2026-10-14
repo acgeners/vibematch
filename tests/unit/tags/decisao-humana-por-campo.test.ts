@@ -34,7 +34,7 @@ import { createLoggedMessage } from "@/lib/ai/anthropic-client"
 import { changeTagGroup, reprocessTagEnrichment, setTagAdult, setTagScoreTier } from "@/server/actions/tag-review"
 import { moveTagToSubgroup, moveTagsToSubgroup, unassignTag } from "@/server/actions/tag-subgroups"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
-import { countNewTagsQueue, loadNewTagsQueue } from "@/server/queries/new-tags-queue"
+import { countNewTagsQueue, loadNewTagsQueue, rowNeedsRecovery } from "@/server/queries/new-tags-queue"
 import { parseHumanDecisions, recoveryState } from "@/lib/tags/enrichment-view"
 import { TAG_GROUP_IDS } from "@/lib/constants/tag-groups"
 
@@ -150,8 +150,12 @@ describe("E–F · quando a tag sai da recuperação", () => {
     await setTagAdult("t-falhou", "explicit")
     expect(estado("t-falhou")).toBe("in_progress")
     const fila = await loadNewTagsQueue(h.db.client() as never)
-    expect(fila[0].id).toBe("t-falhou")
-    expect(parseHumanDecisions(fila[0].human_decisions).adult).toBeTruthy()
+    // no bloco do TOPO (o das que precisam de alguém). Dentro dele a ordem é created_at desc, id desc:
+    // `t-fonte` empata no created_at e também precisa, então a posição exata não é o que se testa aqui.
+    const i = fila.findIndex((t) => t.id === "t-falhou")
+    expect(i).toBeGreaterThanOrEqual(0)
+    expect(fila.slice(0, i + 1).every(rowNeedsRecovery)).toBe(true)
+    expect(parseHumanDecisions(fila[i].human_decisions).adult).toBeTruthy()
   })
 
   it("F2. piso NÃO é exigido para sair da recuperação (a fila \"Piso adulto\" o cobra), nem subgrupo", async () => {

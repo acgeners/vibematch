@@ -77,6 +77,9 @@ function adultLevelOf(indicator: boolean, strong: boolean): AdultLevel {
 
 // ---- Tags novas ----------------------------------------------------------
 
+/** Ids por requisição na contagem de obras da fila: 100 UUIDs ≈ 4 KB de URL, folgado nos dois gateways. */
+const WORK_COUNT_ID_CHUNK = 100
+
 /**
  * A fila "Tags novas": tags de fonte ainda não revisadas ∪ tags de QUALQUER origem cuja classificação
  * automática não terminou (regra em `server/queries/new-tags-queue.ts`, a mesma do contador da aba).
@@ -91,20 +94,24 @@ export async function listNewTags(): Promise<NewTagRow[]> {
   const tags = await loadNewTagsQueue(supabase)
   if (!tags.length) return []
 
-  // Contagem de obras por tag (dedup em JS — a fila de pendentes é pequena).
-  const ids = tags.map((t) => t.id as string)
+  // Obras por tag, com os ids em LOTES: o `.in()` vai na URL do GET, e o gateway recusa URL longa
+  // (local: 414 acima de ~8 KB, entre 200 e 300 UUIDs, medido em 2026-10-14; nuvem: 400 acima de
+  // ~24 KB, medido em 07/2026). 🔴 Até 2026-10-14 ia a fila inteira num `.in()` só — 1.000 ids, ~39 KB,
+  // acima dos dois — e o `error` era IGNORADO: a leitura falhada virava "0 obras" em toda linha.
+  // Cada lote pagina com a PK de `work_tags`, e erro agora LANÇA, como o resto da fila.
+  const ids = tags.map((t) => t.id)
+  const lotes: string[][] = []
+  for (let i = 0; i < ids.length; i += WORK_COUNT_ID_CHUNK) lotes.push(ids.slice(i, i + WORK_COUNT_ID_CHUNK))
+  const porLote = await Promise.all(
+    lotes.map((lote) =>
+      fetchAllRows<{ tag_id: string }>(() => supabase.from("work_tags").select("tag_id").in("tag_id", lote), {
+        orderBy: ["work_id", "tag_id"],
+        label: "fila Tags novas (obras por tag)",
+      }),
+    ),
+  )
   const counts = new Map<string, number>()
-  for (let from = 0; ; from += 1000) {
-    const { data } = await supabase
-      .from("work_tags")
-      .select("tag_id")
-      .in("tag_id", ids)
-      .order("work_id")
-      .order("tag_id")
-      .range(from, from + 999)
-    for (const r of data ?? []) counts.set(r.tag_id as string, (counts.get(r.tag_id as string) ?? 0) + 1)
-    if (!data || data.length < 1000) break
-  }
+  for (const r of porLote.flat()) counts.set(r.tag_id, (counts.get(r.tag_id) ?? 0) + 1)
 
   return tags.map((t) => {
     const groupSlug = t.tag_group_id ? (TAG_GROUP_ID_TO_NORMALIZED_SLUG[t.tag_group_id as string] ?? "") : ""
