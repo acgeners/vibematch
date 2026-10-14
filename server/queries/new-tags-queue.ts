@@ -1,5 +1,6 @@
 import "server-only"
 import type { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { ENRICHMENT_NEEDS_RECOVERY, parseHumanDecisions, recoveryState, stillNeedsRecovery } from "@/lib/tags/enrichment-view"
 
 type Admin = ReturnType<typeof createAdminClient>
@@ -50,19 +51,25 @@ export function rowNeedsRecovery(t: Pick<NewTagsQueueRow, "enrichment_status" | 
 
 const inA = (t: Pick<NewTagsQueueRow, "origin" | "reviewed_at">) => t.origin === "external" && t.reviewed_at == null
 
-/** Teto da parte A (a fila histórica tinha o mesmo); a parte B é pequena por natureza. */
-const LIMIT = 2000
+/*
+ * As duas partes são lidas INTEIRAS, paginadas, na ordem da tela (a mais nova primeiro) com `id`
+ * desempatando: `created_at` não é único, e paginar por offset sem ordem total repete uma linha e
+ * perde outra entre páginas.
+ * 🔴 Até 2026-10-14 cada parte era `.limit(2000)` numa requisição só, e o PostgREST corta em 1.000
+ * por resposta sem avisar: em produção (v50) o contador dizia 1.544 e a lista abria 1.000 — as 544
+ * tags de fonte mais antigas ficavam inalcançáveis.
+ */
 
 /** As tags da parte B (pequena: só as que não terminaram a classificação e ninguém resolveu). */
 async function loadRecoveryRows(supabase: Admin): Promise<NewTagsQueueRow[]> {
-  const { data, error } = await supabase
-    .from("tags")
-    .select(NEW_TAGS_COLUMNS)
-    .in("enrichment_status", [...ENRICHMENT_NEEDS_RECOVERY])
-    .order("created_at", { ascending: false })
-    .limit(LIMIT)
-  if (error) throw new Error(`fila Tags novas (classificação não concluída): ${error.message}`)
-  return ((data ?? []) as NewTagsQueueRow[]).filter(rowNeedsRecovery)
+  const rows = await fetchAllRows<NewTagsQueueRow>(
+    () => supabase.from("tags").select(NEW_TAGS_COLUMNS).in("enrichment_status", [...ENRICHMENT_NEEDS_RECOVERY]),
+    {
+      orderBy: [{ column: "created_at", ascending: false }, { column: "id", ascending: false }],
+      label: "fila Tags novas (classificação não concluída)",
+    },
+  )
+  return rows.filter(rowNeedsRecovery)
 }
 
 /**
@@ -70,19 +77,18 @@ async function loadRecoveryRows(supabase: Admin): Promise<NewTagsQueueRow[]> {
  * acionável), depois o resto; dentro de cada parte, a mais nova primeiro.
  */
 export async function loadNewTagsQueue(supabase: Admin): Promise<NewTagsQueueRow[]> {
-  const [{ data: aRows, error: aErr }, bRows] = await Promise.all([
-    supabase
-      .from("tags")
-      .select(NEW_TAGS_COLUMNS)
-      .eq("origin", "external")
-      .is("reviewed_at", null)
-      .order("created_at", { ascending: false })
-      .limit(LIMIT),
+  const [aRows, bRows] = await Promise.all([
+    fetchAllRows<NewTagsQueueRow>(
+      () => supabase.from("tags").select(NEW_TAGS_COLUMNS).eq("origin", "external").is("reviewed_at", null),
+      {
+        orderBy: [{ column: "created_at", ascending: false }, { column: "id", ascending: false }],
+        label: "fila Tags novas (tags de fonte)",
+      },
+    ),
     loadRecoveryRows(supabase),
   ])
-  if (aErr) throw new Error(`fila Tags novas (tags de fonte): ${aErr.message}`)
   const byId = new Map<string, NewTagsQueueRow>()
-  for (const t of [...bRows, ...((aRows ?? []) as NewTagsQueueRow[])]) byId.set(t.id, t)
+  for (const t of [...bRows, ...aRows]) byId.set(t.id, t)
   return [...byId.values()].sort((x, y) => {
     const rx = rowNeedsRecovery(x) ? 0 : 1
     const ry = rowNeedsRecovery(y) ? 0 : 1
