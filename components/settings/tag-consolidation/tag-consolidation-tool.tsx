@@ -20,6 +20,7 @@ import {
   type UnassignedTag as UnassignedSubgroupTag,
 } from "@/server/actions/tag-subgroups"
 import { listNewTags, listGenreProposals, type NewTagRow, type GenreProposalRow } from "@/server/actions/tag-review"
+import { countNewTagsQueue } from "@/server/queries/new-tags-queue"
 import { GENRE_PROPOSAL_MIN_OCCURRENCES } from "@/lib/tags/genre-proposals"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
@@ -82,8 +83,13 @@ export async function TagConsolidationTool({
 
   // Contagens sempre (badges nas abas). Head-count barato via service role.
   const admin = createAdminClient()
-  const [{ count: newTagsCount }, { count: genreProposalsCount }] = await Promise.all([
-    admin.from("tags").select("*", { count: "exact", head: true }).eq("origin", "external").is("reviewed_at", null),
+  const [newTagsCount, { count: genreProposalsCount }] = await Promise.all([
+    // A MESMA regra da lista (`server/queries/new-tags-queue.ts`). Falha na contagem só apaga o
+    // badge (como antes); a lista, se a aba for aberta, lança.
+    countNewTagsQueue(admin).catch((err: unknown) => {
+      console.error("[tag-consolidation] contagem da fila Tags novas falhou:", err instanceof Error ? err.message : err)
+      return 0
+    }),
     admin
       .from("genre_proposal")
       .select("*", { count: "exact", head: true })

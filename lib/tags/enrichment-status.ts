@@ -13,25 +13,21 @@ import { PaidCallBlockedError } from "@/lib/ai/anthropic-client"
  * |-----------------------|-----------------------------------------------------------------------|
  * | `pending`             | criada e ainda sem resultado (o default de toda tag nova)             |
  * | `done`                | o modelo respondeu sobre ESTA tag; grupo/subgrupo/18+/piso aplicados   |
- * | `partial`             | o provider respondeu, mas não sobre esta tag (omitiu ou slug inválido) |
+ * | `partial`             | o provider respondeu, mas a classificação desta tag não ficou completa: |
+ * |                       | omitida, campo inválido/ausente, saída truncada, ou a GRAVAÇÃO falhou |
  * | `provider_not_called` | nada foi chamado: sem `ANTHROPIC_API_KEY` ou guard de proveniência    |
  * | `provider_failed`     | a chamada foi feita e falhou                                           |
  * | `legacy`              | anterior à 210 — sem proveniência registrada                          |
  * | `curated`             | decisão humana registrada em migration (as tags que a 210 corrigiu)    |
  *
- * 🔴 Só `done` grava a marca de revisão do piso (`adult_score_tier_reviewed_at`). Qualquer outro
- * estado deixa a tag visível como "ainda precisa de enriquecimento".
+ * 🔴 Só `done` grava a marca de revisão do piso (`adult_score_tier_reviewed_at`), e só depois de TODAS
+ * as escritas da classificação confirmadas. Qualquer outro estado deixa a tag visível como "ainda
+ * precisa de enriquecimento" (fila "Tags novas", `server/queries/new-tags-queue.ts`).
+ *
+ * A lista mora no módulo puro `lib/tags/enrichment-view.ts`, que a tela também lê.
  */
-export const TAG_ENRICHMENT_STATUSES = [
-  "pending",
-  "done",
-  "partial",
-  "provider_not_called",
-  "provider_failed",
-  "legacy",
-  "curated",
-] as const
-export type TagEnrichmentStatus = (typeof TAG_ENRICHMENT_STATUSES)[number]
+export { TAG_ENRICHMENT_STATUSES } from "@/lib/tags/enrichment-view"
+export type { TagEnrichmentStatus } from "@/lib/tags/enrichment-view"
 
 /** O que aconteceu com UMA chamada ao provider (classificador ou enricher). */
 export type ProviderOutcome = "ok" | "provider_not_called" | "provider_failed"

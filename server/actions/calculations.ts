@@ -649,7 +649,7 @@ export type RecalculateExecutionContext = "next-runtime" | "headless"
 
 export async function recalculateAll(ctx: RecalculateExecutionContext = "next-runtime") {
   const headless = ctx === "headless"
-  // 🔴 Código canônico, ANTES de tudo: fora do Fly, contra a nuvem, só código contido em origin/main
+  // 🔴 Código canônico, ANTES de tudo: fora do Fly, contra a nuvem, só a ponta de origin/main
   // regrava o catálogo (server/recalc/code-guard.ts). O runner já recusa antes do job; esta é a
   // segunda linha, para qualquer caminho que chegue aqui.
   assertRecalcCodeAllowed()

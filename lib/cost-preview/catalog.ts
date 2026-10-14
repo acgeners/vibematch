@@ -42,6 +42,7 @@ export const DEFAULT_SUPPRESS_THRESHOLD_USD = 0.02
 
 export type CostActionId =
   | "infer_tags"
+  | "enrich_tag"
   | "deep_dive"
   | "recommend"
   | "rerank_single"
@@ -86,6 +87,17 @@ function tokens(inputTokens: number, outputTokens: number): UsageTokens {
 }
 
 const CATALOG: Record<CostActionId, CostSpec> = {
+  enrich_tag: {
+    label: "Reprocessar a classificação da tag com IA",
+    model: HAIKU,
+    // Medido em ai_api_calls (01/09–07/10/2026): tag_classifier 2.405 in / 94 out (US$0,0029, 26
+    // chamadas) + tag_enricher 1.900 in + 2.563 de escrita de cache / 113 out (US$0,0057, 50
+    // chamadas). O classificador só roda quando a tag não tem grupo; isto é o teto das duas.
+    base: { inputTokens: 4305, outputTokens: 207, cacheReadTokens: 0, cacheCreationTokens: 2563 },
+    etaSeconds: 5,
+    background: true,
+    note: "Reprocessa UMA tag (grupo, subgrupo, sinal 18+ e piso). Se a classificação não terminar de novo, a tag continua na fila com o motivo.",
+  },
   infer_tags: {
     label: "Inferir tags por IA",
     model: HAIKU,

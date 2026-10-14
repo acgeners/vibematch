@@ -29,6 +29,8 @@ export interface TagClassification {
    * falhava — e a falha virava "decisão" no banco (ver `lib/tags/enrichment-status.ts`).
    */
   byName: Map<string, string>
+  /** Nome → por que a resposta sobre esta tag foi recusada (lista inválida, item truncado). */
+  invalid: Map<string, string>
   /** O que aconteceu com a chamada. */
   outcome: ProviderOutcome
   /** Motivo, quando `outcome` não é "ok". */
@@ -95,7 +97,7 @@ const CLASSIFIER_TOOL = {
 async function callClassifier(
   systemPrompt: string,
   tagNames: string[]
-): Promise<Array<{ tag_name: string; group_slug: string }>> {
+): Promise<{ classifications: unknown; truncated: boolean }> {
   if (!process.env.ANTHROPIC_API_KEY) {
     // Lançar (e não devolver []) é o que separa "não chamei" de "chamei e o modelo não classificou".
     throw new Error("ANTHROPIC_API_KEY ausente: classificador de grupo não chamado")
@@ -132,14 +134,14 @@ async function callClassifier(
   const toolUse = message.content.find(
     (b): b is Extract<typeof b, { type: "tool_use" }> => b.type === "tool_use"
   )
-  if (!toolUse) return []
+  if (!toolUse) return { classifications: [], truncated: false }
 
-  const input = toolUse.input as { classifications?: Array<{ tag_name: string; group_slug: string }> }
-  return input.classifications ?? []
+  const input = toolUse.input as { classifications?: unknown }
+  return { classifications: input.classifications ?? [], truncated: message.stop_reason === "max_tokens" }
 }
 
 export async function classifyTagsByGroup({ tagNames }: ClassifierInput): Promise<TagClassification> {
-  const result: TagClassification = { byName: new Map(), outcome: "ok", detail: null }
+  const result: TagClassification = { byName: new Map(), invalid: new Map(), outcome: "ok", detail: null }
   if (tagNames.length === 0) return result
 
   const groups = await loadTagGroups()
@@ -149,19 +151,34 @@ export async function classifyTagsByGroup({ tagNames }: ClassifierInput): Promis
   }
   const idBySlug = new Map(groups.map((g) => [g.slug, g.id]))
 
-  let classifications: Array<{ tag_name: string; group_slug: string }> = []
+  let classifications: unknown = []
+  let truncated = false
   try {
-    classifications = await callClassifier(buildSystemPrompt(groups), tagNames)
+    ;({ classifications, truncated } = await callClassifier(buildSystemPrompt(groups), tagNames))
   } catch (error) {
     const outcome = providerOutcomeOf(error)
     console.error(`[tag-classifier] ${outcome}: nenhum grupo atribuído`, error)
     return { ...result, outcome, detail: providerDetailOf(error) }
   }
 
-  // Slug fora da lista e nome omitido ficam FORA do mapa: o modelo não decidiu sobre eles.
-  for (const c of classifications) {
-    const groupId = idBySlug.get(c.group_slug)
-    if (groupId && tagNames.includes(c.tag_name)) result.byName.set(c.tag_name, groupId)
+  if (!Array.isArray(classifications)) {
+    for (const name of tagNames) result.invalid.set(name, "resposta inválida: `classifications` não é uma lista")
+    return result
   }
+
+  // Slug fora da lista e nome omitido ficam FORA do mapa: o modelo não decidiu sobre eles.
+  classifications.forEach((item, i) => {
+    if (!item || typeof item !== "object") return
+    const c = item as { tag_name?: unknown; group_slug?: unknown }
+    if (typeof c.tag_name !== "string" || !tagNames.includes(c.tag_name)) return
+    // `max_tokens`: o último item pode ter sido cortado; os anteriores já foram fechados.
+    if (truncated && i === classifications.length - 1) {
+      result.byName.delete(c.tag_name)
+      result.invalid.set(c.tag_name, "resposta truncada (max_tokens): o item desta tag pode estar incompleto")
+      return
+    }
+    const groupId = typeof c.group_slug === "string" ? idBySlug.get(c.group_slug) : undefined
+    if (groupId && !result.invalid.has(c.tag_name)) result.byName.set(c.tag_name, groupId)
+  })
   return result
 }

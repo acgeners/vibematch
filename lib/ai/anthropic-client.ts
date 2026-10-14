@@ -246,7 +246,7 @@ export function assertPaidCallAllowed(): CodeProvenance {
     const p = decision.provenance
     console.warn(
       `[ai-guard] chamada paga NÃO CANÔNICA liberada por ${OVERRIDE_ENV} ("${p.override_reason}") — ` +
-        `${p.branch ?? "(detached)"} @ ${p.sha?.slice(0, 7) ?? "?"} · dirty=${p.dirty} · in_origin_main=${p.in_origin_main}`,
+        `${p.branch ?? "(detached)"} @ ${p.sha?.slice(0, 7) ?? "?"} · dirty=${p.dirty} · at_origin_main=${p.at_origin_main} · in_origin_main=${p.in_origin_main}`,
     )
   }
   return decision.provenance

@@ -4775,8 +4775,9 @@ não impõe nada. ⚠️ Limite aceito: um checkout anterior ao preflight ainda 
 provider antes de o banco recusar a persistência.
 
 🔴 **O contrato vê o RÓTULO; quem vê o CÓDIGO é o guard do recálculo** (`server/recalc/code-guard.ts`).
-Fora do Fly e com o banco na nuvem, o recálculo só roda de checkout limpo contido no `origin/main`
-local — a mesma regra das chamadas pagas (`lib/ai/code-provenance.ts`). Recusado, o catálogo não
+Fora do Fly e com o banco na nuvem, o recálculo só roda de checkout limpo **exatamente na ponta** do
+`origin/main` local — a mesma regra das chamadas pagas (`lib/ai/code-provenance.ts`). Até 13/10/2026
+bastava estar CONTIDO, e um checkout velho (ancestral) passava como canônico. Recusado, o catálogo não
 é lido, nenhum cálculo nem job de recálculo roda e nada é gravado (só o estado da pendência é lido,
 antes do guard); `recalc_pending` fica de pé; o disparo automático só loga, o botão
 mostra a mensagem. Override deliberado: `RECALC_CLOUD_NONCANONICAL_REASON="<motivo>"`.

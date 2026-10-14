@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { humanDecisionPatches } from "@/server/queries/tag-human-decisions"
 import { slugifyTagName } from "@/lib/utils"
 import { TAG_GROUP_IDS } from "@/lib/constants/tag-groups"
 import { moveTagToGroup } from "@/server/actions/tag-consolidation"
@@ -293,6 +294,76 @@ export async function listUnassignedTags(groupSlug: string): Promise<UnassignedT
   return ((tagsRes.data ?? []) as UnassignedTag[]).filter((t) => !assigned.has(t.id))
 }
 
+type Supa = ReturnType<typeof createAdminClient>
+
+/**
+ * Decisão humana de SUBGRUPO de UMA tag: o VALOR mora em `tag_subgroup_assignment` e a PROVENIÊNCIA em
+ * `tags.human_decisions.subgroup` (migration 219). Duas tabelas, e o PostgREST não dá transação. A
+ * ordem e a compensação garantem que a proveniência nunca afirme o que não aconteceu:
+ *
+ *   1. lê a atribuição anterior e monta a proveniência — falha ⇒ nada foi escrito;
+ *   2. grava o VALOR — falha ⇒ nada foi escrito (nunca há proveniência sem valor);
+ *   3. grava a PROVENIÊNCIA (na remoção, no MESMO update que limpa `tags.tag_subgroup_id`) — falha ⇒
+ *      DESFAZ o valor (restaura a linha anterior, ou apaga a que não existia) e devolve erro.
+ *
+ * Resíduo aceito, e dito na mensagem: se a 3 E o desfazer falharem, o valor fica sem a proveniência.
+ * É o mesmo resíduo do "não avaliado" por edição (decisão de 12/10): atomicidade de verdade exigiria
+ * uma função SQL. A ordem inversa (proveniência antes) teria o resíduo PIOR — proveniência de uma
+ * decisão que não foi gravada, que faz o reprocessamento pular o subgrupo para sempre.
+ *
+ * `novo = null` é a remoção — decidir "nenhum subgrupo".
+ */
+async function decidirSubgrupo(
+  supabase: Supa,
+  tagId: string,
+  novo: { subgroupId: string; groupSlug: string } | null,
+): Promise<string | null> {
+  const [anteriorRes, prov] = await Promise.all([
+    supabase.from("tag_subgroup_assignment").select("*").eq("tag_id", tagId).maybeSingle(),
+    humanDecisionPatches(supabase, [tagId], ["subgroup"]),
+  ])
+  if (anteriorRes.error) return `não consegui ler o subgrupo atual (${anteriorRes.error.message}); nada mudou`
+  if (!prov.ok) return `${prov.error}; nada mudou`
+  const anterior = (anteriorRes.data as Record<string, unknown> | null) ?? null
+
+  // 2. o VALOR
+  const valor = novo
+    ? await supabase.from("tag_subgroup_assignment").upsert(
+        {
+          tag_id: tagId,
+          subgroup_id: novo.subgroupId,
+          group_slug: novo.groupSlug,
+          status: "approved",
+          reviewed_at: new Date().toISOString(),
+        },
+        { onConflict: "tag_id" },
+      )
+    : await supabase.from("tag_subgroup_assignment").delete().eq("tag_id", tagId)
+  if (valor.error) return `${valor.error.message}; nada mudou`
+
+  // 3. a PROVENIÊNCIA
+  const { error: provErr } = await supabase
+    .from("tags")
+    .update(novo ? { human_decisions: prov.patches.get(tagId) } : { tag_subgroup_id: null, human_decisions: prov.patches.get(tagId) })
+    .eq("id", tagId)
+  if (!provErr) return null
+
+  const desfazer = anterior
+    ? await supabase.from("tag_subgroup_assignment").upsert(anterior, { onConflict: "tag_id" })
+    : await supabase.from("tag_subgroup_assignment").delete().eq("tag_id", tagId)
+  if (!desfazer.error) {
+    return `o registro da decisão humana falhou (${provErr.message}); a mudança de subgrupo foi desfeita, nada mudou`
+  }
+  console.error(`[tag-subgroups] tag ${tagId}: subgrupo gravado SEM proveniência humana`, {
+    proveniencia: provErr.message,
+    desfazer: desfazer.error.message,
+  })
+  return (
+    `🔴 o subgrupo foi gravado SEM o registro de decisão humana (${provErr.message}), e desfazer também ` +
+    `falhou (${desfazer.error.message}). Refaça a ação para registrar a decisão.`
+  )
+}
+
 // Move/assign a tag to a sub-group. A manual placement counts as approval,
 // so the row is upserted as "approved" (one assignment per tag).
 export async function moveTagToSubgroup(
@@ -302,36 +373,21 @@ export async function moveTagToSubgroup(
 ): Promise<{ error?: string }> {
   const gate = await ensureAdmin()
   if (!gate.ok) return { error: gate.error }
-  const supabase = createAdminClient()
-  const { error } = await supabase
-    .from("tag_subgroup_assignment")
-    .upsert(
-      {
-        tag_id: tagId,
-        subgroup_id: subgroupId,
-        group_slug: groupSlug,
-        status: "approved",
-        reviewed_at: new Date().toISOString(),
-      },
-      { onConflict: "tag_id" },
-    )
-  if (error) return { error: error.message }
+  const err = await decidirSubgrupo(createAdminClient(), tagId, { subgroupId, groupSlug })
+  if (err) return { error: err }
   revalidatePath(PATH)
   return {}
 }
 
 // Remove a tag from its sub-group entirely (deletes the assignment row and
-// clears the applied link on the tag).
+// clears the applied link on the tag). Remover É decidir: "nenhum subgrupo".
+// Em sequência, nunca em paralelo: com as duas escritas juntas, um DELETE que
+// falhasse deixava a proveniência dizendo "nenhum" com a linha ainda lá.
 export async function unassignTag(tagId: string): Promise<{ error?: string }> {
   const gate = await ensureAdmin()
   if (!gate.ok) return { error: gate.error }
-  const supabase = createAdminClient()
-  const [delRes, tagRes] = await Promise.all([
-    supabase.from("tag_subgroup_assignment").delete().eq("tag_id", tagId),
-    supabase.from("tags").update({ tag_subgroup_id: null }).eq("id", tagId),
-  ])
-  if (delRes.error) return { error: delRes.error.message }
-  if (tagRes.error) return { error: tagRes.error.message }
+  const err = await decidirSubgrupo(createAdminClient(), tagId, null)
+  if (err) return { error: err }
   revalidatePath(PATH)
   return {}
 }
@@ -363,8 +419,10 @@ export async function moveTagToOtherGroup(
   return {}
 }
 
-// Bulk version of moveTagToSubgroup — reassigns many tags to one sub-group at
-// once (single upsert). Each placement counts as approval.
+// Bulk version of moveTagToSubgroup. Each placement counts as approval. Laço sobre a MESMA operação
+// por tag (valor + proveniência, com desfazer), como `moveTagsToOtherGroup` logo abaixo: um upsert em
+// lote seguido de proveniência tag a tag deixava, numa falha no meio, tags movidas sem registro e um
+// `moved` que contava todas. Para na primeira falha; `moved` conta só as que ficaram com os dois.
 export async function moveTagsToSubgroup(
   tagIds: string[],
   subgroupId: string,
@@ -374,20 +432,17 @@ export async function moveTagsToSubgroup(
   if (!gate.ok) return { moved: 0, error: gate.error }
   if (tagIds.length === 0) return { moved: 0 }
   const supabase = createAdminClient()
-  const now = new Date().toISOString()
-  const rows = tagIds.map((tagId) => ({
-    tag_id: tagId,
-    subgroup_id: subgroupId,
-    group_slug: groupSlug,
-    status: "approved" as const,
-    reviewed_at: now,
-  }))
-  const { error } = await supabase
-    .from("tag_subgroup_assignment")
-    .upsert(rows, { onConflict: "tag_id" })
-  if (error) return { moved: 0, error: error.message }
+  let moved = 0
+  for (const tagId of tagIds) {
+    const err = await decidirSubgrupo(supabase, tagId, { subgroupId, groupSlug })
+    if (err) {
+      if (moved > 0) revalidatePath(PATH)
+      return { moved, error: `${moved} de ${tagIds.length} movida(s); parou numa tag: ${err}` }
+    }
+    moved += 1
+  }
   revalidatePath(PATH)
-  return { moved: tagIds.length }
+  return { moved }
 }
 
 // Bulk version of moveTagToOtherGroup — loops the per-tag move (which also

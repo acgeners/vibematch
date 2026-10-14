@@ -11,8 +11,8 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 const MSG =
   "Recálculo da nuvem BLOQUEADO: este checkout local não está no código canônico — o HEAD não está " +
-  "contido em origin/main. Checkout: fix/experimento @ bbbbbbb. Nada foi calculado nem gravado, e o " +
-  "recálculo continua pendente. Rode-o a partir de um checkout limpo contido em origin/main (código já mergeado)."
+  "em origin/main. Checkout: fix/experimento @ bbbbbbb. Nada foi calculado nem gravado, e o " +
+  "recálculo continua pendente. Rode-o a partir de um checkout limpo exatamente em origin/main (a ponta, atualizada com `git fetch`)."
 
 const h = vi.hoisted(() => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
 

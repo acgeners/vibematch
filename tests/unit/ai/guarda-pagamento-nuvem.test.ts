@@ -46,7 +46,9 @@ import { decidePaidCloudCall, normalizeOverride, probeGit, type GitProbe } from 
 import { createLoggedMessage, PaidCallBlockedError } from "@/lib/ai/anthropic-client"
 
 const SHA = "a".repeat(40)
-const limpo: GitProbe = { ok: true, sha: SHA, branch: "main", dirtyTracked: false, inOriginMain: true }
+const limpo: GitProbe = { ok: true, sha: SHA, branch: "main", dirtyTracked: false, inOriginMain: true, atOriginMain: true }
+/** Contido em origin/main, mas NÃO é a ponta: o checkout velho (o `1a2e6a8` de 13/10/2026). */
+const ancestral: GitProbe = { ...limpo, branch: "fix/badge-curadoria-se-explica", atOriginMain: false }
 const nuvemLocal = { onFly: false, localDb: false }
 
 describe("A · a decisão (pura)", () => {
@@ -60,14 +62,25 @@ describe("A · a decisão (pura)", () => {
     expect(decidePaidCloudCall({ onFly: false, localDb: true, git: null, override: null })).toMatchObject({ allow: true, basis: "local_db" })
   })
 
-  it("local + nuvem + limpo + HEAD em origin/main ⇒ permite (canônico)", () => {
+  it("local + nuvem + limpo + HEAD NA PONTA de origin/main ⇒ permite (canônico)", () => {
     const d = decidePaidCloudCall({ ...nuvemLocal, git: limpo, override: null })
     expect(d).toMatchObject({ allow: true, basis: "canonical" })
-    expect(d.provenance).toMatchObject({ runtime: "local", target: "cloud", sha: SHA, dirty: false, in_origin_main: true, canonical: true })
+    expect(d.provenance).toMatchObject({ runtime: "local", target: "cloud", sha: SHA, dirty: false, in_origin_main: true, at_origin_main: true, canonical: true })
   })
 
-  it("branch ≠ main já mergeada (HEAD dentro de origin/main) ⇒ permite", () => {
+  it("nome de branch não importa: worktree em outra branch mas com HEAD na ponta ⇒ permite", () => {
     expect(decidePaidCloudCall({ ...nuvemLocal, git: { ...limpo, branch: "fix/x" }, override: null }).allow).toBe(true)
+  })
+
+  it("🔴 HEAD ANCESTRAL de origin/main (contido, mas não é a ponta) ⇒ BLOQUEIA contra a nuvem, e diz que está desatualizado", () => {
+    const d = decidePaidCloudCall({ ...nuvemLocal, git: ancestral, override: null })
+    expect(d.allow).toBe(false)
+    expect(d.provenance).toMatchObject({ in_origin_main: true, at_origin_main: false, canonical: false })
+    if (!d.allow) expect(d.message).toMatch(/DESATUALIZADO/)
+  })
+
+  it("HEAD ancestral + banco LOCAL ⇒ continua permitido (a regra não endurece o local)", () => {
+    expect(decidePaidCloudCall({ onFly: false, localDb: true, git: ancestral, override: null })).toMatchObject({ allow: true, basis: "local_db" })
   })
 
   it("rastreado sujo ⇒ bloqueia", () => {
@@ -77,7 +90,7 @@ describe("A · a decisão (pura)", () => {
   })
 
   it("HEAD fora de origin/main ⇒ bloqueia, e sugere git fetch (a ref é LOCAL)", () => {
-    const d = decidePaidCloudCall({ ...nuvemLocal, git: { ...limpo, inOriginMain: false }, override: null })
+    const d = decidePaidCloudCall({ ...nuvemLocal, git: { ...limpo, inOriginMain: false, atOriginMain: false }, override: null })
     expect(d.allow).toBe(false)
     if (!d.allow) expect(d.message).toMatch(/git fetch/)
   })
@@ -89,7 +102,7 @@ describe("A · a decisão (pura)", () => {
   })
 
   it("origin/main ausente ⇒ bloqueia", () => {
-    const d = decidePaidCloudCall({ ...nuvemLocal, git: { ...limpo, inOriginMain: null }, override: null })
+    const d = decidePaidCloudCall({ ...nuvemLocal, git: { ...limpo, inOriginMain: null, atOriginMain: null }, override: null })
     expect(d.allow).toBe(false)
     if (!d.allow) expect(d.message).toMatch(/origin\/main não existe/)
   })
@@ -108,20 +121,20 @@ describe("A · a decisão (pura)", () => {
   })
 
   it("override válido ⇒ permite, SEM esconder que é não canônico", () => {
-    const d = decidePaidCloudCall({ ...nuvemLocal, git: { ...limpo, dirtyTracked: true, inOriginMain: false }, override: "piloto deliberado" })
+    const d = decidePaidCloudCall({ ...nuvemLocal, git: { ...limpo, dirtyTracked: true, inOriginMain: false, atOriginMain: false }, override: "piloto deliberado" })
     expect(d).toMatchObject({ allow: true, basis: "override" })
     expect(d.provenance).toMatchObject({ canonical: false, dirty: true, in_origin_main: false, override_reason: "piloto deliberado" })
   })
 
   it("detached HEAD não quebra — branch fica null e a mensagem diz (detached)", () => {
-    const d = decidePaidCloudCall({ ...nuvemLocal, git: { ...limpo, branch: null, inOriginMain: false }, override: null })
+    const d = decidePaidCloudCall({ ...nuvemLocal, git: { ...limpo, branch: null, inOriginMain: false, atOriginMain: false }, override: null })
     expect(d.allow).toBe(false)
     expect(d.provenance.branch).toBeNull()
     if (!d.allow) expect(d.message).toMatch(/\(detached\)/)
   })
 
   it("INCIDENTE v31 reconstruído (branch experimental, 1dc9ce2 fora de origin/main, sujo) ⇒ BLOQUEIA; com motivo ⇒ permite e registra", () => {
-    const incidente: GitProbe = { ok: true, sha: "1dc9ce2" + "0".repeat(33), branch: "feat/ai-evaluation-art-signal", dirtyTracked: true, inOriginMain: false }
+    const incidente: GitProbe = { ok: true, sha: "1dc9ce2" + "0".repeat(33), branch: "feat/ai-evaluation-art-signal", dirtyTracked: true, inOriginMain: false, atOriginMain: false }
     const semOverride = decidePaidCloudCall({ ...nuvemLocal, git: incidente, override: null })
     expect(semOverride.allow).toBe(false)
     if (!semOverride.allow) expect(semOverride.message).toMatch(/feat\/ai-evaluation-art-signal @ 1dc9ce2/)
@@ -146,8 +159,25 @@ describe("A · a sonda de git (repositório temporário REAL, local, sem rede)",
   })
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
-  it("limpo e contido ⇒ canônico", () => {
-    expect(probeGit(dir)).toMatchObject({ ok: true, branch: "main", dirtyTracked: false, inOriginMain: true })
+  it("limpo e NA PONTA ⇒ inOriginMain e atOriginMain", () => {
+    expect(probeGit(dir)).toMatchObject({ ok: true, branch: "main", dirtyTracked: false, inOriginMain: true, atOriginMain: true })
+  })
+
+  it("🔴 ANCESTRAL: origin/main andou, o checkout ficou para trás ⇒ contido, mas NÃO na ponta", () => {
+    const c1 = g("rev-parse", "HEAD")
+    writeFileSync(join(dir, "b.txt"), "1")
+    g("add", "b.txt")
+    g("commit", "-q", "-m", "c2")
+    g("update-ref", "refs/remotes/origin/main", "HEAD")
+    g("checkout", "-q", "--detach", c1)
+    expect(probeGit(dir)).toMatchObject({ ok: true, inOriginMain: true, atOriginMain: false })
+  })
+
+  it("À FRENTE / divergente: commit local que origin/main não tem ⇒ nem contido nem na ponta", () => {
+    writeFileSync(join(dir, "c.txt"), "1")
+    g("add", "c.txt")
+    g("commit", "-q", "-m", "local")
+    expect(probeGit(dir)).toMatchObject({ ok: true, inOriginMain: false, atOriginMain: false })
   })
 
   it("só arquivo NÃO rastreado ⇒ não conta como sujo", () => {
@@ -165,9 +195,9 @@ describe("A · a sonda de git (repositório temporário REAL, local, sem rede)",
     writeFileSync(join(dir, "b.txt"), "1")
     g("add", "b.txt")
     g("commit", "-q", "-m", "c2")
-    expect(probeGit(dir)).toMatchObject({ ok: true, branch: "exp", inOriginMain: false })
+    expect(probeGit(dir)).toMatchObject({ ok: true, branch: "exp", inOriginMain: false, atOriginMain: false })
     g("update-ref", "refs/remotes/origin/main", "HEAD")
-    expect(probeGit(dir)).toMatchObject({ ok: true, branch: "exp", inOriginMain: true })
+    expect(probeGit(dir)).toMatchObject({ ok: true, branch: "exp", inOriginMain: true, atOriginMain: true })
   })
 
   it("detached HEAD ⇒ branch null, sem quebrar", () => {
@@ -177,7 +207,7 @@ describe("A · a sonda de git (repositório temporário REAL, local, sem rede)",
 
   it("origin/main ausente ⇒ in_origin_main null", () => {
     g("update-ref", "-d", "refs/remotes/origin/main")
-    expect(probeGit(dir)).toMatchObject({ ok: true, inOriginMain: null })
+    expect(probeGit(dir)).toMatchObject({ ok: true, inOriginMain: null, atOriginMain: null })
   })
 
   it("fora de um repositório ⇒ ok:false (fail closed)", () => {
@@ -226,7 +256,7 @@ describe("B · no createLoggedMessage real (cliente e banco FALSOS — nenhuma c
   })
 
   it("não canônico + nuvem ⇒ recusa ANTES do provider: zero chamada, zero linha de log", async () => {
-    estado.probe = () => ({ ok: true, sha: SHA, branch: "exp", dirtyTracked: true, inOriginMain: false })
+    estado.probe = () => ({ ok: true, sha: SHA, branch: "exp", dirtyTracked: true, inOriginMain: false, atOriginMain: false })
     await expect(createLoggedMessage(cliente, params, meta)).rejects.toBeInstanceOf(PaidCallBlockedError)
     expect(chamadasProvider).toBe(0)
     expect(estado.inserts).toHaveLength(0)
@@ -239,16 +269,23 @@ describe("B · no createLoggedMessage real (cliente e banco FALSOS — nenhuma c
   })
 
   it("canônico ⇒ paga, e metadata.code entra SEM apagar a metadata existente", async () => {
-    estado.probe = () => ({ ok: true, sha: SHA, branch: "main", dirtyTracked: false, inOriginMain: true })
+    estado.probe = () => ({ ok: true, sha: SHA, branch: "main", dirtyTracked: false, inOriginMain: true, atOriginMain: true })
     await createLoggedMessage(cliente, params, meta)
     expect(chamadasProvider).toBe(1)
     const md = estado.inserts[0].metadata as Record<string, unknown>
     expect(md).toMatchObject({ hasReviews: true, work_id: "w-1", attempt: 1, logical_request_id: "lr-1", workload_type: "recurring" })
-    expect(md.code).toMatchObject({ runtime: "local", target: "cloud", sha: SHA, branch: "main", dirty: false, in_origin_main: true, canonical: true })
+    expect(md.code).toMatchObject({ runtime: "local", target: "cloud", sha: SHA, branch: "main", dirty: false, in_origin_main: true, at_origin_main: true, canonical: true })
+  })
+
+  it("🔴 checkout ANCESTRAL (o código velho) + nuvem ⇒ recusa antes do provider: zero chamada, zero log", async () => {
+    estado.probe = () => ancestral
+    await expect(createLoggedMessage(cliente, params, meta)).rejects.toBeInstanceOf(PaidCallBlockedError)
+    expect(chamadasProvider).toBe(0)
+    expect(estado.inserts).toHaveLength(0)
   })
 
   it("override válido ⇒ paga, avisa, e o motivo fica na proveniência", async () => {
-    estado.probe = () => ({ ok: true, sha: SHA, branch: "exp", dirtyTracked: true, inOriginMain: false })
+    estado.probe = () => ({ ok: true, sha: SHA, branch: "exp", dirtyTracked: true, inOriginMain: false, atOriginMain: false })
     process.env.PAID_CLOUD_NONCANONICAL_REASON = "piloto deliberado"
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     await createLoggedMessage(cliente, params, meta)
@@ -259,7 +296,7 @@ describe("B · no createLoggedMessage real (cliente e banco FALSOS — nenhuma c
   })
 
   it("override só com espaços ⇒ continua recusado", async () => {
-    estado.probe = () => ({ ok: true, sha: SHA, branch: "exp", dirtyTracked: true, inOriginMain: false })
+    estado.probe = () => ({ ok: true, sha: SHA, branch: "exp", dirtyTracked: true, inOriginMain: false, atOriginMain: false })
     process.env.PAID_CLOUD_NONCANONICAL_REASON = "   "
     await expect(createLoggedMessage(cliente, params, meta)).rejects.toBeInstanceOf(PaidCallBlockedError)
     expect(chamadasProvider).toBe(0)

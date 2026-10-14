@@ -102,9 +102,10 @@ import { recalculateForUser } from "@/server/recalc/user-recalc"
 import { maybeTriggerStaleRecalc, recalculateScoresNowResult, triggerRecalcNow } from "@/server/recalc/queue"
 
 const SHA = "b".repeat(40)
-const canonico: GitProbe = { ok: true, sha: SHA, branch: "main", dirtyTracked: false, inOriginMain: true }
-const mergeada: GitProbe = { ...canonico, branch: "fix/ja-mergeada" }
-const naoMergeada: GitProbe = { ...canonico, branch: "fix/experimento", inOriginMain: false }
+const canonico: GitProbe = { ok: true, sha: SHA, branch: "main", dirtyTracked: false, inOriginMain: true, atOriginMain: true }
+/** Branch já mergeada: o HEAD está CONTIDO em origin/main, mas não é a ponta. Desde 13/10/2026, não basta. */
+const mergeada: GitProbe = { ...canonico, branch: "fix/ja-mergeada", atOriginMain: false }
+const naoMergeada: GitProbe = { ...canonico, branch: "fix/experimento", inOriginMain: false, atOriginMain: false }
 const suja: GitProbe = { ...canonico, dirtyTracked: true }
 const NUVEM = "https://abcdefgh.supabase.co"
 
@@ -158,9 +159,16 @@ describe("1 · a matriz (checkRecalcCode: env + sonda)", () => {
     expect(checkRecalcCode()).toMatchObject({ allow: true, provenance: { basis: "canonical", canonical: true } })
   })
 
-  it("3b) branch já mergeada (HEAD dentro de origin/main) ⇒ permite", () => {
+  it("3b) 🔴 branch já mergeada (HEAD contido em origin/main, mas não é a ponta) ⇒ BLOQUEIA desde 13/10/2026", () => {
     sonda(mergeada)
-    expect(checkRecalcCode()).toMatchObject({ allow: true, provenance: { basis: "canonical", branch: "fix/ja-mergeada" } })
+    const c = checkRecalcCode()
+    expect(c).toMatchObject({ allow: false, provenance: { basis: "blocked", in_origin_main: true, at_origin_main: false, canonical: false } })
+    if (!c.allow) expect(c.message).toMatch(/DESATUALIZADO/)
+  })
+
+  it("3c) branch ≠ main com HEAD NA PONTA de origin/main ⇒ permite (o nome da branch não decide)", () => {
+    sonda({ ...canonico, branch: "fix/na-ponta" })
+    expect(checkRecalcCode()).toMatchObject({ allow: true, provenance: { basis: "canonical", branch: "fix/na-ponta" } })
   })
 
   it("4) local + nuvem + branch NÃO mergeada ⇒ bloqueia", () => {
@@ -369,6 +377,7 @@ describe("8 · proveniência no payload do job `recalculate_scores`", () => {
       branch: "main",
       dirty: false,
       in_origin_main: true,
+      at_origin_main: true,
       canonical: true,
       override_used: false,
     })
@@ -392,6 +401,7 @@ describe("8 · proveniência no payload do job `recalculate_scores`", () => {
       branch: null,
       dirty: null,
       in_origin_main: null,
+      at_origin_main: null,
       canonical: null,
       override_used: false,
     })
