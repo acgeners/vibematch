@@ -68,6 +68,7 @@ import { normalizeCoverSource, titleToSlug } from "@/lib/utils"
 import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 import { canRateReadingState } from "@/lib/reading-gate"
+import { isMixedEditionState } from "@/lib/editions/mixed-edition"
 
 type SupabaseAdminClient = ReturnType<typeof createAdminClient>
 
@@ -845,6 +846,8 @@ export interface WorkPreview {
   totalVotes: number
   /** Conteúdo adulto (18+) efetivo — works.is_adult. Renderiza o chip 🔞 no hover. */
   isAdult: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed: boolean
   /** Nota Prevista DE QUEM OLHA (após overlay per-usuário). NULL sem os 9 atributos IA / sem modelo. */
   expectedScore: number | null
   /** Prevista é estimativa (sem modelo ML) → marca `~`. */
@@ -860,7 +863,7 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
     supabase
       .from("works")
       .select(`
-        id, title, canonical_synopsis, is_adult,
+        id, title, canonical_synopsis, is_adult, edition_state,
         publication_status_id, total_chapters, year,
         work_covers(url, is_primary, position),
         work_synopses(source, text, is_primary, position),
@@ -909,6 +912,7 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
     platformAvg: calc?.platform_avg ?? null,
     totalVotes: calc?.total_votes ?? 0,
     isAdult: Boolean((data as { is_adult?: boolean | null }).is_adult),
+    isMixed: isMixedEditionState((data as { edition_state?: string | null }).edition_state),
     expectedScore: calc?.expected_score ?? null,
     expectedIsStub: calc?.expected_is_stub ?? false,
     userScore: state.userScore,

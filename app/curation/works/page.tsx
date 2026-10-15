@@ -45,6 +45,7 @@ import type { EvalPrep } from "@/lib/ai-evaluation/eval-readiness"
 import { parseAttrEvalFilters } from "@/lib/ai-evaluation/attr-eval-filters"
 import type { AttrEvalFilter } from "@/lib/ai-evaluation/attr-eval-filters"
 import { DECISION_QUEUES, decisionHint } from "@/lib/curation/decision-queues"
+import { isMixedEditionState } from "@/lib/editions/mixed-edition"
 
 export type EvaluationFilter = AttrEvalFilter
 const parseFilters = parseAttrEvalFilters
@@ -64,6 +65,8 @@ interface EligibleWork {
   expected_score: number | null
   /** Conteúdo adulto (18+) efetivo — works.is_adult. Renderiza o chip 🔞 no card. */
   is_adult?: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `is_adult` (`workContentBadge`). */
+  is_mixed?: boolean
   /** Sua nota (user_score) do DONO (via works_owner) — mostra "Real" ao lado da Prevista. */
   user_score?: number | null
   /** Hidratados só na aba ativa (cards) — ausentes no caminho do cache de contagens. */
@@ -423,7 +426,7 @@ async function getEligibleWorks(
   type CoverRow = { work_id: string; url: string | null; is_primary: boolean | null; position: number | null }
   type ScoreRow = { work_id: string; expected_score: number | null }
   // `is_adult` é catálogo (não está na view works_owner) — busca direta em `works`.
-  type AdultRow = { id: string; is_adult: boolean | null }
+  type AdultRow = { id: string; is_adult: boolean | null; edition_state: string | null }
   const [coversResult, scoresResult, adultResult, latestEvals] = await Promise.all([
     chunkedInQuery<CoverRow>(displayedIds, CHUNK_SIZE, (chunk) =>
       supabase
@@ -442,7 +445,7 @@ async function getEligibleWorks(
     chunkedInQuery<AdultRow>(displayedIds, CHUNK_SIZE, (chunk) =>
       supabase
         .from("works")
-        .select("id, is_adult")
+        .select("id, is_adult, edition_state")
         .in("id", chunk)
         .then(({ data, error }) => ({ data: (data ?? []) as AdultRow[], error })),
     ),
@@ -460,8 +463,10 @@ async function getEligibleWorks(
     scoreByWork.set(s.work_id, s)
   }
   const adultByWork = new Map<string, boolean>()
+  const mixedByWork = new Map<string, boolean>()
   for (const a of adultResult.data) {
     adultByWork.set(a.id, Boolean(a.is_adult))
+    mixedByWork.set(a.id, isMixedEditionState(a.edition_state))
   }
 
   const eligibleIdSet = new Set(eligibleIds)
@@ -499,6 +504,7 @@ async function getEligibleWorks(
       cover_url: pickPrimaryCover(coversByWork.get(row.id) ?? []),
       expected_score: scoreByWork.get(row.id)?.expected_score ?? null,
       is_adult: adultByWork.get(row.id) ?? false,
+      is_mixed: mixedByWork.get(row.id) ?? false,
       user_score: row.user_score ?? null,
       matchedFilters: matchedByWork.get(row.id) ?? [],
       aiEvalStatus: row.ai_eval_status ?? null,
@@ -904,6 +910,7 @@ export default async function CuradoriaDaObraPage({
       w.reviewCount = revCounts.get(w.id) ?? 0
       const f = flags.get(w.id)
       w.isAdult = f?.isAdult ?? false
+      w.isMixed = f?.isMixed ?? false
       w.userScore = f?.userScore ?? null
     }
     const readIds = readIdsFor("tags_reviews", mergedWorks)

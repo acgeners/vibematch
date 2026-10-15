@@ -22,7 +22,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import { AdultBadge } from "@/components/ui/adult-badge"
+import { WorkContentChip } from "@/components/ui/work-content-chip"
 import { CoverImage } from "@/components/ui/cover-image"
 import { ExplainPanel } from "@/components/discovery/explain-panel"
 import { getCoverImageSrc } from "@/lib/image-proxy"
@@ -1234,7 +1234,7 @@ function WorkMeta({
 }) {
   return (
     <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted-foreground">
-      {work.isAdult && <AdultBadge />}
+      <WorkContentChip isAdult={work.isAdult} isMixed={work.isMixed} />
       <span className="tabular-nums">{work.year ?? "—"}</span>
       <span>·</span>
       <span className="tabular-nums">{work.totalChapters ?? "?"} cap.</span>

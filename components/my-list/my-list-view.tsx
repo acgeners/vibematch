@@ -8,6 +8,8 @@ import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { SHELVES } from "@/lib/my-list/shelves"
 import type { ShelfCounts, ShelfKey } from "@/lib/my-list/shelves"
 import type { MyListWork } from "@/server/queries/my-list"
+import { R19EditionChip } from "@/components/ui/work-content-chip"
+import { workContentBadge } from "@/lib/editions/mixed-edition"
 
 type Aba = ShelfKey | "all"
 
@@ -142,7 +144,8 @@ function Linha({ work }: { work: MyListWork }) {
         />
 
         <span className="min-w-0 truncate text-[13.5px] font-medium">
-          {work.isAdult && <span className="mr-1.5 text-red-400/90 text-[11px]">18+</span>}
+          {workContentBadge({ isMixed: work.isMixed, isAdult: work.isAdult }) === "adult" && <span className="mr-1.5 text-red-400/90 text-[11px]">18+</span>}
+          {workContentBadge({ isMixed: work.isMixed, isAdult: work.isAdult }) === "r19_edition" && <R19EditionChip className="mr-1.5 px-1 py-0 text-[10px]" />}
           {work.title}
         </span>
 

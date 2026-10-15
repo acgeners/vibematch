@@ -5,6 +5,7 @@ import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queri
 import { getScoresReader } from "@/server/queries/user-scores"
 import { personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
+import { isMixedEditionState } from "@/lib/editions/mixed-edition"
 
 type CoverRow = { url: string; is_primary: boolean; position: number }
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean }
@@ -17,6 +18,8 @@ export interface ReadingWork {
   publicationStatusId: number | null
   /** Conteúdo adulto (18+) efetivo — works.is_adult. */
   isAdult: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed: boolean
   chaptersRead: number | null
   totalChapters: number | null
   lastReadAt: string | null
@@ -74,7 +77,7 @@ export async function getReadingWorks(
   if (!ownIds || ownIds.length === 0) return []
 
   const baseSelect = `
-    id, title, publication_status_id, total_chapters, is_adult,
+    id, title, publication_status_id, total_chapters, is_adult, edition_state,
     hiatus_kind, hiatus_kind_confidence, publication_status_note,
     calculated_scores(expected_score),
     work_covers(url, is_primary, position),
@@ -97,6 +100,7 @@ export async function getReadingWorks(
     publication_status_id: number | null
     total_chapters: number | null
     is_adult?: boolean | null
+    edition_state?: string | null
     hiatus_kind?: HiatusKind | null
     hiatus_kind_confidence?: "high" | "low" | null
     publication_status_note?: string | null
@@ -118,6 +122,7 @@ export async function getReadingWorks(
       personalStatusId: state.personalStatusId,
       publicationStatusId: w.publication_status_id ?? null,
       isAdult: Boolean(w.is_adult),
+      isMixed: isMixedEditionState(w.edition_state),
       chaptersRead: state.chaptersRead,
       totalChapters: w.total_chapters ?? null,
       lastReadAt: state.lastReadAt,

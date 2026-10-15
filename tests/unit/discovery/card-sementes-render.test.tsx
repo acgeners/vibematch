@@ -181,7 +181,7 @@ function obra(over: Partial<DiscoveryWork> = {}): DiscoveryWork {
     totalChapters: 110,
     publicationStatusId: null,
     personalStatusId: null,
-    isAdult: false,
+    isAdult: false, isMixed: false,
     coverUrls: ["https://exemplo/capa.jpg"],
     synopsis: null,
     simPercentile: 100,

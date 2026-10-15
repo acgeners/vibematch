@@ -241,6 +241,8 @@ export interface Work {
   is_archived: boolean
   /** Conteúdo adulto (18+) efetivo — COALESCE(adult_override, adult_auto). */
   is_adult: boolean
+  /** Estado de edição (`mixed` = versão normal + R18). Vem do `select *`; decide o selo com `is_adult`. */
+  edition_state?: string | null
   is_favorite: boolean
   last_read_at: string | null
   created_at: string

@@ -94,14 +94,19 @@ export function defaultMixedEdition(ctx: Pick<EditionContext, "hideAdult" | "sig
   return resolveMixedEdition({ hideAdult: ctx.hideAdult, signedIn: ctx.signedIn, r18OnlyInExtras: ctx.r18OnlyInExtras }).edition
 }
 
+/** O selo de conteúdo ao lado do título: "Versão R19 disponível", "18+" ou nenhum. */
+export type WorkContentBadge = "r19_edition" | "adult" | null
+
 /**
- * O selo "18+" ao lado do título. Obra `mixed`: quem decide é a EDIÇÃO ATIVA — R18 sim, normal não.
- * O gate global (`is_adult`) não serve aqui: numa mixed ele é falso por construção (mig 204) e só um
- * `adult_override` o liga — e aí ligaria nas DUAS edições, afirmando "18+" sobre a versão normal.
- * Fora das mixed, o gate de sempre. Só o SELO: o portão de conteúdo (ocultar 18+) segue no gate.
+ * O selo de conteúdo da página da obra — decidido pela ESTRUTURA editorial, nunca pela versão aberta.
+ * `mixed` (normal + R18) ⇒ "Versão R19 disponível" e nunca "18+": o aviso é que existe uma versão mais
+ * leve e que o leitor escolhe qual abrir. Fora das mixed ⇒ "18+" quando o gate (`is_adult`) diz adulta.
+ * O `adult_override` de uma mixed liga o gate da obra inteira, mas não muda a estrutura: o selo segue
+ * sendo o de versão. Só o SELO: filtro ("Só 18+" = `is_adult OR r19_edition`) e ocultação seguem o gate.
  */
-export function showsAdultBadge(input: { isMixed: boolean; activeEdition: MixedEdition | null; isAdult: boolean }): boolean {
-  return input.isMixed ? input.activeEdition === "r18" : input.isAdult
+export function workContentBadge(input: { isMixed: boolean; isAdult: boolean }): WorkContentBadge {
+  if (input.isMixed) return "r19_edition"
+  return input.isAdult ? "adult" : null
 }
 
 // ── A nota da edição ────────────────────────────────────────────────────────────────────────

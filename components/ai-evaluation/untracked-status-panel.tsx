@@ -24,6 +24,8 @@ export interface UntrackedWorkWithMeta {
   reviewCount: number
   /** Chip 🔞 (works.is_adult) e badge "Real" (works_owner.user_score) — anexados na page. */
   isAdult?: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed?: boolean
   userScore?: number | null
 }
 
@@ -64,6 +66,7 @@ export function UntrackedStatusPanel({ works, readIds = [] }: { works: Untracked
               coverUrls={w.coverUrls}
               expectedScore={w.expectedScore}
               isAdult={w.isAdult}
+              isMixed={w.isMixed}
               userScore={w.userScore}
               publicationStatusId={w.publicationStatusId}
               hiatusKind={w.hiatusKind}

@@ -5,7 +5,7 @@ import { BookOpen, ChevronDown, ChevronUp, MessageSquare, Star, StickyNote, Tag,
 import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { CoverImage } from "@/components/ui/cover-image"
-import { AdultBadge } from "@/components/ui/adult-badge"
+import { WorkContentChip } from "@/components/ui/work-content-chip"
 import { ScoreBadge } from "@/components/ui/score-badge"
 import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
 import { cn } from "@/lib/utils"
@@ -289,9 +289,7 @@ export function WorkHoverPreview({ preview, anchorRect, onMouseEnter, onMouseLea
             {/* Título + chip 18+ (mesmo tratamento do cabeçalho da obra) */}
             <div className="flex items-start gap-1.5">
               <p className="font-semibold text-[15px] leading-tight line-clamp-2 min-w-0 flex-1 break-words">{preview.title}</p>
-              {preview.isAdult && (
-                <AdultBadge className="mt-px shrink-0 px-1.5 py-0 text-[10px] leading-tight" />
-              )}
+              <WorkContentChip isAdult={preview.isAdult} isMixed={preview.isMixed} className="mt-px shrink-0 px-1.5 py-0 text-[10px] leading-tight" />
             </div>
 
             {/* Linha 1: ano · capítulos · status curto (discreto) */}

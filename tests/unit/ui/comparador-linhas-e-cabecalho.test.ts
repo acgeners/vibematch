@@ -82,10 +82,13 @@ describe("o filtro 'só diferenças' mede o que a célula mostra", () => {
 })
 
 describe("dado que já vinha do banco e era descartado", () => {
-  it("is_adult é mapeado — sem query nova", () => {
-    // `WORK_WITH_RELATIONS_SELECT` é `select *`, então o campo já chegava em `mapWorkToCompare`.
+  it("is_adult e o estado de edição são mapeados — sem query nova", () => {
+    // `WORK_WITH_RELATIONS_SELECT` é `select *`: `is_adult` e `edition_state` já chegavam em
+    // `mapWorkToCompare`. O selo segue a régua do app inteiro (`workContentBadge`, 2026-10-14):
+    // mixed ⇒ "R19", nunca "18+" — por isso não basta o `is_adult` sozinho.
     expect(action).toContain("isAdult: Boolean(work.is_adult)")
-    expect(drawer).toContain("work.isAdult &&")
+    expect(action).toMatch(/isMixed: isMixedEditionState\(/)
+    expect(drawer).toMatch(/workContentBadge\(\{ isMixed: work\.isMixed, isAdult: work\.isAdult \}\)/)
   })
 
   it("isFavorite aparece na capa", () => {

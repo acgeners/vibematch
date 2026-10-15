@@ -5,7 +5,7 @@ import { isSameMonth } from "date-fns"
 import { AlertTriangle } from "lucide-react"
 import { CoverImage } from "@/components/ui/cover-image"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
-import { AdultBadge } from "@/components/ui/adult-badge"
+import { WorkContentChip } from "@/components/ui/work-content-chip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
@@ -290,7 +290,7 @@ function MoreTile({ markers, hiddenCount }: { markers: CalendarMarker[]; hiddenC
                 <span className="min-w-0 flex-1 truncate text-[12.5px] leading-tight">{m.title}</span>
                 {/* Único lugar do calendário onde a obra aparece por NOME — as células
                     do dia são só capa, e lá o 18+ chega pela prévia de hover. */}
-                {m.isAdult && <AdultBadge className="shrink-0 px-1.5 py-0 text-[9.5px] leading-tight" />}
+                <WorkContentChip isAdult={m.isAdult} isMixed={m.isMixed} className="shrink-0 px-1.5 py-0 text-[9.5px] leading-tight" />
                 <span className={cn("size-2 shrink-0 rounded-full", DOT[m.kind])} aria-hidden />
               </WorkTitleLink>
             ))}

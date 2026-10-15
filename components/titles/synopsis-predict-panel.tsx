@@ -296,6 +296,7 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
               coverUrls={w.coverUrls}
               expectedScore={w.expectedScore}
               isAdult={w.isAdult}
+              isMixed={w.isMixed}
               userScore={w.userScore}
               publicationStatusId={w.publicationStatusId}
               personalStatusId={w.personalStatusId}

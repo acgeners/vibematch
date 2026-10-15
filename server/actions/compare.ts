@@ -42,6 +42,8 @@ export interface CompareWork extends HiatusFields {
   /** Classificação da OBRA (o mesmo selo 🔞 da página), não das tags. Vai no cabeçalho da
    *  coluna: é o que muda a decisão antes de qualquer nota, e não é comparável em linha. */
   isAdult: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed: boolean
   expectedScore: number | null
   /** Prioridade (0–10) — âncora na Prevista + IA Rk quando há (ver lib/calculations/decision.ts). */
   decisionScore: number | null
@@ -247,6 +249,7 @@ function mapWorkToCompare(
     // Já vinha do banco (`WORK_WITH_RELATIONS_SELECT` é `select *`) e era descartado aqui —
     // custo de exibir: esta linha. Nenhuma query nova, nenhum egress a mais.
     isAdult: Boolean(work.is_adult),
+    isMixed: isMixedEditionState((work as { edition_state?: unknown }).edition_state),
     expectedScore: work.calculated_scores?.expected_score ?? null,
     decisionScore: computeDecisionScore({
       expected: work.calculated_scores?.expected_score ?? null,

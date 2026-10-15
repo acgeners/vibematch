@@ -44,7 +44,7 @@ import { ScoreBadge, criterionCellTextClass, getSoftScoreColor } from "@/compone
 import type { ColumnThresholds, CriterionRange, AttrColorMode } from "@/components/ui/score-badge"
 import { readAttrColorMode, subscribeAttrColorMode } from "@/lib/ui/attr-color-mode"
 import { PublicationStatusBadge, PersonalStatusBadge, AiStatusBadge } from "@/components/ui/status-badge"
-import { AdultBadge } from "@/components/ui/adult-badge"
+import { WorkContentChip } from "@/components/ui/work-content-chip"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
 import { AlignmentCell, AlignmentScoreCell, ArtCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
@@ -401,6 +401,7 @@ function entryToPreview(entry: RankingEntry): WorkPreview {
     platformAvg: entry.platformAvg,
     totalVotes: entry.totalVotes,
     isAdult: entry.isAdult,
+    isMixed: entry.isMixed,
     expectedScore: entry.expectedScore,
     expectedIsStub: entry.expectedIsStub,
     userScore: entry.userScore,
@@ -432,7 +433,7 @@ function TitleCell({ entry }: { entry: RankingEntry }) {
         {entry.isAdult || entry.differentiators.length > 0 ? (
           <TooltipProvider delayDuration={150}>
             <div className="flex flex-wrap items-center gap-1">
-              {entry.isAdult && <AdultBadge className="px-1.5 py-0 text-[10px]" />}
+              <WorkContentChip isAdult={entry.isAdult} isMixed={entry.isMixed} className="px-1.5 py-0 text-[10px]" />
               {entry.differentiators.map((d) => {
                 const info = CRITERIA_INFO[d.slug]
                 if (!info) return null
@@ -2029,7 +2030,7 @@ function RankingCard({
             </h3>
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
               <PublicationStatusBadge statusId={entry.publicationStatusId} compact className="gap-1 px-1.5 py-0 text-[10px]" hiatusKind={entry.hiatusKind} hiatusKindConfidence={entry.hiatusKindConfidence} publicationStatusNote={entry.publicationStatusNote} />
-              {entry.isAdult && <AdultBadge className="px-1.5 py-0 text-[10px]" />}
+              <WorkContentChip isAdult={entry.isAdult} isMixed={entry.isMixed} className="px-1.5 py-0 text-[10px]" />
               {entry.totalChapters != null && (
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold tabular-nums text-muted-foreground">
                   <BookOpen className="size-3 text-muted-foreground/70" />

@@ -5,6 +5,7 @@ import { workCardCountsRpc, getWorkTagReviewCounts } from "@/server/queries/work
 import { coverCandidates } from "@/lib/work-derived"
 import { REVIEW_DIGEST_VERSION } from "@/lib/ai-recommendation/review-summarizer"
 import { hasEnoughReviewsForDigest } from "@/lib/reviews/digest-gate"
+import { isMixedEditionState } from "@/lib/editions/mixed-edition"
 
 /**
  * A fila do DIGEST estruturado — obras com reviews e sem digest na versão vigente.
@@ -34,6 +35,8 @@ export interface DigestQueueWork {
   personalStatusId: number | null
   expectedScore: number | null
   isAdult: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed: boolean
   /** Reviews ÚTEIS (≥40 chars) — a mesma medida que o gate aplica. */
   usefulReviews: number
   /** ⚠️ Vem da MESMA chamada (a RPC devolve os dois). Sem ele o card imprime
@@ -66,6 +69,7 @@ interface WorkRow {
   work_covers: Array<{ url: string; is_primary: boolean | null; position: number | null }> | null
   publication_status_id: number | null
   is_adult: boolean | null
+  edition_state?: string | null
   review_digest_version: string | null
 }
 
@@ -89,7 +93,7 @@ export async function getReviewDigestQueue(opts: { countOnly?: boolean } = {}): 
           .select(
             opts.countOnly
               ? "id, review_digest_version"
-              : "id, title, publication_status_id, is_adult, review_digest_version, work_covers(url, is_primary, position)",
+              : "id, title, publication_status_id, is_adult, edition_state, review_digest_version, work_covers(url, is_primary, position)",
           )
           .eq("is_archived", false),
       { orderBy: ["id"], label: "getReviewDigestQueue" },
@@ -138,6 +142,7 @@ export async function getReviewDigestQueue(opts: { countOnly?: boolean } = {}): 
       personalStatusId: null,
       expectedScore: null,
       isAdult: w.is_adult === true,
+      isMixed: isMixedEditionState(w.edition_state),
       usefulReviews,
       tagCount: counts.get(w.id)?.tagCount ?? 0,
       eligible: hasEnoughReviewsForDigest(usefulReviews),

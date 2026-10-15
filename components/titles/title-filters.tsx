@@ -43,6 +43,8 @@ import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 import { CollapseIconTrigger, CollapseTitleTrigger } from "@/components/ui/collapse-trigger"
 import { ActiveFilterChips } from "@/components/ranking/active-filter-chips"
 import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
+import { R19EditionChip } from "@/components/ui/work-content-chip"
+import { workContentBadge } from "@/lib/editions/mixed-edition"
 
 /**
  * Rótulo CURTO do critério. As entradas abaixo são ENCURTAMENTOS deliberados ("Casal" em vez de
@@ -765,11 +767,12 @@ function SearchInputWithHistory({
                           </span>
                         )}
                       </span>
-                      {s.isAdult && (
+                      {workContentBadge({ isMixed: s.isMixed, isAdult: s.isAdult }) === "adult" && (
                         <span className="ml-auto shrink-0 rounded-full bg-destructive/15 px-1.5 py-0.5 text-[10px] font-bold text-destructive">
                           18+
                         </span>
                       )}
+                      {workContentBadge({ isMixed: s.isMixed, isAdult: s.isAdult }) === "r19_edition" && <R19EditionChip className="ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold" />}
                     </a>
                   </CommandItem>
                 ))}

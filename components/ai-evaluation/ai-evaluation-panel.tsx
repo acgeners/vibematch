@@ -55,6 +55,8 @@ interface PendingWork {
   cover_url?: string | null
   expected_score?: number | null
   is_adult?: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `is_adult` (`workContentBadge`). */
+  is_mixed?: boolean
   user_score?: number | null
   tagCount?: number | null
   reviewCount?: number | null
@@ -1016,6 +1018,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
               coverUrl={work.cover_url}
               expectedScore={work.expected_score}
               isAdult={work.is_adult}
+              isMixed={work.is_mixed}
               userScore={work.user_score}
               publicationStatusId={work.publication_status_id}
               personalStatusId={work.personal_status_id}

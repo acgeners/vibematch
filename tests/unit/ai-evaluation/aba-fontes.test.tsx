@@ -54,7 +54,7 @@ function work(over: Partial<SourceGapWork> = {}): SourceGapWork {
     publicationStatusNote: null,
     personalStatusId: 3,
     expectedScore: 8.1,
-    isAdult: false,
+    isAdult: false, isMixed: false,
     userScore: null,
     linked: [S2],
     absent: [],

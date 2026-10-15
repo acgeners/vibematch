@@ -3,7 +3,7 @@ import { BookMarked, ArrowRight, ExternalLink } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { CoverImage } from "@/components/ui/cover-image"
-import { AdultBadge } from "@/components/ui/adult-badge"
+import { WorkContentChip } from "@/components/ui/work-content-chip"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { formatRelativeDate } from "@/lib/date-utils"
 import type { ContinueReadingItem } from "@/server/queries/dashboard"
@@ -61,7 +61,7 @@ export function ContinueReading({
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
-                      {item.isAdult && <AdultBadge className="shrink-0 px-1.5 py-0 text-[10px]" />}
+                      <WorkContentChip isAdult={item.isAdult} isMixed={item.isMixed} className="shrink-0 px-1.5 py-0 text-[10px]" />
                       <WorkTitleLink
                         title={item.title}
                         workId={item.id}

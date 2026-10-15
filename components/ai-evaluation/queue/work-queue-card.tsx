@@ -6,7 +6,7 @@ import { Tag, MessageSquare, Check, X } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScoreBadge } from "@/components/ui/score-badge"
-import { AdultBadge } from "@/components/ui/adult-badge"
+import { WorkContentChip } from "@/components/ui/work-content-chip"
 import { PersonalStatusBadge, PublicationStatusBadge } from "@/components/ui/status-badge"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
@@ -46,6 +46,8 @@ export interface WorkQueueCardProps {
   expectedScore?: number | null
   /** Conteúdo adulto (18+) — chip 🔞 ao lado do título. */
   isAdult?: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed?: boolean
   /** Sua nota (Real) — badge ao lado do título quando você já avaliou. */
   userScore?: number | null
   publicationStatusId?: number | null
@@ -131,6 +133,7 @@ export function WorkQueueCard({
   coverUrls,
   expectedScore,
   isAdult,
+  isMixed,
   userScore,
   publicationStatusId,
   hiatusKind,
@@ -204,9 +207,7 @@ export function WorkQueueCard({
                 workId={workId}
                 className="line-clamp-2 min-w-0 flex-1 break-words text-base font-semibold leading-snug hover:underline text-foreground"
               />
-              {isAdult && (
-                <AdultBadge className="mt-0.5 shrink-0 text-[11px]" />
-              )}
+              <WorkContentChip isAdult={Boolean(isAdult)} isMixed={Boolean(isMixed)} className="mt-0.5 shrink-0 text-[11px]" />
             </div>
 
             {/* Meta comum — status (short code) · Real · interesse · contagens */}

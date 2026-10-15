@@ -234,6 +234,7 @@ export function SourcesTab({
               title={w.title}
               coverUrl={w.coverUrls[0] ?? null}
               isAdult={w.isAdult}
+              isMixed={w.isMixed}
               userScore={w.userScore}
               expectedScore={w.expectedScore}
               publicationStatusId={w.publicationStatusId}
