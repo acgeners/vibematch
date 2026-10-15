@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { ArrowRight, BookOpen, ExternalLink } from "lucide-react"
 import { CoverImage } from "@/components/ui/cover-image"
-import { AdultBadge } from "@/components/ui/adult-badge"
+import { WorkContentChip } from "@/components/ui/work-content-chip"
 import { PublicationStatusBadge, PersonalStatusBadge } from "@/components/ui/status-badge"
 import { ScoreBadge } from "@/components/ui/score-badge"
 import type { ScoreColorThresholds } from "@/components/ui/score-badge"
@@ -224,7 +224,7 @@ export function ContinueHero({
           {/* Os selos que a obra já carrega no resto do app — a coluna de texto era mais curta
               que a capa e o que sobrava era vão, não respiro. */}
           <div className="flex flex-wrap items-center gap-1.5">
-            {main.isAdult && <AdultBadge className="px-1.5 py-0" />}
+            <WorkContentChip isAdult={main.isAdult} isMixed={main.isMixed} className="px-1.5 py-0" />
             <PublicationStatusBadge statusId={main.publicationStatusId} hiatusKind={main.hiatusKind} hiatusKindConfidence={main.hiatusKindConfidence} publicationStatusNote={main.publicationStatusNote} />
             <PersonalStatusBadge statusId={main.personalStatusId} />
           </div>

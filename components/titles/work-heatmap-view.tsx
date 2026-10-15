@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
-import { AdultBadge } from "@/components/ui/adult-badge"
+import { WorkContentChip } from "@/components/ui/work-content-chip"
 import { ResponsiveHeaderLabel, headerFormsFor } from "@/components/titles/responsive-header-label"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
 import { AlignmentCell, AlignmentScoreCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
@@ -33,6 +33,7 @@ import {
   type WorkColumnNamespace,
 } from "@/components/titles/work-table-config"
 import type { WorkWithRelations, CategoryScore } from "@/types/domain"
+import { isMixedEditionState } from "@/lib/editions/mixed-edition"
 
 interface WorkHeatmapViewProps {
   works: WorkWithRelations[]
@@ -548,7 +549,7 @@ export function WorkHeatmapView({
                           parte do rótulo do link. Aqui é a única marca de classificação da
                           matriz — a coluna 🔞 desta view é a NOTA de `adult_content` (0–10,
                           quanto a obra mostra), que é outro fato. */}
-                      {work.is_adult && <AdultBadge className="shrink-0 px-1.5 py-0 text-[10px]" />}
+                      <WorkContentChip isAdult={work.is_adult} isMixed={isMixedEditionState(work.edition_state)} className="shrink-0 px-1.5 py-0 text-[10px]" />
                     </div>
                   </td>
                   {visibleScoreColumns.map((col) => {

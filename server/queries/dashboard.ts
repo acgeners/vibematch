@@ -19,6 +19,7 @@ import {
   isPickablePersonalStatus,
   personalStatusNameOrDefault,
 } from "@/lib/constants/status-lookups"
+import { isMixedEditionState } from "@/lib/editions/mixed-edition"
 
 type CoverRow = { url: string; is_primary: boolean; position: number }
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean | null }
@@ -71,6 +72,8 @@ export interface TopWorkItem extends HiatusFields {
   personalStatusId: number | null
   /** Conteúdo adulto (18+) efetivo — works.is_adult. */
   isAdult: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed: boolean
   /** Total de capítulos conhecido; null quando nenhuma fonte sabe. */
   totalChapters: number | null
   /** Interesse na obra de QUEM OLHA (♥…♥♥♥♥), quando já declarado. */
@@ -96,6 +99,8 @@ export interface ContinueReadingItem extends HiatusFields {
   nextChapterPredictedAt: string | null
   /** Conteúdo adulto (18+) efetivo — works.is_adult. */
   isAdult: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed: boolean
 }
 
 export interface AiQueueCounts {
@@ -258,7 +263,7 @@ export async function getTopPicksForToday(
       supabase
         .from("works")
         .select(`
-          id, title, is_archived, publication_status_id, is_adult, total_chapters,
+          id, title, is_archived, publication_status_id, is_adult, edition_state, total_chapters,
           ${HIATUS_SELECT_COLUMNS},
           calculated_scores(expected_score, platform_avg),
           work_covers(url, is_primary, position)
@@ -272,6 +277,7 @@ export async function getTopPicksForToday(
     title: string
     publication_status_id: number | null
     is_adult?: boolean | null
+    edition_state?: string | null
     total_chapters?: number | null
     hiatus_kind?: HiatusKind | null
     hiatus_kind_confidence?: "high" | "low" | null
@@ -293,6 +299,7 @@ export async function getTopPicksForToday(
         publicationStatusId: w.publication_status_id ?? null,
         personalStatusId: state.personalStatusId,
         isAdult: Boolean(w.is_adult),
+        isMixed: isMixedEditionState(w.edition_state),
         totalChapters: w.total_chapters ?? null,
         synopsisQuality: state.synopsisQuality,
         ...hiatusFieldsFromRow(w),
@@ -318,6 +325,7 @@ export async function getTopPicksForToday(
       publicationStatusId: w.publicationStatusId,
       personalStatusId: w.personalStatusId,
       isAdult: w.isAdult,
+      isMixed: w.isMixed,
       hiatusKind: w.hiatusKind,
       hiatusKindConfidence: w.hiatusKindConfidence,
       publicationStatusNote: w.publicationStatusNote,
@@ -361,7 +369,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
   const { data, error } = await supabase
     .from("works")
     .select(`
-      id, title, total_chapters, is_adult, publication_status_id,
+      id, title, total_chapters, is_adult, edition_state, publication_status_id,
       ${HIATUS_SELECT_COLUMNS},
       last_chapter_released_at, next_chapter_predicted_at,
       calculated_scores(expected_score),
@@ -378,6 +386,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
     title: string
     total_chapters: number | null
     is_adult?: boolean | null
+    edition_state?: string | null
     last_chapter_released_at: string | null
     next_chapter_predicted_at: string | null
     publication_status_id?: number | null
@@ -408,6 +417,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
       lastChapterReleasedAt: w.last_chapter_released_at ?? null,
       nextChapterPredictedAt: w.next_chapter_predicted_at ?? null,
       isAdult: Boolean(w.is_adult),
+      isMixed: isMixedEditionState(w.edition_state),
     }
   })
 

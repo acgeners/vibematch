@@ -43,6 +43,8 @@ import type { WorkSuggestion } from "@/server/queries/work-suggestions"
 import type { SearchEntry, SearchKind } from "@/server/queries/search-index"
 import { roleAtLeast } from "@/lib/plans/roles"
 import { cn } from "@/lib/utils"
+import { R19EditionChip } from "@/components/ui/work-content-chip"
+import { workContentBadge } from "@/lib/editions/mixed-edition"
 
 const ICONS: Record<string, LucideIcon> = {
   Home, BookOpen, Trophy, Wand2, Info, BookOpenText, BookMarked, Heart, Clock,
@@ -413,11 +415,12 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
                           : [w.year, w.publicationStatus].filter(Boolean).join(" · ") || "—"}
                       </span>
                     </span>
-                    {w.isAdult && (
+                    {workContentBadge({ isMixed: w.isMixed, isAdult: w.isAdult }) === "adult" && (
                       <span className="shrink-0 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-rose-600 dark:text-rose-400">
                         18+
                       </span>
                     )}
+                    {workContentBadge({ isMixed: w.isMixed, isAdult: w.isAdult }) === "r19_edition" && <R19EditionChip className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold" />}
                   </a>
                 </CommandItem>
               ))}

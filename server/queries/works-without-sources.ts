@@ -1,6 +1,7 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchAllRows } from "@/lib/supabase/paginate"
+import { isMixedEditionState } from "@/lib/editions/mixed-edition"
 import { SELECTABLE_EXTERNAL_SOURCES } from "@/lib/external/source-order"
 import { tallySourceGaps } from "@/lib/external/source-gaps"
 import { coverCandidates } from "@/lib/work-derived"
@@ -23,6 +24,8 @@ export interface SourceGapWork {
   personalStatusId: number | null
   expectedScore: number | null
   isAdult: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed: boolean
   userScore: number | null
   /** Fontes com vínculo aceito, na ordem canônica. */
   linked: ExternalSourceId[]
@@ -180,15 +183,18 @@ export async function getSourceGapQueue(
     }
   }
 
-  // `is_adult` é de CATÁLOGO (não está na view do dono) — 1 scan próprio, paginado.
-  const adultIds = new Set(
-    (
-      await fetchAllRows<{ id: string }>(
-        () => sb.from("works").select("id").eq("is_adult", true),
-        { orderBy: ["id"], label: "getSourceGapQueue.adult" },
-      )
-    ).map((r) => r.id),
+  // `is_adult` e `edition_state` são de CATÁLOGO (não estão na view do dono) — 1 scan próprio,
+  // paginado, só das linhas que acendem selo (adultas e mixed; o selo é `workContentBadge`).
+  const adultIds = new Set<string>()
+  const mixedIds = new Set<string>()
+  const comSelo = await fetchAllRows<{ id: string; is_adult: boolean | null; edition_state: string | null }>(
+    () => sb.from("works").select("id, is_adult, edition_state").or("is_adult.eq.true,edition_state.eq.mixed"),
+    { orderBy: ["id"], label: "getSourceGapQueue.selo" },
   )
+  for (const r of comSelo) {
+    if (r.is_adult) adultIds.add(r.id)
+    if (isMixedEditionState(r.edition_state)) mixedIds.add(r.id)
+  }
 
   // Contagens agregadas em SQL (RPC da migration 122) — 1 chamada pro catálogo todo.
   // `null` quando a RPC não existe; aí a coluna simplesmente não é exibida (0), em vez
@@ -213,6 +219,7 @@ export async function getSourceGapQueue(
       expectedScore:
         w.calculated_scores?.expected_score != null ? Number(w.calculated_scores.expected_score) : null,
       isAdult: adultIds.has(w.id),
+      isMixed: mixedIds.has(w.id),
       userScore: w.user_score ?? null,
       linked,
       absent,

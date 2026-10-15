@@ -19,7 +19,7 @@ import {
   parseMixedEdition,
   predictionForEdition,
   resolveMixedEdition,
-  showsAdultBadge,
+  workContentBadge,
 } from "@/lib/editions/mixed-edition"
 import type { EditionScoreRow } from "@/lib/editions/mixed-edition"
 import { mentionsExplicitSexualContent, tagsForEdition, warningsForEdition } from "@/lib/editions/edition-content"
@@ -113,7 +113,6 @@ import { CriterionTitleTooltip } from "@/components/titles/criterion-title-toolt
 import { AlignmentTooltipContent, VerdictTooltipContent } from "@/components/ranking/score-tooltip-content"
 import { Badge } from "@/components/ui/badge"
 import { EditionNoteBadge } from "@/components/ui/edition-note-badge"
-import { hasEditionNoteTag } from "@/lib/tags/edition-note-tags"
 import { TagRowAction } from "@/components/ai-evaluation/tag-actions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -689,9 +688,8 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
           return objetos.filter((t) => typeof t.id === "string" && visiveis.has(t.id))
         })()
       : rawTags
-  const hasEditionNote = hasEditionNoteTag(
-    (tags as Array<WorkTagForDisplay | string>).map((tag) => (typeof tag === "string" ? tag : tag.name)),
-  )
+  // Os dois selos de conteúdo saem de UMA decisão, pela estrutura editorial — não pela versão aberta.
+  const contentBadge = workContentBadge({ isMixed: isMixedWork, isAdult })
   // Avisos de conteúdo do digest de reviews — o MESMO dado e a MESMA régua do card de reviews
   // (`displayableContentWarnings`). Zero query: `getWorkReviews` já trouxe o digest acima.
   // Na versão normal, sai o aviso que descreve só a R18 (sexo explícito); violência sexual, violência
@@ -1037,16 +1035,17 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
             </span>
           )}
           {!aprovada && <ApprovalBadge />}
-          {/* Obra mixed: o selo segue a EDIÇÃO ATIVA (R18 sim, normal não), não o gate global. */}
-          {showsAdultBadge({ isMixed: isMixedWork, activeEdition, isAdult }) && (
+          {/* Obra mixed: só "Versão R19 disponível", em qualquer versão aberta; "18+" fica para a obra
+              adulta sem versão mais leve. */}
+          {contentBadge === "adult" && (
             <span
               className="inline-flex items-center gap-2 rounded-full border border-red-500/40 bg-red-50 px-3.5 py-1.5 text-base font-bold text-red-800 dark:bg-red-950/40 dark:text-red-200"
-              title={isMixedWork ? "Versão R18 da obra — conteúdo adulto (18+)" : "Conteúdo adulto (18+) — nota de conteúdo adulto ≥ 7"}
+              title="Conteúdo adulto (18+) — nota de conteúdo adulto ≥ 7"
             >
               🔞 18+
             </span>
           )}
-          {hasEditionNote && <EditionNoteBadge className="px-3.5 py-1.5 text-base font-bold" />}
+          {contentBadge === "r19_edition" && <EditionNoteBadge className="px-3.5 py-1.5 text-base font-bold" />}
         </div>
       </header>
 

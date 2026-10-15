@@ -30,6 +30,7 @@ import {
   DEFAULT_RESULT_LIMIT,
   SEED_SUGGESTION_COUNT,
 } from "@/lib/discovery/limits"
+import { isMixedEditionState } from "@/lib/editions/mixed-edition"
 
 /**
  * "Mais como estas" (`/discover`) — o cruzamento entre PARECENÇA com obras-semente e
@@ -67,6 +68,8 @@ export interface DiscoveryWork {
   publicationStatusId: number | null
   personalStatusId: number | null
   isAdult: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed: boolean
   coverUrls: string[]
   synopsis: string | null
   /** Percentil de parecença com as sementes (0–100) dentro do conjunto avaliado. */
@@ -173,6 +176,7 @@ interface MetaRow {
   total_chapters: number | null
   publication_status_id: number | null
   is_adult: boolean | null
+  edition_state: string | null
   canonical_synopsis: string | null
 }
 
@@ -380,6 +384,7 @@ export async function discoverBySeeds(opts: DiscoverBySeedsOptions): Promise<Dis
       publicationStatusId: m?.publication_status_id ?? null,
       personalStatusId: state.personalStatusId,
       isAdult: Boolean(m?.is_adult),
+      isMixed: isMixedEditionState(m?.edition_state),
       // 🔴 `seedMeta` só contém SEMENTES e ANTI-SEMENTES: para uma obra do resultado o
       // `get()` devolvia sempre `undefined`, então a lista NUNCA mostrou capa — todas as 24
       // linhas caíam no placeholder cinza, que lê como "esta obra não tem capa". Medido na
@@ -687,7 +692,7 @@ async function loadMeta(
   if (ids.length === 0) return new Map()
   const { data, error } = await supabase
     .from("works")
-    .select("id, title, year, total_chapters, publication_status_id, is_adult, canonical_synopsis")
+    .select("id, title, year, total_chapters, publication_status_id, is_adult, edition_state, canonical_synopsis")
     .in("id", ids)
 
   if (error) {

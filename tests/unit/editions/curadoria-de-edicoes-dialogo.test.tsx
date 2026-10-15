@@ -1,6 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import type { WorkEditionCuration } from "@/server/actions/work-editions"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { bandForScore, rubricTitle } from "@/lib/criteria/justification"
 
 /**
  * O diálogo "Edições da obra" RENDERIZADO: um teste da regra pura passaria verde com a nota atual
@@ -164,5 +167,80 @@ describe("diálogo Versões da obra", () => {
     await abrir({ ...curada, canRevert: false, revertTarget: "Esta decisão não guardou o estado anterior, então não há para onde voltar." })
     expect((screen.getByRole("button", { name: "Remover decisão da curadoria" }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText(/não guardou o estado anterior/)).toBeTruthy()
+  })
+})
+
+/**
+ * A nota por versão é uma nota de critério (Conteúdo Adulto, 0–10) e se dá pelo MESMO controle da
+ * avaliação pós-leitura: a linha do critério com o rótulo da faixa ao vivo e o painel da faixa. Antes era
+ * um campo de texto solto ao lado do seletor, sem dizer de que critério era nem o que a nota significa.
+ */
+describe("nota por versão — o mesmo controle da nota de critério", () => {
+  it("'Informar nota' abre a linha de Conteúdo Adulto e o painel da faixa; 'Manter como está' não", async () => {
+    await abrir(base)
+    expect(screen.queryByText("Conteúdo Adulto")).toBeNull()
+    escolher(screen.getByRole("combobox", { name: "Nota da Versão R18" }), "Informar nota")
+    expect(screen.getByText("Conteúdo Adulto")).toBeTruthy()
+    expect(screen.getByText("Informe a nota para ver o que a faixa significa.")).toBeTruthy()
+  })
+
+  it("a faixa da rubrica acompanha o valor digitado, na linha e no painel", async () => {
+    await abrir(base)
+    escolher(screen.getByRole("combobox", { name: "Nota da Versão R18" }), "Informar nota")
+    const campo = screen.getByRole("textbox", { name: /Versão R18/ })
+    fireEvent.change(campo, { target: { value: "9" } })
+    const faixa = bandForScore(9)
+    const titulo = rubricTitle("adult_content", faixa)!
+    expect(screen.getAllByText(titulo)).toHaveLength(2) // rótulo na linha + painel
+    expect(screen.getByText(faixa)).toBeTruthy()
+    fireEvent.change(campo, { target: { value: "5,5" } })
+    expect(screen.getAllByText(rubricTitle("adult_content", bandForScore(5.5))!)).toHaveLength(2)
+  })
+
+  it("nota inválida: sem faixa na linha, painel em espera e Salvar travado", async () => {
+    await abrir(base)
+    escolher(screen.getByRole("combobox", { name: "Nota da Versão R18" }), "Informar nota")
+    fireEvent.change(screen.getByRole("textbox", { name: /Versão R18/ }), { target: { value: "8,3" } })
+    expect(screen.queryByText(rubricTitle("adult_content", bandForScore(8))!)).toBeNull()
+    expect(screen.getByText("Informe a nota para ver o que a faixa significa.")).toBeTruthy()
+    expect(salvar().disabled).toBe(true)
+  })
+
+  it("o contrato de gravação não mudou: R18 '9' grava { kind: 'nota', value: 9 } e a normal fica 'manter'", async () => {
+    await abrir(base)
+    escolher(screen.getByRole("combobox", { name: "Nota da Versão R18" }), "Informar nota")
+    fireEvent.change(screen.getByRole("textbox", { name: /Versão R18/ }), { target: { value: "9" } })
+    fireEvent.click(salvar())
+    await waitFor(() =>
+      expect(saveWorkEditionCuration).toHaveBeenCalledWith("obra-1", {
+        state: "mixed",
+        r18ExtraChapters: false,
+        scores: { normal: { kind: "manter" }, r18: { kind: "nota", value: 9 } },
+      }),
+    )
+  })
+
+  it("'Marcar como não avaliado' grava { kind: 'nao_avaliado' } e não abre campo nem painel", async () => {
+    await abrir(base)
+    escolher(screen.getByRole("combobox", { name: "Nota da Versão R18" }), "Marcar como não avaliado")
+    expect(screen.queryByRole("textbox", { name: /Versão R18/ })).toBeNull()
+    expect(screen.queryByText("Conteúdo Adulto")).toBeNull()
+    fireEvent.click(salvar())
+    await waitFor(() =>
+      expect(saveWorkEditionCuration).toHaveBeenCalledWith("obra-1", {
+        state: "mixed",
+        r18ExtraChapters: false,
+        scores: { normal: { kind: "manter" }, r18: { kind: "nao_avaliado" } },
+      }),
+    )
+  })
+
+  it("a pós-leitura e a nota por versão usam a MESMA linha e o MESMO painel — não há uma terceira cópia", () => {
+    for (const f of ["components/titles/post-attribute-assessment-form.tsx", "components/titles/work-editions-dialog.tsx"]) {
+      const src = readFileSync(join(process.cwd(), f), "utf8")
+      expect(src, f).toMatch(/import \{ CriterionBandReadout, CriterionScoreRow \} from "@\/components\/titles\/criterion-score-row"/)
+      expect(src, f).toMatch(/<CriterionScoreRow/)
+      expect(src, f).not.toMatch(/function BandReadout/)
+    }
   })
 })

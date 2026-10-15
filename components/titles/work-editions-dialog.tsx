@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, selectedOptionLabel } from "@/components/ui/select"
 import { STATUS_TONE } from "@/lib/ui/status-tone"
+import { CriterionBandReadout, CriterionScoreRow } from "@/components/titles/criterion-score-row"
 import { cn } from "@/lib/utils"
 
 type ScoreMode = EditionScoreInput["kind"]
@@ -324,6 +325,12 @@ function ScoreRow({
   onChange: (d: ScoreDraft) => void
 }) {
   const inputId = `edition-score-${edition}`
+  // A nota por versão é de Conteúdo Adulto e se dá como qualquer nota de critério: a linha do critério
+  // com o rótulo da faixa ao vivo e o painel da faixa (`criterion-score-row`). O campo segue de texto
+  // para aceitar vírgula, validado por `parseEditionScore` (0 a 10, de 0,5 em 0,5).
+  const parsed = draft.mode === "nota" ? parseEditionScore(draft.text) : null
+  const [hovered, setHovered] = useState(false)
+  const [focused, setFocused] = useState(false)
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3">
@@ -343,8 +350,16 @@ function ScoreRow({
             ))}
           </SelectContent>
         </Select>
-        {draft.mode === "nota" && (
-          <>
+      </div>
+      {draft.mode === "nota" && (
+        <div className="flex flex-col gap-2">
+          <CriterionScoreRow
+            slug="adult_content"
+            score={parsed}
+            active={hovered || focused}
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
+          >
             <Input
               id={inputId}
               // texto + inputMode: num type="number" o Chrome devolve vazio para "7,5".
@@ -353,16 +368,23 @@ function ScoreRow({
               placeholder="0 a 10"
               value={draft.text}
               onChange={(e) => onChange({ ...draft, text: e.target.value })}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
               aria-invalid={invalid}
               aria-label={`Nota de conteúdo adulto da ${EDITION_LABEL[edition]}`}
-              className="h-8 w-24"
+              className="w-20 text-center font-mono tabular-nums pr-3"
             />
-            {invalid && draft.text.trim() !== "" && (
-              <span className="text-xs text-destructive">De 0 a 10, de 0,5 em 0,5.</span>
-            )}
-          </>
-        )}
-      </div>
+          </CriterionScoreRow>
+          {invalid && draft.text.trim() !== "" && (
+            <span className="text-xs text-destructive">De 0 a 10, de 0,5 em 0,5.</span>
+          )}
+          <CriterionBandReadout
+            slug={parsed == null ? null : "adult_content"}
+            score={parsed ?? 0}
+            idleHint="Informe a nota para ver o que a faixa significa."
+          />
+        </div>
+      )}
     </div>
   )
 }

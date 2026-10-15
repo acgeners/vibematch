@@ -102,6 +102,8 @@ export interface RankingEntry {
   isFavorite: boolean
   /** Conteúdo adulto (18+) efetivo — works.is_adult (COALESCE(adult_override, adult_auto)). */
   isAdult: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed: boolean
   publicationStatus: string
   publicationStatusId: number | null
   publicationStatusShort: string | null
@@ -887,6 +889,7 @@ export async function getRanking(
       userScore: state.userScore,
       isFavorite: state.isFavorite,
       isAdult: Boolean(w.is_adult),
+      isMixed,
       publicationStatus: getPublicationStatusNameById(publicationStatusId) ?? "Unknown",
       publicationStatusId,
       publicationStatusShort: publicationStatusDisplay?.short ?? null,

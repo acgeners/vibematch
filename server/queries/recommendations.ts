@@ -94,6 +94,7 @@ const CANDIDATE_WORK_SELECT = `
   id,
   title,
   is_adult,
+  edition_state,
   canonical_synopsis,
   review_summary,
   user_work_state(user_score, is_favorite),
@@ -323,6 +324,7 @@ function mapRowToCandidate(
     id: work.id as string,
     title: work.title as string,
     isAdult: Boolean(work.is_adult),
+    isMixed: isMixedEditionState(work.edition_state as string | null | undefined),
     synopsis,
     categoryScores: buildCategoryScores(work.category_scores as RawCategoryScore[] | null, biasMap),
     tags: buildTags(work.work_tags as RawTagRow[] | null),
@@ -546,6 +548,8 @@ export interface AlignmentQueueWork {
   reviewCount?: number | null
   /** Chip 🔞 (works.is_adult) e badge "Real" (works_owner.user_score) — anexados na page. */
   isAdult?: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed?: boolean
   userScore?: number | null
 }
 
@@ -862,6 +866,8 @@ export interface SynopsisQueueWork {
   reviewCount?: number
   /** Chip 🔞 (works.is_adult) e badge "Real" (works_owner.user_score) — anexados na page. */
   isAdult?: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed?: boolean
   userScore?: number | null
   /** Prontidão do gerador de Interesse (motor de orquestração → UI). Anexada só
    *  na fila EXIBIDA (não no countOnly). null quando o cálculo falhou. */
@@ -1562,10 +1568,10 @@ export async function getRecommendationRun(idOrSlug: string): Promise<Recommenda
     // `getCurrentUserId(supabase)`: hoje inofensivo (o early-return de anônimo vem antes),
     // mas fazia a proteção depender de OUTRA linha — bastava alguém mover o guard pra o
     // estado de leitura do dono voltar a vazar. Foi o teste de arquitetura que apontou.
-    // `edition_state` só aqui (não no select compartilhado): é a exibição da run que precisa da edição.
+    // `edition_state` vem no select compartilhado: a run precisa da edição, e o card, do selo (`isMixed`).
     const { data: worksData } = await supabase
       .from("works")
-      .select(`${CANDIDATE_WORK_SELECT}, edition_state`)
+      .select(CANDIDATE_WORK_SELECT)
       .eq("user_work_state.user_id", userId)
       .in("id", workIds)
     // Exibição da run histórica: a justificativa já está congelada no `results`.
@@ -1688,6 +1694,8 @@ export interface AlignedWork {
   chanceScore: number | null
   /** Classificação da obra (`works.is_adult`) — as duas trilhas mostram capa e título. */
   isAdult: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed: boolean
 }
 
 /**
@@ -1790,7 +1798,7 @@ export async function getAlignedWorkSplit(
       supabase
         .from("works")
         .select(
-          "id, title, is_adult, total_chapters, publication_status_id, work_covers(url, is_primary, position), calculated_scores!inner(personal_fit, personal_fit_percentile, expected_score, chance_score, chance_is_stub)",
+          "id, title, is_adult, edition_state, total_chapters, publication_status_id, work_covers(url, is_primary, position), calculated_scores!inner(personal_fit, personal_fit_percentile, expected_score, chance_score, chance_is_stub)",
         )
         .eq("is_archived", false)
         .not("calculated_scores.personal_fit", "is", null),
@@ -1826,6 +1834,7 @@ export async function getAlignedWorkSplit(
           })),
         ),
         isAdult: Boolean(w.is_adult),
+        isMixed: isMixedEditionState(w.edition_state),
         personalFit: calc?.personal_fit != null ? Number(calc.personal_fit) : 0,
         personalFitPercentile:
           calc?.personal_fit_percentile != null ? Number(calc.personal_fit_percentile) : null,

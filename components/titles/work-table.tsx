@@ -54,7 +54,7 @@ import {
   PersonalStatusBadge,
   PublicationStatusBadge,
 } from "@/components/ui/status-badge"
-import { AdultBadge } from "@/components/ui/adult-badge"
+import { WorkContentChip } from "@/components/ui/work-content-chip"
 import {
   TableBody,
   TableCell,
@@ -106,6 +106,7 @@ import {
   writeWorkColumnConfig,
   type WorkColumnNamespace,
 } from "@/components/titles/work-table-config"
+import { isMixedEditionState } from "@/lib/editions/mixed-edition"
 
 type ViewMode = "list" | "cards" | "heatmap"
 
@@ -975,7 +976,7 @@ function WorkCardsView({
                     Mesmo tratamento dos cards do /ranking: código curto + símbolo a 10px. O
                     `flex-wrap` é rede de segurança pra rótulo novo mais longo. */}
                 <div className="absolute inset-x-0 bottom-0 flex flex-wrap items-end gap-1 bg-gradient-to-t from-black/75 via-black/30 to-transparent p-1.5">
-                  {work.is_adult && <AdultBadge className="px-1.5 py-0 text-[10px]" />}
+                  <WorkContentChip isAdult={work.is_adult} isMixed={isMixedEditionState(work.edition_state)} className="px-1.5 py-0 text-[10px]" />
                   <PublicationStatusBadge
                     statusId={work.publication_status_id}
                     compact
@@ -1169,7 +1170,7 @@ function WorkListView({
           workId={work.id}
           className="min-w-0 text-sm font-semibold leading-snug text-foreground line-clamp-2 hover:underline"
         />
-        {work.is_adult && <AdultBadge className="shrink-0 px-1.5 py-0 text-[10px]" />}
+        <WorkContentChip isAdult={work.is_adult} isMixed={isMixedEditionState(work.edition_state)} className="shrink-0 px-1.5 py-0 text-[10px]" />
       </span>
     ),
     publication_status: (work) => <PublicationStatusBadge statusId={work.publication_status_id} compact hiatusKind={work.hiatus_kind ?? null} hiatusKindConfidence={work.hiatus_kind_confidence ?? null} publicationStatusNote={work.publication_status_note ?? null} />,

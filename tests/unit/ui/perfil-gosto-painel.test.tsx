@@ -90,7 +90,7 @@ const work = (
   id: `w${n}`,
   title: `Obra ${n}`,
   coverUrls: [],
-  isAdult: false,
+  isAdult: false, isMixed: false,
   personalFit: 0.5,
   personalFitPercentile: 90,
   personalStatus: user == null ? "Want to Read" : "Finished",
@@ -416,7 +416,7 @@ describe("selo 18+ nas duas trilhas", () => {
   // um teste sobre o dado passaria verde com o selo fora da árvore.
   it("marca a obra 18+ na trilha das lidas, e só ela", () => {
     renderPanel({
-      aligned: { ...ALIGNED, read: [work(1, 9.1, 9.4, { isAdult: true }), work(2, 8.7, 8.3)] },
+      aligned: { ...ALIGNED, read: [work(1, 9.1, 9.4, { isAdult: true, isMixed: false }), work(2, 8.7, 8.3)] },
     })
     const adulta = screen.getByText("Obra 1").closest("li")!
     const comum = screen.getByText("Obra 2").closest("li")!
@@ -426,7 +426,7 @@ describe("selo 18+ nas duas trilhas", () => {
 
   it("marca também na fila das não lidas", () => {
     renderPanel({
-      aligned: { ...ALIGNED, unread: [work(11, 8.7, null, { isAdult: true }), work(12, 8.6, null)] },
+      aligned: { ...ALIGNED, unread: [work(11, 8.7, null, { isAdult: true, isMixed: false }), work(12, 8.6, null)] },
     })
     goTo(/O que isso muda/)
     const adulta = screen.getByText("Obra 11").closest("li")!

@@ -29,6 +29,8 @@ export interface CalendarMarker {
   chaptersRead: number | null
   totalChapters: number | null
   isAdult: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed: boolean
   expectedScore: number | null
 }
 
@@ -68,6 +70,7 @@ export function buildMarkers(
       chaptersRead: w.chaptersRead,
       totalChapters: w.totalChapters,
       isAdult: w.isAdult,
+      isMixed: w.isMixed,
       expectedScore: w.expectedScore,
     }
 

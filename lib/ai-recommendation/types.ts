@@ -216,6 +216,8 @@ export interface CandidateWorkInput {
   title: string
   /** Conteúdo adulto (18+) efetivo — works.is_adult. Só pra exibição (selo no card). */
   isAdult: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed: boolean
   synopsis: string | null
   categoryScores: Partial<Record<CriterionSlug, number>>
   tags: Array<{ name: string; group: string | null }>

@@ -1,9 +1,12 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { isMixedEditionState } from "@/lib/editions/mixed-edition"
 
 export interface AdultScoreFlag {
   /** works.is_adult — chip 🔞 do card. */
   isAdult: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed: boolean
   /** works_owner.user_score (do dono) — badge "Real" do card. */
   userScore: number | null
 }
@@ -29,7 +32,7 @@ export async function fetchAdultScoreFlags(ids: string[]): Promise<Map<string, A
   const ensure = (id: string): AdultScoreFlag => {
     let e = map.get(id)
     if (!e) {
-      e = { isAdult: false, userScore: null }
+      e = { isAdult: false, isMixed: false, userScore: null }
       map.set(id, e)
     }
     return e
@@ -38,11 +41,13 @@ export async function fetchAdultScoreFlags(ids: string[]): Promise<Map<string, A
   await Promise.all(
     chunks.map(async (chunk) => {
       const [adult, scores] = await Promise.all([
-        sb.from("works").select("id, is_adult").in("id", chunk),
+        sb.from("works").select("id, is_adult, edition_state").in("id", chunk),
         sb.from("works_owner").select("id, user_score").in("id", chunk),
       ])
-      for (const r of (adult.data ?? []) as Array<{ id: string; is_adult: boolean | null }>) {
-        ensure(r.id).isAdult = Boolean(r.is_adult)
+      for (const r of (adult.data ?? []) as Array<{ id: string; is_adult: boolean | null; edition_state: string | null }>) {
+        const e = ensure(r.id)
+        e.isAdult = Boolean(r.is_adult)
+        e.isMixed = isMixedEditionState(r.edition_state)
       }
       for (const r of (scores.data ?? []) as Array<{ id: string; user_score: number | null }>) {
         ensure(r.id).userScore = r.user_score ?? null

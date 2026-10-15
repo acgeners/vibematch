@@ -6,6 +6,7 @@ import { getPersonalStateReader } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { belongsToMyList, emptyShelfCounts, shelfOfStatusId } from "@/lib/my-list/shelves"
 import type { ShelfCounts, ShelfKey } from "@/lib/my-list/shelves"
+import { isMixedEditionState } from "@/lib/editions/mixed-edition"
 
 const PAGE = 1000
 /**
@@ -27,6 +28,8 @@ export interface MyListWork {
   expectedScore: number | null
   lastReadAt: string | null
   isAdult: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed: boolean
 }
 
 export interface MyList {
@@ -111,7 +114,7 @@ export async function getMyList(): Promise<MyList> {
     const { data, error } = await supabase
       .from("works")
       .select(
-        "id, title, total_chapters, is_adult, calculated_scores(expected_score), work_covers(url, is_primary, position)",
+        "id, title, total_chapters, is_adult, edition_state, calculated_scores(expected_score), work_covers(url, is_primary, position)",
       )
       .eq("is_archived", false)
       .in("id", chunk)
@@ -121,6 +124,7 @@ export async function getMyList(): Promise<MyList> {
       title: string
       total_chapters: number | null
       is_adult: boolean | null
+      edition_state: string | null
       calculated_scores?: { expected_score?: number | null } | null
       work_covers?: CoverRow[] | null
     }>) {
@@ -139,6 +143,7 @@ export async function getMyList(): Promise<MyList> {
         expectedScore: scores.overlay(w.id, w.calculated_scores)?.expected_score ?? null,
         lastReadAt: estado.lastReadAt,
         isAdult: Boolean(w.is_adult),
+        isMixed: isMixedEditionState(w.edition_state),
       })
     }
   }

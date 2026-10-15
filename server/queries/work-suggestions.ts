@@ -7,6 +7,7 @@ import { coverCandidates } from "@/lib/work-derived"
 import { getPublicationStatusNameById } from "@/lib/constants/status-lookups"
 import { getHideAdultContent } from "@/server/queries/current-user"
 import { titleTokens, workMatchesQuery, matchedAliasFor, matchTier } from "@/lib/title-match"
+import { isMixedEditionState } from "@/lib/editions/mixed-edition"
 
 /** Uma sugestão do dropdown de busca ao vivo de /catalog. */
 export interface WorkSuggestion {
@@ -18,6 +19,8 @@ export interface WorkSuggestion {
   year: number | null
   publicationStatus: string | null
   isAdult: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed: boolean
   /**
    * O título alternativo que casou a busca — só quando NÃO foi o título principal.
    * Sem isto o dropdown mostra um nome sem relação nenhuma com o que foi digitado.
@@ -31,6 +34,7 @@ interface IndexRow {
   original_title: string | null
   alternative_titles: string[] | null
   is_adult: boolean | null
+  edition_state: string | null
   total_chapters: number | null
   year: number | null
   publication_status_id: number | null
@@ -56,7 +60,7 @@ const getSuggestionIndex = unstable_cache(
         supabase
           .from("works")
           .select(
-            "id, title, original_title, alternative_titles, is_adult, total_chapters, year, publication_status_id",
+            "id, title, original_title, alternative_titles, is_adult, edition_state, total_chapters, year, publication_status_id",
           )
           .eq("is_archived", false),
       { orderBy: ["id"], label: "getSuggestionIndex" },
@@ -126,6 +130,7 @@ export async function getWorkSuggestions(
         ? getPublicationStatusNameById(row.publication_status_id)
         : null,
       isAdult: Boolean(row.is_adult),
+      isMixed: isMixedEditionState(row.edition_state),
       matchedAlias: matchedAliasFor(row, tokens),
     }
   })

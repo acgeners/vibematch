@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { AlertTriangle, Check, ExternalLink, ImageOff } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { AdultBadge } from "@/components/ui/adult-badge"
+import { WorkContentChip } from "@/components/ui/work-content-chip"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { CoverImage } from "@/components/ui/cover-image"
 import { cn, titleToSlug } from "@/lib/utils"
@@ -82,7 +82,7 @@ export function RankedWorkCard({ rank, ranked }: RankedWorkCardProps) {
           </TooltipProvider>
         </div>
 
-        {work.isAdult && <AdultBadge className="w-fit px-1.5 py-0 text-[10px]" />}
+        <WorkContentChip isAdult={work.isAdult} isMixed={work.isMixed} className="w-fit px-1.5 py-0 text-[10px]" />
 
         <p className="text-xs leading-relaxed text-muted-foreground">{justification}</p>
 

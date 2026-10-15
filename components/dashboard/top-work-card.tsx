@@ -2,7 +2,7 @@ import { ScoreBadge } from "@/components/ui/score-badge"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import type { ScoreColorThresholds } from "@/components/ui/score-badge"
 import { PublicationStatusBadge, PersonalStatusBadge } from "@/components/ui/status-badge"
-import { AdultBadge } from "@/components/ui/adult-badge"
+import { WorkContentChip } from "@/components/ui/work-content-chip"
 import { CoverImage } from "@/components/ui/cover-image"
 import { QualityHearts } from "@/components/ui/quality-hearts"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
@@ -17,6 +17,8 @@ interface TopWorkCardProps {
     publicationStatusId: number | null
     personalStatusId: number | null
     isAdult: boolean
+    /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+    isMixed: boolean
     totalChapters?: number | null
     /** Interesse declarado (♥…♥♥♥♥). Ausente = ainda não avaliou a sinopse. */
     synopsisQuality?: string | null
@@ -90,7 +92,7 @@ export function TopWorkCard({ rank, work, scoreThresholds, hideRank = false }: T
       )}
 
       <div className="mt-auto flex flex-wrap gap-1 pt-1">
-        {work.isAdult && <AdultBadge className="px-1.5 py-0" />}
+        <WorkContentChip isAdult={work.isAdult} isMixed={work.isMixed} className="px-1.5 py-0" />
         <PublicationStatusBadge statusId={work.publicationStatusId} hiatusKind={work.hiatusKind ?? null} hiatusKindConfidence={work.hiatusKindConfidence ?? null} publicationStatusNote={work.publicationStatusNote ?? null} />
         <PersonalStatusBadge statusId={work.personalStatusId} />
       </div>

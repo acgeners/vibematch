@@ -40,6 +40,8 @@ export interface TagsReviewsWork {
   reviewCount: number
   /** Chip 🔞 (works.is_adult) e badge "Real" (works_owner.user_score) — anexados na page. */
   isAdult?: boolean
+  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
+  isMixed?: boolean
   userScore?: number | null
 }
 
@@ -203,6 +205,7 @@ export function TagsReviewsTab({
                 coverUrl={w.coverUrls[0] ?? null}
                 expectedScore={w.expectedScore}
                 isAdult={w.isAdult}
+                isMixed={w.isMixed}
                 userScore={w.userScore}
                 publicationStatusId={w.publicationStatusId}
                 hiatusKind={w.hiatusKind}

@@ -504,6 +504,7 @@ export default async function FilaRecomendacaoPage({
         tagCount: c?.tagCount ?? 0,
         reviewCount: c?.reviewCount ?? 0,
         isAdult: f?.isAdult ?? false,
+        isMixed: f?.isMixed ?? false,
         userScore: f?.userScore ?? null,
       }
     })
@@ -556,6 +557,7 @@ export default async function FilaRecomendacaoPage({
         tagCount: c?.tagCount ?? 0,
         reviewCount: c?.reviewCount ?? 0,
         isAdult: f?.isAdult ?? false,
+        isMixed: f?.isMixed ?? false,
         userScore: f?.userScore ?? null,
       }
     })
@@ -588,6 +590,7 @@ export default async function FilaRecomendacaoPage({
       tagCount: counts.get(w.id)?.tagCount ?? 0,
       reviewCount: counts.get(w.id)?.reviewCount ?? 0,
       isAdult: flags.get(w.id)?.isAdult ?? false,
+      isMixed: flags.get(w.id)?.isMixed ?? false,
       userScore: flags.get(w.id)?.userScore ?? null,
     }))
     const readIds = readIdsFor("veredito", works)

@@ -82,6 +82,8 @@ import {
 } from "@/components/ui/column-picker"
 import { CompareToolbar } from "@/components/titles/compare-toolbar"
 import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
+import { R19EditionChip } from "@/components/ui/work-content-chip"
+import { workContentBadge } from "@/lib/editions/mixed-edition"
 
 const HIDDEN_ROWS_STORAGE_KEY = "compare_hidden_rows_v1"
 // v3 → v4: adiciona as linhas "Prioridade" (decision) e "Alinhamento"
@@ -345,6 +347,7 @@ export function WorkCompareDrawer({
           coverUrls: w.coverUrls,
           year: w.year,
           isAdult: w.isAdult,
+          isMixed: w.isMixed,
           publicationStatus: st?.status ?? null,
           publicationStatusShort: st?.short ?? null,
           publicationStatusColor: st?.color || null,
@@ -1723,7 +1726,7 @@ function CompareHeaderCell({
           {/* Identidade da obra, não comparação: responde "que obra é essa?" a um palmo do
               título. É este bloco que ocupa o vão que antes ficava vazio. */}
           <div className="mt-0.5 flex items-center gap-1.5 text-[11px]">
-            {work.isAdult && (
+            {workContentBadge({ isMixed: work.isMixed, isAdult: work.isAdult }) === "adult" && (
               <span
                 className="rounded border border-red-500/45 bg-red-500/10 px-1 py-px text-[10px] font-bold leading-none text-red-600 dark:text-red-300"
                 title="Conteúdo 18+"
@@ -1731,6 +1734,7 @@ function CompareHeaderCell({
                 18+
               </span>
             )}
+            {workContentBadge({ isMixed: work.isMixed, isAdult: work.isAdult }) === "r19_edition" && <R19EditionChip className="rounded px-1 py-px text-[10px] font-bold leading-none" />}
             <span className="tabular-nums text-muted-foreground">{work.year ?? "—"}</span>
           </div>
           <SynopsisButton synopsis={work.synopsis} />
