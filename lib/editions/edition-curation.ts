@@ -263,10 +263,18 @@ export function planEditionCuration(
           marksRecalc: antes !== wanted.value,
         })
       } else if (wanted.kind === "nao_avaliado") {
-        if (cur && cur.source === "not_rated") continue
+        // 🔴 "Não avaliado" da AUDITORIA (ninguém avaliou ainda) e "não avaliado" da CURADORIA (decisão
+        // de manter sem nota) têm o MESMO valor e significados opostos para a inferência estrutural: o
+        // primeiro ela pode preencher, o segundo é override (`lib/editions/structural-inference.ts`).
+        // Por isso a decisão é gravada mesmo sobre a ausência da auditoria — só a da própria curadoria
+        // dispensa escrita. Sem isso, a escolha da curadora não deixava rastro e o recálculo seguinte
+        // preencheria a versão por cima dela.
+        if (cur && cur.source === "not_rated" && cur.decidedBy === "curator") continue
         const row: CuratedScoreRow = { edition, criterion_slug: "adult_content", score: null, source: "not_rated", status: "not_rated", confidence: null, ai_evaluation_id: null, decided_by: "curator", evidence }
         const marksRecalc = antes !== null
-        scoreOps.push(cur ? { edition, op: "replace", row, marksRecalc } : { edition, op: "upsert", row, marksRecalc })
+        // not_rated → not_rated é a MESMA força: o upsert passa no gatilho, sem apagar e reinserir.
+        const rebaixa = cur != null && cur.source !== "not_rated"
+        scoreOps.push(rebaixa ? { edition, op: "replace", row, marksRecalc } : { edition, op: "upsert", row, marksRecalc })
       }
     }
   }

@@ -70,6 +70,8 @@ export async function recordMangaUpdatesEditionEvidence(
           novel_r18_lines: evidence.novelR18Lines,
           categories: evidence.categories,
           notes: evidence.notes,
+          // Gêneros do MU (Smut/Hentai confirmam a natureza sexual da versão adulta) — `work_genres` não os guarda.
+          genres: evidence.genres ?? [],
         },
       },
       evidence_fetched_at: fetchedAt,

@@ -73,6 +73,7 @@ import { readFantasyDrift, scoringCriteriaSignature } from "@/server/queries/fan
 import { SCORING_CONTRACT, conferirContratoDoCalculo, mensagemDeContratoQuebrado } from "@/lib/calculations/scoring-contract"
 import { exigirContratoDeScoring } from "@/server/queries/canonical-contract"
 import { assertRecalcCodeAllowed } from "@/server/recalc/code-guard"
+import { reconcileStructuralInferenceForRecalc, recalcPendingAfter } from "@/server/editions/structural-inference-sync"
 import type { DeclaredTagPref } from "@/server/queries/tag-preferences"
 import { loadArtLabels } from "@/server/queries/pilot-taste"
 import { computeArtForCatalog } from "@/lib/art/model"
@@ -659,6 +660,11 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   // recusaria a escrita de qualquer jeito — aqui o checkout defasado descobre isso sem custo.
   await exigirContratoDeScoring(supabase)
 
+  // Inferência ESTRUTURAL da nota por versão das mixed, ANTES de ler essas notas logo abaixo: as
+  // linhas inferidas e a previsão mudam juntas, nesta execução. Falha macia (o recálculo segue) e
+  // desligada até o legado ser aplicado — ver server/editions/structural-inference-sync.ts.
+  const editionInference = await reconcileStructuralInferenceForRecalc(supabase)
+
   // Offset de atributos (Fase 1.5) — carregado uma vez e aplicado on-read.
   const userId = await getCurrentUserId(supabase)
   const biasMap = await getBiasMap(userId, supabase)
@@ -929,8 +935,9 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
       // (recalc_pending é lido pela fila/sonda). Race conhecido e benigno: uma
       // edição entre o load das obras e este UPDATE perde o flag até o próximo
       // trigger (single-user, janela de segundos; a próxima edição re-arma).
-      recalc_pending: false,
-      recalc_last_edit_at: null,
+      // 🔴 Exceção: a inferência estrutural por versão ficou devendo (erro parcial ou total) ⇒ a
+      // pendência FICA, com a janela de 1h reiniciada — ver `recalcPendingAfter`.
+      ...recalcPendingAfter(editionInference, new Date().toISOString()),
     })
     .eq("id", config.id)
   if (configUpdateErr) throw new Error(configUpdateErr.message)
@@ -982,6 +989,8 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
 
   return {
     recalculated: works.length,
+    // O que a inferência estrutural por versão fez nesta execução — erro parcial aparece aqui, não só no log.
+    editionInference,
     diagnostics: {
       gptClampHits,
       gptClampHitRate,

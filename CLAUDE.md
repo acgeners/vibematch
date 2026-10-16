@@ -311,12 +311,12 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**108 arquivos, remedidos em 2026-10-12**):
+banco declara um dos dois (**109 arquivos, remedidos em 2026-10-15**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **45** | só LÊ ⇒ vai pro local, de graça |
-| `ALVO: NUVEM` no cabeçalho | **51** | GRAVA ⇒ tem que ir pra nuvem |
+| `ALVO: NUVEM` no cabeçalho | **52** | GRAVA ⇒ tem que ir pra nuvem |
 | (não tocam o banco) | 9 | fora da régua — entrou o `smoke-browser.mjs`, que só abre rota |
 
 🔴 **A régua tem DOIS rótulos e o mundo tem TRÊS casos — `smoke-logado.mjs` é o terceiro.**
@@ -4052,10 +4052,10 @@ faz `relatar()` devolver `false`. É o "declara o que esperava achar" do título
 
 ### Onde vale, e a válvula
 
-Aplicado a **11 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos`
+Aplicado a **12 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos`
 · `normalizar-titulos-alternativos` · `reverter-calibracao-auto-aplicada` ·
 `backfill-faixa-citada` · `repick-dead-covers` · `seed-art-signal` · `tag-r19-adult` ·
-`push-opening-structure` · `recalcular-vies-da-dona`.
+`push-opening-structure` · `recalcular-vies-da-dona` · `reconciliar-inferencia-estrutural`.
 
 ⚠️ **`funil.nadaAFazer("…")` substitui o `console.log` da frase**, e não é estilo: separados,
 volta a ser possível imprimir a conclusão sem a evidência, que é o estado exato que custou o
@@ -5607,9 +5607,11 @@ Based on a R19 Novel" (o R19 é do novel — teto 6 na nota). Testes: `npm run t
 **Nunca herdar.** Em obra `mixed`, `category_scores.adult_content` é a nota misturada (legado: não é
 exibida nem prevista). A nota de cada edição mora em `work_edition_scores`; sem linha ou `not_rated` ⇒
 "não avaliado para esta edição", nunca a da outra edição. Dono: `adultContentFor` (`lib/editions/mixed-edition.ts`).
-- O baseline 5,0 da normal (`inferred_base`) NÃO é avaliação (`provisional` + `baixa`, travados por CHECK).
-  Não vale para obra com R18 só nos extras (`work_edition_state.r18_extra_chapters`) nem sem R18 sexual provada.
-- Não existe nota R18 "por regra": existência da R18 ou piso de tag sozinhos não viram nota de edição.
+- A nota inferida (`inferred_base`: a base da normal e o piso da adulta) NÃO é avaliação (`provisional` +
+  `baixa`, travados por CHECK). Não vale para obra com R18 só nos extras (`work_edition_state.r18_extra_chapters`)
+  nem sem R18 sexual provada — a régua inteira está em "Inferência ESTRUTURAL", logo abaixo.
+- Não existe nota R18 que afirme intensidade "por regra": a existência da R18 sozinha não gera nota, e o
+  piso de tag explícita (9) não vira nota de edição. A única inferência é a estrutural, provisória.
 
 **Previsão:** o recálculo prevê as DUAS edições com o MESMO modelo e grava
 `expected_by_edition`; as colunas de sempre ficam com a edição padrão de quem recebe a nota
@@ -5635,6 +5637,34 @@ compartilhado.
 
 **Publicada em 13/10/2026** (Fly v49, migs 213–218, contrato `s9-fantasy-b-edicao-v2`). Testes:
 `npm run test:db-edicao-fase2` e `npm run test:db-retirada-contratos`.
+
+### Inferência ESTRUTURAL da nota por versão (política 6/7, 15/10/2026)
+
+Quando a estrutura editorial restringe a faixa, a versão sem nota recebe uma inferência marcada como
+tal (`inferred_base`, regra em `evidence.regra`), em vez de ficar sem Nota Prevista. Dono único da
+política: `lib/editions/structural-inference.ts`; executor: `server/editions/structural-inference-sync.ts`.
+- **Padrão R15/R16, sem extras, com natureza sexual da adulta confirmada** ⇒ 6,0 (`base_padrao_r15`,
+  = `R15_FROM_R19_CEILING`). R12, R17, rótulo desconhecido e extras: sem base.
+- **Adulta com natureza sexual confirmada** ⇒ 7,0 (`piso_adulta_sexual`, = `ADULT_LABEL_FLOOR`).
+- 🔴 **Confirmam:** tag de ato (`explicit`), tag de subgrupo sexual COM nível de nota ou flag forte,
+  Sexual Content/Borderline H, Smut/Hentai do MangaUpdates (gravados na evidência: `work_genres` não
+  guarda os adultos), classificação externa ≥ piso adulto, ou adulta já avaliada por fonte forte.
+  **Não confirmam:** rótulo de idade (Adult, Mature, R19), violência (Whipping fica no subgrupo
+  `explicit` sem nível — é a marca de obra adulta por violência), "Uncensored", prosa, e a nota
+  genérica da avaliação (sem versão-alvo — nunca é promovida para a R18).
+- Nunca toca `curator_confirmed`/`ai_evaluated`/`reused_existing` nem o "não avaliado" da curadoria.
+  🔴 O "não avaliado" da AUDITORIA (`decided_by = 'audit'`) ela pode preencher; o da CURADORIA é override.
+  Por isso a curadoria GRAVA a escolha "não avaliado" mesmo sobre a ausência da auditoria (mesmo valor,
+  autoria diferente) — sem isso a decisão humana não deixava rastro.
+  Só RETIRA o que ela mesma inferiu (DELETE filtrado no banco por fonte + regra, e devolve a linha de
+  antes, guardada em `evidence.anterior`) — nada passa por `app.permitir_rebaixar_edicao`. A base 5,0
+  da mig 214 é atualizada para 6,0 quando a política a sustenta; quando não, vira conflito (curadoria).
+- Roda no recálculo global (depois das guardas, antes de ler as notas) e na curadoria de versões.
+  Erro nela não derruba o recálculo, mas também não vira sucesso: o status volta no resultado e a
+  pendência FICA, com a janela de 1h reiniciada (`recalcPendingAfter`) — reprocessar é idempotente.
+  🔴 **`STRUCTURAL_INFERENCE_AUTO_APPLY` nasce desligado:** ligado, o primeiro recálculo em produção
+  SERIA a aplicação do legado sem revisão. O legado vai por `scripts/reconciliar-inferencia-estrutural.ts`
+  (ensaio por padrão; `--execute --edicao=normal|r18`, de checkout canônico); só depois se liga.
 
 ## A RAZÃO do limite 18+ tem dono — e quem a estava escrevendo era o modelo
 

@@ -110,10 +110,21 @@ describe("adultContentFor(work, edição) — nunca a nota de outra edição", (
 })
 
 describe("procedência: o baseline não se passa por avaliação", () => {
-  it("baseline = 'Nota-base provisória (inferida)' e diz que NÃO é avaliação", () => {
+  it("versão padrão inferida = 'Nota-base inferida', diz que é base conservadora e que NÃO é avaliação", () => {
+    // Vale também para a base antiga 5,0 da mig 214 (mesma premissa): a versão decide o texto.
     const p = editionScoreProvenance(adultContentFor({ isMixed: true, legacyScore: 9, editionRows: [linha("normal", 5, "inferred_base")] }, "normal"))
-    expect(p?.label).toBe("Nota-base provisória (inferida)")
-    expect(p?.detail).toMatch(/Não é avaliação/)
+    expect(p?.label).toBe("Nota-base inferida")
+    expect(p?.detail).toMatch(/cortadas ou atenuadas/)
+    expect(p?.detail).toMatch(/base conservadora/)
+    expect(p?.detail).toMatch(/Não é avaliação da IA/)
+  })
+  it("versão adulta inferida = 'Nota mínima inferida': conteúdo sexual confirmado, intensidade não medida — nunca o texto da normal", () => {
+    const p = editionScoreProvenance(adultContentFor({ isMixed: true, legacyScore: 9, editionRows: [linha("r18", 7, "inferred_base")] }, "r18"))
+    expect(p?.label).toBe("Nota mínima inferida")
+    expect(p?.detail).toMatch(/confirmação de conteúdo sexual/)
+    expect(p?.detail).toMatch(/menor valor compatível/)
+    expect(p?.detail).toMatch(/Não é avaliação da IA/)
+    expect(p?.detail).not.toMatch(/cortadas|padrão/)
   })
   it("ausência = 'Não avaliado para esta versão'", () => {
     expect(editionScoreProvenance({ kind: "absent", edition: "r18", row: null })?.label).toBe("Não avaliado para esta versão")

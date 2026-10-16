@@ -293,10 +293,15 @@ export async function fetchMangaUpdatesById(id: number): Promise<MangaUpdatesDet
     const categories: string[] = (data.categories ?? []).map((c: any) => c.category as string)
     // A descrição CRUA ainda tem os blocos "Original Webtoon: R19: … / R15: …"; a sinopse limpa não.
     // Fica guardada (no servidor) até o save confirmar o vínculo — ver edition-evidence-cache.ts.
-    const editionEvidence = extractMangaUpdatesEditionEvidence({
-      description: typeof data.description === "string" ? data.description : null,
-      categories,
-    })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const genres: string[] = (data.genres ?? []).map((g: any) => g.genre as string).filter(Boolean)
+    const editionEvidence = {
+      ...extractMangaUpdatesEditionEvidence({
+        description: typeof data.description === "string" ? data.description : null,
+        categories,
+      }),
+      genres,
+    }
     rememberEditionEvidence("mangaupdates", id, editionEvidence)
 
     return {

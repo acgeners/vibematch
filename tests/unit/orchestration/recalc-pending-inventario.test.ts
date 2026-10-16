@@ -90,6 +90,12 @@ const INVENTARIO: Record<string, boolean> = {
   saveWorkEditionCuration: true,
   // Remover a decisão da curadoria marca só quando a obra entra ou sai de `mixed` — é o que a previsão lê.
   revertWorkEditionCuration: true,
+
+  // ── Entrou com a inferência estrutural por versão (2026-10-15) ─────────────
+  // O save que confirma o vínculo com o MangaUpdates grava o estado de edição (pode virar mixed). O
+  // estado é entrada da previsão por versão E da inferência estrutural, que roda no recálculo — sem
+  // marcar, a obra que vira mixed esperaria outra mudança qualquer. Declara `edition_scores`.
+  recordMangaUpdatesEditionEvidence: true,
 }
 
 /**

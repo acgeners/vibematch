@@ -102,10 +102,18 @@ describe("nota por edição — o curador informa; sem regra automática", () =>
     ])
   })
 
-  it("'não avaliado' sem linha insere a ausência; sobre ausência já gravada, nada", () => {
+  it("'não avaliado' sem linha insere a ausência; sobre a ausência da PRÓPRIA curadoria, nada", () => {
     expect(planEditionCuration(mixed, entrada({ scores: { normal: { kind: "nao_avaliado" }, r18: { kind: "manter" } } }), NOW).scoreOps[0]).toMatchObject({ op: "upsert" })
-    const jaAusente = { ...mixed, scores: { normal: { score: null, source: "not_rated" as const } } }
-    expect(planEditionCuration(jaAusente, entrada({ scores: { normal: { kind: "nao_avaliado" }, r18: { kind: "manter" } } }), NOW).scoreOps).toEqual([])
+    const jaDecidido = { ...mixed, scores: { normal: { score: null, source: "not_rated" as const, decidedBy: "curator" as const } } }
+    expect(planEditionCuration(jaDecidido, entrada({ scores: { normal: { kind: "nao_avaliado" }, r18: { kind: "manter" } } }), NOW).scoreOps).toEqual([])
+  })
+
+  it("🔴 'não avaliado' sobre a ausência da AUDITORIA grava a DECISÃO (upsert de mesma força, sem recálculo)", () => {
+    // Mesmo valor, significado oposto: a da auditoria a inferência estrutural pode preencher; a da
+    // curadoria é override. Sem gravar, a escolha humana não deixaria rastro.
+    const daAuditoria = { ...mixed, scores: { r18: { score: null, source: "not_rated" as const, decidedBy: "audit" as const } } }
+    const [op] = planEditionCuration(daAuditoria, entrada({ scores: { normal: { kind: "manter" }, r18: { kind: "nao_avaliado" } } }), NOW).scoreOps
+    expect(op).toMatchObject({ edition: "r18", op: "upsert", marksRecalc: false, row: { source: "not_rated", decided_by: "curator" } })
   })
 
   it("fora de mixed a nota por edição é ignorada (o gatilho da 213 recusaria) — as linhas antigas ficam", () => {
@@ -138,7 +146,8 @@ describe("entrada da nota", () => {
 describe("o que o diálogo mostra", () => {
   it("a nota atual sai com a MESMA procedência da página da obra — e a ausência se distingue do not_rated", () => {
     expect(describeCurrentEditionScore("r18", { score: 9, source: "reused_existing" })).toBe("9,0 · Da avaliação da obra")
-    expect(describeCurrentEditionScore("normal", { score: 5, source: "inferred_base" })).toBe("5,0 · Nota-base provisória (inferida)")
+    expect(describeCurrentEditionScore("normal", { score: 5, source: "inferred_base" })).toBe("5,0 · Nota-base inferida")
+    expect(describeCurrentEditionScore("r18", { score: 7, source: "inferred_base" })).toBe("7,0 · Nota mínima inferida")
     // Para quem cura, "sem linha" e `not_rated` explícito NÃO são a mesma coisa — a tela diz qual é.
     expect(describeCurrentEditionScore("normal", undefined)).toBe("Sem registro (não avaliado)")
     expect(describeCurrentEditionScore("r18", { score: null, source: "not_rated", decidedBy: "curator" })).toBe("Não avaliado · registrado pela curadoria")

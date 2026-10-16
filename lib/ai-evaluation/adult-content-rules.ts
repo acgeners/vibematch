@@ -73,7 +73,7 @@ export const EXPLICIT_FLOOR = 9
  * EXPLÍCITO — deixá-lo em 8 permitiria "explícito mas nota 8", que a decisão de
  * produto ("qualquer cena explícita ⇒ > 8") exclui.
  */
-const CONTENT_RATING_BOUNDS: Record<string, number> = {
+export const CONTENT_RATING_BOUNDS: Record<string, number> = {
   suggestive: 5,
   erotica: 7,
   pornographic: EXPLICIT_FLOOR,
@@ -107,7 +107,7 @@ const ADULT_TAG_GROUP = "content_indicator"
  *  pro tier de RÓTULO (piso 7), pra bater com a tag homônima: na taxonomia das fontes
  *  ele marca faixa etária, não necessariamente cena mostrada. "Mature" também fica
  *  fora — é largo e cobre violência e tema adulto sem sexo. */
-const EXPLICIT_GENRES = ["smut", "hentai"]
+export const EXPLICIT_GENRES = ["smut", "hentai"]
 
 /** Gêneros que rotulam a obra como adulta sem afirmar cena explícita. */
 const ADULT_LABEL_GENRES = ["adult"]
