@@ -6,6 +6,7 @@ import {
   SEXUAL_EXTERNAL_RATINGS,
   STANDARD_EDITION_BASE,
   STRUCTURAL_RULES,
+  TAG_SOURCES_THAT_CONFIRM,
   planStructuralInference,
   sexualNatureSignals,
   standardEditionLabel,
@@ -17,12 +18,19 @@ import type { CurrentEditionRow, StructuralFacts, StructuralTagFacts } from "@/l
  * Os casos com nome de obra saíram do catálogo real (ensaio de 2026-10-15 nas 140 mixed).
  */
 
-const tag = (name: string, tier: string | null, subgroup: string | null, flags: { ind?: boolean; strong?: boolean } = {}): StructuralTagFacts => ({
+const tag = (
+  name: string,
+  tier: string | null,
+  subgroup: string | null,
+  flags: { ind?: boolean; strong?: boolean; source?: string | null } = {},
+): StructuralTagFacts => ({
   name,
   tier,
   subgroup,
   adultIndicator: flags.ind ?? true,
   adultIndicatorStrong: flags.strong ?? false,
+  // `null` = legado/formulário/fontes: a procedência mais comum do catálogo.
+  source: "source" in flags ? flags.source : null,
 })
 const ATO = tag("Cunnilingus", "explicit", "explicit", { strong: true })
 const R19 = tag("R19", "label", "rating-labels", { strong: true })
@@ -120,6 +128,82 @@ describe("o que confirma a natureza sexual — e o que NÃO", () => {
     const p = planStructuralInference(fatos({ tags: [WHIPPING, R19], current: {} }))
     expect(p.decisions.r18.kind).toBe("none")
     expect(p.decisions.normal.kind).toBe("none")
+  })
+})
+
+describe("a procedência do vínculo da tag decide se ela pode confirmar (2026-10-16)", () => {
+  const sinais = (f: Partial<Parameters<typeof sexualNatureSignals>[0]>) =>
+    sexualNatureSignals({ tags: [], muGenres: [], externalRatings: [], adultEditionRow: null, ...f })
+  const sexualContent = (source: string | null | undefined) => tag("Sexual Content", "label", "rating-labels", { source })
+  const AGE_E_VIOLENCIA = [ADULT, R19, WHIPPING, tag("Gore", null, "violence", { ind: false })]
+
+  it("a lista de permissão é exatamente legado/fontes, backfill das fontes e curadoria", () => {
+    expect([...TAG_SOURCES_THAT_CONFIRM].sort((a, b) => String(a).localeCompare(String(b)))).toEqual(["curadoria", "imported", null])
+  })
+
+  it("Sexual Content de fonte externa (backfill), de curadoria e do legado/formulário confirma", () => {
+    for (const source of ["imported", "curadoria", null]) expect(sinais({ tags: [sexualContent(source)] })).toEqual(["tag sexual: Sexual Content"])
+  })
+
+  it("Sexual Content só inferida pela IA NÃO confirma — é a prosa que a política já recusa, com outro nome", () => {
+    expect(sinais({ tags: [sexualContent("ai_inferred")] })).toEqual([])
+  })
+
+  it("a exclusão é da PROCEDÊNCIA, não do tipo de tag: ato explícito inferido pela IA também não confirma", () => {
+    expect(sinais({ tags: [tag("Cunnilingus", "explicit", "explicit", { strong: true, source: "ai_inferred" })] })).toEqual([])
+    expect(sinais({ tags: [tag("First-Time Intercourse", "label", "sexual-themes", { ind: false, source: "ai_inferred" })] })).toEqual([])
+  })
+
+  it("procedência fora da lista (marcador de sinopse, nova) e procedência NÃO LIDA não confirmam", () => {
+    expect(sinais({ tags: [sexualContent("synopsis_marker")] })).toEqual([])
+    expect(sinais({ tags: [sexualContent("escritor_novo")] })).toEqual([])
+    expect(sinais({ tags: [sexualContent(undefined)] })).toEqual([])
+  })
+
+  it("tag de IA + outro sinal forte: confirma pelo OUTRO sinal, e a tag de IA não aparece como evidência", () => {
+    expect(sinais({ tags: [sexualContent("ai_inferred")], muGenres: ["Smut"] })).toEqual(["gênero do MangaUpdates: smut"])
+    expect(sinais({ tags: [sexualContent("ai_inferred")], externalRatings: ["erotica"] })).toEqual(["classificação externa: erotica"])
+    expect(sinais({ tags: [sexualContent("ai_inferred"), tag("First-Time Intercourse", "label", "sexual-themes", { ind: false })] })).toEqual([
+      "tag sexual: First-Time Intercourse",
+    ])
+  })
+
+  it("o resto da régua não muda: Smut/Hentai do MU e erotica/pornographic confirmam; idade e violência não", () => {
+    expect(sinais({ muGenres: ["Smut"] })).toEqual(["gênero do MangaUpdates: smut"])
+    expect(sinais({ muGenres: ["Hentai"] })).toEqual(["gênero do MangaUpdates: hentai"])
+    expect(sinais({ externalRatings: ["erotica"] })).toEqual(["classificação externa: erotica"])
+    expect(sinais({ externalRatings: ["pornographic"] })).toEqual(["classificação externa: pornographic"])
+    expect(sinais({ tags: AGE_E_VIOLENCIA, muGenres: ["Adult", "Mature"], externalRatings: ["suggestive"] })).toEqual([])
+  })
+
+  describe("as três adultas do legado que se confirmavam só por tag de IA (fatos lidos da nuvem em 2026-10-16)", () => {
+    const SC_IA = sexualContent("ai_inferred")
+    const casos: Array<[string, Partial<StructuralFacts>]> = [
+      ["Lucia", { tags: [SC_IA, ADULT, R19], muGenres: ["Mature"], externalRatings: ["suggestive"], current: { normal: row("reused_existing", 6), r18: NAO_AVALIADO } }],
+      ["The Tyrant's Comfort Doll", { tags: [SC_IA, tag("Nudity", null, "sexual-themes"), R19], muGenres: ["Adult"] }],
+      ["I Became the Villain's Mother", { tags: [SC_IA, R19], muGenres: [] }],
+    ]
+    for (const [obra, f] of casos) {
+      it(`${obra}: a adulta segue sem nota — e a base legada da padrão vira conflito, não sobe para 6`, () => {
+        const p = planStructuralInference(fatos(f))
+        expect(p.sexualSignals).toEqual([])
+        expect(p.decisions.r18).toMatchObject({ kind: "none", reason: /não confirmada/ })
+        expect(p.decisions.normal.kind).toBe(obra === "Lucia" ? "preserve" : "conflict")
+      })
+    }
+
+    it("contraprova: obras com tag de IA E sinal forte (Lycan, Tangled Up, Villainess in Love) seguem com o piso", () => {
+      const comOutroSinal: Array<Partial<StructuralFacts>> = [
+        { tags: [SC_IA, R19], muGenres: ["Romance", "Smut"] },
+        { tags: [SC_IA, R19], externalRatings: ["erotica"] },
+        { tags: [SC_IA, tag("Drunken Intercourse", "label", "sexual-themes", { ind: false }), tag("First-Time Intercourse", "label", "sexual-themes", { ind: false }), R19] },
+      ]
+      for (const f of comOutroSinal) {
+        const p = planStructuralInference(fatos(f))
+        expect(p.decisions.r18).toMatchObject({ kind: "infer", target: { score: 7, rule: STRUCTURAL_RULES.adultFloor } })
+        expect(p.sexualSignals.some((s) => s.includes("Sexual Content"))).toBe(false)
+      }
+    })
   })
 })
 

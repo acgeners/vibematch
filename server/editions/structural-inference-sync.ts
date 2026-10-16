@@ -81,6 +81,8 @@ type Embed<T> = T | T[] | null | undefined
 interface TagLinkRow {
   work_id: string
   tag_id: string
+  /** Procedência do vínculo — a política decide quais confirmam (`TAG_SOURCES_THAT_CONFIRM`). */
+  source?: string | null
   tags: Embed<{
     name: string
     adult_score_tier: string | null
@@ -159,7 +161,7 @@ export async function loadStructuralFacts(sb: Db, scope: { workIds?: string[] } 
       () =>
         sb
           .from("work_tags")
-          .select("work_id, tag_id, tags!inner(name, adult_score_tier, adult_indicator, adult_indicator_strong, tag_subgroup(slug))")
+          .select("work_id, tag_id, source, tags!inner(name, adult_score_tier, adult_indicator, adult_indicator_strong, tag_subgroup(slug))")
           .in("work_id", lote)
           .or(ADULT_TAG_FILTER, { referencedTable: "tags" }),
       { orderBy: ["work_id", "tag_id"], label: "inferencia-estrutural.tags" },
@@ -174,6 +176,7 @@ export async function loadStructuralFacts(sb: Db, scope: { workIds?: string[] } 
         adultIndicator: t.adult_indicator === true,
         adultIndicatorStrong: t.adult_indicator_strong === true,
         subgroup: um(t.tag_subgroup)?.slug ?? null,
+        source: v.source,
       })
       tags.set(v.work_id, lista)
     }

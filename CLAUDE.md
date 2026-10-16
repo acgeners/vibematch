@@ -5652,6 +5652,9 @@ política: `lib/editions/structural-inference.ts`; executor: `server/editions/st
   **Não confirmam:** rótulo de idade (Adult, Mature, R19), violência (Whipping fica no subgrupo
   `explicit` sem nível — é a marca de obra adulta por violência), "Uncensored", prosa, e a nota
   genérica da avaliação (sem versão-alvo — nunca é promovida para a R18).
+  🔴 **A tag só conta pela PROCEDÊNCIA do vínculo** (`TAG_SOURCES_THAT_CONFIRM`, lista de permissão):
+  legado/formulário/fontes (`null`), `imported` e `curadoria`. Tag `ai_inferred` é a IA lendo a mesma
+  prosa — não confirma sozinha (só outro sinal confirma). Vínculo sem `source` lido também não.
 - Nunca toca `curator_confirmed`/`ai_evaluated`/`reused_existing` nem o "não avaliado" da curadoria.
   🔴 O "não avaliado" da AUDITORIA (`decided_by = 'audit'`) ela pode preencher; o da CURADORIA é override.
   Por isso a curadoria GRAVA a escolha "não avaliado" mesmo sobre a ausência da auditoria (mesmo valor,
