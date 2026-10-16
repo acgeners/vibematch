@@ -62,9 +62,13 @@ async function main() {
     console.log(`\n== ${titulo} (${linhas.length})`)
     for (const [id, t] of linhas) console.log(`  · ${id}  ${t}`)
   }
-  listar("CONFLITOS — base existente que a política não sustenta (para a curadoria)", (w) => {
-    const d = w.plan.decisions.normal.kind === "conflict" ? w.plan.decisions.normal : w.plan.decisions.r18.kind === "conflict" ? w.plan.decisions.r18 : null
-    return d && d.kind === "conflict" ? d.reason : null
+  listar("CONFLITOS — nota existente que a política não sustenta: base legada ou nota forte fora da fronteira (para a curadoria)", (w) => {
+    // As duas versões: uma obra pode ter conflito nas duas, e mostrar só uma esconderia a outra.
+    const motivos = (["normal", "r18"] as MixedEdition[]).flatMap((e) => {
+      const d = w.plan.decisions[e]
+      return d.kind === "conflict" ? [`${e}: ${d.reason}`] : []
+    })
+    return motivos.length > 0 ? motivos.join(" · ") : null
   })
   listar("versão adulta segue sem nota", (w) => (w.plan.decisions.r18.kind === "none" ? w.plan.decisions.r18.reason : null))
   listar("versão padrão segue sem nota", (w) => (w.plan.decisions.normal.kind === "none" ? w.plan.decisions.normal.reason : null))

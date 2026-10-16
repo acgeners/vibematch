@@ -33,11 +33,24 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
  * só a FIAÇÃO: a curadoria a chama para a obra, depois de gravar, e marca o recálculo se ela gravou.
  * O estado visto NA HORA da chamada prova a ordem (depois da escrita do estado).
  */
-const inferencia = vi.hoisted(() => ({ changed: false, failed: false, chamadas: [] as Array<{ workId: string; estado: unknown; extras: unknown }> }))
+const inferencia = vi.hoisted(() => ({
+  changed: false,
+  failed: false,
+  chamadas: [] as Array<{ workId: string; estado: unknown; extras: unknown }>,
+  /** Os fatos que a política lê para a natureza sexual da R18 (padrão: nenhum sinal). */
+  fatos: { tags: [] as unknown[], muGenres: [] as string[], externalRatings: [] as string[] },
+  fatosFalham: false,
+  fatosLidos: 0,
+}))
 vi.mock("@/server/editions/structural-inference-sync", () => ({
   reconcileStructuralInferenceForWork: async (_sb: unknown, workId: string) => {
     inferencia.chamadas.push({ workId, estado: estado.get(workId)?.state ?? null, extras: estado.get(workId)?.r18_extra_chapters ?? null })
     return { changed: inferencia.changed, failed: inferencia.failed }
+  },
+  loadStructuralFacts: async (_sb: unknown, scope: { workIds: string[] }) => {
+    inferencia.fatosLidos++
+    if (inferencia.fatosFalham) throw new Error("falha injetada lendo os fatos")
+    return scope.workIds.map((workId) => ({ workId, facts: { ...inferencia.fatos, isMixed: true, r18ExtraChapters: false, standardLines: [], current: {} } }))
   },
 }))
 
@@ -196,6 +209,9 @@ beforeEach(() => {
   inferencia.changed = false
   inferencia.failed = false
   inferencia.chamadas.length = 0
+  inferencia.fatos = { tags: [], muGenres: [], externalRatings: [] }
+  inferencia.fatosFalham = false
+  inferencia.fatosLidos = 0
 })
 
 describe("'sem nota' explícito da curadora sobre o 'sem nota' da auditoria", () => {
@@ -500,5 +516,81 @@ describe("adult_override fica fora de tudo", () => {
     await remover()
     expect(escritasEmWorks).toEqual([])
     expect(overrides.get(W)).toBe(true)
+  })
+})
+
+/**
+ * A FRONTEIRA editorial no SERVIDOR (2026-10-16): a versão normal fica abaixo da faixa explícita e a
+ * R18 de natureza sexual confirmada não fica abaixo dela (`EXPLICIT_FLOOR`). A recusa vem antes de
+ * qualquer escrita — o estado final das tabelas é o de antes.
+ */
+describe("fronteira editorial: a action recusa antes de gravar", () => {
+  // Lily Busch's Fake Marriage (nuvem, 16/10): Smut no MangaUpdates + erotica; a "Sexual Content"
+  // dela é `ai_inferred` e não conta.
+  const LILY = {
+    tags: [{ name: "Sexual Content", tier: "label", adultIndicator: true, adultIndicatorStrong: false, subgroup: "rating-labels", source: "ai_inferred" }],
+    muGenres: ["Romance", "Smut"],
+    externalRatings: ["erotica"],
+  }
+  const fotografar = () => ({ estado: structuredClone([...estado]), notas: structuredClone([...notas]) })
+
+  beforeEach(() => {
+    estado.set(W, { ...AUDIT_MIXED })
+  })
+
+  it("R18 sexual abaixo de 9 (o caso da Lily: 6, e também 8,5) é recusada, sem escrita nem recálculo", async () => {
+    inferencia.fatos = LILY
+    for (const valor of [6, 8.5]) {
+      const antes = fotografar()
+      const r = await salvar("mixed", { normal: manter, r18: nota(valor) })
+      expect(r).toMatchObject({ error: expect.stringMatching(/a nota mínima é 9,0/) })
+      expect((r as { error: string }).error).toMatch(/gênero do MangaUpdates: smut; classificação externa: erotica/)
+      expect(fotografar()).toEqual(antes)
+    }
+    expect(markRecalcPending).not.toHaveBeenCalled()
+    expect(inferencia.chamadas).toEqual([])
+  })
+
+  it("R18 sexual em 9 e em 9,5 grava como curadoria", async () => {
+    inferencia.fatos = LILY
+    for (const valor of [9, 9.5]) {
+      const r = await salvar("mixed", { normal: manter, r18: nota(valor) })
+      expect(r).toMatchObject({ data: { changed: true } })
+      expect(notas.get(`${W}|r18|adult_content`)).toMatchObject({ score: valor, source: "curator_confirmed", decided_by: "curator" })
+    }
+  })
+
+  it("R18 sem natureza sexual confirmada (só rótulo de idade/violência) não tem piso: 6 grava", async () => {
+    inferencia.fatos = { tags: [], muGenres: ["Adult", "Mature"], externalRatings: ["suggestive"] }
+    const r = await salvar("mixed", { normal: manter, r18: nota(6) })
+    expect(r).toMatchObject({ data: { changed: true } })
+    expect(notas.get(`${W}|r18|adult_content`)).toMatchObject({ score: 6 })
+  })
+
+  it("versão normal na faixa explícita (9) é recusada sem ler fatos; 8,5 grava", async () => {
+    const antes = fotografar()
+    const r = await salvar("mixed", { normal: nota(9), r18: manter })
+    expect(r).toMatchObject({ error: expect.stringMatching(/versão normal não pode entrar na faixa explícita/) })
+    expect(fotografar()).toEqual(antes)
+    expect(inferencia.fatosLidos).toBe(0)
+    expect(await salvar("mixed", { normal: nota(8.5), r18: manter })).toMatchObject({ data: { changed: true } })
+  })
+
+  it("sem conseguir ler os fatos, a nota da R18 NÃO é gravada (falha fechada)", async () => {
+    inferencia.fatosFalham = true
+    const antes = fotografar()
+    const r = await salvar("mixed", { normal: manter, r18: nota(9) })
+    expect(r).toMatchObject({ error: expect.stringMatching(/Não consegui conferir a natureza sexual da versão R18/) })
+    expect(fotografar()).toEqual(antes)
+  })
+
+  it("nota da curadoria válida segue soberana; e a nota legada fora da fronteira não trava o resto da decisão", async () => {
+    inferencia.fatos = LILY
+    // A R18 da Lily hoje: 6,0 da curadoria (gravado antes da fronteira). "Manter" não a revalida nem a toca.
+    notas.set(`${W}|r18|adult_content`, { ...NOTA_214, score: 6, source: "curator_confirmed", decided_by: "curator" })
+    const r = await salvar("mixed", { normal: nota(5), r18: manter })
+    expect(r).toMatchObject({ data: { changed: true } })
+    expect(notas.get(`${W}|r18|adult_content`)).toMatchObject({ score: 6, source: "curator_confirmed" })
+    expect(notas.get(`${W}|normal|adult_content`)).toMatchObject({ score: 5, source: "curator_confirmed" })
   })
 })

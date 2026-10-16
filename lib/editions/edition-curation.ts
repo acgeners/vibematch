@@ -14,6 +14,7 @@
 import { z } from "zod"
 import { adultContentFor, editionScoreProvenance, isMixedEditionState } from "@/lib/editions/mixed-edition"
 import type { EditionScoreSource, MixedEdition } from "@/lib/editions/mixed-edition"
+import { EDITION_EXPLICIT_THRESHOLD, editionBoundsViolation } from "@/lib/editions/structural-inference"
 
 export const CURATED_EDITION_STATES = ["single", "mixed", "r18_only", "unknown"] as const
 export type CuratedEditionState = (typeof CURATED_EDITION_STATES)[number]
@@ -103,6 +104,44 @@ export const editionCurationSchema = z.object({
   scores: z.object({ normal: notaDeEdicao, r18: notaDeEdicao }),
 })
 export type EditionCurationInput = z.infer<typeof editionCurationSchema>
+
+const MIXED_EDITIONS_ORDER: MixedEdition[] = ["normal", "r18"]
+
+/**
+ * A nota de UMA versão fora da fronteira editorial das obras mixed — a mensagem, ou null. O predicado
+ * é o da política (`editionBoundsViolation`); `adultSexualSignals` são os sinais INDEPENDENTES da
+ * própria nota (`independentSexualSignals`). A tela e a action chamam esta mesma função.
+ */
+export function editionScoreBoundsError(edition: MixedEdition, score: number, adultSexualSignals: readonly string[]): string | null {
+  const limiar = formatEditionScore(EDITION_EXPLICIT_THRESHOLD)
+  const v = editionBoundsViolation(edition, score, adultSexualSignals.length > 0)
+  if (v === "padrao_na_faixa_explicita")
+    return `A versão normal não pode entrar na faixa explícita: a nota tem de ficar abaixo de ${limiar}. Se esta versão mostra sexo explícito, o que precisa mudar é o estado das versões, não a nota.`
+  if (v === "adulta_abaixo_do_explicito")
+    return `A versão R18 tem natureza sexual confirmada (${adultSexualSignals.join("; ")}) e começa na faixa explícita: a nota mínima é ${limiar}. Se a leitura indica menos, revise a classificação das versões em vez de baixar a nota.`
+  return null
+}
+
+/** O limite de cada versão, como a tela o anuncia ao lado do campo — da mesma régua da validação. */
+export function editionScoreBoundsHint(edition: MixedEdition, adultSexualSignals: readonly string[]): string {
+  const limiar = formatEditionScore(EDITION_EXPLICIT_THRESHOLD)
+  if (edition === "normal") return `Abaixo de ${limiar}: a versão normal não entra na faixa explícita.`
+  return adultSexualSignals.length > 0
+    ? `A partir de ${limiar}: a natureza sexual da versão R18 está confirmada (${adultSexualSignals.join("; ")}).`
+    : "Sem piso: a natureza sexual da versão R18 não está confirmada por tag, gênero ou classificação da fonte."
+}
+
+/** O 1º erro de fronteira das notas INFORMADAS nesta decisão (só obra mixed tem nota por versão). */
+export function editionCurationBoundsError(input: EditionCurationInput, adultSexualSignals: readonly string[]): string | null {
+  if (input.state !== "mixed") return null
+  for (const edition of MIXED_EDITIONS_ORDER) {
+    const wanted = input.scores[edition]
+    if (wanted.kind !== "nota") continue
+    const erro = editionScoreBoundsError(edition, wanted.value, adultSexualSignals)
+    if (erro) return erro
+  }
+  return null
+}
 
 export interface CurrentEditionScore {
   score: number | null
@@ -217,8 +256,6 @@ export interface EditionCurationPlan {
   /** Estado ou nota mudam no plano (usado para dizer na tela se haverá recálculo). */
   affectsPrediction: boolean
 }
-
-const MIXED_EDITIONS_ORDER: MixedEdition[] = ["normal", "r18"]
 
 export function planEditionCuration(
   current: CurrentEditionCuration,

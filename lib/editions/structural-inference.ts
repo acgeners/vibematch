@@ -9,15 +9,20 @@
  * | versão  | quando                                                                 | nota                          | regra                |
  * |---------|------------------------------------------------------------------------|-------------------------------|----------------------|
  * | padrão  | mixed, sem extras, rótulo R15/R16, natureza sexual da adulta confirmada | topo da faixa 4–6 (Sugestivo) | `base_padrao_r15`    |
- * | adulta  | mixed, natureza sexual confirmada                                       | início da faixa 7–8 (Maduro)  | `piso_adulta_sexual` |
+ * | adulta  | mixed, natureza sexual confirmada                                       | início da faixa 9–10 (Smut)   | `piso_adulta_sexual` |
  *
- * 🔴 A fronteira que sustenta as duas é "nada de sexo mostrado (≤ 6)" × "algo sexual mostrado (≥ 7)",
- * que a régua de produção e o `c1` compartilham. O limiar de EXPLÍCITO (9) não entra aqui: ele é
- * a decisão aberta do `c1`, e uma inferência estrutural não pode depender dela.
+ * 🔴 A fronteira é a REGRA DE PRODUTO das obras mixed (2026-10-16): a versão padrão nunca entra na
+ * faixa explícita, e a versão adulta de natureza sexual nunca fica abaixo dela. O limiar é o da régua
+ * da avaliação (`EXPLICIT_FLOOR`, faixa 9–10 "há cena de sexo explícito"), e o mesmo predicado
+ * (`editionBoundsViolation`) vale para a inferência, para a curadoria e para a tela.
  *
- * Os valores DERIVAM das constantes que a régua já usa (`R15_FROM_R19_CEILING`, `ADULT_LABEL_FLOOR`):
- * a base da padrão é o mesmo teto que a avaliação aplica a obra R15, e o piso da adulta é o mesmo piso
- * de "rótulo adulto sem cena afirmada". Mudar a régua move os dois juntos.
+ * O piso NÃO estima intensidade: diz "esta é a edição adulta sexual; este é o menor valor compatível
+ * com a categoria". Avaliação ou curadoria podem subir dentro da faixa. Uma leitura humana abaixo do
+ * piso numa edição adulta sexual é conflito de CLASSIFICAÇÃO (estado ou subtipo da versão) ou de
+ * nota — nunca autoriza quebrar a fronteira.
+ *
+ * Os valores DERIVAM das constantes da régua (`R15_FROM_R19_CEILING`, `EXPLICIT_FLOOR`): a base da
+ * padrão é o teto que a avaliação aplica a obra R15, e o piso da adulta é o limiar explícito.
  *
  * ⚠️ Nunca substitui nota mais forte (`curator_confirmed`, `ai_evaluated`, `reused_existing`) nem o
  * "não avaliado" que a CURADORIA registrou. E só RETIRA o que ela mesma inferiu (as regras de
@@ -25,15 +30,40 @@
  * 5,0) é a predecessora da base R15: pode ser atualizada para ela, mas nunca retirada sozinha — quando
  * a política não a sustenta, vira CONFLITO para a curadoria.
  */
-import { ADULT_LABEL_FLOOR, CONTENT_RATING_BOUNDS, EXPLICIT_GENRES, R15_FROM_R19_CEILING } from "@/lib/ai-evaluation/adult-content-rules"
+import {
+  ADULT_LABEL_FLOOR,
+  CONTENT_RATING_BOUNDS,
+  EXPLICIT_FLOOR,
+  EXPLICIT_GENRES,
+  R15_FROM_R19_CEILING,
+} from "@/lib/ai-evaluation/adult-content-rules"
 import type { EditionScoreSource, MixedEdition } from "@/lib/editions/mixed-edition"
 
-// ── Os valores e as regras ───────────────────────────────────────────────────────────────────
+// ── A fronteira editorial e os valores ───────────────────────────────────────────────────────
+
+/** Onde começa a faixa EXPLÍCITA da régua de Conteúdo Adulto — a fronteira entre as versões de uma mixed. */
+export const EDITION_EXPLICIT_THRESHOLD = EXPLICIT_FLOOR
+
+export type EditionBoundsViolation = "padrao_na_faixa_explicita" | "adulta_abaixo_do_explicito"
+
+/**
+ * A nota de uma versão de obra MIXED fora da fronteira editorial — ou null. A padrão nunca entra na
+ * faixa explícita (qualquer que seja a natureza da adulta); a adulta só tem piso quando a natureza
+ * sexual dela está confirmada (`sexualNatureSignals`) — adulta por violência não é a edição explícita.
+ */
+export function editionBoundsViolation(edition: MixedEdition, score: number, adultEditionSexual: boolean): EditionBoundsViolation | null {
+  if (edition === "normal") return score >= EDITION_EXPLICIT_THRESHOLD ? "padrao_na_faixa_explicita" : null
+  return adultEditionSexual && score < EDITION_EXPLICIT_THRESHOLD ? "adulta_abaixo_do_explicito" : null
+}
 
 /** Base da versão PADRÃO R15 (topo da faixa 4–6 "Sugestivo": cenas cortadas ou atenuadas). */
 export const STANDARD_EDITION_BASE = R15_FROM_R19_CEILING
-/** Piso da versão ADULTA de natureza sexual confirmada (início da faixa 7–8: algo sexual mostrado). */
-export const ADULT_EDITION_SEXUAL_FLOOR = ADULT_LABEL_FLOOR
+/**
+ * Piso da versão ADULTA de natureza sexual confirmada: o início da faixa explícita. ⚠️ Os sinais (Smut,
+ * erotica, tag sexual) confirmam a NATUREZA sexual da edição adulta; não provam sozinhos intensidade 9.
+ * O 9 vem da classificação: mixed + edição adulta + natureza sexual confirmada ⇒ é a edição explícita.
+ */
+export const ADULT_EDITION_SEXUAL_FLOOR = EDITION_EXPLICIT_THRESHOLD
 
 export const STRUCTURAL_RULES = {
   standardBase: "base_padrao_r15",
@@ -124,12 +154,17 @@ export interface SexualSignalInput {
   muGenres: ReadonlyArray<string>
   /** `externalContentRating` da avaliação mais recente da obra (é a classificação da FONTE, não da IA). */
   externalRatings: ReadonlyArray<string>
-  /** A linha atual da versão adulta — só conta se for de fonte mais forte. */
+  /**
+   * A linha atual da versão adulta — só conta se for de fonte mais forte E já estiver na faixa
+   * explícita (≥ `ADULT_EDITION_SEXUAL_FLOOR`). Abaixo dela, a própria nota não confirma a natureza
+   * sexual: não pode criar o piso que ela mesma violaria (a curadoria usa a mesma régua, sem ela).
+   */
   adultEditionRow: CurrentEditionRow | null | undefined
 }
 
 /**
- * Os sinais que CONFIRMAM a natureza sexual da versão adulta. Vazio ⇒ não confirmada.
+ * Os sinais que CONFIRMAM a natureza sexual da versão adulta. Vazio ⇒ não confirmada. Confirmam a
+ * NATUREZA, não a intensidade: o 9 vem da classificação (ver `ADULT_EDITION_SEXUAL_FLOOR`).
  *
  * Não confirmam sozinhos (de propósito): tag ou gênero de IDADE (Adult, Mature, R19), "Uncensored" no
  * MangaUpdates (a censura pode ser de gore), aviso do digest e texto de review (prosa), tag que a IA
@@ -155,6 +190,14 @@ export function sexualNatureSignals(input: SexualSignalInput): string[] {
   if (adulta && STRONGER_EDITION_SOURCES.has(adulta.source) && adulta.score != null && adulta.score >= ADULT_EDITION_SEXUAL_FLOOR)
     out.push(`versão adulta já avaliada: ${adulta.score.toFixed(1)} (${adulta.source})`)
   return [...new Set(out)]
+}
+
+/**
+ * A natureza sexual da versão adulta por sinais que NÃO dependem da nota da própria versão — a régua
+ * de quem está REVENDO essa nota (curadoria): a nota em revisão não pode travar a si mesma.
+ */
+export function independentSexualSignals(f: Pick<StructuralFacts, "tags" | "muGenres" | "externalRatings">): string[] {
+  return sexualNatureSignals({ tags: f.tags, muGenres: f.muGenres, externalRatings: f.externalRatings, adultEditionRow: null })
 }
 
 // ── Rótulo etário da versão padrão ──────────────────────────────────────────────────────────
@@ -201,7 +244,10 @@ export type EditionDecision =
   | { kind: "retract"; current: CurrentEditionRow; reason: string }
   /** Nota mais forte, ou "não avaliado" da curadoria: nunca tocada. */
   | { kind: "preserve"; current: CurrentEditionRow; reason: string }
-  /** Base legada (ou de regra alheia) que a política não sustenta: fica, e vai para a curadoria. */
+  /**
+   * Fica como está e vai para a curadoria: base legada (ou de regra alheia) que a política não sustenta,
+   * ou nota mais forte FORA da fronteira editorial — nunca sobrescrita, mas também não aceita calada.
+   */
   | { kind: "conflict"; current: CurrentEditionRow; reason: string }
   /** Segue sem nota. */
   | { kind: "none"; reason: string }
@@ -243,12 +289,25 @@ export function planStructuralInference(f: StructuralFacts): StructuralPlan {
   }
 
   const decisions = {} as Record<MixedEdition, EditionDecision>
-  for (const ed of EDITIONS) decisions[ed] = decide(f.current[ed] ?? null, alvo[ed].target, alvo[ed].why)
+  for (const ed of EDITIONS) {
+    const cur = f.current[ed] ?? null
+    const fora = f.isMixed && cur?.score != null ? editionBoundsViolation(ed, cur.score, sexual) : null
+    decisions[ed] = decide(cur, alvo[ed].target, alvo[ed].why, fora)
+  }
   return { sexualSignals, standardLabel, decisions }
 }
 
-function decide(cur: CurrentEditionRow | null, target: StructuralTarget | null, why: string): EditionDecision {
-  if (cur && STRONGER_EDITION_SOURCES.has(cur.source)) return { kind: "preserve", current: cur, reason: `nota mais forte (${cur.source})` }
+const FORA_DA_FRONTEIRA: Record<EditionBoundsViolation, string> = {
+  padrao_na_faixa_explicita: "versão padrão na faixa explícita",
+  adulta_abaixo_do_explicito: "versão adulta sexual abaixo da faixa explícita",
+}
+
+function decide(cur: CurrentEditionRow | null, target: StructuralTarget | null, why: string, fora: EditionBoundsViolation | null): EditionDecision {
+  if (cur && STRONGER_EDITION_SOURCES.has(cur.source)) {
+    // Nunca sobrescrita — a curadoria decide se o erro é da nota ou da classificação da versão.
+    if (fora) return { kind: "conflict", current: cur, reason: `nota mais forte (${cur.source}) fora da fronteira: ${FORA_DA_FRONTEIRA[fora]}` }
+    return { kind: "preserve", current: cur, reason: `nota mais forte (${cur.source})` }
+  }
   if (cur && cur.source === "not_rated" && cur.decidedBy === "curator")
     return { kind: "preserve", current: cur, reason: "a curadoria registrou 'não avaliado'" }
 

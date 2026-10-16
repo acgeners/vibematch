@@ -42,6 +42,7 @@ const base: WorkEditionCuration = {
   adultOverride: null,
   revertTarget: null,
   canRevert: false,
+  adultSexualSignals: [],
 }
 const curada: WorkEditionCuration = {
   ...base,
@@ -242,5 +243,61 @@ describe("nota por versão — o mesmo controle da nota de critério", () => {
       expect(src, f).toMatch(/<CriterionScoreRow/)
       expect(src, f).not.toMatch(/function BandReadout/)
     }
+  })
+})
+
+/**
+ * A FRONTEIRA editorial na tela (2026-10-16): a R18 de natureza sexual confirmada começa na faixa
+ * explícita (`EXPLICIT_FLOOR`); a normal fica abaixo dela. A tela usa a MESMA função da action — este
+ * teste prova que ela antecipa a recusa; quem impede a gravação é o servidor (teste da action).
+ */
+describe("fronteira editorial no diálogo", () => {
+  // Os sinais de Lily Busch's Fake Marriage (nuvem, 16/10): Smut no MangaUpdates + erotica.
+  const LILY = { ...base, scores: { r18: { score: 6, source: "curator_confirmed" as const, decidedBy: "curator" as const } }, adultSexualSignals: ["gênero do MangaUpdates: smut", "classificação externa: erotica"] }
+
+  it("R18 sexual: o limite aparece com os sinais, e 6 é recusado na tela (Salvar travado)", async () => {
+    await abrir(LILY)
+    escolher(screen.getByRole("combobox", { name: "Nota da Versão R18" }), "Informar nota")
+    expect(screen.getByText(/A partir de 9,0: a natureza sexual da versão R18 está confirmada \(gênero do MangaUpdates: smut; classificação externa: erotica\)/)).toBeTruthy()
+    fireEvent.change(screen.getByRole("textbox", { name: /Versão R18/ }), { target: { value: "6" } })
+    expect(screen.getByRole("alert").textContent).toMatch(/a nota mínima é 9,0/)
+    expect(salvar().disabled).toBe(true)
+    fireEvent.change(screen.getByRole("textbox", { name: /Versão R18/ }), { target: { value: "8,5" } })
+    expect(salvar().disabled).toBe(true)
+  })
+
+  it("R18 sexual: 9 e 9,5 gravam", async () => {
+    await abrir(LILY)
+    escolher(screen.getByRole("combobox", { name: "Nota da Versão R18" }), "Informar nota")
+    for (const [texto, valor] of [["9", 9], ["9,5", 9.5]] as const) {
+      saveWorkEditionCuration.mockClear()
+      fireEvent.change(screen.getByRole("textbox", { name: /Versão R18/ }), { target: { value: texto } })
+      expect(screen.queryByRole("alert")).toBeNull()
+      fireEvent.click(salvar())
+      await waitFor(() =>
+        expect(saveWorkEditionCuration).toHaveBeenCalledWith("obra-1", { state: "mixed", r18ExtraChapters: false, scores: { normal: { kind: "manter" }, r18: { kind: "nota", value: valor } } }),
+      )
+    }
+  })
+
+  it("R18 sem natureza sexual confirmada: sem piso (6 grava)", async () => {
+    await abrir(base)
+    escolher(screen.getByRole("combobox", { name: "Nota da Versão R18" }), "Informar nota")
+    expect(screen.getByText(/Sem piso: a natureza sexual da versão R18 não está confirmada/)).toBeTruthy()
+    fireEvent.change(screen.getByRole("textbox", { name: /Versão R18/ }), { target: { value: "6" } })
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(salvar().disabled).toBe(false)
+  })
+
+  it("versão normal: 9 entra na faixa explícita e é recusado; 8,5 grava", async () => {
+    await abrir(base)
+    escolher(screen.getByRole("combobox", { name: "Nota da Versão normal" }), "Informar nota")
+    expect(screen.getByText("Abaixo de 9,0: a versão normal não entra na faixa explícita.")).toBeTruthy()
+    fireEvent.change(screen.getByRole("textbox", { name: /Versão normal/ }), { target: { value: "9" } })
+    expect(screen.getByRole("alert").textContent).toMatch(/não pode entrar na faixa explícita/)
+    expect(salvar().disabled).toBe(true)
+    fireEvent.change(screen.getByRole("textbox", { name: /Versão normal/ }), { target: { value: "8,5" } })
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(salvar().disabled).toBe(false)
   })
 })

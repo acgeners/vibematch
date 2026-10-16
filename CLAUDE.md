@@ -5610,8 +5610,9 @@ exibida nem prevista). A nota de cada edição mora em `work_edition_scores`; se
 - A nota inferida (`inferred_base`: a base da normal e o piso da adulta) NÃO é avaliação (`provisional` +
   `baixa`, travados por CHECK). Não vale para obra com R18 só nos extras (`work_edition_state.r18_extra_chapters`)
   nem sem R18 sexual provada — a régua inteira está em "Inferência ESTRUTURAL", logo abaixo.
-- Não existe nota R18 que afirme intensidade "por regra": a existência da R18 sozinha não gera nota, e o
-  piso de tag explícita (9) não vira nota de edição. A única inferência é a estrutural, provisória.
+- Não existe nota R18 que afirme intensidade "por regra": a existência da R18 sozinha não gera nota. O
+  único valor estrutural da adulta é o PISO da fronteira editorial (abaixo), provisório — ele diz "esta
+  é a edição adulta sexual", não "ela vale exatamente isto".
 
 **Previsão:** o recálculo prevê as DUAS edições com o MESMO modelo e grava
 `expected_by_edition`; as colunas de sempre ficam com a edição padrão de quem recebe a nota
@@ -5638,17 +5639,28 @@ compartilhado.
 **Publicada em 13/10/2026** (Fly v49, migs 213–218, contrato `s9-fantasy-b-edicao-v2`). Testes:
 `npm run test:db-edicao-fase2` e `npm run test:db-retirada-contratos`.
 
-### Inferência ESTRUTURAL da nota por versão (política 6/7, 15/10/2026)
+### Inferência ESTRUTURAL da nota por versão (fronteira editorial, 15–16/10/2026)
 
 Quando a estrutura editorial restringe a faixa, a versão sem nota recebe uma inferência marcada como
 tal (`inferred_base`, regra em `evidence.regra`), em vez de ficar sem Nota Prevista. Dono único da
 política: `lib/editions/structural-inference.ts`; executor: `server/editions/structural-inference-sync.ts`.
 - **Padrão R15/R16, sem extras, com natureza sexual da adulta confirmada** ⇒ 6,0 (`base_padrao_r15`,
   = `R15_FROM_R19_CEILING`). R12, R17, rótulo desconhecido e extras: sem base.
-- **Adulta com natureza sexual confirmada** ⇒ 7,0 (`piso_adulta_sexual`, = `ADULT_LABEL_FLOOR`).
+- **Adulta com natureza sexual confirmada** ⇒ 9,0 (`piso_adulta_sexual`, = `EXPLICIT_FLOOR`).
+- 🔴 **Fronteira editorial (regra de produto, 16/10):** a versão padrão fica ABAIXO da faixa explícita e a
+  adulta de natureza sexual confirmada fica A PARTIR dela. O limiar é o da régua
+  (`EDITION_EXPLICIT_THRESHOLD` = `EXPLICIT_FLOOR`, faixa 9–10 "há cena de sexo explícito"), e o mesmo
+  predicado (`editionBoundsViolation`) vale na inferência, na curadoria e na tela: a action recusa
+  ANTES de gravar (`editionCurationBoundsError`, natureza sexual por `independentSexualSignals`, que não
+  conta a nota da própria versão; sem conseguir ler os fatos, recusa). Adulta sem natureza sexual
+  confirmada (por violência) não tem piso. Nota forte fora da fronteira nunca é sobrescrita: vira
+  CONFLITO. Leitura humana abaixo do piso numa adulta sexual é conflito de classificação ou de nota —
+  nunca autoriza quebrar a fronteira. ⚠️ Smut, erotica e tag sexual confirmam a NATUREZA sexual, não
+  provam intensidade 9: o 9 vem de mixed + edição adulta + natureza sexual confirmada (= a edição explícita).
 - 🔴 **Confirmam:** tag de ato (`explicit`), tag de subgrupo sexual COM nível de nota ou flag forte,
   Sexual Content/Borderline H, Smut/Hentai do MangaUpdates (gravados na evidência: `work_genres` não
-  guarda os adultos), classificação externa ≥ piso adulto, ou adulta já avaliada por fonte forte.
+  guarda os adultos), classificação externa erotica/pornographic, ou adulta já avaliada por fonte forte
+  na faixa explícita (abaixo dela a própria nota não confirma: não cria o piso que violaria).
   **Não confirmam:** rótulo de idade (Adult, Mature, R19), violência (Whipping fica no subgrupo
   `explicit` sem nível — é a marca de obra adulta por violência), "Uncensored", prosa, e a nota
   genérica da avaliação (sem versão-alvo — nunca é promovida para a R18).

@@ -126,8 +126,9 @@ export type EditionScoreSource = (typeof EDITION_SCORE_SOURCES)[number]
  * `lib/editions/structural-inference.ts`) é o mais fraco que ainda tem número.
  *
  * ⚠️ Não há fonte que AFIRME intensidade por regra: a existência da R18 sozinha não gera nota, e o piso
- * de tag explícita (9) não vira nota de edição (decisão de 2026-10-11). A inferência estrutural é
- * provisória e conservadora — só afirma "algo sexual é mostrado" (7) ou "cenas cortadas" (6).
+ * de tag explícita não vira nota de edição (decisão de 2026-10-11). A inferência estrutural é
+ * provisória — a base da padrão ("cenas cortadas", 6) e o piso da adulta sexual, que é a FRONTEIRA
+ * editorial (`EXPLICIT_FLOOR`): classifica a edição como a explícita, não estima a intensidade dela.
  */
 export const EDITION_SCORE_STRENGTH: Record<EditionScoreSource, number> = {
   not_rated: 0,
