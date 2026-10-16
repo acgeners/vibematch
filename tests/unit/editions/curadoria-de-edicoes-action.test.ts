@@ -28,6 +28,18 @@ vi.mock("@/server/queries/current-user", () => ({
 }))
 vi.mock("@/server/recalc/queue", () => ({ markRecalcPending: (c: string, o?: unknown) => markRecalcPending(c, o) }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
+/**
+ * A inferência estrutural (`server/editions/structural-inference-sync.ts`) tem testes próprios; aqui
+ * só a FIAÇÃO: a curadoria a chama para a obra, depois de gravar, e marca o recálculo se ela gravou.
+ * O estado visto NA HORA da chamada prova a ordem (depois da escrita do estado).
+ */
+const inferencia = vi.hoisted(() => ({ changed: false, failed: false, chamadas: [] as Array<{ workId: string; estado: unknown; extras: unknown }> }))
+vi.mock("@/server/editions/structural-inference-sync", () => ({
+  reconcileStructuralInferenceForWork: async (_sb: unknown, workId: string) => {
+    inferencia.chamadas.push({ workId, estado: estado.get(workId)?.state ?? null, extras: estado.get(workId)?.r18_extra_chapters ?? null })
+    return { changed: inferencia.changed, failed: inferencia.failed }
+  },
+}))
 
 const chaveNota = (r: Row) => `${r.work_id}|${r.edition}|${r.criterion_slug}`
 
@@ -181,6 +193,59 @@ beforeEach(() => {
   leituraFalha = null
   antesDeEscreverEstado = null
   markRecalcPending.mockClear()
+  inferencia.changed = false
+  inferencia.failed = false
+  inferencia.chamadas.length = 0
+})
+
+describe("'sem nota' explícito da curadora sobre o 'sem nota' da auditoria", () => {
+  it("grava a DECISÃO (autoria da curadoria), sem marcar recálculo — é ela que a inferência respeita depois", async () => {
+    estado.set(W, structuredClone(AUDIT_MIXED))
+    notas.set(`${W}|r18|adult_content`, {
+      work_id: W, edition: "r18", criterion_slug: "adult_content", score: null, source: "not_rated", status: "not_rated",
+      confidence: null, ai_evaluation_id: null, decided_by: "audit", evidence: { mig: "214", motivo: "insufficient_evidence" },
+    })
+    expect(await salvar("mixed", { normal: manter, r18: naoAvaliado })).toEqual({ data: { changed: true, recalcMarked: false } })
+    expect(notas.get(`${W}|r18|adult_content`)).toMatchObject({
+      source: "not_rated", decided_by: "curator",
+      evidence: { curadoria: { anterior: { source: "not_rated", evidence: { motivo: "insufficient_evidence" } } } },
+    })
+    // Repetir a mesma escolha não escreve de novo (a ausência já é da curadoria).
+    expect(await salvar("mixed", { normal: manter, r18: naoAvaliado })).toEqual({ data: { changed: false, recalcMarked: false } })
+  })
+})
+
+describe("a inferência estrutural acompanha a decisão da curadoria", () => {
+  it("salvar reconcilia a OBRA depois de gravar o estado (a reconciliação já vê o estado novo)", async () => {
+    estado.set(W, structuredClone(AUDIT_MIXED))
+    await salvar("mixed", { normal: manter, r18: manter }, true)
+    expect(inferencia.chamadas).toEqual([{ workId: W, estado: "mixed", extras: true }])
+  })
+
+  it("só os extras mudaram, mas a reconciliação retirou a base ⇒ o recálculo é marcado", async () => {
+    estado.set(W, structuredClone(AUDIT_MIXED))
+    inferencia.changed = true
+    expect(await salvar("mixed", { normal: manter, r18: manter }, true)).toEqual({ data: { changed: true, recalcMarked: true } })
+    expect(markRecalcPending).toHaveBeenCalledWith("saveWorkEditionCuration", { changed: ["edition_scores"] })
+  })
+
+  it("a reconciliação da obra FALHOU: o recálculo é marcado (a varredura dele termina o trabalho)", async () => {
+    estado.set(W, structuredClone(AUDIT_MIXED))
+    inferencia.failed = true
+    expect(await salvar("mixed", { normal: manter, r18: manter }, true)).toEqual({ data: { changed: true, recalcMarked: true } })
+    expect(markRecalcPending).toHaveBeenCalledWith("saveWorkEditionCuration", { changed: ["edition_scores"] })
+  })
+
+  it("remover a decisão também reconcilia, e marca o recálculo se ela gravou", async () => {
+    estado.set(W, structuredClone(AUDIT_MIXED))
+    await salvar("mixed", { normal: manter, r18: manter }, true)
+    inferencia.chamadas.length = 0
+    inferencia.changed = true
+    markRecalcPending.mockClear()
+    expect(await remover()).toEqual({ data: { changed: true, recalcMarked: true } })
+    expect(inferencia.chamadas).toEqual([{ workId: W, estado: "mixed", extras: false }])
+    expect(markRecalcPending).toHaveBeenCalledWith("revertWorkEditionCuration", { changed: ["edition_scores"] })
+  })
 })
 
 describe("gate e leitura", () => {

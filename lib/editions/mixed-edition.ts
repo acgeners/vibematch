@@ -122,10 +122,12 @@ export type EditionScoreSource = (typeof EDITION_SCORE_SOURCES)[number]
 
 /**
  * Força da procedência — a MESMA ordem de `work_edition_score_strength` (mig 213), que recusa
- * rebaixar. `inferred_base` (o baseline 5,0) é o mais fraco que ainda tem número.
+ * rebaixar. `inferred_base` (a inferência ESTRUTURAL: a base da padrão e o piso da adulta — ver
+ * `lib/editions/structural-inference.ts`) é o mais fraco que ainda tem número.
  *
- * ⚠️ Não há fonte "derivada por regra": a existência da R18, e o piso de tag explícita sozinho, não
- * viram nota de edição (decisão de 2026-10-11).
+ * ⚠️ Não há fonte que AFIRME intensidade por regra: a existência da R18 sozinha não gera nota, e o piso
+ * de tag explícita (9) não vira nota de edição (decisão de 2026-10-11). A inferência estrutural é
+ * provisória e conservadora — só afirma "algo sexual é mostrado" (7) ou "cenas cortadas" (6).
  */
 export const EDITION_SCORE_STRENGTH: Record<EditionScoreSource, number> = {
   not_rated: 0,
@@ -214,12 +216,21 @@ export function editionScoreProvenance(resolution: AdultContentResolution): { la
     }
   }
   switch (resolution.row.source) {
+    // Inferência ESTRUTURAL (`lib/editions/structural-inference.ts`): a versão decide qual das duas é —
+    // a base da padrão ou o piso da adulta. Decidir pela versão, e não pela regra gravada, mantém certas
+    // as linhas antigas (a base provisória 5,0 da mig 214 tem a mesma premissa da base da padrão).
     case "inferred_base":
-      return {
-        label: "Nota-base provisória (inferida)",
-        detail:
-          "Não é avaliação. Versão não adulta de uma obra com versão R18 sexual confirmada: presume-se conteúdo sexual atenuado/censurado, sem evidência suficiente de cenas explícitas nesta versão.",
-      }
+      return resolution.edition === "r18"
+        ? {
+            label: "Nota mínima inferida",
+            detail:
+              "Há confirmação de conteúdo sexual nesta versão, mas não há evidência suficiente para medir a intensidade: foi usado o menor valor compatível com essa condição, e a nota real pode ser maior. Não é avaliação da IA.",
+          }
+        : {
+            label: "Nota-base inferida",
+            detail:
+              "Não há avaliação direta suficiente desta versão. Pela estrutura editorial — versão padrão de uma obra cuja versão adulta tem conteúdo sexual confirmado —, as cenas são cortadas ou atenuadas: foi usada uma base conservadora. Não é avaliação da IA.",
+          }
     case "curator_confirmed":
       return { label: "Confirmada pela curadoria", detail: "A curadoria confirmou a nota desta versão a partir das reviews existentes." }
     case "ai_evaluated":

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { ensureAdmin } from "@/server/queries/current-user"
 import { markRecalcPending } from "@/server/recalc/queue"
+import { reconcileStructuralInferenceForWork } from "@/server/editions/structural-inference-sync"
 import {
   describeRevertTarget,
   editionCurationSchema,
@@ -215,9 +216,15 @@ export async function saveWorkEditionCuration(
     }
   }
 
-  // Marca só quando a ENTRADA da previsão muda: a obra entrou/saiu de mixed, ou uma nota gravada
-  // trocou o valor que a edição usa. Origem, autoria, extras e single↔r18_only↔unknown não marcam.
-  const recalcMarked = plan.stateMarksRecalc || notaMudouPrevisao
+  // A inferência ESTRUTURAL acompanha a decisão: trocar estado ou extras pode criar ou retirar a base
+  // e o piso inferidos (nunca as notas que a curadoria acabou de gravar — elas são mais fortes).
+  const inferencia = await reconcileStructuralInferenceForWork(supabase, workId)
+
+  // Marca só quando a ENTRADA da previsão muda: a obra entrou/saiu de mixed, uma nota gravada
+  // trocou o valor que a edição usa, ou a inferência estrutural gravou algo — ou ficou devendo, e
+  // aí é a varredura do recálculo que termina o trabalho. Origem, autoria e single↔r18_only↔unknown
+  // não marcam.
+  const recalcMarked = plan.stateMarksRecalc || notaMudouPrevisao || inferencia.changed || inferencia.failed
   if (recalcMarked) await markRecalcPending("saveWorkEditionCuration", { changed: ["edition_scores"] })
   revalidateWork(workId)
 
@@ -261,9 +268,11 @@ export async function revertWorkEditionCuration(
     // Sem estado anterior, "sem decisão" é ausência de linha — o registro da decisão vai para o log.
     console.info(`[edition-curation] decisão da curadoria removida work=${workId}:`, JSON.stringify({ state: current.state, evidence: current.evidence }))
   }
-  if (plan.marksRecalc) await markRecalcPending("revertWorkEditionCuration", { changed: ["edition_scores"] })
+  const inferencia = await reconcileStructuralInferenceForWork(supabase, workId)
+  const recalcMarked = plan.marksRecalc || inferencia.changed || inferencia.failed
+  if (recalcMarked) await markRecalcPending("revertWorkEditionCuration", { changed: ["edition_scores"] })
   revalidateWork(workId)
-  return { data: { changed: true, recalcMarked: plan.marksRecalc } }
+  return { data: { changed: true, recalcMarked } }
 }
 
 function revalidateWork(workId: string) {

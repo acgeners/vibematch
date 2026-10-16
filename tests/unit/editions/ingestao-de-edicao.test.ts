@@ -29,11 +29,20 @@ describe("o conector do MangaUpdates lê a edição da descrição CRUA", () => 
       "fetch",
       vi.fn(async () => ({
         ok: true,
-        json: async () => ({ title: "Obra X", description: DESCRICAO_CRUA, categories: [{ category: "Romance" }], status: "40 Chapters (Ongoing)" }),
+        json: async () => ({
+          title: "Obra X",
+          description: DESCRICAO_CRUA,
+          categories: [{ category: "Romance" }],
+          genres: [{ genre: "Romance" }, { genre: "Smut" }],
+          status: "40 Chapters (Ongoing)",
+        }),
       })),
     )
     const detail = await fetchMangaUpdatesById(424242)
     expect(detail?.editionEvidence?.verdict).toBe("mixed")
+    // Os gêneros vão junto da evidência: `work_genres` não guarda os adultos, e "Smut" é um dos sinais
+    // que confirmam a natureza sexual da versão adulta (inferência estrutural).
+    expect(readEditionEvidence("mangaupdates", "424242")?.evidence.genres).toEqual(["Romance", "Smut"])
     // A sinopse que o resto do app recebe continua colapsada (o cleanHtml junta as linhas) — é por
     // isso que a evidência TEM de sair do texto cru: lida da sinopse, a régua não acharia os blocos.
     expect(extractMangaUpdatesEditionEvidence({ description: detail?.synopsis, categories: [] }).verdict).not.toBe("mixed")
@@ -89,6 +98,17 @@ describe("o save grava a evidência — pela régua da ingestão", () => {
     expect(writes[0].op).toBe("upsert")
     expect(writes[0].opts).toEqual({ onConflict: "work_id", ignoreDuplicates: true })
     expect(writes[0].payload).toMatchObject({ work_id: "w1", state: "mixed", decided_by: "auto", basis: "mangaupdates_description" })
+  })
+
+  it("os gêneros do MU entram na evidência gravada (e evidência sem gêneros grava lista vazia)", async () => {
+    rememberEditionEvidence("mangaupdates", "778", { ...evidenciaMixed, genres: ["Romance", "Smut"] }, new Date())
+    const a = fakeSupabase(null)
+    await recordMangaUpdatesEditionEvidence(a.supabase, "w1", "778")
+    expect(a.writes[0].payload).toMatchObject({ evidence: { mangaupdates: { genres: ["Romance", "Smut"] } } })
+    rememberEditionEvidence("mangaupdates", "779", evidenciaMixed, new Date())
+    const b = fakeSupabase(null)
+    await recordMangaUpdatesEditionEvidence(b.supabase, "w1", "779")
+    expect(b.writes[0].payload).toMatchObject({ evidence: { mangaupdates: { genres: [] } } })
   })
 
   it("obra auditada: a ingestão não toca", async () => {

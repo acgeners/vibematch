@@ -145,7 +145,14 @@ async function upsertWorkExternalIds(
   // evidência de edição vista na hidratação vira estado (mig 204). Os três caminhos de save —
   // criar, editar e "Atualizar dados" — passam por esta função.
   const muId = rows.find((r) => r.source === "mangaupdates")?.external_id
-  if (muId) await recordMangaUpdatesEditionEvidence(supabase, workId, muId)
+  if (!muId) return
+  const outcome = await recordMangaUpdatesEditionEvidence(supabase, workId, muId)
+  // O estado de edição é ENTRADA da previsão (nota por versão das mixed) e da inferência estrutural,
+  // que roda no recálculo: gravado o estado, o recálculo tem de vir — senão ele esperaria outra
+  // mudança qualquer para acontecer.
+  if (outcome === "inserido" || outcome === "atualizado") {
+    await markRecalcPending("recordMangaUpdatesEditionEvidence", { changed: ["edition_scores"] })
+  }
 }
 
 export interface DuplicateWorkForForm {

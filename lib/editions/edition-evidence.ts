@@ -92,6 +92,13 @@ export interface EditionEvidence {
   novelR18Lines: string[]
   categories: { mixed: string[]; censorship: string[]; r19Mentions: string[]; comicIsNormal: string[] }
   notes: string[]
+  /**
+   * Os gêneros do MangaUpdates, como vieram. O catálogo (`work_genres`) NÃO guarda os adultos (Smut,
+   * Hentai…) — sem esta cópia, "Smut" sumiria no save, e ele é um dos sinais que confirmam a natureza
+   * sexual da versão adulta (`lib/editions/structural-inference.ts`). Opcional: a análise da descrição
+   * não o produz; quem o acrescenta é o conector.
+   */
+  genres?: string[]
 }
 
 const MAX_LINES = 10
