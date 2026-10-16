@@ -119,8 +119,8 @@ class Q {
 
 const W = "w-caso-a"
 const NOVA = "w-nova"
-const tagAto = { work_id: W, tag_id: "t1", tags: { name: "Cunnilingus", adult_score_tier: "explicit", adult_indicator: true, adult_indicator_strong: true, tag_subgroup: { slug: "explicit" } } }
-const tagR19 = { work_id: W, tag_id: "t2", tags: { name: "R19", adult_score_tier: "label", adult_indicator: true, adult_indicator_strong: true, tag_subgroup: { slug: "rating-labels" } } }
+const tagAto = { work_id: W, tag_id: "t1", source: null, tags: { name: "Cunnilingus", adult_score_tier: "explicit", adult_indicator: true, adult_indicator_strong: true, tag_subgroup: { slug: "explicit" } } }
+const tagR19 = { work_id: W, tag_id: "t2", source: null, tags: { name: "R19", adult_score_tier: "label", adult_indicator: true, adult_indicator_strong: true, tag_subgroup: { slug: "rating-labels" } } }
 const BASE_LEGADA = {
   work_id: W, edition: "normal", criterion_slug: "adult_content", score: 5, source: "inferred_base", status: "provisional",
   confidence: "baixa", decided_by: "audit", ai_evaluation_id: null, evidence: { mig: "214", regra: LEGACY_STANDARD_BASE_RULE },
@@ -154,6 +154,43 @@ describe("ensaio (apply: false) não grava nada", () => {
     expect(r.works[0].plan.decisions.r18).toMatchObject({ kind: "infer", target: { score: 7 } })
     expect(db.writes).toEqual([])
     expect(db.tables.work_edition_scores).toEqual(antes)
+  })
+})
+
+describe("o carregador leva a procedência do vínculo da tag até a política", () => {
+  const sexualContent = (source?: string | null) => ({
+    work_id: W, tag_id: "t3", ...(source === undefined ? {} : { source }),
+    tags: { name: "Sexual Content", adult_score_tier: "label", adult_indicator: true, adult_indicator_strong: false, tag_subgroup: { slug: "rating-labels" } },
+  })
+
+  it("Sexual Content inferida pela IA, sozinha: a adulta segue sem nota (e nada é gravado)", async () => {
+    db.tables.work_tags = [sexualContent("ai_inferred"), structuredClone(tagR19)]
+    const r = await reconcileStructuralInference(db as never, { apply: true, nowIso: NOW })
+    expect(r.works[0].facts.tags.find((t) => t.name === "Sexual Content")?.source).toBe("ai_inferred")
+    expect(r.works[0].plan.decisions.r18).toMatchObject({ kind: "none" })
+    expect(nota(W, "r18")).toMatchObject(NAO_AVALIADO)
+  })
+
+  it("a mesma tag vinda das fontes confirma e grava o piso", async () => {
+    db.tables.work_tags = [sexualContent("imported"), structuredClone(tagR19)]
+    await reconcileStructuralInference(db as never, { apply: true, nowIso: NOW })
+    expect(nota(W, "r18")).toMatchObject({ score: 7, evidence: { sinais: ["tag sexual: Sexual Content"] } })
+  })
+
+  it("vínculo SEM a coluna `source` (select que a perdeu) não confirma — falha para o lado de não inferir", async () => {
+    db.tables.work_tags = [sexualContent(undefined), structuredClone(tagR19)]
+    const r = await reconcileStructuralInference(db as never, { apply: false, nowIso: NOW })
+    expect(r.works[0].plan.decisions.r18).toMatchObject({ kind: "none" })
+  })
+
+  // O banco falso ignora o select, então quem guarda a coluna é a leitura do source: sem ela o vínculo
+  // chega sem procedência e NENHUMA tag confirma (o caso acima) — seguro, mas apagaria o legado inteiro.
+  it("o select do carregador pede a coluna `source` de work_tags (no nível do vínculo, não da tag)", () => {
+    const src = readFileSync(join(__dirname, "../../../server/editions/structural-inference-sync.ts"), "utf8")
+    const select = src.match(/from\("work_tags"\)\s*\.select\(\s*"([^"]*)"/)?.[1]
+    expect(select).toBeDefined()
+    const doVinculo = select!.replace(/\w+!?\w*\([^()]*(\([^()]*\))?[^()]*\)/g, "").split(",").map((c) => c.trim())
+    expect(doVinculo).toContain("source")
   })
 })
 

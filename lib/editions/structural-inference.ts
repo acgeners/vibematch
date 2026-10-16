@@ -87,12 +87,27 @@ export const SEXUAL_EXTERNAL_RATINGS: readonly string[] = Object.entries(CONTENT
   .filter(([, bound]) => bound >= ADULT_LABEL_FLOOR)
   .map(([rating]) => rating)
 
+/**
+ * Procedências de VÍNCULO obra↔tag (`work_tags.source`) que podem confirmar a natureza sexual — lista
+ * de PERMISSÃO, então procedência nova fica de fora até ser decidida aqui.
+ *   · `null` — legado, formulário da obra e "Atualizar dados" (tags das fontes): humano ou externo.
+ *   · `"imported"` — backfill das tags das fontes.
+ *   · `"curadoria"` — decisão humana auditada (migration 212).
+ * 🔴 Fora: `"ai_inferred"` é a IA lendo a sinopse e o resumo das reviews — a mesma prosa que a política
+ * recusa como confirmação. Virar tag não a torna fato estrutural. `"synopsis_marker"` é marcador de
+ * texto da sinopse. Medido em 2026-10-16: 3 das 47 adultas do legado se confirmavam só por uma
+ * "Sexual Content" `ai_inferred`.
+ */
+export const TAG_SOURCES_THAT_CONFIRM: ReadonlySet<string | null> = new Set([null, "imported", "curadoria"])
+
 export interface StructuralTagFacts {
   name: string
   tier: string | null
   adultIndicator: boolean
   adultIndicatorStrong: boolean
   subgroup: string | null
+  /** `work_tags.source` do vínculo. `undefined` = não foi lida ⇒ não confirma (nunca libera por omissão). */
+  source: string | null | undefined
 }
 
 export interface CurrentEditionRow {
@@ -117,14 +132,16 @@ export interface SexualSignalInput {
  * Os sinais que CONFIRMAM a natureza sexual da versão adulta. Vazio ⇒ não confirmada.
  *
  * Não confirmam sozinhos (de propósito): tag ou gênero de IDADE (Adult, Mature, R19), "Uncensored" no
- * MangaUpdates (a censura pode ser de gore), aviso do digest e texto de review (prosa), e a nota
- * genérica da avaliação da obra (não tem versão-alvo).
+ * MangaUpdates (a censura pode ser de gore), aviso do digest e texto de review (prosa), tag que a IA
+ * inferiu dessa prosa (`TAG_SOURCES_THAT_CONFIRM`) e a nota genérica da avaliação da obra (não tem
+ * versão-alvo). Uma tag de IA não impede a inferência: só não conta — se houver outro sinal, ele basta.
  */
 export function sexualNatureSignals(input: SexualSignalInput): string[] {
   const out: string[] = []
   const generos = input.muGenres.map((g) => g.trim().toLowerCase())
   for (const g of EXPLICIT_GENRES) if (generos.includes(g)) out.push(`gênero do MangaUpdates: ${g}`)
   for (const t of input.tags) {
+    if (t.source === undefined || !TAG_SOURCES_THAT_CONFIRM.has(t.source)) continue
     if (t.tier === "explicit") out.push(`tag de ato explícito: ${t.name}`)
     else if (t.subgroup && SEXUAL_TAG_SUBGROUPS.includes(t.subgroup) && ((t.tier != null && TIERS_COM_PISO.includes(t.tier)) || t.adultIndicatorStrong))
       out.push(`tag sexual: ${t.name}`)
