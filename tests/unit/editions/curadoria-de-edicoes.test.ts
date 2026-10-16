@@ -4,7 +4,9 @@ import {
   describeRevertTarget,
   planRevertEditionCuration,
   describeCurrentEditionScore,
+  editionCurationBoundsError,
   editionCurationSchema,
+  editionScoreBoundsHint,
   parseEditionScore,
   planEditionCuration,
 } from "@/lib/editions/edition-curation"
@@ -147,7 +149,7 @@ describe("o que o diálogo mostra", () => {
   it("a nota atual sai com a MESMA procedência da página da obra — e a ausência se distingue do not_rated", () => {
     expect(describeCurrentEditionScore("r18", { score: 9, source: "reused_existing" })).toBe("9,0 · Da avaliação da obra")
     expect(describeCurrentEditionScore("normal", { score: 5, source: "inferred_base" })).toBe("5,0 · Nota-base inferida")
-    expect(describeCurrentEditionScore("r18", { score: 7, source: "inferred_base" })).toBe("7,0 · Nota mínima inferida")
+    expect(describeCurrentEditionScore("r18", { score: 9, source: "inferred_base" })).toBe("9,0 · Nota mínima inferida")
     // Para quem cura, "sem linha" e `not_rated` explícito NÃO são a mesma coisa — a tela diz qual é.
     expect(describeCurrentEditionScore("normal", undefined)).toBe("Sem registro (não avaliado)")
     expect(describeCurrentEditionScore("r18", { score: null, source: "not_rated", decidedBy: "curator" })).toBe("Não avaliado · registrado pela curadoria")
@@ -270,5 +272,42 @@ describe("cada nota diz se muda a previsão — pela mesma régua do recálculo 
     expect(planEditionCuration(de(null), entrada({ state: "single" }), NOW).stateMarksRecalc).toBe(false)
     expect(planEditionCuration(de("unknown"), entrada({ state: "mixed" }), NOW).stateMarksRecalc).toBe(true)
     expect(planEditionCuration(de("mixed"), entrada({ state: "unknown" }), NOW).stateMarksRecalc).toBe(true)
+  })
+})
+
+describe("fronteira editorial — o validador puro que a action e a tela chamam", () => {
+  const SINAIS = ["gênero do MangaUpdates: smut"]
+  const decisao = (normal: EditionCurationInput["scores"]["normal"], r18: EditionCurationInput["scores"]["r18"], state: EditionCurationInput["state"] = "mixed"): EditionCurationInput => ({
+    state,
+    r18ExtraChapters: false,
+    scores: { normal, r18 },
+  })
+  const nota = (value: number) => ({ kind: "nota" as const, value })
+  const manter = { kind: "manter" as const }
+
+  it("R18 sexual: < 9 recusa (com os sinais na mensagem); 9 e acima passam", () => {
+    for (const v of [0, 6, 8.5]) expect(editionCurationBoundsError(decisao(manter, nota(v)), SINAIS)).toMatch(/a nota mínima é 9,0/)
+    expect(editionCurationBoundsError(decisao(manter, nota(6)), SINAIS)).toMatch(/\(gênero do MangaUpdates: smut\)/)
+    for (const v of [9, 9.5, 10]) expect(editionCurationBoundsError(decisao(manter, nota(v)), SINAIS)).toBeNull()
+  })
+
+  it("R18 sem natureza sexual confirmada: sem piso", () => {
+    expect(editionCurationBoundsError(decisao(manter, nota(6)), [])).toBeNull()
+  })
+
+  it("padrão: 9 ou mais recusa (independe dos sinais); 8,5 passa", () => {
+    expect(editionCurationBoundsError(decisao(nota(9), manter), [])).toMatch(/não pode entrar na faixa explícita/)
+    expect(editionCurationBoundsError(decisao(nota(8.5), manter), SINAIS)).toBeNull()
+  })
+
+  it("só a nota INFORMADA é conferida; fora de mixed não há nota por versão a conferir", () => {
+    expect(editionCurationBoundsError(decisao(manter, { kind: "nao_avaliado" }), SINAIS)).toBeNull()
+    expect(editionCurationBoundsError(decisao(nota(9), nota(6), "r18_only"), SINAIS)).toBeNull()
+  })
+
+  it("o limite anunciado na tela sai da mesma régua", () => {
+    expect(editionScoreBoundsHint("normal", [])).toBe("Abaixo de 9,0: a versão normal não entra na faixa explícita.")
+    expect(editionScoreBoundsHint("r18", SINAIS)).toMatch(/^A partir de 9,0/)
+    expect(editionScoreBoundsHint("r18", [])).toMatch(/^Sem piso/)
   })
 })

@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { ensureAdmin } from "@/server/queries/current-user"
 import { markRecalcPending } from "@/server/recalc/queue"
-import { reconcileStructuralInferenceForWork } from "@/server/editions/structural-inference-sync"
+import { loadStructuralFacts, reconcileStructuralInferenceForWork } from "@/server/editions/structural-inference-sync"
+import { independentSexualSignals } from "@/lib/editions/structural-inference"
 import {
   describeRevertTarget,
+  editionCurationBoundsError,
   editionCurationSchema,
   planEditionCuration,
   planRevertEditionCuration,
@@ -41,12 +43,19 @@ export interface WorkEditionCuration extends CurrentEditionCuration {
   revertTarget: string | null
   /** A remoção é possível (há decisão da curadoria E se sabe o estado de antes). */
   canRevert: boolean
+  /**
+   * O que confirma a natureza sexual da versão R18 SEM contar a nota dela — vazio = não confirmada.
+   * A tela antecipa a fronteira com estes sinais; a action os relê antes de gravar.
+   */
+  adultSexualSignals: string[]
 }
+
+type CurationRead = Omit<WorkEditionCuration, "adultSexualSignals">
 
 type Admin = ReturnType<typeof createAdminClient>
 type Result<T> = { data: T } | { error: string }
 
-async function readCuration(supabase: Admin, workId: string): Promise<WorkEditionCuration> {
+async function readCuration(supabase: Admin, workId: string): Promise<CurationRead> {
   const [stateRes, scoresRes, workRes] = await Promise.all([
     supabase
       .from("work_edition_state")
@@ -111,11 +120,23 @@ async function readCuration(supabase: Admin, workId: string): Promise<WorkEditio
   }
 }
 
+/**
+ * A natureza sexual da versão R18 pela régua da POLÍTICA (`independentSexualSignals`): tags com
+ * procedência permitida, gêneros do MangaUpdates, classificação da fonte — nunca a nota da versão.
+ * Erro LANÇA: sem conseguir conferir, a fronteira não pode ser dada por satisfeita.
+ */
+async function adultSexualSignalsFor(supabase: Admin, workId: string): Promise<string[]> {
+  const [entrada] = await loadStructuralFacts(supabase, { workIds: [workId] })
+  return entrada ? independentSexualSignals(entrada.facts) : []
+}
+
 export async function getWorkEditionCuration(workId: string): Promise<Result<WorkEditionCuration>> {
   const gate = await ensureAdmin()
   if (!gate.ok) return { error: gate.error }
   try {
-    return { data: await readCuration(createAdminClient(), workId) }
+    const supabase = createAdminClient()
+    const [lida, adultSexualSignals] = await Promise.all([readCuration(supabase, workId), adultSexualSignalsFor(supabase, workId)])
+    return { data: { ...lida, adultSexualSignals } }
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) }
   }
@@ -180,7 +201,22 @@ export async function saveWorkEditionCuration(
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." }
 
   const supabase = createAdminClient()
-  let current: WorkEditionCuration
+
+  // 🔴 A FRONTEIRA editorial, no servidor e antes de qualquer escrita: a versão normal fica abaixo da
+  // faixa explícita e a R18 de natureza sexual não fica abaixo dela. A tela só antecipa a mesma
+  // mensagem — quem impede a gravação é este ponto.
+  let sinais: string[] = []
+  if (parsed.data.state === "mixed" && parsed.data.scores.r18.kind === "nota") {
+    try {
+      sinais = await adultSexualSignalsFor(supabase, workId)
+    } catch (err) {
+      return { error: `Não consegui conferir a natureza sexual da versão R18: ${err instanceof Error ? err.message : String(err)}` }
+    }
+  }
+  const foraDaFronteira = editionCurationBoundsError(parsed.data, sinais)
+  if (foraDaFronteira) return { error: foraDaFronteira }
+
+  let current: CurationRead
   try {
     current = await readCuration(supabase, workId)
   } catch (err) {
@@ -244,7 +280,7 @@ export async function revertWorkEditionCuration(
   if (!gate.ok) return { error: gate.error }
 
   const supabase = createAdminClient()
-  let current: WorkEditionCuration
+  let current: CurationRead
   try {
     current = await readCuration(supabase, workId)
   } catch (err) {

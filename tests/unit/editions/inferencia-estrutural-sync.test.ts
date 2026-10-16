@@ -147,11 +147,11 @@ const nota = (workId: string, edition: string) =>
 const NOW = "2026-10-15T12:00:00.000Z"
 
 describe("ensaio (apply: false) não grava nada", () => {
-  it("planeja 6 e 7 e não escreve", async () => {
+  it("planeja 6 e 9 e não escreve", async () => {
     const antes = structuredClone(db.tables.work_edition_scores)
     const r = await reconcileStructuralInference(db as never, { apply: false, nowIso: NOW })
     expect(r.works[0].plan.decisions.normal).toMatchObject({ kind: "infer", target: { score: 6 } })
-    expect(r.works[0].plan.decisions.r18).toMatchObject({ kind: "infer", target: { score: 7 } })
+    expect(r.works[0].plan.decisions.r18).toMatchObject({ kind: "infer", target: { score: 9 } })
     expect(db.writes).toEqual([])
     expect(db.tables.work_edition_scores).toEqual(antes)
   })
@@ -174,7 +174,7 @@ describe("o carregador leva a procedência do vínculo da tag até a política",
   it("a mesma tag vinda das fontes confirma e grava o piso", async () => {
     db.tables.work_tags = [sexualContent("imported"), structuredClone(tagR19)]
     await reconcileStructuralInference(db as never, { apply: true, nowIso: NOW })
-    expect(nota(W, "r18")).toMatchObject({ score: 7, evidence: { sinais: ["tag sexual: Sexual Content"] } })
+    expect(nota(W, "r18")).toMatchObject({ score: 9, evidence: { sinais: ["tag sexual: Sexual Content"] } })
   })
 
   it("vínculo SEM a coluna `source` (select que a perdeu) não confirma — falha para o lado de não inferir", async () => {
@@ -195,12 +195,12 @@ describe("o carregador leva a procedência do vínculo da tag até a política",
 })
 
 describe("aplicação, idempotência e retirada", () => {
-  it("caso A: 5→6 e não avaliado→7, guardando o estado anterior; nenhuma subida recusada pelo gatilho", async () => {
+  it("caso A: 5→6 e não avaliado→9, guardando o estado anterior; nenhuma subida recusada pelo gatilho", async () => {
     const r = await reconcileStructuralInference(db as never, { apply: true, nowIso: NOW })
     expect(r.errors).toEqual([])
     expect(r.works[0].outcomes).toEqual([{ edition: "normal", action: "atualizada" }, { edition: "r18", action: "atualizada" }])
     expect(nota(W, "normal")).toMatchObject({ score: 6, source: "inferred_base", status: "provisional", confidence: "baixa", evidence: { regra: STRUCTURAL_RULES.standardBase, anterior: { score: 5, source: "inferred_base" } } })
-    expect(nota(W, "r18")).toMatchObject({ score: 7, source: "inferred_base", evidence: { regra: STRUCTURAL_RULES.adultFloor, anterior: { source: "not_rated" } } })
+    expect(nota(W, "r18")).toMatchObject({ score: 9, source: "inferred_base", evidence: { regra: STRUCTURAL_RULES.adultFloor, anterior: { source: "not_rated" } } })
     expect((nota(W, "r18")!.evidence as { sinais: string[] }).sinais).toContain("tag de ato explícito: Cunnilingus")
   })
 
@@ -230,7 +230,7 @@ describe("aplicação, idempotência e retirada", () => {
     db.tables.work_edition_state.push({ work_id: NOVA, state: "mixed", r18_extra_chapters: false, linhas_normal: null, normal_lines: ["Original Webtoon: R15"], genres: ["Romance", "Smut"], generos_adultos: null })
     const r = await reconcileStructuralInference(db as never, { workIds: [NOVA], apply: true, nowIso: NOW })
     expect(r.works[0].outcomes).toEqual([{ edition: "normal", action: "inserida" }, { edition: "r18", action: "inserida" }])
-    expect(nota(NOVA, "r18")).toMatchObject({ score: 7, evidence: { sinais: ["gênero do MangaUpdates: smut"], anterior: null } })
+    expect(nota(NOVA, "r18")).toMatchObject({ score: 9, evidence: { sinais: ["gênero do MangaUpdates: smut"], anterior: null } })
     db.tables.work_edition_state.find((s) => s.work_id === NOVA)!.genres = ["Romance"]
     await reconcileStructuralInference(db as never, { workIds: [NOVA], apply: true, nowIso: NOW })
     expect(nota(NOVA, "r18")).toBeUndefined()
@@ -290,9 +290,9 @@ const varias = async (n: number, opts: Parameters<typeof reconcileStructuralInfe
 }
 
 describe("'sem nota' da AUDITORIA × 'sem nota' da CURADORIA — mesmo valor, significados opostos", () => {
-  it("1) sem nota por ausência de evidência (auditoria) ⇒ a inferência preenche com 7", async () => {
+  it("1) sem nota por ausência de evidência (auditoria) ⇒ a inferência preenche com 9", async () => {
     await varias(1)
-    expect(nota(W, "r18")).toMatchObject({ score: 7, source: "inferred_base" })
+    expect(nota(W, "r18")).toMatchObject({ score: 9, source: "inferred_base" })
   })
 
   it("2) a curadora escolheu 'sem nota' ⇒ continua sem nota depois de vários recálculos, sem nenhuma escrita", async () => {
@@ -312,7 +312,7 @@ describe("'sem nota' da AUDITORIA × 'sem nota' da CURADORIA — mesmo valor, si
     // Sem linha = ninguém decidiu nada: a inferência pode atuar de novo.
     db.tables.work_edition_scores = db.tables.work_edition_scores.filter((r) => r.edition !== "r18")
     await varias(1, { apply: true, editions: ["r18"] })
-    expect(nota(W, "r18")).toMatchObject({ score: 7, source: "inferred_base", evidence: { anterior: null } })
+    expect(nota(W, "r18")).toMatchObject({ score: 9, source: "inferred_base", evidence: { anterior: null } })
   })
 
   it("4) curator_confirmed é soberano mesmo com o sinal sexual mudando", async () => {
@@ -369,7 +369,7 @@ describe("evidence.anterior: as sequências reais, sem cadeia e sem fotografia v
   it("D) inferência sem estado anterior → retração ⇒ a linha some", async () => {
     db.tables.work_edition_scores = db.tables.work_edition_scores.filter((r) => r.edition !== "r18")
     await varias(1)
-    expect(nota(W, "r18")).toMatchObject({ score: 7, evidence: { anterior: null } })
+    expect(nota(W, "r18")).toMatchObject({ score: 9, evidence: { anterior: null } })
     db.tables.work_tags = [structuredClone(tagR19)]
     await varias(1)
     expect(nota(W, "r18")).toBeUndefined()
@@ -409,7 +409,7 @@ describe("falha parcial no recálculo: nada vira sucesso, e a passada seguinte c
     await reconcileStructuralInferenceForRecalc(db as never, ligado)
     db.falhar = null
     expect(await reconcileStructuralInferenceForRecalc(db as never, ligado)).toMatchObject({ status: "ok", gravadas: 1 })
-    expect(nota(W, "r18")).toMatchObject({ score: 7 })
+    expect(nota(W, "r18")).toMatchObject({ score: 9 })
     db.writes = []
     const s = await reconcileStructuralInferenceForRecalc(db as never, ligado)
     expect(s).toMatchObject({ status: "ok", gravadas: 0 })

@@ -11,6 +11,8 @@ import {
   EDITION_STATE_LABEL,
   adultOverrideWarning,
   describeCurrentEditionScore,
+  editionScoreBoundsError,
+  editionScoreBoundsHint,
   parseEditionScore,
 } from "@/lib/editions/edition-curation"
 import type { CuratedEditionState, EditionScoreInput } from "@/lib/editions/edition-curation"
@@ -135,7 +137,12 @@ function EditionsForm({
     r18: toInput(scores.r18),
   }
   const scoresDirty = isMixed && MIXED_EDITIONS.some((e) => scores[e].mode !== "manter")
-  const invalid = isMixed && MIXED_EDITIONS.some((e) => scoreInputs[e] == null)
+  // A fronteira editorial pela MESMA função da action: a tela antecipa, o servidor impede.
+  const boundsErrors: Record<MixedEdition, string | null> = {
+    normal: boundsErrorOf("normal", scoreInputs.normal, current?.adultSexualSignals ?? []),
+    r18: boundsErrorOf("r18", scoreInputs.r18, current?.adultSexualSignals ?? []),
+  }
+  const invalid = isMixed && MIXED_EDITIONS.some((e) => scoreInputs[e] == null || boundsErrors[e] != null)
   const dirty = stateDirty || scoresDirty
   const warning = current ? adultOverrideWarning(current.adultOverride) : null
 
@@ -268,6 +275,8 @@ function EditionsForm({
                   currentLabel={describeCurrentEditionScore(edition, current.scores[edition])}
                   draft={scores[edition]}
                   invalid={scoreInputs[edition] == null}
+                  boundsHint={editionScoreBoundsHint(edition, current.adultSexualSignals)}
+                  boundsError={boundsErrors[edition]}
                   onChange={(d) => setScores((prev) => ({ ...prev, [edition]: d }))}
                 />
               ))}
@@ -302,6 +311,10 @@ function EditionsForm({
   )
 }
 
+function boundsErrorOf(edition: MixedEdition, input: EditionScoreInput | null, signals: readonly string[]): string | null {
+  return input?.kind === "nota" ? editionScoreBoundsError(edition, input.value, signals) : null
+}
+
 /** O rascunho vira entrada da action; null = nota digitada inválida. */
 function toInput(d: ScoreDraft): EditionScoreInput | null {
   if (d.mode === "nota") {
@@ -316,12 +329,16 @@ function ScoreRow({
   currentLabel,
   draft,
   invalid,
+  boundsHint,
+  boundsError,
   onChange,
 }: {
   edition: MixedEdition
   currentLabel: string
   draft: ScoreDraft
   invalid: boolean
+  boundsHint: string
+  boundsError: string | null
   onChange: (d: ScoreDraft) => void
 }) {
   const inputId = `edition-score-${edition}`
@@ -370,13 +387,18 @@ function ScoreRow({
               onChange={(e) => onChange({ ...draft, text: e.target.value })}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
-              aria-invalid={invalid}
+              aria-invalid={invalid || boundsError != null}
               aria-label={`Nota de conteúdo adulto da ${EDITION_LABEL[edition]}`}
               className="w-20 text-center font-mono tabular-nums pr-3"
             />
           </CriterionScoreRow>
           {invalid && draft.text.trim() !== "" && (
             <span className="text-xs text-destructive">De 0 a 10, de 0,5 em 0,5.</span>
+          )}
+          {boundsError ? (
+            <span role="alert" className="text-xs text-destructive">{boundsError}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{boundsHint}</span>
           )}
           <CriterionBandReadout
             slug={parsed == null ? null : "adult_content"}
