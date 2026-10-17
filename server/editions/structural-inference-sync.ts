@@ -26,11 +26,13 @@ import type { EditionScoreSource, MixedEdition } from "@/lib/editions/mixed-edit
  *    JUNTAS, na mesma execução — e a guarda de código canônico já protege a escrita.
  * 2. Na CURADORIA de versões ("Versões da obra…"), logo depois de gravar: lá a pessoa vê as linhas na
  *    hora, e trocar extras/estado precisa retirar a inferência que deixou de valer.
- * 3. No script `scripts/reconciliar-inferencia-estrutural.ts` (ensaio por padrão), para o legado.
+ * 3. No script `scripts/reconciliar-inferencia-estrutural.ts` (ensaio por padrão): diagnóstico e
+ *    reconciliação controlada, por versão.
  *
- * 🔴 `STRUCTURAL_INFERENCE_AUTO_APPLY` desliga as gravações AUTOMÁTICAS (1 e 2). Ligado, o primeiro
- * recálculo em produção SERIA a aplicação do legado (≈119 bases e ≈48 pisos) sem revisão nem a
- * escolha de separar em etapas. O legado vai pelo script; depois, liga-se aqui (um PR de uma linha).
+ * 🔴 `STRUCTURAL_INFERENCE_AUTO_APPLY` liga as gravações AUTOMÁTICAS (1 e 2). Nasceu desligado para o
+ * legado não ser aplicado sem revisão pelo primeiro recálculo; o legado foi aplicado pelo script, em
+ * etapas (R18 e normal), e recalculado em 17/10/2026, e o dry-run ficou sem gravação planejada — por
+ * isso foi ligado. Desligá-lo de novo é o interruptor de emergência: a reconciliação para, o resto não.
  *
  * ── Como grava sem furar a guarda da migration 213 ────────────────────────────────────────────
  * - preencher (sem linha / "não avaliado" automático → inferida) e trocar 5,0 → 6,0 são SUBIDA ou mesma
@@ -43,7 +45,7 @@ import type { EditionScoreSource, MixedEdition } from "@/lib/editions/mixed-edit
  */
 
 /** 🔴 Interruptor das gravações AUTOMÁTICAS (recálculo e curadoria). Ver o cabeçalho. */
-export const STRUCTURAL_INFERENCE_AUTO_APPLY = false
+export const STRUCTURAL_INFERENCE_AUTO_APPLY = true
 
 type Db = Pick<SupabaseClient, "from">
 

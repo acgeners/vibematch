@@ -14,7 +14,14 @@ import {
   reconcileStructuralInferenceForRecalc,
   reconcileStructuralInferenceForWork,
 } from "@/server/editions/structural-inference-sync"
-import { LEGACY_STANDARD_BASE_RULE, STRUCTURAL_RULES, planStructuralInference } from "@/lib/editions/structural-inference"
+import {
+  ADULT_EDITION_SEXUAL_FLOOR,
+  LEGACY_STANDARD_BASE_RULE,
+  STANDARD_EDITION_BASE,
+  STRUCTURAL_RULES,
+  planStructuralInference,
+} from "@/lib/editions/structural-inference"
+import { EXPLICIT_FLOOR } from "@/lib/ai-evaluation/adult-content-rules"
 
 /**
  * O executor da inferência estrutural contra um banco FALSO que reproduz o gatilho da migration 213:
@@ -435,16 +442,206 @@ describe("falha parcial no recálculo: nada vira sucesso, e a passada seguinte c
   })
 })
 
-describe("as gravações automáticas estão DESLIGADAS até o legado ser aplicado", () => {
-  it("o interruptor está desligado e os dois ganchos não tocam o banco", async () => {
-    expect(STRUCTURAL_INFERENCE_AUTO_APPLY).toBe(false)
+/**
+ * 🔴 Daqui para baixo, NENHUM teste passa `autoApply`: é o caminho de PRODUÇÃO, com o interruptor no valor
+ * do código. O legado foi aplicado pelo script e recalculado em 17/10/2026 (dry-run sem gravação
+ * planejada), e o interruptor foi ligado. Os casos provam o comportamento ligado, não a constante.
+ */
+describe("as gravações automáticas estão LIGADAS (legado aplicado e recalculado em 17/10/2026)", () => {
+  beforeEach(() => {
     vi.spyOn(console, "info").mockImplementation(() => {})
+    vi.spyOn(console, "error").mockImplementation(() => {})
+  })
+
+  it("o interruptor está ligado: sem opção nenhuma, o gancho do recálculo reconcilia e grava", async () => {
+    expect(STRUCTURAL_INFERENCE_AUTO_APPLY).toBe(true)
     const s = await reconcileStructuralInferenceForRecalc(db as never)
-    expect(s).toEqual({ status: "desligada" })
+    expect(s).toEqual({ status: "ok", obras: 1, gravadas: 1 })
     expect(recalcPendingAfter(s, NOW)).toEqual({ recalc_pending: false, recalc_last_edit_at: null })
-    expect(await reconcileStructuralInferenceForWork(db as never, W)).toEqual({ changed: false, failed: false })
-    expect(db.calls).toEqual([])
+    expect(db.writes.length).toBeGreaterThan(0)
+  })
+})
+
+const estado = (workId: string, extra: Record<string, unknown> = {}) => ({
+  work_id: workId, state: "mixed", r18_extra_chapters: false, linhas_normal: ["Original Webtoon: R15: Ridibooks"],
+  normal_lines: null, genres: null, generos_adultos: [], ...extra,
+})
+const linha = (workId: string, edition: "normal" | "r18", extra: Record<string, unknown>) => ({
+  work_id: workId, edition, criterion_slug: "adult_content", score: null, source: "not_rated", status: "not_rated",
+  confidence: null, decided_by: "audit", ai_evaluation_id: null, evidence: {}, ...extra,
+})
+const tagDe = (workId: string, nome: string, t: { tier?: string | null; strong?: boolean; subgroup?: string | null; source?: string | null }) => ({
+  work_id: workId, tag_id: `t-${workId}-${nome}`, source: t.source === undefined ? null : t.source,
+  tags: { name: nome, adult_score_tier: t.tier ?? null, adult_indicator: true, adult_indicator_strong: t.strong ?? false, tag_subgroup: t.subgroup ? { slug: t.subgroup } : null },
+})
+const propriaNormal = (workId: string) =>
+  linha(workId, "normal", { score: STANDARD_EDITION_BASE, source: "inferred_base", status: "provisional", confidence: "baixa", evidence: { regra: STRUCTURAL_RULES.standardBase, anterior: { ...structuredClone(BASE_LEGADA), work_id: workId } } })
+const propriaR18 = (workId: string) =>
+  linha(workId, "r18", { score: ADULT_EDITION_SEXUAL_FLOOR, source: "inferred_base", status: "provisional", confidence: "baixa", evidence: { regra: STRUCTURAL_RULES.adultFloor, anterior: { ...structuredClone(NAO_AVALIADO), work_id: workId } } })
+
+describe("obras FUTURAS, com o interruptor ligado (os cenários aprovados)", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "info").mockImplementation(() => {})
+    vi.spyOn(console, "error").mockImplementation(() => {})
+  })
+
+  it("A) nova mixed R15 com adulta sexual confirmada: normal = base 6 e adulta = EXPLICIT_FLOOR, as duas inferred_base", async () => {
+    db.tables.work_edition_state.push(estado(NOVA, { linhas_normal: null, normal_lines: ["Original Webtoon: R15"], genres: ["Romance", "Smut"] }))
+    expect(await reconcileStructuralInferenceForWork(db as never, NOVA)).toEqual({ changed: true, failed: false })
+    expect(STANDARD_EDITION_BASE).toBe(6)
+    expect(ADULT_EDITION_SEXUAL_FLOOR).toBe(EXPLICIT_FLOOR)
+    expect(nota(NOVA, "normal")).toMatchObject({ score: STANDARD_EDITION_BASE, source: "inferred_base", status: "provisional", confidence: "baixa", decided_by: "audit", evidence: { regra: STRUCTURAL_RULES.standardBase, origem: "inferencia_estrutural", anterior: null } })
+    expect(nota(NOVA, "r18")).toMatchObject({ score: EXPLICIT_FLOOR, source: "inferred_base", status: "provisional", confidence: "baixa", decided_by: "audit", evidence: { regra: STRUCTURAL_RULES.adultFloor, anterior: null } })
+  })
+
+  it("B) nova mixed adulta por VIOLÊNCIA (Whipping, Sexual Assault, rótulos de idade, Sexual Content só da IA): nada é inferido", async () => {
+    const V = "w-violencia"
+    db.tables.work_edition_state.push(estado(V))
+    db.tables.work_tags.push(
+      tagDe(V, "Whipping", { subgroup: "explicit" }),
+      tagDe(V, "Sexual Assault", { subgroup: "sexual-themes" }),
+      tagDe(V, "Adult", { tier: "label", subgroup: "rating-labels" }),
+      tagDe(V, "R19", { tier: "label", strong: true, subgroup: "rating-labels" }),
+      tagDe(V, "Sexual Content", { tier: "label", subgroup: "rating-labels", source: "ai_inferred" }),
+    )
+    db.writes = []
+    expect(await reconcileStructuralInferenceForWork(db as never, V)).toEqual({ changed: false, failed: false })
+    expect(nota(V, "normal")).toBeUndefined()
+    expect(nota(V, "r18")).toBeUndefined()
     expect(db.writes).toEqual([])
+    const [{ plan }] = (await reconcileStructuralInference(db as never, { workIds: [V], apply: false })).works
+    expect(plan.sexualSignals).toEqual([])
+    expect(plan.decisions.r18).toMatchObject({ kind: "none", reason: "natureza sexual da versão adulta não confirmada" })
+    expect(plan.decisions.normal.kind).toBe("none")
+  })
+
+  it("C) conflito: nota forte fora da fronteira e base legada sem respaldo ficam como estão — nenhuma escrita", async () => {
+    // W: a normal avaliada na faixa explícita e a adulta reaproveitada abaixo dela (as duas fora da fronteira).
+    db.tables.work_edition_scores = [
+      linha(W, "normal", { score: 9.5, source: "ai_evaluated", status: "rated" }),
+      linha(W, "r18", { score: 8, source: "reused_existing", status: "rated" }),
+    ]
+    // W17: versão padrão R17 com a base legada 5,0 — a política não a sustenta.
+    const W17 = "w-r17"
+    db.tables.work_edition_state.push(estado(W17, { linhas_normal: ["Original Webtoon: R17: KakaoPage"] }))
+    db.tables.work_edition_scores.push({ ...structuredClone(BASE_LEGADA), work_id: W17 }, linha(W17, "r18", { score: 9, source: "reused_existing", status: "rated" }))
+    db.tables.work_tags.push({ ...structuredClone(tagAto), work_id: W17 })
+    const antes = structuredClone(db.tables.work_edition_scores)
+    db.writes = []
+    const s = await reconcileStructuralInferenceForRecalc(db as never)
+    expect(s).toEqual({ status: "ok", obras: 2, gravadas: 0 })
+    expect(db.writes).toEqual([])
+    expect(db.tables.work_edition_scores).toEqual(antes)
+    const plano = Object.fromEntries((await reconcileStructuralInference(db as never, { apply: false })).works.map((w) => [w.workId, w.plan.decisions]))
+    expect(plano[W].normal).toMatchObject({ kind: "conflict", reason: /fora da fronteira: versão padrão na faixa explícita/ })
+    expect(plano[W].r18).toMatchObject({ kind: "conflict", reason: /fora da fronteira: versão adulta sexual abaixo da faixa explícita/ })
+    expect(plano[W17].normal).toMatchObject({ kind: "conflict", reason: /base legada sem respaldo na política: versão padrão R17/ })
+  })
+
+  it("D) humana R18 = 9,5 é preservada; a normal recebe a base, porque a estrutura permite", async () => {
+    db.tables.work_tags = [] // o único sinal sexual é a própria nota humana, já na faixa explícita
+    nota(W, "r18")!.score = 9.5
+    Object.assign(nota(W, "r18")!, { source: "curator_confirmed", status: "rated", decided_by: "curator", evidence: { curadoria: true } })
+    const humana = structuredClone(nota(W, "r18"))
+    expect(await reconcileStructuralInferenceForWork(db as never, W)).toEqual({ changed: true, failed: false })
+    expect(nota(W, "r18")).toEqual(humana)
+    expect(nota(W, "normal")).toMatchObject({ score: STANDARD_EDITION_BASE, source: "inferred_base", evidence: { regra: STRUCTURAL_RULES.standardBase, anterior: BASE_LEGADA } })
+  })
+
+  it("D) 'sem nota' HUMANO na R18 é override: vários recálculos não a preenchem; a normal recebe a base pelos sinais independentes", async () => {
+    Object.assign(nota(W, "r18")!, { decided_by: "curator", evidence: { curadoria: { decidido_em: "2026-10-14" } } })
+    const override = structuredClone(nota(W, "r18"))
+    expect(await reconcileStructuralInferenceForRecalc(db as never)).toEqual({ status: "ok", obras: 1, gravadas: 1 })
+    expect(nota(W, "normal")).toMatchObject({ score: STANDARD_EDITION_BASE, source: "inferred_base" })
+    // Nas passadas seguintes nem TENTA escrever: a política preserva o override. (O filtro no banco,
+    // `decided_by <> curator`, seguraria a escrita mesmo assim — mas a tentativa já seria o defeito.)
+    db.writes = []
+    for (let i = 0; i < 2; i++) expect(await reconcileStructuralInferenceForRecalc(db as never)).toEqual({ status: "ok", obras: 1, gravadas: 0 })
+    expect(db.writes).toEqual([])
+    expect(nota(W, "r18")).toEqual(override)
+  })
+
+  it("E) a evidência muda depois: só a inferência PRÓPRIA é retirada (o anterior volta); a nota mais forte fica", async () => {
+    // WL: a normal é reaproveitada (forte, como a Lucia) e a adulta começa em 'não avaliado' da auditoria.
+    const WL = "w-forte"
+    db.tables.work_edition_state.push(estado(WL))
+    db.tables.work_edition_scores.push(
+      linha(WL, "normal", { score: 6, source: "reused_existing", status: "rated", confidence: "media" }),
+      { ...structuredClone(NAO_AVALIADO), work_id: WL },
+    )
+    db.tables.work_tags.push({ ...structuredClone(tagAto), work_id: WL })
+    await reconcileStructuralInferenceForRecalc(db as never)
+    expect(nota(W, "normal")).toMatchObject({ score: 6, source: "inferred_base" })
+    expect(nota(WL, "r18")).toMatchObject({ score: EXPLICIT_FLOOR, source: "inferred_base" })
+    const forte = structuredClone(nota(WL, "normal"))
+    // A tag de ato é corrigida: sobra só o rótulo de idade. Ninguém mais confirma a natureza sexual.
+    db.tables.work_tags = [structuredClone(tagR19)]
+    const s = await reconcileStructuralInferenceForRecalc(db as never)
+    expect(s).toEqual({ status: "ok", obras: 2, gravadas: 2 })
+    expect(nota(W, "normal")).toMatchObject(BASE_LEGADA)
+    expect(nota(W, "r18")).toMatchObject(NAO_AVALIADO)
+    expect(nota(WL, "r18")).toMatchObject({ ...NAO_AVALIADO, work_id: WL })
+    expect(nota(WL, "normal")).toEqual(forte)
+  })
+
+  it("F) recálculo pelo caminho de produção: falha numa linha ⇒ 'com_erros' e a pendência FICA; falha ao ler ⇒ 'falhou', sem escrita", async () => {
+    db.falhar = (table, op, alvo) => table === "work_edition_scores" && op === "update" && alvo.some((r) => r.edition === "r18")
+    const parcial = await reconcileStructuralInferenceForRecalc(db as never)
+    expect(parcial).toMatchObject({ status: "com_erros", obras: 1, gravadas: 1 })
+    expect(recalcPendingAfter(parcial, NOW)).toEqual({ recalc_pending: true, recalc_last_edit_at: NOW })
+    db.falhar = null
+    db.leituraFalha = "work_tags"
+    db.writes = []
+    const lida = await reconcileStructuralInferenceForRecalc(db as never)
+    expect(lida).toMatchObject({ status: "falhou" })
+    expect(recalcPendingAfter(lida, NOW).recalc_pending).toBe(true)
+    expect(db.writes).toEqual([])
+  })
+
+  it("G) o gancho da curadoria reconcilia SÓ a obra afetada, mesmo com outra mixed elegível pendente", async () => {
+    db.tables.work_edition_state.push(estado(NOVA, { genres: ["Smut"] }))
+    const deW = structuredClone(db.tables.work_edition_scores.filter((r) => r.work_id === W))
+    expect(await reconcileStructuralInferenceForWork(db as never, NOVA)).toEqual({ changed: true, failed: false })
+    expect(db.tables.work_edition_scores.filter((r) => r.work_id === W)).toEqual(deW)
+    expect(nota(NOVA, "normal")).toMatchObject({ score: STANDARD_EDITION_BASE })
+  })
+
+  it("H) o estado CONVERGIDO de produção (keep, preserve, conflict, none) não gera nenhuma escrita, recálculo após recálculo", async () => {
+    const tags = (id: string) => ({ ...structuredClone(tagAto), work_id: id })
+    db.tables = {
+      work_edition_state: [
+        estado("keep"), estado("reaproveitada"), estado("curadoria"),
+        estado("conflito-r17", { linhas_normal: ["Original Webtoon: R17"] }),
+        estado("extras", { r18_extra_chapters: true }),
+        estado("lucia"), estado("sem-sinal"),
+      ],
+      work_edition_scores: [
+        propriaNormal("keep"), propriaR18("keep"),
+        propriaNormal("reaproveitada"), linha("reaproveitada", "r18", { score: 9.5, source: "reused_existing", status: "rated" }),
+        propriaNormal("curadoria"), linha("curadoria", "r18", { score: 9, source: "curator_confirmed", status: "rated", decided_by: "curator" }),
+        { ...structuredClone(BASE_LEGADA), work_id: "conflito-r17" }, linha("conflito-r17", "r18", { score: 9, source: "reused_existing", status: "rated" }),
+        linha("extras", "normal", {}), propriaR18("extras"),
+        linha("lucia", "normal", { score: 6, source: "reused_existing", status: "rated", confidence: "media" }), linha("lucia", "r18", {}),
+        { ...structuredClone(BASE_LEGADA), work_id: "sem-sinal" }, linha("sem-sinal", "r18", {}),
+      ],
+      work_tags: [tags("keep"), tags("reaproveitada"), tags("curadoria"), tags("conflito-r17"), tags("extras"), { ...structuredClone(tagR19), work_id: "sem-sinal" }],
+      ai_evaluations: [],
+    }
+    const plano = Object.fromEntries((await reconcileStructuralInference(db as never, { apply: false })).works.map((w) => [w.workId, [w.plan.decisions.normal.kind, w.plan.decisions.r18.kind]]))
+    expect(plano).toEqual({
+      keep: ["keep", "keep"],
+      reaproveitada: ["keep", "preserve"],
+      curadoria: ["keep", "preserve"],
+      "conflito-r17": ["conflict", "preserve"],
+      extras: ["none", "keep"],
+      lucia: ["preserve", "none"],
+      "sem-sinal": ["conflict", "none"],
+    })
+    const antes = structuredClone(db.tables.work_edition_scores)
+    db.writes = []
+    for (let i = 0; i < 3; i++) expect(await reconcileStructuralInferenceForRecalc(db as never)).toEqual({ status: "ok", obras: 7, gravadas: 0 })
+    expect(db.writes).toEqual([])
+    expect(db.tables.work_edition_scores).toEqual(antes)
   })
 })
 

@@ -16,10 +16,20 @@ import { existsSync, rmSync, cpSync } from "node:fs"
 import { spawn } from "node:child_process"
 import path from "node:path"
 // O ambiente do servidor (sem credencial administrativa, e com a ordem que importa) — ver o módulo.
-import { ambienteDoServidor, carregarEnvLocal } from "./lib/standalone-env.mjs"
+import { ambienteDoServidor, carregarEnvLocal, decidirInicioLocal } from "./lib/standalone-env.mjs"
+import { probeGit } from "../lib/ai/git-probe.mjs"
 
 const raiz = process.cwd()
 const standalone = path.join(raiz, ".next", "standalone")
+const porta = process.env.PORT ?? "3000"
+const env = ambienteDoServidor({ envLocal: carregarEnvLocal(raiz), processEnv: process.env, porta })
+
+// 🔴 Contra a nuvem, só checkout canônico sobe (a curadoria local grava na nuvem) — ver `decidirInicioLocal`.
+const inicio = decidirInicioLocal({ url: env.NEXT_PUBLIC_SUPABASE_URL, onFly: Boolean(env.FLY_APP_NAME), sondar: () => probeGit(raiz) })
+if (!inicio.permitido) {
+  console.error(`✗ ${inicio.motivo}`)
+  process.exit(1)
+}
 
 if (!existsSync(standalone)) {
   console.error("✗ .next/standalone não existe — rode `npm run build` antes.")
@@ -37,11 +47,10 @@ for (const [origem, destino] of [
   cpSync(origem, destino, { recursive: true })
 }
 
-const porta = process.env.PORT ?? "3000"
 console.log(`▲ standalone em http://localhost:${porta}`)
 const servidor = spawn(process.execPath, [path.join(standalone, "server.js")], {
   stdio: "inherit",
-  env: ambienteDoServidor({ envLocal: carregarEnvLocal(raiz), processEnv: process.env, porta }),
+  env,
 }).on("exit", (code) => process.exit(code ?? 0))
 
 /**

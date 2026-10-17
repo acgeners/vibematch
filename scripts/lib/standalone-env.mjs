@@ -4,6 +4,8 @@
  */
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
+import { isCanonicalCheckout } from "../../lib/ai/git-probe.mjs"
+import { ehLocal } from "./local-primary.mjs"
 
 /**
  * Credenciais ADMINISTRATIVAS: só scripts as usam, nunca o app em runtime. Não entram no servidor,
@@ -53,4 +55,40 @@ export function ambienteDoServidor({ envLocal, processEnv, porta }) {
   env.PORT = porta
   for (const chave of CREDENCIAIS_SO_DE_SCRIPT) delete env[chave]
   return env
+}
+
+/**
+ * Este checkout pode subir o servidor local? A regra é a das chamadas pagas e do recálculo
+ * (`lib/ai/code-provenance.ts`): contra o banco da NUVEM, só um checkout CANÔNICO — rastreado limpo e
+ * HEAD exatamente na ref local `origin/main` (`isCanonicalCheckout`, o mesmo predicado). Banco local
+ * (`smoke:logado`, `db:local`) e Fly passam sem olhar git.
+ *
+ * 🔴 Por que no lançador: o `npm start` é a curadoria local, e salvar "Versões da obra…" reconcilia a
+ * inferência estrutural na hora (`STRUCTURAL_INFERENCE_AUTO_APPLY`), por um caminho que não passa pela
+ * guarda do recálculo. Checkout não canônico não sobe; o Fly não usa este lançador (`node server.js`).
+ * ⚠️ Não faz `git fetch`: a ref é a local, como nas outras guardas.
+ *
+ * @param {{ url: string | undefined, onFly: boolean, sondar: () => import("../../lib/ai/code-provenance").GitProbe }} entrada
+ * @returns {{ permitido: true, base: "fly" | "banco_local" | "canonico" } | { permitido: false, motivo: string }}
+ */
+export function decidirInicioLocal({ url, onFly, sondar }) {
+  if (onFly) return { permitido: true, base: "fly" }
+  if (ehLocal(url)) return { permitido: true, base: "banco_local" }
+  const p = sondar()
+  if (isCanonicalCheckout(p)) return { permitido: true, base: "canonico" }
+  const onde = p.ok ? `${p.branch ?? "(detached)"} @ ${p.sha.slice(0, 7)}` : "?"
+  const porque = !p.ok
+    ? `não deu para ler o estado do git (${p.error})`
+    : p.atOriginMain === null
+      ? "a ref local origin/main não existe"
+      : p.dirtyTracked
+        ? "há arquivos rastreados modificados"
+        : "o HEAD não é a ponta de origin/main (ref local)"
+  return {
+    permitido: false,
+    motivo:
+      `npm start RECUSADO: o servidor apontaria para o banco da NUVEM (${url || "sem URL"}) a partir de um ` +
+      `checkout não canônico — ${porque}. Checkout: ${onde}. Suba de um checkout limpo exatamente em ` +
+      `origin/main (\`git fetch\` + atualizar), ou aponte o app para o banco local (\`npm run db:local\`).`,
+  }
 }

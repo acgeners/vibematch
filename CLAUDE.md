@@ -3304,6 +3304,14 @@ que vazou num transcript. Tirar só a credencial poria a próxima chave (API key
 ⚠️ O `npm run dev` não passa o `.env.local` no ambiente do processo (o Next o carrega em memória, no
 filho); só tirar a credencial do `.env.local` cobre os dois.
 
+🔴 **Contra a NUVEM, o `npm start` só sobe de checkout CANÔNICO** (`decidirInicioLocal`, desde
+2026-10-17): rastreado limpo e HEAD na ponta da ref local `origin/main` — a régua das chamadas pagas e
+do recálculo, pelo MESMO predicado (`isCanonicalCheckout`, `lib/ai/git-probe.mjs`). Banco local
+(`smoke:logado`, `db:local`) passa sem olhar git. Motivo: o `npm start` é a curadoria local, e salvar
+"Versões da obra…" reconcilia a inferência estrutural na hora, por um caminho fora da guarda do recálculo.
+⚠️ Só o lançador: o Fly roda `node server.js` direto (imagem sem `.git`), e o `npm run dev` NÃO tem esta
+guarda (a dele é de alvo do banco).
+
 🔴 **`npm run deploy` CONFERE o que subiu, e o `/api/health` sozinho não serve.** Em
 19/08/2026 um deploy levou 90 PRs ao ar e a **`/ranking` subiu quebrada** — HTTP 200, erro de
 Server Components no render, **zero obras na tela** — enquanto o health respondia
@@ -4790,7 +4798,8 @@ bastava estar CONTIDO, e um checkout velho (ancestral) passava como canônico. R
 antes do guard); `recalc_pending` fica de pé; o disparo automático só loga, o botão
 mostra a mensagem. Override deliberado: `RECALC_CLOUD_NONCANONICAL_REASON="<motivo>"`.
 ⚠️ **Não confundir com `PAID_CLOUD_NONCANONICAL_REASON`**: cada override só libera a sua operação.
-⚠️ Só o recálculo: curadoria por obra ("Atualizar dados", edição, vínculos) segue livre em branch.
+⚠️ Só o recálculo: a curadoria por obra ("Atualizar dados", edição, vínculos) não passa por este guard.
+Contra a nuvem, o `npm start` local já não sobe de checkout não canônico (ver a seção do `standalone`).
 O job `recalculate_scores` grava a proveniência em `payload.code`.
 
 ## Scoring pipeline
@@ -5682,12 +5691,18 @@ política: `lib/editions/structural-inference.ts`; executor: `server/editions/st
   Só RETIRA o que ela mesma inferiu (DELETE filtrado no banco por fonte + regra, e devolve a linha de
   antes, guardada em `evidence.anterior`) — nada passa por `app.permitir_rebaixar_edicao`. A base 5,0
   da mig 214 é atualizada para 6,0 quando a política a sustenta; quando não, vira conflito (curadoria).
-- Roda no recálculo global (depois das guardas, antes de ler as notas) e na curadoria de versões.
+- Roda no recálculo global (depois das guardas, antes de ler as notas) e na curadoria de versões
+  (só a obra salva, logo depois de gravar). Evidência nova (MangaUpdates, tags, avaliação com
+  classificação externa) só MARCA o recálculo — quem reconcilia é ele. Startup e deploy não rodam nada.
   Erro nela não derruba o recálculo, mas também não vira sucesso: o status volta no resultado e a
   pendência FICA, com a janela de 1h reiniciada (`recalcPendingAfter`) — reprocessar é idempotente.
-  🔴 **`STRUCTURAL_INFERENCE_AUTO_APPLY` nasce desligado:** ligado, o primeiro recálculo em produção
-  SERIA a aplicação do legado sem revisão. O legado vai por `scripts/reconciliar-inferencia-estrutural.ts`
-  (ensaio por padrão; `--execute --edicao=normal|r18`, de checkout canônico); só depois se liga.
+  🔴 **`STRUCTURAL_INFERENCE_AUTO_APPLY` está LIGADO desde 17/10/2026**, depois de o legado (R18 e
+  normal) ser aplicado pelo script, em etapas, e recalculado, com o dry-run sem gravação planejada. Ela
+  só ajusta ou retira a PRÓPRIA inferência (devolvendo `evidence.anterior`); curadoria
+  (`curator_confirmed` e o "não avaliado" dela) e notas mais fortes nunca são tocadas, e conflito fica
+  como está, para a curadoria. `scripts/reconciliar-inferencia-estrutural.ts` segue para diagnóstico e
+  reconciliação controlada (ensaio por padrão; `--execute --edicao=normal|r18`, de checkout canônico).
+  Desligar a constante é o interruptor de emergência.
 
 ## A RAZÃO do limite 18+ tem dono — e quem a estava escrevendo era o modelo
 
