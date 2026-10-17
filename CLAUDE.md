@@ -3296,6 +3296,14 @@ que mordem ao rodar local:
 - **`server.js` não lê `.env.local`** (em prod quem injeta as env é a plataforma). Sem isso, toda
   página morre com `supabaseKey is required` numa tela genérica. O script injeta local.
 
+🔴 **Credencial só de script NÃO entra no servidor** (`scripts/lib/standalone-env.mjs`): o
+`start-standalone` retira `CREDENCIAIS_SO_DE_SCRIPT` (`SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`)
+do `.env.local` e do shell, e põe `PORT` como 1ª variável. Motivo medido em 2026-10-16: o `next-server`
+reescreve o título do processo e o `pgrep -fl` passa a mostrar a 1ª string do ambiente — era o token,
+que vazou num transcript. Tirar só a credencial poria a próxima chave (API key paga) nessa posição.
+⚠️ O `npm run dev` não passa o `.env.local` no ambiente do processo (o Next o carrega em memória, no
+filho); só tirar a credencial do `.env.local` cobre os dois.
+
 🔴 **`npm run deploy` CONFERE o que subiu, e o `/api/health` sozinho não serve.** Em
 19/08/2026 um deploy levou 90 PRs ao ar e a **`/ranking` subiu quebrada** — HTTP 200, erro de
 Server Components no render, **zero obras na tela** — enquanto o health respondia
