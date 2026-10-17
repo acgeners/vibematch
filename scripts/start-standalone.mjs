@@ -12,25 +12,11 @@
  *
  * Uso: npm run build && npm start        (PORT=3000 por padrão)
  */
-import { existsSync, rmSync, cpSync, readFileSync } from "node:fs"
+import { existsSync, rmSync, cpSync } from "node:fs"
 import { spawn } from "node:child_process"
 import path from "node:path"
-
-/**
- * O `server.js` gerado NÃO lê `.env.local` — em produção quem injeta as variáveis é a plataforma
- * (no Fly, o Dockerfile + os secrets). Sem isto, o servidor sobe, responde 200 e toda página morre
- * com "supabaseKey is required" numa tela genérica de erro. Só afeta o `npm start` local.
- */
-function carregarEnvLocal(raiz) {
-  const arquivo = path.join(raiz, ".env.local")
-  if (!existsSync(arquivo)) return {}
-  const env = {}
-  for (const linha of readFileSync(arquivo, "utf8").split("\n")) {
-    const m = linha.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
-    if (m && !linha.trimStart().startsWith("#")) env[m[1]] = m[2].trim().replace(/^["']|["']$/g, "")
-  }
-  return env
-}
+// O ambiente do servidor (sem credencial administrativa, e com a ordem que importa) — ver o módulo.
+import { ambienteDoServidor, carregarEnvLocal } from "./lib/standalone-env.mjs"
 
 const raiz = process.cwd()
 const standalone = path.join(raiz, ".next", "standalone")
@@ -55,7 +41,7 @@ const porta = process.env.PORT ?? "3000"
 console.log(`▲ standalone em http://localhost:${porta}`)
 const servidor = spawn(process.execPath, [path.join(standalone, "server.js")], {
   stdio: "inherit",
-  env: { ...carregarEnvLocal(raiz), ...process.env, PORT: porta },
+  env: ambienteDoServidor({ envLocal: carregarEnvLocal(raiz), processEnv: process.env, porta }),
 }).on("exit", (code) => process.exit(code ?? 0))
 
 /**
