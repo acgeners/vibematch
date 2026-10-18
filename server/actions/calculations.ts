@@ -661,8 +661,8 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   await exigirContratoDeScoring(supabase)
 
   // Inferência ESTRUTURAL da nota por versão das mixed, ANTES de ler essas notas logo abaixo: as
-  // linhas inferidas e a previsão mudam juntas, nesta execução. Falha macia (o recálculo segue) e
-  // desligada até o legado ser aplicado — ver server/editions/structural-inference-sync.ts.
+  // linhas inferidas e a previsão mudam juntas, nesta execução. Falha macia (o recálculo segue, a
+  // pendência fica) — ver server/editions/structural-inference-sync.ts.
   const editionInference = await reconcileStructuralInferenceForRecalc(supabase)
 
   // Offset de atributos (Fase 1.5) — carregado uma vez e aplicado on-read.

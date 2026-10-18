@@ -1,9 +1,9 @@
-import { spawnSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { CREDENCIAIS_SO_DE_SCRIPT, ambienteDoServidor, carregarEnvLocal } from "@/scripts/lib/standalone-env.mjs"
+import { CREDENCIAIS_SO_DE_SCRIPT, ambienteDoServidor, carregarEnvLocal, decidirInicioLocal } from "@/scripts/lib/standalone-env.mjs"
 
 /**
  * `npm start` NÃO repassa credencial administrativa ao `next-server` (2026-10-16).
@@ -93,7 +93,9 @@ describe("o lançador real (scripts/start-standalone.mjs), com um server.js fals
     const saida = path.join(raiz, "chaves.json")
     const r = spawnSync(process.execPath, [path.join(RAIZ, "scripts/start-standalone.mjs")], {
       cwd: raiz,
-      env: { PATH: process.env.PATH ?? "", SAIDA_SONDA: saida, SUPABASE_DB_PASSWORD: "do-shell", PORT: "3197" } as unknown as NodeJS.ProcessEnv,
+      // Banco LOCAL (o shell vence o .env.local): a pasta temporária não é checkout git, e contra a nuvem
+      // o lançador exige checkout canônico — ver o bloco da guarda abaixo.
+      env: { PATH: process.env.PATH ?? "", SAIDA_SONDA: saida, SUPABASE_DB_PASSWORD: "do-shell", PORT: "3197", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321" } as unknown as NodeJS.ProcessEnv,
       encoding: "utf8",
       timeout: 20_000,
     })
@@ -102,6 +104,116 @@ describe("o lançador real (scripts/start-standalone.mjs), com um server.js fals
     for (const chave of CREDENCIAIS_SO_DE_SCRIPT) expect(chaves).not.toContain(chave)
     expect(chaves).toEqual(expect.arrayContaining(["NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "ANTHROPIC_API_KEY"]))
     expect(chaves[0]).toBe("PORT")
+  })
+})
+
+/**
+ * 🔴 O lançador local só sobe contra a NUVEM a partir de checkout CANÔNICO (rastreado limpo + HEAD na
+ * ponta da ref local `origin/main`) — a régua das chamadas pagas e do recálculo, pelo MESMO predicado
+ * (`lib/ai/git-probe.mjs`). Motivo: o `npm start` é a curadoria local, e salvar "Versões da obra…"
+ * reconcilia a inferência estrutural na hora, por um caminho fora da guarda do recálculo.
+ */
+describe("o lançador só sobe contra a nuvem a partir do checkout canônico", () => {
+  const NUVEM = "https://ficticio.supabase.co"
+  const LOCAL = "http://127.0.0.1:54321"
+  const naoSonda = () => {
+    throw new Error("não devia olhar o git")
+  }
+
+  it("decisão: Fly e banco local passam SEM olhar git; nuvem exige o predicado canônico", () => {
+    expect(decidirInicioLocal({ url: NUVEM, onFly: true, sondar: naoSonda })).toEqual({ permitido: true, base: "fly" })
+    expect(decidirInicioLocal({ url: LOCAL, onFly: false, sondar: naoSonda })).toEqual({ permitido: true, base: "banco_local" })
+    const sonda = (extra: Record<string, unknown>) => () => ({ ok: true, sha: "a".repeat(40), branch: "main", dirtyTracked: false, inOriginMain: true, atOriginMain: true, ...extra }) as never
+    expect(decidirInicioLocal({ url: NUVEM, onFly: false, sondar: sonda({}) })).toEqual({ permitido: true, base: "canonico" })
+    expect(decidirInicioLocal({ url: NUVEM, onFly: false, sondar: sonda({ dirtyTracked: true }) })).toMatchObject({ permitido: false, motivo: /rastreados modificados/ })
+    expect(decidirInicioLocal({ url: NUVEM, onFly: false, sondar: sonda({ atOriginMain: false }) })).toMatchObject({ permitido: false, motivo: /não é a ponta de origin\/main/ })
+    expect(decidirInicioLocal({ url: NUVEM, onFly: false, sondar: sonda({ atOriginMain: null, inOriginMain: null }) })).toMatchObject({ permitido: false, motivo: /origin\/main não existe/ })
+    expect(decidirInicioLocal({ url: NUVEM, onFly: false, sondar: () => ({ ok: false, error: "HEAD indeterminado" }) })).toMatchObject({ permitido: false })
+    // URL ausente não é "local": falha para o lado de exigir o checkout canônico.
+    expect(decidirInicioLocal({ url: undefined, onFly: false, sondar: () => ({ ok: false, error: "x" }) })).toMatchObject({ permitido: false })
+  })
+
+  /** Repositório git TEMPORÁRIO de verdade (local, sem rede), com o `.env.local` ignorado como no projeto. */
+  function checkout(): { raiz: string; g: (...a: string[]) => string } {
+    const raiz = raizTemporaria()
+    mkdirSync(path.join(raiz, ".next", "standalone"), { recursive: true })
+    writeFileSync(
+      path.join(raiz, ".next", "standalone", "server.js"),
+      'require("fs").writeFileSync(process.env.SAIDA_SONDA, JSON.stringify(Object.keys(process.env)))\n',
+    )
+    const g = (...a: string[]) => execFileSync("git", a, { cwd: raiz, stdio: "pipe", encoding: "utf8" }).trim()
+    writeFileSync(path.join(raiz, ".gitignore"), ".env*\n.next/\nchaves.json\n")
+    writeFileSync(path.join(raiz, "codigo.txt"), "v1\n")
+    g("init", "-q", "-b", "main")
+    g("-c", "user.email=t@t", "-c", "user.name=t", "add", ".gitignore", "codigo.txt")
+    g("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "c1")
+    g("update-ref", "refs/remotes/origin/main", "HEAD")
+    return { raiz, g }
+  }
+  function subir(raiz: string, url = NUVEM) {
+    const saida = path.join(raiz, "chaves.json")
+    const r = spawnSync(process.execPath, [path.join(RAIZ, "scripts/start-standalone.mjs")], {
+      cwd: raiz,
+      env: { PATH: process.env.PATH ?? "", SAIDA_SONDA: saida, PORT: "3198", NEXT_PUBLIC_SUPABASE_URL: url } as unknown as NodeJS.ProcessEnv,
+      encoding: "utf8",
+      timeout: 20_000,
+    })
+    let chaves: string[] | null = null
+    try {
+      chaves = JSON.parse(readFileSync(saida, "utf8")) as string[]
+    } catch {
+      chaves = null
+    }
+    return { status: r.status, stderr: r.stderr, chaves }
+  }
+
+  it("canônico (limpo, HEAD na ponta) + nuvem ⇒ sobe, com o ambiente do #571 intacto", () => {
+    const { raiz } = checkout()
+    const r = subir(raiz)
+    expect(r.status).toBe(0)
+    expect(r.chaves?.[0]).toBe("PORT")
+    for (const chave of CREDENCIAIS_SO_DE_SCRIPT) expect(r.chaves).not.toContain(chave)
+  })
+
+  it("arquivos NÃO rastreados e ignorados não bloqueiam", () => {
+    const { raiz } = checkout()
+    writeFileSync(path.join(raiz, "notas-locais.md"), "rascunho\n")
+    expect(subir(raiz).status).toBe(0)
+  })
+
+  it("HEAD diferente da ponta de origin/main ⇒ RECUSA, e o servidor nem é chamado", () => {
+    const { raiz, g } = checkout()
+    writeFileSync(path.join(raiz, "codigo.txt"), "v2\n")
+    g("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-am", "c2")
+    const r = subir(raiz)
+    expect(r.status).toBe(1)
+    expect(r.chaves).toBeNull()
+    expect(r.stderr).toMatch(/npm start RECUSADO.*não é a ponta de origin\/main/)
+  })
+
+  it("arquivo RASTREADO modificado ⇒ RECUSA", () => {
+    const { raiz } = checkout()
+    writeFileSync(path.join(raiz, "codigo.txt"), "editado\n")
+    const r = subir(raiz)
+    expect(r.status).toBe(1)
+    expect(r.chaves).toBeNull()
+    expect(r.stderr).toMatch(/rastreados modificados/)
+  })
+
+  it("sem git + nuvem ⇒ RECUSA (fail closed); sem git + banco local ⇒ sobe (o caso do smoke:logado)", () => {
+    const raiz = raizTemporaria()
+    mkdirSync(path.join(raiz, ".next", "standalone"), { recursive: true })
+    writeFileSync(path.join(raiz, ".next", "standalone", "server.js"), 'require("fs").writeFileSync(process.env.SAIDA_SONDA, "[]")\n')
+    expect(subir(raiz, NUVEM).status).toBe(1)
+    expect(subir(raiz, LOCAL).status).toBe(0)
+  })
+
+  it("o Fly não passa por este lançador: a imagem roda `node server.js` e não leva `.git`", () => {
+    const dockerfile = readFileSync(path.join(RAIZ, "Dockerfile"), "utf8")
+    expect(dockerfile).toMatch(/^CMD \["node", "server\.js"\]\s*$/m)
+    expect(dockerfile).not.toMatch(/start-standalone|npm start|\bgit\b/)
+    expect(readFileSync(path.join(RAIZ, ".dockerignore"), "utf8").split("\n").map((l) => l.trim())).toContain(".git")
+    expect(readFileSync(path.join(RAIZ, "package.json"), "utf8")).toMatch(/"start": "node scripts\/start-standalone\.mjs"/)
   })
 })
 
