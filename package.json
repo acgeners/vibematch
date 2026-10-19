@@ -76,6 +76,7 @@
     "db:health": "node scripts/db-health.mjs",
     "db:local:auth": "node --env-file=.env.local --env-file=.env.analysis scripts/db-local-bootstrap-auth.mjs",
     "backup": "node scripts/backup-primary.mjs",
+    "backup:conferir": "node scripts/backup-conferir.mjs",
     "db:local:backup": "node --env-file=.env.local --env-file=.env.analysis scripts/db-local-backup.mjs",
     "db:local:restore": "node --env-file=.env.local --env-file=.env.analysis scripts/db-local-restore.mjs",
     "db:local-primary": "node --env-file=.env.local --env-file=.env.analysis scripts/db-local-primary.mjs"

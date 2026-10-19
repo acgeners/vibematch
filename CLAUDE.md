@@ -45,8 +45,24 @@ existe de onde restaurar. E parte do dado é cara de refazer: ~2.100 avaliaçõe
 tokens**) e ~14 mil reviews raspadas de 8 fontes.
 
 ```bash
+npm run backup                    # o que o agente semanal roda (backup-primary.mjs → backup-db.mjs)
+npm run backup:conferir           # SÓ LEITURA: estado de cada pasta + simulação da retenção
 node scripts/backup-db.mjs        # → .backups/<timestamp>/ (gitignored)
 ```
+
+🔴 **Backup completo é o que a régua CONFERE, nunca o nome da pasta.** O `backup-db.mjs` grava em
+`<stamp>.incompleto/` e só renomeia no fim, depois de reler do disco cada tabela (linhas) e o
+schema. Dono da régua: `scripts/lib/backup-integridade.mjs`.
+
+| pasta | estado | exit | o que fazer |
+|---|---|---|---|
+| `<stamp>/` | **completo**: manifesto `formato: 2` + tabelas + schema conferidos | 0 | — |
+| `<stamp>.sem-schema/` | dado conferido, NÃO restaura sozinho | 2 | corrigir o motivo (no manifesto) e rodar de novo |
+| `<stamp>.incompleto/` | interrompido; motivo em `FALHA.json`, tabela cortada em `*.parcial` | 1 | rodar de novo; apagar à mão depois de um completo |
+
+⚠️ Pasta de stamp puro SEM manifesto (anterior a 19/10, como a de 18/10) é **incompleta** — o
+script antigo só gravava o manifesto depois de todas as tabelas passarem. Com manifesto, tamanhos e
+schema batendo, conta como completa (legado).
 
 Dump lógico de todas as tabelas em NDJSON gzipado (**39,6 MB / 206.151 linhas em 77 tabelas**,
 remedido em 2026-08-18; eram 34,9 MB / 173.806 em 2026-08-09) **+ `schema.sql.gz`** (42 KB: 67
@@ -64,7 +80,9 @@ tratar como corrupção, olhe o SINAL da diferença: `escritas > contadas` é co
 viva; `escritas < contadas` é o truncamento que o guard existe para pegar.
 
 🟢 **Roda sozinho, semanalmente**: `~/Library/LaunchAgents/com.geners.animedb-backup.plist`,
-domingo 04:00, com `BACKUP_ENV_FILE=.env.supabase-cloud`.
+domingo 04:00, chamando `scripts/backup-primary.mjs` (= `npm run backup`), que passa
+`BACKUP_ENV_FILE=.env.supabase-cloud` ao `backup-db.mjs`. O log (`~/Library/Logs/animedb-backup.log`)
+ninguém lê: confira o resultado com `npm run backup:conferir`.
 
 ⚠️ **Por que um env file FIXO, se o `.env.local` já aponta pra nuvem:** porque ele é um
 INTERRUPTOR — `db:local`/`db:cloud` reescrevem o alvo dele (`scripts/db-target.mjs`). Sem o
@@ -91,9 +109,10 @@ tinha **1 dia** e o de schema tinha **11** — e, com o local deixando de ser fo
 `db:pull` para de ser rodado por hábito, então essa metade envelheceria ainda mais justamente
 quando vira a única rede. Custa 259 KB e ~3s: **0,24%** do dump completo de 108 MB.
 
-⚠️ O bloco de schema é **fail-soft**: sem `pg_dump` no PATH ou sem `SUPABASE_DB_PASSWORD` ele
-avisa e segue, porque o dado já está gravado e conferido — abortar ali jogaria fora o que deu
-certo.
+⚠️ **Sem schema, o backup não é descartado nem anunciado como completo**: sem `pg_dump` no PATH ou
+sem `SUPABASE_DB_PASSWORD`, o dado conferido fica em `<stamp>.sem-schema/`, o script sai com 2 e a
+pasta não conta na retenção. Jogar o dado fora seria perder o que deu certo; chamá-lo de backup
+foi o que manteve os automáticos de agosto 8 dias sem schema.
 
 🔴 **E esse fail-soft disparava em TODO backup automático: por 8 dias, só o dado foi salvo.**
 Medido em 2026-08-18 sobre os 5 backups completos em disco — **1 tinha `schema.sql.gz`**, o de
@@ -105,10 +124,9 @@ carrega **um** env file, e o agente semanal roda com `.env.supabase-cloud`, que 
 chaves e **não tinha `SUPABASE_DB_PASSWORD`** (ela mora no `.env.local`). Corrigido copiando a
 senha para lá.
 
-⚠️ **O modo de falha é o caro:** o aviso vai para o log do launchd, que ninguém lê, e o backup
-termina anunciando sucesso. Você descobriria no dia de restaurar num banco vazio — quando o
-NDJSON não tem onde entrar, porque não há tabelas. É a mesma família do `backup-db.mjs` mirando
-o banco errado: **falha que produz resultado** ([[gotcha-backup-automatico-sem-schema]]).
+⚠️ **O modo de falha era o caro:** o aviso ia para o log do launchd e o backup terminava
+anunciando sucesso — descoberto só ao restaurar num banco sem tabelas. Hoje vira `.sem-schema` +
+exit 2 ([[gotcha-backup-automatico-sem-schema]]).
 
 ⚠️ **Ao mexer em `.env.supabase-cloud`, lembre que ele NÃO herda nada do `.env.local`.** É o
 oposto da convenção dos scripts de análise, onde dois `--env-file` se sobrepõem e o segundo
@@ -128,7 +146,13 @@ nome de diretório de `exemplo`) e todo escritor chama `podar("<família>")`. Aj
 pela env declarada em cada uma — `BACKUP_KEEP` (5), `PULL_KEEP` (3), `PUSH_STAGE_KEEP` (2),
 `PUSH_EVALS_KEEP` (3), `COFRE_KEEP` (5), `SYNOPSIS_LAB_KEEP` (3), e mais 5.
 
-⚠️ **São 16 hoje**, e esta linha já disse **7** e **11** — a lista de envs acima cobre 6 delas.
+🔴 **A família `backup` só conta e só apaga backups COMPLETOS, e por padrão só SIMULA.** Pasta
+incompleta, sem-schema ou de validade desconhecida nunca entra no limite de `BACKUP_KEEP` nem é
+apagada (`.incompleto`/`.sem-schema` são a família `backup-parcial`, nunca podada). Apagar completo
+exige `BACKUP_PODAR=1` — e só ligue isso quando houver cópia externa RECORRENTE e conferida: hoje
+o iCloud é manual, e a cópia local mais antiga pode ser a única. Custo de não podar: ~50 MB/semana.
+
+⚠️ **São 17 hoje**, e esta linha já disse **7** e **11** — a lista de envs acima cobre 6 delas.
 Contagem em prosa não acusa a própria defasagem: **não a repita aqui, leia o `FAMILIAS`.**
 
 🔴 **E essa frase não bastou: a linha defasou de 11 para 14 com o aviso escrito nela mesma.** É a
@@ -727,9 +751,8 @@ create trigger on_auth_user_created
   after insert on auth.users for each row execute function public.handle_new_user();
 ```
 
-**Corolário de backup:** este `pg_dump` é hoje o **único** backup que inclui schema, policies e
-functions. O `scripts/backup-db.mjs` grava **só dado** (as 162 functions, 47 policies, 11 triggers e 2
-views do `public` não vão nele), e `supabase/migrations/` não reconstrói o banco.
+**Corolário de backup:** `supabase/migrations/` não reconstrói o banco — quem tem o schema são este
+`pg_dump` e o `schema.sql.gz` de todo backup COMPLETO do `backup-db.mjs` (um `.sem-schema/` não tem).
 
 ## Architecture
 
