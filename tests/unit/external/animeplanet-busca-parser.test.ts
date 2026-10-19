@@ -13,6 +13,8 @@ vi.mock("@/lib/external/flaresolverr", () => ({
   fetchHtmlWithCfFallback: vi.fn(),
   isCfBypassUnavailable: vi.fn(() => false),
 }))
+// A rota exige curador (ver proxies-de-fonte-exigem-curador.test.ts); aqui o assunto é o parser.
+vi.mock("@/server/auth/curator-route-gate", () => ({ gateCuradorDaRota: async () => null }))
 
 import {
   fetchAnimePlanetByTitle,
