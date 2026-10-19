@@ -11,6 +11,11 @@
  *   node scripts/backup-db.mjs            → .backups/<timestamp>/
  *   node scripts/backup-db.mjs /caminho   → /caminho/<timestamp>/
  *
+ * Saída, e o que cada nome quer dizer (régua: `lib/backup-integridade.mjs`):
+ *   <timestamp>/             COMPLETO — tabelas + schema conferidos no disco      (exit 0)
+ *   <timestamp>.sem-schema/  só dado: conferido, mas não restaura sozinho         (exit 2)
+ *   <timestamp>.incompleto/  em andamento, ou interrompido (motivo em FALHA.json) (exit 1)
+ *
  * 🔴 ALVO: NUVEM — e aqui a palavra tem sentido inverso ao dos outros scripts. Ele não GRAVA
  * no banco; o que ele grava é o BACKUP, e um backup do banco errado é pior que backup nenhum,
  * porque reporta sucesso. O alvo sai de `BACKUP_ENV_FILE` (default `.env.local`), não de
@@ -26,8 +31,10 @@ import fs from "node:fs"
 import path from "node:path"
 import zlib from "node:zlib"
 import { createRequire } from "node:module"
-import { podar } from "./lib/backups-retencao.mjs"
+import { listarFamilia, podar } from "./lib/backups-retencao.mjs"
 import { ordemDePaginacao, paginasOrdenadas } from "./lib/backup-ordem.mjs"
+import { FALHA, SCHEMA, SUFIXO_INCOMPLETO } from "./lib/backup-integridade.mjs"
+import { escreverNdjsonGz, gravarBackup } from "./lib/backup-gravacao.mjs"
 
 const require = createRequire(import.meta.url)
 const { createClient } = require("@supabase/supabase-js")
@@ -89,33 +96,22 @@ async function dumpTable(table, definicao, outDir) {
   // abaixo não percebe. A regra e o porquê moram em `lib/backup-ordem.mjs`.
   const ordem = ordemDePaginacao(table, definicao, count, PAGE)
 
+  // Escreve, fecha e confere contra `count` — e, se cair no meio, o arquivo vira `.parcial`.
   const file = path.join(outDir, `${table}.ndjson.gz`)
-  const gzip = zlib.createGzip()
-  const out = fs.createWriteStream(file)
-  gzip.pipe(out)
-
-  let written = 0
-  for await (const data of paginasOrdenadas(() => sb.from(table).select("*"), ordem, PAGE, table)) {
-    for (const row of data) gzip.write(JSON.stringify(row) + "\n")
-    written += data.length
-  }
-
-  await new Promise((res, rej) => {
-    gzip.end()
-    out.on("finish", res)
-    out.on("error", rej)
-  })
-
-  // A conferência que torna o backup confiável. Sem ela, truncar não daria erro.
-  if (written !== (count ?? 0)) {
-    throw new Error(`${table}: BACKUP INCOMPLETO — ${written} linhas gravadas, ${count} no banco`)
-  }
-  return { table, rows: written, bytes: fs.statSync(file).size }
+  const paginas = paginasOrdenadas(() => sb.from(table).select("*"), ordem, PAGE, table)
+  const { rows, bytes } = await escreverNdjsonGz(file, paginas, { esperado: count ?? 0, rotulo: table })
+  return { table, rows, bytes }
 }
 
 const base = process.argv[2] ?? path.join(ROOT, ".backups")
 const stamp = new Date().toISOString().replace(/[:.]/g, "-")
-const outDir = path.join(base, stamp)
+// 🔴 O backup é escrito em `<stamp>.incompleto/` e só vira `<stamp>/` por RENOMEAÇÃO, depois de
+// conferido no disco. Até 2026-10-19 a pasta nascia com o nome final: a queda de 18/10 deixou um
+// diretório com nome de backup bom e 68 de 82 tabelas, e a retenção (que ordenava por nome) o
+// contaria entre os 5 mais recentes. `renameSync` na mesma pasta é atômico: não existe instante
+// em que `<stamp>/` exista pela metade. Régua dos estados: `lib/backup-integridade.mjs`.
+const finalDir = path.join(base, stamp)
+const outDir = finalDir + SUFIXO_INCOMPLETO
 
 // 🔴 O mkdir vem DEPOIS da descoberta, de propósito. Criado antes, todo backup falho deixava
 // um diretório vazio em `.backups/` — indistinguível, na listagem, de um backup que rodou e
@@ -135,101 +131,117 @@ if (tables.length === 0) {
   process.exit(1)
 }
 fs.mkdirSync(outDir, { recursive: true })
-console.log(`backup de ${tables.length} tabelas → ${outDir}\n`)
-
-const manifest = []
-let totalRows = 0
-let totalBytes = 0
-for (const t of tables) {
-  const r = await dumpTable(t, defs[t], outDir)
-  manifest.push(r)
-  totalRows += r.rows
-  totalBytes += r.bytes
-  if (r.rows > 0) {
-    console.log(`  ${t.padEnd(34)} ${String(r.rows).padStart(7)} linhas  ${(r.bytes / 1024).toFixed(0).padStart(6)} KB`)
-  }
-}
-
-fs.writeFileSync(
-  path.join(outDir, "manifest.json"),
-  JSON.stringify(
-    { takenAt: new Date().toISOString(), project: URL_, tables: manifest, totalRows },
-    null,
-    2,
-  ),
-)
-
-// 🔴 FAIL-CLOSED nº 2: backup que não trouxe linha nenhuma não é backup.
-if (totalRows === 0) {
-  console.error(`\n🔴 BACKUP FALHOU — ${tables.length} tabelas descobertas e ZERO linhas lidas.`)
-  console.error(`   Um catálogo real nunca fica vazio; isto é falha de acesso, não estado.\n`)
-  fs.rmSync(outDir, { recursive: true, force: true })
-  process.exit(1)
-}
-
-console.log(`\n✅ ${totalRows} linhas em ${tables.length} tabelas · ${(totalBytes / 1024 / 1024).toFixed(1)} MB`)
-console.log(`   manifest: ${path.join(outDir, "manifest.json")}`)
-console.log(`\n   Cada tabela é um NDJSON gzipado (1 linha = 1 registro JSON). Pra restaurar:`)
-console.log(`   zcat <tabela>.ndjson.gz | ... → upsert via service role (a ordem importa: FKs).`)
+console.log(`backup de ${tables.length} tabelas → ${outDir}`)
+console.log(`   (vira ${stamp}/ só depois de conferido)\n`)
 
 // ── schema ──────────────────────────────────────────────────────────────────────────────
 /**
- * 🔴 O NDJSON acima é SÓ DADO. Sem esta seção, restaurar exigia um banco que já tivesse as
- * tabelas, as 67 policies, os 13 triggers/functions do projeto e as 2 views — e o único lugar
- * onde isso existia era o `pg_dump` do `db:pull`, rodado à mão. Medido em 2026-08-10: o backup
- * de DADO tinha 1 dia (o agente semanal do launchd) e o de SCHEMA tinha **11**. E com o local
- * deixando de ser fonte de verdade, o `db:pull` para de ser rodado por hábito — a metade de
- * schema envelheceria ainda mais, justamente quando vira a única rede.
- *
- * Custa 259 KB (37 KB gzipado) e ~3 s: 0,24% do dump completo de 108 MB. Roda toda vez.
+ * 🔴 O NDJSON é SÓ DADO. Sem o schema, restaurar exige um banco que já tenha as tabelas, as
+ * policies, os triggers/functions do projeto e as views. Custa ~45 KB gzipado e ~3 s.
  *
  * ⚠️ `--schema public` NÃO leva `CREATE EXTENSION`, e `vector`/`pg_trgm` moram dentro do
  * public — restaurar exige criá-las antes, como o `db-pull-to-local.mjs` já faz no passo 4.
  *
- * ⚠️ As 162 funções que o `pg_proc` acusa no public NÃO são do projeto: 149 vêm dessas duas
- * extensions, e o pg_dump as omite de propósito (voltam com a extension). As 13 restantes são
- * as nossas, e são as que aparecem aqui.
+ * ⚠️ As ~160 funções que o `pg_proc` acusa no public NÃO são do projeto: vêm dessas duas
+ * extensions, e o pg_dump as omite de propósito (voltam com a extension).
  *
- * Fail-SOFT de propósito: sem `pg_dump` no PATH ou sem `SUPABASE_DB_PASSWORD`, o backup de
- * dado já está gravado e conferido — abortar agora jogaria fora o que deu certo.
+ * Sem schema o backup NÃO é descartado (os dados conferidos valem), mas também não é COMPLETO:
+ * a pasta termina como `<stamp>.sem-schema/` e o script sai com código 2. Até 2026-10-19 isto
+ * era um aviso e o backup seguia como bem-sucedido — foi assim que os automáticos passaram 8 dias
+ * de agosto salvando só dado sem nada acusar.
  */
-{
+function salvarSchema(dir) {
   const senha = process.env.SUPABASE_DB_PASSWORD
   const ref = (URL_ ?? "").match(/https:\/\/([a-z0-9]+)\.supabase\.co/)?.[1]
   if (!senha || !ref) {
-    console.log(`\n⚠️  schema NÃO salvo: falta ${!ref ? "um alvo de nuvem" : "SUPABASE_DB_PASSWORD"}.`)
-    console.log(`   O backup é só de DADO — restaurar vai exigir um banco com o schema já criado.`)
-  } else {
-    const arquivo = path.join(outDir, "schema.sql")
-    try {
-      const conn = `postgresql://postgres:${encodeURIComponent(senha)}@db.${ref}.supabase.co:5432/postgres?sslmode=require`
-      const { execFileSync } = require("node:child_process")
-      execFileSync(
-        "pg_dump",
-        [conn, "--no-owner", "--quote-all-identifiers", "--schema-only",
-         "--schema", "public", "--schema", "bkp", "-f", arquivo],
-        { stdio: ["ignore", "ignore", "pipe"] },
-      )
-      const sql = fs.readFileSync(arquivo)
-      fs.writeFileSync(`${arquivo}.gz`, zlib.gzipSync(sql, { level: 9 }))
-      fs.rmSync(arquivo)
-      const conta = (re) => (sql.toString().match(re) ?? []).length
-      console.log(`\n✅ schema: ${(fs.statSync(`${arquivo}.gz`).size / 1024).toFixed(0)} KB gzipado` +
-        ` · ${conta(/CREATE POLICY/g)} policies · ${conta(/CREATE FUNCTION/g)} functions` +
-        ` · ${conta(/CREATE TRIGGER/g)} triggers`)
-    } catch (e) {
-      console.log(`\n⚠️  schema NÃO salvo: ${String(e.stderr ?? e.message).trim().split("\n")[0].slice(0, 120)}`)
-      console.log(`   O backup de dado acima está íntegro. Rode \`npm run db:pull\` para um dump com schema.`)
+    return { status: "ausente", motivo: `falta ${!ref ? "um alvo de nuvem" : "SUPABASE_DB_PASSWORD"} no ${ENV_FILE}` }
+  }
+  const arquivo = path.join(dir, "schema.sql")
+  try {
+    const conn = `postgresql://postgres:${encodeURIComponent(senha)}@db.${ref}.supabase.co:5432/postgres?sslmode=require`
+    const { execFileSync } = require("node:child_process")
+    execFileSync(
+      "pg_dump",
+      [conn, "--no-owner", "--quote-all-identifiers", "--schema-only",
+       "--schema", "public", "--schema", "bkp", "-f", arquivo],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    )
+    const sql = fs.readFileSync(arquivo)
+    fs.writeFileSync(path.join(dir, SCHEMA), zlib.gzipSync(sql, { level: 9 }))
+    fs.rmSync(arquivo)
+    const conta = (re) => (sql.toString().match(re) ?? []).length
+    return {
+      status: "ok",
+      bytes: fs.statSync(path.join(dir, SCHEMA)).size,
+      policies: conta(/CREATE POLICY/g),
+      functions: conta(/CREATE FUNCTION/g),
+      triggers: conta(/CREATE TRIGGER/g),
     }
+  } catch (e) {
+    // Saída pela metade deste mesmo pg_dump não é schema — não pode ficar parecendo um.
+    fs.rmSync(arquivo, { force: true })
+    fs.rmSync(path.join(dir, SCHEMA), { force: true })
+    return { status: "ausente", motivo: String(e.stderr ?? e.message).trim().split("\n")[0].slice(0, 160) }
   }
 }
 
-// Retenção: mantém os BACKUP_KEEP mais recentes (default 5). A política mora em
-// `lib/backups-retencao.mjs`, que é o dono ÚNICO — cada script ter a sua foi o que deixou 3
-// famílias sem poda nenhuma e o `.backups` chegar a 1,9 GB.
+const r = await gravarBackup({
+  dir: outDir,
+  destinoFinal: finalDir,
+  tabelas: tables,
+  despejar: (t, dir) => dumpTable(t, defs[t], dir),
+  salvarSchema,
+  project: URL_,
+  log: (linha) => console.log(linha),
+})
+
+if (r.estado === "vazio") {
+  // 🔴 FAIL-CLOSED nº 2: um catálogo real nunca fica vazio. A pasta desta execução não tinha dado
+  // nenhum e foi removida.
+  console.error(`\n🔴 BACKUP FALHOU — ${r.tabelas} tabelas descobertas e ZERO linhas lidas.`)
+  console.error(`   Um catálogo real nunca fica vazio; isto é falha de acesso, não estado.\n`)
+  process.exit(1)
+}
+
+if (r.estado === "falhou") {
+  console.error(`\n🔴 BACKUP FALHOU na etapa ${r.etapa}${r.tabela ? ` (tabela ${r.tabela})` : ""}: ${r.erro}`)
+  console.error(`   A pasta ficou como ${path.basename(r.dir)}/ (motivo em ${FALHA}). Ela NÃO é um backup`)
+  console.error(`   restaurável e não conta na retenção. Nenhum backup anterior foi apagado.`)
+  console.error(`   Rode de novo. Depois de um backup completo, a pasta .incompleto pode ser apagada à mão.\n`)
+  process.exit(1)
+}
+
+const { schema, dir: destino, totalRows, totalBytes } = r
+console.log(`\n   dados: ${totalRows} linhas em ${r.tabelas} tabelas · ${(totalBytes / 1024 / 1024).toFixed(1)} MB, conferidos no disco`)
+
+if (schema.status !== "ok") {
+  console.log(`\n⚠️  BACKUP SÓ DE DADOS — schema NÃO salvo: ${schema.motivo}`)
+  console.log(`   ${destino}`)
+  console.log(`   Os dados estão conferidos e preservados, mas isto NÃO restaura um banco sozinho`)
+  console.log(`   (faltam tabelas, policies, triggers) e não conta como backup na retenção.`)
+  console.log(`   Corrija o motivo e rode de novo; schema avulso: \`npm run db:pull\`.\n`)
+  process.exit(2)
+}
+
+console.log(`\n✅ BACKUP COMPLETO — ${totalRows} linhas em ${r.tabelas} tabelas + schema, conferidos no disco`)
+console.log(`   ${destino}`)
+console.log(`   schema: ${(schema.bytes / 1024).toFixed(0)} KB gzipado · ${schema.policies} policies` +
+  ` · ${schema.functions} functions · ${schema.triggers} triggers`)
+console.log(`\n   Pra restaurar: criar as extensions vector e pg_trgm, aplicar schema.sql.gz e depois`)
+console.log(`   zcat <tabela>.ndjson.gz | ... → upsert via service role (a ordem importa: FKs).\n`)
+
+// Retenção: a política mora em `lib/backups-retencao.mjs`, dono ÚNICO. Ela só conta (e só pode
+// apagar) backups que a régua de `lib/backup-integridade.mjs` classifica como COMPLETOS, e por
+// padrão só SIMULA: apagar exige BACKUP_PODAR=1 (ver o porquê na família "backup").
 //
-// 🔴 Aqui, e SÓ aqui, a poda é no FIM de propósito: o script dá throw acima se qualquer tabela
-// truncar, então chegar até esta linha é a prova de que o backup novo presta. Podar antes
-// descartaria um backup bom por causa de um novo que falhou. Nos scripts de STAGING é o
-// contrário — lá se poda no começo, porque ensaio interrompido também deixa lixo.
+// 🔴 Aqui, e SÓ aqui, a poda é no FIM de propósito: chegar até esta linha é a prova de que o
+// backup novo está completo. Podar antes descartaria um backup bom por causa de um novo que
+// falhou. Nos scripts de STAGING é o contrário — lá se poda no começo.
 podar("backup", { base })
+
+const parciais = listarFamilia("backup-parcial", base)
+if (parciais.length) {
+  console.log(`ℹ️  ${parciais.length} pasta(s) .incompleto/.sem-schema preservada(s) em ${base} — não contam` +
+    ` como backup; apague à mão depois de diagnosticar:`)
+  for (const p of parciais) console.log(`     ${p}`)
+}

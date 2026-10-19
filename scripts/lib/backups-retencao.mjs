@@ -38,6 +38,7 @@
  */
 import fs from "node:fs"
 import path from "node:path"
+import { classificarBackup } from "./backup-integridade.mjs"
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..")
 export const BASE = path.join(ROOT, ".backups")
@@ -51,7 +52,12 @@ export const BASE = path.join(ROOT, ".backups")
  * para sempre). Por isso todo regex datado exige o dígito do ano LOGO depois do prefixo:
  * `push-curation-…` não casa com `/^push-\d{4}/`. Guardado por teste.
  *
- * `keep: null` = diretório fixo, não acumula versões — tem dono, mas não se poda.
+ * `keep: null` = tem dono, mas não se poda automaticamente (diretório fixo, ou família que só se
+ * apaga à mão).
+ *
+ * Dois campos opcionais, hoje só na família `backup`:
+ *   `classificar(dir)` — a pasta só CONTA e só pode ser apagada se `.completo`; o resto é preservado
+ *   `exigeHabilitacao` — env que precisa valer "1" para apagar de verdade; sem ela, só simula
  *
  * 🔴 `exemplo` NÃO é dado morto: é o nome de diretório real que o teste de arquitetura usa
  * para provar duas coisas de uma vez — que `casa` reconhece a PRÓPRIA família e que nenhuma
@@ -66,11 +72,30 @@ export const FAMILIAS = [
   {
     id: "backup",
     dono: "backup-db.mjs",
-    oQueE: "dump lógico NDJSON de todas as tabelas — o backup de DADO (sem schema/policies)",
+    oQueE: "backup lógico da nuvem: NDJSON de todas as tabelas + schema.sql.gz",
     casa: (n) => /^\d{4}-\d{2}-\d{2}T[\d-]+Z$/.test(n),
     exemplo: "2026-08-10T15-46-58-638Z",
     keepPadrao: 5,
     env: "BACKUP_KEEP",
+    // 🔴 O nome NÃO prova que a pasta é backup: a de 18/10 (interrompida, sem manifesto) tinha
+    // nome de backup e contaria entre "os 5 mais recentes", empurrando uma cópia boa para a
+    // exclusão. Só COMPLETO conta e só COMPLETO pode ser apagado.
+    classificar: classificarBackup,
+    // 🔴 Apagar backup completo exige BACKUP_PODAR=1. A cópia externa (iCloud) ainda é manual:
+    // sem prova de que a semana chegou lá fora, a cópia local mais antiga pode ser a única.
+    // Sem a env a poda só SIMULA e imprime o que apagaria. Custo: ~50 MB por semana em disco.
+    exigeHabilitacao: "BACKUP_PODAR",
+  },
+  {
+    id: "backup-parcial",
+    dono: "backup-db.mjs",
+    // Nunca podado: `.incompleto` é diagnóstico de uma falha e `.sem-schema` tem dado conferido.
+    // Os dois ficam fora da contagem da família `backup` por construção (o sufixo não casa lá).
+    oQueE: "backup interrompido (.incompleto, motivo em FALHA.json) ou só de dado (.sem-schema)",
+    casa: (n) => /^\d{4}-\d{2}-\d{2}T[\d-]+Z\.(incompleto|sem-schema)$/.test(n),
+    exemplo: "2026-10-18T07-00-02-555Z.incompleto",
+    keepPadrao: null,
+    env: null,
   },
   {
     id: "local-primary",
@@ -272,6 +297,40 @@ export function entradasSemDono(base = BASE) {
   return listar(base).filter((nome) => !FAMILIAS.some((f) => f.casa(nome)))
 }
 
+function familiaPorId(familiaId) {
+  const familia = FAMILIAS.find((f) => f.id === familiaId)
+  if (!familia) throw new Error(`família desconhecida em .backups: "${familiaId}" — declare em FAMILIAS`)
+  return familia
+}
+
+/** Entradas de uma família, da mais recente para a mais antiga (stamp ISO ordena por nome). */
+export function listarFamilia(familiaId, base = BASE) {
+  const familia = familiaPorId(familiaId)
+  return listar(base).filter((n) => familia.casa(n)).sort().reverse()
+}
+
+/**
+ * O plano da poda, SEM tocar em nada: o que fica, o que sairia e o que é preservado por não ser
+ * válido. Família com `classificar`: só as válidas contam para o `keep` e só elas podem sair —
+ * pasta inválida nunca desloca uma válida nem é apagada aqui.
+ */
+export function planejarPoda(familiaId, { base = BASE } = {}) {
+  const familia = familiaPorId(familiaId)
+  const keep = keepDe(familia)
+  const nomes = listarFamilia(familiaId, base)
+  if (keep == null) return { keep, manter: nomes, apagar: [], preservados: [] }
+  if (!familia.classificar) return { keep, manter: nomes.slice(0, keep), apagar: nomes.slice(keep), preservados: [] }
+
+  const validos = []
+  const preservados = []
+  for (const nome of nomes) {
+    const c = familia.classificar(path.join(base, nome))
+    if (c.completo) validos.push(nome)
+    else preservados.push({ nome, estado: c.estado, motivo: c.motivo })
+  }
+  return { keep, manter: validos.slice(0, keep), apagar: validos.slice(keep), preservados }
+}
+
 /**
  * Poda uma família e denuncia o que não tem dono.
  *
@@ -282,20 +341,26 @@ export function entradasSemDono(base = BASE) {
  * descartar um antigo que estava bom.)
  */
 export function podar(familiaId, { base = BASE, log = console.log } = {}) {
-  const familia = FAMILIAS.find((f) => f.id === familiaId)
-  if (!familia) throw new Error(`família desconhecida em .backups: "${familiaId}" — declare em FAMILIAS`)
+  const familia = familiaPorId(familiaId)
+  const plano = planejarPoda(familiaId, { base })
+  const habilitado = !familia.exigeHabilitacao || process.env[familia.exigeHabilitacao] === "1"
+  const apagados = habilitado ? plano.apagar : []
+  const simulados = habilitado ? [] : plano.apagar
 
-  const keep = keepDe(familia)
-  let apagados = []
-  if (keep != null) {
-    // Stamp ISO é lexicograficamente ordenável, então `sort()` já é ordem cronológica.
-    const todos = listar(base).filter((n) => familia.casa(n)).sort().reverse()
-    apagados = todos.slice(keep)
-    for (const nome of apagados) fs.rmSync(path.join(base, nome), { recursive: true, force: true })
-    if (apagados.length) {
-      log(`🧹 retenção (${familia.id}): apagados ${apagados.length}, mantidos ${keep}` +
-        (familia.env ? ` — ajuste com ${familia.env}=<n>` : ""))
-    }
+  for (const nome of apagados) fs.rmSync(path.join(base, nome), { recursive: true, force: true })
+  if (apagados.length) {
+    log(`🧹 retenção (${familia.id}): apagados ${apagados.length}, mantidos ${plano.keep}` +
+      (familia.env ? ` — ajuste com ${familia.env}=<n>` : ""))
+  }
+  if (familia.exigeHabilitacao && plano.keep != null) {
+    log(`🧹 retenção (${familia.id}) — ${habilitado ? "" : "SIMULAÇÃO, nada foi apagado: "}` +
+      `${plano.manter.length} válido(s) mantido(s) (limite ${plano.keep}, ${familia.env})` +
+      (simulados.length ? `, ${simulados.length} seriam apagados com ${familia.exigeHabilitacao}=1` : ""))
+    for (const n of plano.manter) log(`     mantém  ${n}`)
+    for (const n of simulados) log(`     apagaria ${n}`)
+  }
+  for (const p of plano.preservados) {
+    log(`⚠️  ${familia.id}: ${p.nome} NÃO conta como backup (${p.estado}: ${p.motivo}) — preservado`)
   }
 
   const orfaos = entradasSemDono(base)
@@ -305,5 +370,5 @@ export function podar(familiaId, { base = BASE, log = console.log } = {}) {
     if (orfaos.length > 5) log(`     … e mais ${orfaos.length - 5}`)
     log(`     Declare a família em scripts/lib/backups-retencao.mjs ou apague à mão.`)
   }
-  return { apagados, orfaos }
+  return { apagados, simulados, manter: plano.manter, preservados: plano.preservados, orfaos }
 }
