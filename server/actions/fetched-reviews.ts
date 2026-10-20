@@ -17,9 +17,12 @@ import { ensureAdmin } from "@/server/queries/current-user"
  * Server Action do EDITOR LOCAL para reviews BUSCADAS de fontes externas (`work_reviews`).
  *
  * Diferente das reviews manuais (`work_external_reviews_manual`, duráveis), o pool em
- * `work_reviews` é APAGADO e reescrito por inteiro a cada Avaliação IA/refetch
- * (ver `lib/external/persist-reviews.ts`). Logo, a exclusão é EFÊMERA: vale até a próxima
- * avaliação. Útil para remover reviews-lixo antes de uma avaliação pontual.
+ * `work_reviews` é ACUMULATIVO: a Avaliação IA e os refetches inserem as reviews de texto
+ * novo que a coleta trouxer, sem apagar as que já estão lá (ver
+ * `lib/external/persist-reviews.ts`). Logo, a exclusão é EFÊMERA num sentido preciso: a
+ * review removida VOLTA se a fonte a trouxer de novo numa coleta futura — não há lista de
+ * bloqueio. Enquanto a fonte não a devolver, ela segue removida. Útil para tirar
+ * reviews-lixo antes de uma avaliação pontual.
  *
  * Mesmo gate local/dev do editor manual (em produção, sem auth, o canal não fica editável).
  * Reusa o tipo de resultado discriminado e o helper de posse das reviews manuais.
