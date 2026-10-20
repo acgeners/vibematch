@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { fetchHtmlWithCfFallback } from "@/lib/external/flaresolverr"
 import { ANIMEPLANET_CF_ABORT_MS, parseAnimePlanetDetailHtml, parseAnimePlanetSearchCards } from "@/lib/external/animeplanet"
+import { gateCuradorDaRota } from "@/server/auth/curator-route-gate"
 
 const AP_BASE = "https://www.anime-planet.com"
 const AP_META = new Set(["all", "tags", "genres", "top-100", "recommendations", "browse"])
@@ -18,6 +19,9 @@ const HEADERS = {
 }
 
 export async function GET(req: NextRequest) {
+  const negado = await gateCuradorDaRota()
+  if (negado) return negado
+
   const title = req.nextUrl.searchParams.get("title")
   const knownSlug = req.nextUrl.searchParams.get("slug")
   if (!title && !knownSlug) return NextResponse.json(null)

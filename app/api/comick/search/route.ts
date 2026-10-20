@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { fetchHtmlWithCfFallback, isFlareSolverrEnabled } from "@/lib/external/flaresolverr"
 import { COMICK_API_CF_ABORT_MS } from "@/lib/external/comick"
+import { gateCuradorDaRota } from "@/server/auth/curator-route-gate"
 
 const COMICK_BASES = [
   "https://api.comick.dev",
@@ -50,6 +51,9 @@ async function fetchJson(url: URL) {
 }
 
 export async function GET(req: NextRequest) {
+  const negado = await gateCuradorDaRota()
+  if (negado) return negado
+
   const q = req.nextUrl.searchParams.get("q")
   if (!q) return NextResponse.json([])
 
