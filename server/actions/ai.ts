@@ -365,10 +365,13 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     // Persiste o pool FRESCO completo (pode passar de 100 reviews), não só o
     // subset capeado que vai pro prompt — recomendação usa essa base pra escolher
     // top reviews por candidato. Só o fresco: o promptPool inclui reviews que JÁ
-    // estão em work_reviews (re-gravar seria delete+insert idêntico), e o merge
-    // por fonte do saveWorkReviews preserva as fontes ausentes desta rodada.
-    // Pool fresco vazio = no-op interno do saveWorkReviews.
-    await saveWorkReviews(workId, freshPool)
+    // estão em work_reviews. Pool fresco vazio = no-op interno do saveWorkReviews.
+    //
+    // ACUMULATIVO, como a aquisição: insere só o texto novo e não apaga nada. O modo
+    // padrão (merge por fonte) apagava tudo da fonte que voltou e regravava só o que veio
+    // agora — Mangago (até 40 tópicos) e Comix (até 2 páginas) entregam uma JANELA, então
+    // cada avaliação descartava o que saiu dela: 290 reviews entre 27/09 e 19/10/2026.
+    await saveWorkReviews(workId, freshPool, { accumulate: true })
 
     // Debug: detalha o pipeline de reviews durante a avaliação. Útil pra
     // entender por que a IA recebeu N reviews quando esperava-se mais.
