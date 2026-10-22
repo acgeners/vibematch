@@ -52,7 +52,9 @@ export function selecionarApendiceArte(
   enviadas: readonly SourcedReview[],
   max: number = ART_APPENDIX_MAX,
 ): ArtAppendixSelection {
-  const candidatas = deduplicateReviews([...pool])
+  // Entre cópias da mesma review no pool, a candidata é a versão mais completa — a mesma escolha da
+  // seleção (`selectReviewsForEvaluation`), senão um trecho de arte que só a versão longa tem sumiria.
+  const candidatas = deduplicateReviews([...pool], { preferirVersaoMaisCompleta: true })
     .map((r) => ({ r, e: classificarEvidenciaDeArte(r.text) }))
     .filter(({ e }) => e.julga || e.mudanca)
 

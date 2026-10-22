@@ -55,7 +55,7 @@ export type PrepareAndEvaluateResult =
  * avaliação (`saveWorkReviews` dispara resumo+digest sob gate de materialidade), e a
  * aquisição do passo 2 cai no cache de contexto externo de 5 min que a avaliação do
  * passo 4 consulta — a chave bate exatamente, porque os dois caminhos usam
- * `{ total: 30, maxPerSource: 12 }` (`AI_EVAL_REVIEW_CAPS` × o default do cache). Preparar
+ * `{ total: 30 }` sem teto por fonte (`AI_EVAL_REVIEW_CAPS` × o default do cache). Preparar
  * antes NÃO paga o scraping duas vezes.
  *
  * ⚠️ **A prontidão é reclassificada DEPOIS do passo 2**, nunca reusada da tela: adquirir

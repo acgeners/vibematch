@@ -11,6 +11,8 @@ import { recordComixFailure } from "./comix-gate"
 import { EXTERNAL_SOURCE_ORDER } from "./source-order"
 import { resolveMangagoUrlProd } from "./mangago-resolve-prod"
 import { boolEnv } from "./mangago-band"
+import { reviewKey } from "./review-merge"
+import { deduplicateReviews } from "@/lib/ai-evaluation/review-dedup"
 import { extractInlineRating } from "./inline-rating"
 import { isBlockedCoverUrl } from "./blocked-covers"
 import { cleanSynopsisText, dedupeByMeaning } from "@/lib/synopsis-text"
@@ -1304,17 +1306,22 @@ async function collectSimilarFromCandidate(candidate: MergedCandidate, limit = 6
 }
 
 /**
- * Seleciona reviews para enviar à IA com amostragem estratificada por fonte
- * e por sentimento. Algoritmo:
- *  1. Agrupa por `source`. Cota por fonte = ceil(`total` / nº de fontes com
- *     review), limitada por `maxPerSource` — com poucas fontes cada uma enche
- *     mais o orçamento; com muitas, o round-robin global (passo 3) apara.
- *  2. Em cada grupo, se há ratings, bucketiza alto (>=7) / baixo (<=4) / médio
- *     e pega round-robin entre buckets (ordenado por textLength desc).
- *     Sem ratings, ordena por textLength desc.
- *  3. Round-robin global entre fontes (ordem REVIEW_SOURCE_PRIORITY) até `total`.
+ * Seleciona as reviews que vão ao prompt da avaliação — política W3 (`REVIEW_SELECTION_POLICY`,
+ * `lib/external/review-selection.ts`). A capacidade (`total`) é um MÁXIMO, não uma cota a cumprir:
+ *  1. Agrupa por `source`. Em cada fonte, ordena por rodízio de sentimento — alto (>=7) / baixo
+ *     (<=4) / médio / sem nota, cada balde do mais longo pro mais curto — quando há ≥ 2 notas; senão,
+ *     do mais longo pro mais curto. Desempate final pela identidade da review (`reviewKey`): a mesma
+ *     entrada em outra ordem produz a mesma seleção.
+ *  2. Round-robin entre fontes (ordem `REVIEW_SOURCE_PRIORITY`) sobre as listas INTEIRAS. A
+ *     diversidade decide a ORDEM — toda fonte tem a vez dela antes de outra repetir —, não um teto.
+ *  3. Deduplica NESSA ordem (cópias da mesma manifestação viram uma, na posição da primeira, com o
+ *     registro da versão mais completa) e só então corta em `total`: vaga de duplicata é reaproveitada.
+ * Logo envia `min(total, pool deduplicado)`: até 30 elegíveis, todas entram; acima, entram 30, e o pool
+ * crescer nunca reduz o que se envia (o degrau 30/31 da cota antiga).
  *
- * Garante diversidade de opinião e de fonte sem precisar de embeddings.
+ * Até 2026-10-22 a cota era `min(12, ceil(30 / fontes))` e as vagas que uma fonte fina não usava
+ * ficavam vazias (7.443 vagas com review disponível no backup de 19/10). `maxPerSource` segue
+ * aceito, mas só como limite EXPLÍCITO de quem chama; nenhum caminho de avaliação o passa.
  */
 export function selectReviewsForEvaluation(
   reviews: SourcedReview[],
@@ -1327,20 +1334,20 @@ export function selectReviewsForEvaluation(
     else grouped.set(review.source, [review])
   }
 
-  // Reparte o orçamento (`total`) entre as fontes que de fato têm review. Sem
-  // o `maxPerSource`, uma fonte única poderia contribuir até `total`; com ele,
-  // fica capada mesmo quando é a única com reviews.
-  const sourceCount = Math.max(1, grouped.size)
-  const perSource = Math.min(
-    opts.maxPerSource ?? opts.total,
-    Math.ceil(opts.total / sourceCount),
-  )
+  // Sem teto implícito por fonte: só um `maxPerSource` passado de propósito limita uma fonte.
+  const perSource = opts.maxPerSource ?? Infinity
 
-  const byLength = (a: SourcedReview, b: SourcedReview) =>
-    (b.textLength ?? b.text.length) - (a.textLength ?? a.text.length)
+  // Ordem TOTAL: comprimento sozinho é ordem parcial, e com sort estável os empatados ficariam na
+  // ordem de entrada — a seleção mudaria com a ordem do provider ou do plano de query.
+  const byLength = (a: SourcedReview, b: SourcedReview) => {
+    const len = (b.textLength ?? b.text.length) - (a.textLength ?? a.text.length)
+    if (len !== 0) return len
+    const ka = reviewKey(a)
+    const kb = reviewKey(b)
+    return ka < kb ? -1 : ka > kb ? 1 : 0
+  }
 
   function pickFromSource(items: SourcedReview[], perSource: number): SourcedReview[] {
-    if (items.length <= perSource) return [...items].sort(byLength)
     const withRating = items.filter((r) => typeof r.userRating === "number")
     if (withRating.length < 2) {
       return [...items].sort(byLength).slice(0, perSource)
@@ -1376,26 +1383,26 @@ export function selectReviewsForEvaluation(
   const sortedSources = [...perSourcePicked.keys()].sort((a, b) => {
     const pa = REVIEW_SOURCE_PRIORITY[a] ?? 99
     const pb = REVIEW_SOURCE_PRIORITY[b] ?? 99
-    return pa - pb
+    return pa - pb || (a < b ? -1 : a > b ? 1 : 0)
   })
 
-  const result: SourcedReview[] = []
+  // Rodízio sobre as listas inteiras; a capacidade só corta DEPOIS da dedup.
+  const ordered: SourcedReview[] = []
   const sourceCursors = new Map<ExternalSourceId, number>(sortedSources.map((s) => [s, 0]))
-  while (result.length < opts.total) {
+  while (true) {
     let progressed = false
     for (const source of sortedSources) {
-      if (result.length >= opts.total) break
       const list = perSourcePicked.get(source) ?? []
       const cursor = sourceCursors.get(source) ?? 0
       if (cursor < list.length) {
-        result.push(list[cursor])
+        ordered.push(list[cursor])
         sourceCursors.set(source, cursor + 1)
         progressed = true
       }
     }
     if (!progressed) break
   }
-  return result
+  return deduplicateReviews(ordered, { preferirVersaoMaisCompleta: true }).slice(0, opts.total)
 }
 
 function restrictCandidateToSources(candidate: MergedCandidate, sources: ReadonlySet<ExternalSourceId>): MergedCandidate {
@@ -1558,7 +1565,8 @@ export async function fetchExternalEvaluationContextForCandidate(
     mangagoSlug: candidate.mangagoSlug ?? null,
     rejectedSources: [...(opts.rejectedSources ?? [])].sort(),
     total: opts.total ?? 30,
-    maxPerSource: opts.maxPerSource ?? 12,
+    // Sem teto implícito por fonte (W3): ausente = sem teto, nos dois caminhos que dividem esta chave.
+    maxPerSource: opts.maxPerSource ?? null,
   })
   const cached = readReviewContextCache(cacheKey)
   if (cached) {
@@ -1623,7 +1631,7 @@ async function fetchExternalEvaluationContextForCandidateUncached(
   return {
     sourcedReviews: selectReviewsForEvaluation(allReviews, {
       total: opts.total ?? 30,
-      maxPerSource: opts.maxPerSource ?? 12,
+      maxPerSource: opts.maxPerSource,
     }),
     allReviews,
     failedSources: collected.failedSources,

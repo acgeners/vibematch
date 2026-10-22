@@ -11,6 +11,7 @@ import {
 } from "@/lib/external/index"
 import { saveWorkReviews, loadWorkReviewsAsSourced } from "@/lib/external/persist-reviews"
 import { mergeFreshWithPersistedReviews } from "@/lib/external/review-merge"
+import { montarReviewsDaAvaliacao } from "@/lib/external/review-selection"
 import type { ExternalSourceId, SourcedReview } from "@/lib/external/types"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
 import { markRecalcPending } from "@/server/recalc/queue"
@@ -346,7 +347,15 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
       textLength: m.text.length,
       isManual: true,
     }))
-    const effectiveSourcedReviews: SourcedReview[] = [...manualSourced, ...(sourcedReviews ?? [])]
+    // Manuais primeiro e FORA da capacidade; o registro (`reviewSelection`) descreve o que o prompt
+    // recebe — vai ao `evaluationContext` abaixo, inclusive quando a resposta vem do cache.
+    const { efetivas: effectiveSourcedReviews, reviewSelection } = montarReviewsDaAvaliacao({
+      pool: promptPool,
+      selecionadas: sourcedReviews ?? [],
+      manuais: manualSourced,
+      capacidade: AI_EVAL_REVIEW_CAPS.total,
+      recuperadas: recovered,
+    })
 
     // Diagnóstico do motivo de "sem reviews externas". Renderizado na UI de
     // revisão para indicar a ação certa (atribuir fontes, revisar rejeições, etc.).
@@ -468,6 +477,10 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
           // Quantas reviews do prompt vieram do pool persistido (work_reviews) em
           // vez da busca fresca — diagnóstico de degradação das fontes CF-gated.
           reviewsRecoveredFromPersisted: recovered,
+          // Qual política escolheu as reviews e com que pool (descritivo: fica FORA do hash do cache —
+          // a seleção em si já muda o hash pelas reviews enviadas). Sem este bloco, a política não se
+          // infere pela ausência: ver `REVIEW_SELECTION_POLICY` (o cadastro usa a W3 e não grava contexto).
+          reviewSelection,
         },
       }
     })())
