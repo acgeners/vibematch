@@ -256,8 +256,12 @@ const MAX_REVIEW_WORDS = 200
  * `triggerAiEvaluation` (Path A) e `evaluateCandidateForCreate` (Path B) pra
  * garantir que a mesma obra avaliada nos dois fluxos receba o mesmo input
  * (e portanto bata no mesmo `inputHash` do cache).
+ *
+ * Só a capacidade GLOBAL: não há teto por fonte (política W3, `selectReviewsForEvaluation`). Até
+ * 2026-10-22 havia `maxPerSource: 12`; recolocá-lo aqui devolveria o degrau 30/31 a todo caminho de
+ * avaliação, sem nada acusar (guardado por `tests/unit/ai-evaluation/selecao-w3-integracao.test.ts`).
  */
-export const AI_EVAL_REVIEW_CAPS = { total: 30, maxPerSource: 12 } as const
+export const AI_EVAL_REVIEW_CAPS = { total: 30 } as const
 
 const PLATFORM_DISPLAY_NAMES: Record<string, string> = {
   mangaupdates: "MangaUpdates",
