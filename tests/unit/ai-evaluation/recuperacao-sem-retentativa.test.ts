@@ -303,3 +303,38 @@ describe("integração com o diagnóstico do #521: salvar NÃO apaga a evidênci
     expect(CRITERION_SLUGS).toHaveLength(11)
   })
 })
+
+describe("fecho `</summary>` (o pedido de produção de 2026-10-03 que se perdeu): agora sem 2ª chamada", () => {
+  const fechoSummary = JSON.parse(
+    readFileSync("tests/fixtures/ai-evaluation/payloads-recusados-fecho-summary.json", "utf8"),
+  ) as { casos: Caso[] }
+  const real = (nome: string) => JSON.parse(fechoSummary.casos.find((c) => c.caso === nome)!.bruto) as Record<string, unknown>
+  const TAG = '</summary>\n<parameter name="confidence">'
+
+  for (const nome of ["fecho_summary_tentativa_0", "fecho_summary_tentativa_1"]) {
+    it(`${nome}: uma chamada, summary sem marcação, confidence = o número vazado, as 11 notas do payload`, async () => {
+      const original = real(nome)
+      spies.createLoggedMessage.mockResolvedValueOnce(resposta(original, `call-${nome}`))
+      const r = await requestAiEvaluation(pedido())
+      expect(spies.createLoggedMessage).toHaveBeenCalledTimes(1)
+      expect(r.summary).not.toMatch(/<\/?(?:summary|parameter)\b/)
+      expect(r.confidence).toBe(Number((original.summary as string).split(TAG)[1]))
+      expect(r.scores.map((s) => s.criterionSlug)).toEqual([...CRITERION_SLUGS])
+      expect(r.scores.every((s) => s.justification !== "Não avaliado.")).toBe(true)
+      // Salvar não apaga a evidência: o ORIGINAL é diagnosticado, com a forma recuperada.
+      expect(spies.anotar).toHaveBeenCalledTimes(1)
+      const [id, d] = anotacao(0)
+      expect(id).toBe(`call-${nome}`)
+      expect(d).toMatchObject({ classe: "schema", recuperado: ["confidence_leaked_after_summary_tag"] })
+      expect(JSON.parse(d.bruto)).toEqual(original)
+    })
+  }
+
+  it("o mesmo vazamento com a chave confidence presente continua pagando a retentativa", async () => {
+    const quebrado = { ...real("fecho_summary_tentativa_0"), confidence: 0.4 }
+    spies.createLoggedMessage.mockResolvedValueOnce(resposta(quebrado)).mockResolvedValueOnce(resposta(valido()))
+    const r = await requestAiEvaluation(pedido())
+    expect(spies.createLoggedMessage).toHaveBeenCalledTimes(2)
+    expect(r.summary).toBe("Resumo válido.")
+  })
+})

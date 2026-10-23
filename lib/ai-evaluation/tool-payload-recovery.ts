@@ -39,7 +39,13 @@
  * 4. Uma linha `<!--criterio-->` entre dois registros de `scores` (rótulo de seção).
  * 5. A regra 2 com quebras de linha ESTRUTURAIS (`[\n{…},\n{…}\n]`), só nos separadores.
  *
- * As três novas exigem, no fim, os 11 critérios completos e únicos: recuperar não pode produzir
+ * E uma variante da regra 1, observada em 5 payloads (piloto de Arte 2026-09-27 ×2; produção v31
+ * 2026-10-03, as DUAS tentativas do mesmo pedido, que se perdeu; piloto v3.1 2026-10-22):
+ *
+ * 6. O mesmo vazamento de `confidence`, fechado com `</summary>` (o NOME do campo) em vez de
+ *    `</parameter>`. Ver `recoverConfidenceAfterSummaryTag`.
+ *
+ * As novas (3 a 6) exigem, no fim, os 11 critérios completos e únicos: recuperar não pode produzir
  * um payload que o pós-processamento completaria com "Não avaliado." em silêncio.
  */
 
@@ -50,6 +56,7 @@ export type PayloadRecovery =
   | "payload_and_art_leaked_into_summary"
   | "scores_comment_line"
   | "scores_unescaped_quotes_multiline"
+  | "confidence_leaked_after_summary_tag"
 
 export interface RecoveryOptions {
   /** Só a variante que PEDE `art` pode recuperar um `art` vazado — na produção é parâmetro desconhecido. */
@@ -300,6 +307,40 @@ function scoresCompletos(scores: unknown, criterionSlugs: readonly string[]): bo
   return vistos.size === criterionSlugs.length
 }
 
+// ── Regra 6 (variante da regra 1) ──────────────────────────────────────────────────────────
+
+/**
+ * A sequência exata observada nos 5 casos — o fecho com o NOME do campo seguido da abertura de
+ * `confidence`. A regra 1 recusava pelo fecho; a regra 3, porque `scores` veio no campo certo.
+ */
+const CONFIDENCE_LEAK_AFTER_SUMMARY_TAG = '</summary>\n<parameter name="confidence">'
+
+/**
+ * As mesmas travas da regra 1 — sequência LITERAL, uma única vez, no FIM, número em [0, 1], chave
+ * `confidence` ausente, texto não vazio antes —, e mais duas: o fecho e a abertura têm de ser as
+ * ÚNICAS marcações da tool no summary (conta `TOOL_MARKUP` inteiro, não só `<parameter`), e os 11
+ * critérios completos (ver a entrada). Separada da regra 1 de propósito: aquela fica byte a byte
+ * como estava, e o nome da forma recuperada continua dizendo qual fecho veio.
+ */
+function recoverConfidenceAfterSummaryTag(obj: Record<string, unknown>): Record<string, unknown> | null {
+  if ("confidence" in obj) return null // duas fontes para o mesmo campo
+  const summary = obj.summary
+  if (typeof summary !== "string") return null
+
+  const at = summary.indexOf(CONFIDENCE_LEAK_AFTER_SUMMARY_TAG)
+  if (at <= 0 || at !== summary.lastIndexOf(CONFIDENCE_LEAK_AFTER_SUMMARY_TAG)) return null
+  if ((summary.match(TOOL_MARKUP) ?? []).length !== 2) return null
+
+  const head = summary.slice(0, at)
+  const tail = summary.slice(at + CONFIDENCE_LEAK_AFTER_SUMMARY_TAG.length)
+  if (!head.trim() || !CONFIDENCE_LITERAL.test(tail)) return null
+
+  const confidence = Number(tail)
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) return null
+
+  return { ...obj, summary: head, confidence }
+}
+
 // ── Entrada ────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -329,6 +370,13 @@ export function recoverEvaluationToolPayload(
     if (withConfidence) {
       obj = withConfidence
       recovered.push("confidence_leaked_into_summary")
+    } else {
+      // Só quando a regra 1 não se aplica: as duas olham o mesmo vazamento, com fechos diferentes.
+      const afterTag = recoverConfidenceAfterSummaryTag(obj)
+      if (afterTag) {
+        obj = afterTag
+        recovered.push("confidence_leaked_after_summary_tag")
+      }
     }
   }
   const withComment = recoverScoresCommentLine(obj)
@@ -348,6 +396,7 @@ export function recoverEvaluationToolPayload(
     "payload_and_art_leaked_into_summary",
     "scores_comment_line",
     "scores_unescaped_quotes_multiline",
+    "confidence_leaked_after_summary_tag",
   ]
   if (recovered.some((r) => NOVAS.includes(r)) && !scoresCompletos(obj.scores, criterionSlugs)) {
     return { value: input, recovered: [] }
