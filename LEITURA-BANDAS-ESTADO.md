@@ -1,5 +1,12 @@
 # LEITURA — Bandas de estado de leitura
 
+> ⚡ **v5 (2026-11-02) substitui o modelo abaixo.** Três seções pela publicação: **Em andamento**,
+> **Concluídas** e **Outras** (hiato, cancelada, sem status, agrupadas pelo motivo da parada). A distância
+> passou a ser em **capítulos que faltam** (até 7 = perto), não em %: com %, uma obra recém-lançada com 2 de
+> 3 lidos caía em "Muito atrás". A regra e os limiares moram em `lib/reading/pace-bands.ts`; o que segue
+> abaixo é o histórico das versões anteriores.
+
+
 > **Data:** 2026-07-21 · **Status:** ✅ na `main` (modelo v4 — **duas taxonomias por seção**)
 > **PRs:** #200 (v1 recência) · #201 (doc) · #202 (v2 %-primeiro) · #203 (doc) · #204 (v3 — 6 bandas) · **v4 (esta — taxonomia por seção)**
 > **Modelo atual:** cada **seção** da página tem sua **própria taxonomia**:

@@ -4,6 +4,7 @@ import { useState } from "react"
 import { ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
+import { FilterCount } from "@/components/ui/filter-count"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { fmtSigma, sigmaToScore, SCORE_GRID } from "@/lib/ranking/criterion-unit"
@@ -35,6 +36,10 @@ export type ScoreDef = ThresholdScale & {
   minKey: string
   maxKey: string
   presets: number[]
+  /** Atalhos de teto ("≤ 3"). Ausente = só os de piso, como no /ranking. */
+  maxPresets?: number[]
+  /** Passo do slider, quando é mais fino que `step` (que segue decidindo o rótulo). */
+  sliderStep?: number
   kind?: "votes"
   fullWidth?: boolean
   /**
@@ -108,11 +113,16 @@ export function ScorePill({
   searchParams,
   selected,
   onSelect,
+  compact = false,
+  title,
 }: {
   def: ScoreDef
   searchParams: Pick<URLSearchParams, "get">
   selected: boolean
   onSelect: () => void
+  /** Pílula baixa, sem o "Qualquer" quando ociosa: é o que deixa 11 atributos em duas linhas. */
+  compact?: boolean
+  title?: string
 }) {
   const info = scoreValueInfo(def, searchParams)
   const tint = info.maxOnly
@@ -131,15 +141,18 @@ export function ScorePill({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`flex min-w-0 items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors ${tint} ${ring} ${def.fullWidth ? "col-span-full" : ""}`}
+      title={title}
+      className={`flex min-w-0 items-center justify-between rounded-lg border text-left transition-colors ${compact ? "min-h-9 gap-1.5 px-2 py-1.5" : "gap-2 px-3 py-2.5"} ${tint} ${ring} ${def.fullWidth ? "col-span-full" : ""}`}
     >
-      <span className="flex min-w-0 items-center gap-2">
+      <span className={`flex min-w-0 items-center ${compact ? "gap-1.5" : "gap-2"}`}>
         <span className="text-base leading-none">{def.emoji}</span>
-        <span className="truncate text-sm font-medium">{def.label}</span>
+        <span className={`truncate font-medium ${compact ? "text-[13px]" : "text-sm"}`}>{def.label}</span>
       </span>
       <span className="flex shrink-0 items-center gap-1">
-        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${valCls}`}>{info.label}</span>
-        {selected && <ChevronDown className="h-3.5 w-3.5 text-primary" />}
+        {(!compact || info.active) && (
+          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${valCls}`}>{info.label}</span>
+        )}
+        {selected && !compact && <ChevronDown className="h-3.5 w-3.5 text-primary" />}
       </span>
     </button>
   )
@@ -191,15 +204,23 @@ function ManualBound({
   )
 }
 
-export function ScoreThresholdEditor({
-  def,
-  searchParams,
-  updateParams,
-}: {
-  def: ScoreDef
-  searchParams: Pick<URLSearchParams, "get">
-  updateParams: (updates: Record<string, string | null>) => void
-}) {
+/** O que as peças do editor de limiar dividem. Uma instância só, para o arraste valer nas três. */
+export type ThresholdControls = ReturnType<typeof useThresholdControls>
+
+/**
+ * A régua de gravação do editor de limiar — dona única: o slider, os atalhos e o campo manual gravam
+ * por aqui, seja no /ranking ou no /reading. Um segundo caminho de escrita é como a URL deixa de
+ * falar pontos ou como um limiar na ponta da escala vira chip sem recorte.
+ *
+ * `live`: grava durante o arraste. Só serve onde filtrar é de graça (o /reading filtra no cliente);
+ * no /ranking cada escrita mexe no rascunho do painel.
+ */
+export function useThresholdControls(
+  def: ScoreDef,
+  searchParams: Pick<URLSearchParams, "get">,
+  updateParams: (updates: Record<string, string | null>) => void,
+  { live = false }: { live?: boolean } = {},
+) {
   const info = scoreValueInfo(def, searchParams)
   const [dragValue, setDragValue] = useState<[number, number] | null>(null)
   const committed: [number, number] = [info.vMin ?? def.min, info.vMax ?? def.max]
@@ -215,9 +236,17 @@ export function ScoreThresholdEditor({
     })
     setDragValue(null)
   }
+  const drag = (next: number[]) => {
+    if (live) commit(next)
+    else setDragValue([next[0], next[1]] as [number, number])
+  }
   const setMinPreset = (p: number | null) => {
     setDragValue(null)
     updateParams({ [def.minKey]: p != null ? write(p, "min") : null, [def.maxKey]: null })
+  }
+  const setMaxPreset = (p: number) => {
+    setDragValue(null)
+    updateParams({ [def.minKey]: null, [def.maxKey]: write(p, "max") })
   }
   // Em σ o preset não bate exato: ele é gravado em pontos e encaixado na grade
   // de 0,5, então "+0,5σ" volta como +0,49σ. Comparar por igualdade deixaria o
@@ -231,39 +260,148 @@ export function ScoreThresholdEditor({
     if (!sd) return false
     return Math.abs(info.vMin - p) < SCORE_GRID / (2 * sd)
   }
-  // Fora da grade em que as notas existem, o limiar digitado RECORTA o mesmo que
-  // o vizinho de cima (mín) ou de baixo (máx). Não é erro — só não compra
-  // resolução, e dizê-lo evita que "7,3 dá o mesmo que 7,5" pareça defeito.
+  const maxPresetActive = (p: number) => !info.hasMin && info.vMax === p
+  return { info, display, drag, commit, write, setMinPreset, setMaxPreset, presetActive, maxPresetActive }
+}
+
+/**
+ * Os atalhos do limiar.
+ *
+ * `countFor` (opcional) imprime quantas obras sobram em cada opção: numa lista curta o atalho que não
+ * corta nada é a regra, não a exceção (`Romance ≥ 7` deixa 49 de 52).
+ */
+export function ThresholdPresets({
+  def,
+  controls,
+  countFor,
+}: {
+  def: ScoreDef
+  controls: ThresholdControls
+  countFor?: (range: { min?: number; max?: number }) => number
+}) {
+  const { info, setMinPreset, setMaxPreset, presetActive, maxPresetActive } = controls
+  const count = (range: { min?: number; max?: number }) =>
+    countFor ? <FilterCount value={countFor(range)} className="ml-1.5" /> : null
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      <button type="button" onClick={() => setMinPreset(null)} className={editorChip(!info.active)}>
+        Qualquer
+      </button>
+      {def.presets.map((p) => (
+        <button key={p} type="button" onClick={() => setMinPreset(p)} className={editorChip(presetActive(p))}>
+          ≥ {fmtScore(def, p)}
+          {count({ min: p })}
+        </button>
+      ))}
+      {def.maxPresets?.map((p) => (
+        <button key={`max-${p}`} type="button" onClick={() => setMaxPreset(p)} className={editorChip(maxPresetActive(p))}>
+          ≤ {fmtScore(def, p)}
+          {count({ max: p })}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+export function ThresholdSlider({ def, controls }: { def: ScoreDef; controls: ThresholdControls }) {
+  return (
+    <Slider
+      value={controls.display}
+      min={def.min}
+      max={def.max}
+      step={def.sliderStep ?? def.step}
+      minStepsBetweenThumbs={1}
+      onValueChange={controls.drag}
+      onValueCommit={controls.commit}
+      className="flex-1"
+    />
+  )
+}
+
+/** O campo manual, pelas duas pontas. */
+export function ThresholdManual({
+  def,
+  controls,
+  updateParams,
+}: {
+  def: ScoreDef
+  controls: ThresholdControls
+  updateParams: (updates: Record<string, string | null>) => void
+}) {
+  const { info, write } = controls
+  return (
+    <div className="flex items-center gap-2">
+      <Label className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+        Manual
+      </Label>
+      <ManualBound
+        def={def}
+        bound="min"
+        value={info.vMin}
+        onWrite={(v) => updateParams({ [def.minKey]: write(v, "min") })}
+      />
+      <span className="text-xs text-muted-foreground">–</span>
+      <ManualBound
+        def={def}
+        bound="max"
+        value={info.vMax}
+        onWrite={(v) => updateParams({ [def.maxKey]: write(v, "max") })}
+      />
+      {def.unit === "sd" && <span className="text-xs text-muted-foreground">σ</span>}
+    </div>
+  )
+}
+
+/**
+ * Fora da grade em que as notas existem, o limiar digitado RECORTA o mesmo que
+ * o vizinho de cima (mín) ou de baixo (máx). Não é erro — só não compra
+ * resolução, e dizê-lo evita que "7,3 dá o mesmo que 7,5" pareça defeito.
+ */
+export function ThresholdOffGridHint({ def, controls }: { def: ScoreDef; controls: ThresholdControls }) {
+  const { info } = controls
   const offGrid = def.grid
     ? ([
         ["min", info.vMin] as const,
         ["max", info.vMax] as const,
       ].filter(([, v]) => v != null && isOffGrid(v, def.grid)) as Array<readonly ["min" | "max", number]>)
     : []
+  if (offGrid.length === 0) return null
+  return (
+    <p className="text-[11px] leading-relaxed text-muted-foreground">
+      As notas de atributo existem de {formatThresholdNumber(def.grid as number, def.grid as number)} em{" "}
+      {formatThresholdNumber(def.grid as number, def.grid as number)} —{" "}
+      {offGrid.map(([bound, v], i) => (
+        <span key={bound}>
+          {i > 0 && " e "}
+          {bound === "min" ? "≥" : "≤"} <span className="tabular-nums">{fmtScore(def, v)}</span> recorta o mesmo
+          que {bound === "min" ? "≥" : "≤"}{" "}
+          <span className="font-semibold tabular-nums text-foreground">
+            {fmtScore(def, equivalentGridThreshold(v, bound, def.grid as number))}
+          </span>
+        </span>
+      ))}
+      .
+    </p>
+  )
+}
+
+export function ScoreThresholdEditor({
+  def,
+  searchParams,
+  updateParams,
+}: {
+  def: ScoreDef
+  searchParams: Pick<URLSearchParams, "get">
+  updateParams: (updates: Record<string, string | null>) => void
+}) {
+  const controls = useThresholdControls(def, searchParams, updateParams)
+  const { display } = controls
   return (
     <>
-      <div className="flex flex-wrap gap-1.5">
-        <button type="button" onClick={() => setMinPreset(null)} className={editorChip(!info.active)}>
-          Qualquer
-        </button>
-        {def.presets.map((p) => (
-          <button key={p} type="button" onClick={() => setMinPreset(p)} className={editorChip(presetActive(p))}>
-            ≥ {fmtScore(def, p)}
-          </button>
-        ))}
-      </div>
+      <ThresholdPresets def={def} controls={controls} />
       <div className="flex items-center gap-3">
         <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Faixa</span>
-        <Slider
-          value={display}
-          min={def.min}
-          max={def.max}
-          step={def.step}
-          minStepsBetweenThumbs={1}
-          onValueChange={(v) => setDragValue([v[0], v[1]] as [number, number])}
-          onValueCommit={commit}
-          className="flex-1"
-        />
+        <ThresholdSlider def={def} controls={controls} />
         <span className="w-24 shrink-0 text-right text-xs font-semibold tabular-nums text-primary">
           {fmtScore(def, display[0])} – {fmtScore(def, display[1])}
         </span>
@@ -273,42 +411,8 @@ export function ScoreThresholdEditor({
           2026-08-19, um passo de 0,5 na Nota Prevista move ~300 obras de uma vez.
           O campo manual é o que dá acesso ao valor intermediário — mesma forma do
           "Manual" dos votos, e passando pela MESMA régua de gravação do slider. */}
-      <div className="flex items-center gap-2">
-        <Label className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-          Manual
-        </Label>
-        <ManualBound
-          def={def}
-          bound="min"
-          value={info.vMin}
-          onWrite={(v) => updateParams({ [def.minKey]: write(v, "min") })}
-        />
-        <span className="text-xs text-muted-foreground">–</span>
-        <ManualBound
-          def={def}
-          bound="max"
-          value={info.vMax}
-          onWrite={(v) => updateParams({ [def.maxKey]: write(v, "max") })}
-        />
-        {def.unit === "sd" && <span className="text-xs text-muted-foreground">σ</span>}
-      </div>
-      {offGrid.length > 0 && (
-        <p className="text-[11px] leading-relaxed text-muted-foreground">
-          As notas de atributo existem de {formatThresholdNumber(def.grid as number, def.grid as number)} em{" "}
-          {formatThresholdNumber(def.grid as number, def.grid as number)} —{" "}
-          {offGrid.map(([bound, v], i) => (
-            <span key={bound}>
-              {i > 0 && " e "}
-              {bound === "min" ? "≥" : "≤"} <span className="tabular-nums">{fmtScore(def, v)}</span> recorta o mesmo
-              que {bound === "min" ? "≥" : "≤"}{" "}
-              <span className="font-semibold tabular-nums text-foreground">
-                {fmtScore(def, equivalentGridThreshold(v, bound, def.grid as number))}
-              </span>
-            </span>
-          ))}
-          .
-        </p>
-      )}
+      <ThresholdManual def={def} controls={controls} updateParams={updateParams} />
+      <ThresholdOffGridHint def={def} controls={controls} />
       {/* Em σ o número não diz nada sozinho: "+1σ" é 6,7 em humor e 8,6 em
           romance. Sem esta linha o controle vira um filtro cego — que foi
           exatamente o defeito da Assinatura que este modo substitui. */}

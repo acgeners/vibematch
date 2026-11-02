@@ -5,25 +5,36 @@ import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queri
 import { getScoresReader } from "@/server/queries/user-scores"
 import { personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
-import { isMixedEditionState } from "@/lib/editions/mixed-edition"
+import { selectByIdsInChunks } from "@/lib/supabase/paginate"
+import {
+  MIXED_EDITIONS,
+  adultContentFor,
+  groupEditionRows,
+  isMixedEditionState,
+  predictionForEdition,
+  resolveMixedEdition,
+} from "@/lib/editions/mixed-edition"
+import type { MixedEdition } from "@/lib/editions/mixed-edition"
+import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
+import { fetchEditionScoresFor, getMixedEditionSettings, getR18ExtrasWorkIds } from "@/server/queries/edition-scores"
+import type { ReadingEditionValues, ReadingFilterFields } from "@/lib/reading/reading-filters"
 
 type CoverRow = { url: string; is_primary: boolean; position: number }
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean }
 
-export interface ReadingWork {
+const VISIBLE_CRITERIA: ReadonlySet<string> = new Set(VISIBLE_CRITERION_SLUGS)
+
+export interface ReadingWork extends ReadingFilterFields {
   id: string
   title: string
   coverUrls: string[]
   personalStatusId: number | null
   publicationStatusId: number | null
-  /** Conteúdo adulto (18+) efetivo — works.is_adult. */
-  isAdult: boolean
-  /** Obra `mixed` (versão normal + R18) — decide o selo junto com `isAdult` (`workContentBadge`). */
-  isMixed: boolean
   chaptersRead: number | null
   totalChapters: number | null
   lastReadAt: string | null
-  expectedScore: number | null
+  /** Última alteração da pessoa nesta obra — só vem quando não há `lastReadAt` (ver `PaceInput`). */
+  lastTouchedAt: string | null
   /** hid do comix (match exato na checagem de capítulos); `null` se não confirmado. */
   comixHid: string | null
   /** Data (aprox.) do último capítulo, cacheada na última checagem. `null` até a migration 087. */
@@ -50,7 +61,8 @@ function isMissingColumnError(message: string): boolean {
 /**
  * Obras com status pessoal "Reading" (opcionalmente "Started"), ordenadas pela
  * leitura mais recente. Alimenta a página /reading e a checagem de capítulos.
- * Traz o hid do comix de `work_external_ids` pra checagem exata por ID.
+ * Traz o hid do comix de `work_external_ids` pra checagem exata por ID, e o que os
+ * filtros da página consultam: quem filtra no cliente precisa da lista inteira aqui.
  */
 export async function getReadingWorks(
   opts?: { statuses?: string[] },
@@ -79,12 +91,19 @@ export async function getReadingWorks(
   const baseSelect = `
     id, title, publication_status_id, total_chapters, is_adult, edition_state,
     hiatus_kind, hiatus_kind_confidence, publication_status_note,
-    calculated_scores(expected_score),
+    calculated_scores(expected_score, alignment_score, scoring_contract, expected_by_edition),
+    category_scores(criterion_slug, score),
     work_covers(url, is_primary, position),
     work_external_ids(source, external_id, is_rejected)`
 
+  // Em lotes: `.in("id", …)` com embeds despenca o plano do Postgres acima de ~300 ids.
   const runQuery = (select: string) =>
-    supabase.from("works").select(select).eq("is_archived", false).in("id", ownIds)
+    selectByIdsInChunks<unknown>(ownIds, (chunk) =>
+      supabase.from("works").select(select).eq("is_archived", false).in("id", chunk) as unknown as PromiseLike<{
+        data: unknown[] | null
+        error: { message: string } | null
+      }>,
+    )
 
   // Tenta com as colunas de data (migration 087); cai pro select-base se ainda
   // não existirem, sem quebrar a página.
@@ -94,7 +113,7 @@ export async function getReadingWorks(
   }
   if (error) throw new Error(error.message)
 
-  const works = ((data ?? []) as unknown as Array<{
+  const rows = (data ?? []) as unknown as Array<{
     id: string
     title: string
     publication_status_id: number | null
@@ -107,14 +126,66 @@ export async function getReadingWorks(
     last_chapter_released_at?: string | null
     next_chapter_predicted_at?: string | null
     chapters_checked_at?: string | null
-    calculated_scores?: { expected_score?: number | null } | null
+    calculated_scores?: { expected_score?: number | null; alignment_score?: number | null } | null
+    category_scores?: Array<{ criterion_slug: string; score: number | null }> | null
     work_covers?: CoverRow[] | null
     work_external_ids?: ExternalIdRow[] | null
-  }>).map((w) => {
+  }>
+
+  // Obras `mixed`: a nota de conteúdo adulto e a Nota Prevista são por EDIÇÃO, e o filtro decide
+  // qual vale no cliente. Só consulta quando há mixed na lista.
+  const mixedIds = rows.filter((w) => isMixedEditionState(w.edition_state)).map((w) => w.id)
+  const [editionRows, editionSettings, r18ExtrasWorkIds] =
+    mixedIds.length > 0
+      ? await Promise.all([fetchEditionScoresFor(supabase, mixedIds), getMixedEditionSettings(), getR18ExtrasWorkIds()])
+      : [[], null, new Set<string>()]
+  const editionByWork = groupEditionRows(editionRows)
+
+  // Sem data de leitura, a recência sai da última alteração da pessoa na obra. Consulta só essas, e
+  // só a coluna: o leitor do estado pessoal roda em toda página e não carrega `updated_at`.
+  const semData = personal.userId ? rows.filter((w) => !personal.get(w.id).lastReadAt).map((w) => w.id) : []
+  const touched = new Map<string, string>()
+  if (semData.length > 0) {
+    const { data: touchRows, error: touchError } = await selectByIdsInChunks<{ work_id: string; updated_at: string | null }>(
+      semData,
+      (chunk) =>
+        supabase
+          .from("user_work_state")
+          .select("work_id, updated_at")
+          .eq("user_id", personal.userId as string)
+          .in("work_id", chunk) as unknown as PromiseLike<{
+          data: Array<{ work_id: string; updated_at: string | null }> | null
+          error: { message: string } | null
+        }>,
+      200,
+    )
+    if (touchError) throw new Error(`user_work_state.updated_at: ${touchError.message}`)
+    for (const r of touchRows) if (r.updated_at) touched.set(r.work_id, r.updated_at)
+  }
+
+  const works = rows.map((w) => {
     const comix = (w.work_external_ids ?? []).find(
       (e) => e.source === "comix" && !e.is_rejected && e.external_id,
     )
     const state = personal.get(w.id)
+    const calc = scoresReader.overlay(w.id, w.calculated_scores)
+    const isMixed = isMixedEditionState(w.edition_state)
+    const criterionScores: Record<string, number> = {}
+    for (const row of w.category_scores ?? []) {
+      if (row.score != null && VISIBLE_CRITERIA.has(row.criterion_slug)) criterionScores[row.criterion_slug] = Number(row.score)
+    }
+    // 🔴 Cada edição só com o que é DELA: sem linha, ausência — nunca a nota misturada nem a da outra.
+    const editionValues = (edition: MixedEdition): ReadingEditionValues => {
+      const adult = adultContentFor(
+        { isMixed, legacyScore: criterionScores.adult_content, editionRows: editionByWork.get(w.id) },
+        edition,
+      )
+      const expected = predictionForEdition(calc, isMixed, edition).row?.expected_score
+      return {
+        expectedScore: expected == null ? null : Number(expected),
+        adultContent: adult.kind === "edition" ? adult.score : null,
+      }
+    }
     return {
       id: w.id,
       title: w.title,
@@ -122,11 +193,26 @@ export async function getReadingWorks(
       personalStatusId: state.personalStatusId,
       publicationStatusId: w.publication_status_id ?? null,
       isAdult: Boolean(w.is_adult),
-      isMixed: isMixedEditionState(w.edition_state),
+      isMixed,
+      synopsisQuality: state.synopsisQuality,
+      readEdition: state.readEdition,
+      defaultEdition: isMixed
+        ? resolveMixedEdition({
+            hideAdult: editionSettings?.hideAdult ?? false,
+            signedIn: editionSettings?.signedIn ?? false,
+            r18OnlyInExtras: r18ExtrasWorkIds.has(w.id),
+          }).edition
+        : null,
+      criterionScores,
+      alignmentScore: calc?.alignment_score == null ? null : Number(calc.alignment_score),
+      byEdition: isMixed
+        ? (Object.fromEntries(MIXED_EDITIONS.map((e) => [e, editionValues(e)])) as Record<MixedEdition, ReadingEditionValues>)
+        : null,
       chaptersRead: state.chaptersRead,
       totalChapters: w.total_chapters ?? null,
       lastReadAt: state.lastReadAt,
-      expectedScore: scoresReader.overlay(w.id, w.calculated_scores)?.expected_score ?? null,
+      lastTouchedAt: touched.get(w.id) ?? null,
+      expectedScore: calc?.expected_score ?? null,
       comixHid: comix?.external_id ?? null,
       lastChapterReleasedAt: w.last_chapter_released_at ?? null,
       nextChapterPredictedAt: w.next_chapter_predicted_at ?? null,

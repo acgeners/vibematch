@@ -841,6 +841,16 @@ custou 19.624 pares de empate na Prioridade. E nota ausente vai pro FIM, nunca c
 Guardado por `tests/unit/my-list/prateleiras.test.ts`, que **enumera a tabela** em vez de listar
 os 12 status de hoje.
 
+### Os grupos da `/reading` medem capítulos que FALTAM, não porcentagem
+
+**Três seções pela publicação (Em andamento, Concluídas, Outras); Outras agrupa pelo motivo da parada.** A distância é em capítulos faltando (até 7 = perto), cruzada com 30 dias sem ler; "leu tudo" só vira "Sem capítulo novo" pela data do LANÇAMENTO. Dona única: `lib/reading/pace-bands.ts`, que também escolhe o "Continue lendo" da home; os textos dos grupos derivam das constantes de lá.
+Obra sem `last_read_at` usa `user_work_state.updated_at` só para classificar, e o card diz que é estimativa; nunca grave data inventada. Quem salva capítulos lidos carimba a data por `withReadDateStamp` (`lib/reading/read-stamp.ts`), exceto importação, que não sabe quando foi lido.
+
+### Os filtros da `/reading` seguem a versão LIDA
+
+**Obra `mixed` segue `read_edition` no filtro de 18+ da `/reading`; sem versão marcada, fica em Ocultar e em Só 18+.** A lista é do que a pessoa está lendo, então não copie a régua do `/ranking` para cá, nem a daqui para lá. Dono: `lib/reading/reading-filters.ts`.
+A URL usa os parâmetros do `/ranking`, em pontos, e o filtro roda no cliente via `replaceState`, sem consulta. Limiar grava só por `useThresholdControls` (`components/ranking/score-pills.tsx`). "Verificar atualizações" continua olhando a lista inteira.
+
 ### As rotas são em INGLÊS, e o nome descreve a PERGUNTA da página
 
 Padronizado em 2026-08-16. A URL era metade em português (`/curadoria`, `/leitura`,
@@ -969,7 +979,7 @@ linha em `user_settings`, caso que só `isCurrentUserAdmin()` resolve, pois prec
 `/dashboard` ([[project-painel-provisorio]], provisório de propósito).
 
 - **Com sessão:** destaque "Continue lendo" escolhido pela banda **Acompanhando** da `/reading`
-  (`lib/reading/pace-bands.ts`, ≥85% lido + leitura recente, desempate por capítulo mais novo),
+  (`lib/reading/pace-bands.ts`, faltam até 7 capítulos + leitura recente, desempate por capítulo mais novo),
   faixa de atividade e prateleira "Pra você hoje". ⚠️ `getContinueReading` ordena por última
   LEITURA e corta no limite **antes** de qualquer seleção — pedir poucos itens esconde do
   destaque a obra que acabou de receber capítulo (foi bug real).

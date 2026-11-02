@@ -69,6 +69,7 @@ import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 import { canRateReadingState } from "@/lib/reading-gate"
 import { isMixedEditionState } from "@/lib/editions/mixed-edition"
+import { withReadDateStamp } from "@/lib/reading/read-stamp"
 
 type SupabaseAdminClient = ReturnType<typeof createAdminClient>
 
@@ -1284,7 +1285,12 @@ async function persistNewWork(
   // insert negado. Com o cliente de sessão, a política da mig 142 (`user_id = auth.uid()`)
   // torna este bug IMPOSSÍVEL de reescrever: escrever na linha de outra pessoa é negado pelo
   // Postgres.
-  const mirror = await writeReadingState(opts.creatorId, [workId], personalPatchFromForm(data))
+  // Obra nova não tem leitura anterior: capítulos lidos no cadastro carimbam "li hoje".
+  const mirror = await writeReadingState(
+    opts.creatorId,
+    [workId],
+    withReadDateStamp(personalPatchFromForm(data), null, new Date().toISOString().slice(0, 10)),
+  )
   if (mirror.error) return { ok: false, error: { _root: [mirror.error] } }
 
   // Create the AI evaluation row FIRST when AI justifications exist, so the
@@ -1855,9 +1861,22 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
   // Com sessão (o form é interativo e o gate é ensureAdmin, então há sessão) vai no cliente de
   // sessão, RLS valendo; o fallback pro espelho do dono preserva qualquer caminho sem sessão.
   const editorId = await getSessionUserId()
+  const stateUserId = editorId ?? (await getOwnerUserId())
+  // Carimba "li hoje" só se os capítulos CRESCERAM — precisa do valor de antes de quem edita.
+  const { data: previousState } = await createAdminClient()
+    .from("user_work_state")
+    .select("chapters_read")
+    .eq("user_id", stateUserId)
+    .eq("work_id", id)
+    .maybeSingle()
+  const personalPatch = withReadDateStamp(
+    personalPatchFromForm(data),
+    (previousState?.chapters_read as number | null | undefined) ?? null,
+    new Date().toISOString().slice(0, 10),
+  )
   const personalMirror = editorId
-    ? await writeReadingState(editorId, [id], personalPatchFromForm(data))
-    : await mirrorOwnerState(await getOwnerUserId(), [id], personalPatchFromForm(data))
+    ? await writeReadingState(editorId, [id], personalPatch)
+    : await mirrorOwnerState(stateUserId, [id], personalPatch)
   if (personalMirror.error) return { error: { _root: [personalMirror.error] } }
 
   // Sincronizar notas por critério: upsert presentes, deletar removidos.
