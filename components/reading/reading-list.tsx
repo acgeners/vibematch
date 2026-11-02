@@ -38,22 +38,52 @@ import { PublicationStatusBadge } from "@/components/ui/status-badge"
 import { WorkContentChip } from "@/components/ui/work-content-chip"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, selectedOptionLabel } from "@/components/ui/select"
 import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
-import { personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
+import {
+  isCancelledPublicationStatus,
+  isConcludedPublicationStatus,
+  isHiatusPublicationStatus,
+  personalStatusNameBySlugOrThrow,
+} from "@/lib/constants/status-lookups"
 import { cn } from "@/lib/utils"
 import { formatRelativeDate, formatPredictedDate, formatRelativeDateTime } from "@/lib/date-utils"
 import { differenceInCalendarDays, startOfMonth, addMonths, format } from "date-fns"
-import { classifyPace, daysSince, BEHIND_PCT, STALE_DAYS } from "@/lib/reading/pace-bands"
-import type { ReadingBand } from "@/lib/reading/pace-bands"
+import {
+  BEHIND_PCT,
+  CONTINUE_PCT,
+  NEAR_CHAPTERS,
+  SILENT_RELEASE_DAYS,
+  STALE_DAYS,
+  STALLED_DAYS,
+  classifyCompleted,
+  classifyOngoing,
+  daysSince,
+  hiatusBand,
+  recencyDate,
+} from "@/lib/reading/pace-bands"
+import type { CompletedBand, OngoingBand, PaceInput } from "@/lib/reading/pace-bands"
 import { ptBR } from "date-fns/locale"
 import { checkReadingUpdates, type ReadingUpdateResult } from "@/server/actions/reading"
 import { setChaptersRead, setReadingStatusForWorks, archiveWork } from "@/server/actions/works"
 import { ReadingCalendar, CalendarLegend } from "@/components/reading/reading-calendar"
-import { writeReadingViewCookie } from "@/lib/reading-view-preference"
+import {
+  ReadingActiveFilters,
+  ReadingFilterEcho,
+  ReadingFiltersButton,
+  ReadingFiltersPanel,
+} from "@/components/reading/reading-filters-panel"
+import {
+  activeReadingFilterCount,
+  clearedReadingFilterParams,
+  matchesReadingFilters,
+  parseReadingFilters,
+} from "@/lib/reading/reading-filters"
+import type { ReadingFilters } from "@/lib/reading/reading-filters"
+import { writeCollapsedBandsCookie, writeReadingViewCookie } from "@/lib/reading-view-preference"
 import type { ReadingView } from "@/lib/reading-view-preference"
 import type { ReadingWork } from "@/server/queries/reading"
 
 type SortKey = "last_read" | "released" | "predicted" | "progress"
-type SectionKey = "ongoing" | "others"
+type SectionKey = "ongoing" | "completed" | "others"
 
 /**
  * "Verificar atualizações" é tarefa DURÁVEL: ela grava `total_chapters`, o status de
@@ -109,12 +139,19 @@ const SECTIONS: Record<
     dotClass: "bg-amber-500",
     hint: "publicação ativa — você espera capítulos novos",
   },
-  others: {
-    label: "Concluída & outras",
+  completed: {
+    label: "Concluídas",
     dotClass: "bg-emerald-500",
-    hint: "completa · hiato · cancelada — dá pra maratonar ou definir",
+    hint: "a publicação terminou — dá pra maratonar ou decidir",
+  },
+  others: {
+    label: "Outras",
+    dotClass: "bg-slate-500",
+    hint: "publicação parada, cancelada ou sem status",
   },
 }
+
+const SECTION_ORDER: readonly SectionKey[] = ["ongoing", "completed", "others"]
 
 /**
  * Conta capítulos como inteiros: cada decimal (ex.: 129.7) é 1 capítulo inteiro,
@@ -169,27 +206,17 @@ type BandConfig = { label: string; hint: string; bar: string; progress: string; 
 // do usuário, não o gradiente de %.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Os limiares e a classificação moram em `lib/reading/pace-bands.ts` — a home usa os
-// MESMOS pra escolher o destaque "Continue lendo". Havia uma cópia deles aqui; duas
-// cópias significavam que ajustar um limiar num lado deixava as duas telas discordando
-// sobre a mesma obra, sem erro nenhum.
-type ReadingState = ReadingBand
+// A régua e os limiares moram em `lib/reading/pace-bands.ts` — a home usa a MESMA pra escolher o
+// destaque "Continue lendo". Os textos de cada grupo derivam das constantes de lá: escrever "7" ou
+// "30 dias" aqui deixaria a tela explicando uma regra que não é a que roda.
+type ReadingState = OngoingBand
 
-const READING_STATE_ORDER: readonly ReadingState[] = [
-  "onpace", // 1 Acompanhando
-  "uptodate", // 2 Em dia
-  "trailing", // 3 Muito atrás
-  "slowing", // 4 Desacelerando
-  "season_break", // 5 Entre temporadas   ─┐ hiato de PUBLICAÇÃO, qualificado (migration 183)
-  "interrupted", // 6 Interrompida        ─┘
-  "hiatus", // 7 Possível hiato — hiato que a fonte não qualifica, ou "leu tudo e parou"
-  "behind", // 8 Atrasado
-]
+const READING_STATE_ORDER: readonly ReadingState[] = ["onpace", "uptodate", "catching", "slowing", "quiet", "behind"]
 
 const READING_STATE_CONFIG: Record<ReadingState, BandConfig> = {
   onpace: {
     label: "Acompanhando",
-    hint: "85–99% lido — quase no fim",
+    hint: `faltam até ${NEAR_CHAPTERS} capítulos e você leu há menos de ${STALE_DAYS} dias`,
     bar: "bg-lime-500",
     progress: "bg-lime-500",
     chip: "border-lime-500/30 bg-lime-500/15 text-lime-600 dark:text-lime-400",
@@ -201,34 +228,135 @@ const READING_STATE_CONFIG: Record<ReadingState, BandConfig> = {
     progress: "bg-emerald-500",
     chip: "border-emerald-500/30 text-emerald-600 dark:text-emerald-400",
   },
-  trailing: {
-    label: "Muito atrás",
-    hint: "40–84% lido — lendo, mas longe do fim",
+  catching: {
+    label: "Alcançando",
+    hint: `faltam mais de ${NEAR_CHAPTERS} capítulos e você leu há menos de ${STALE_DAYS} dias`,
     bar: "bg-amber-500",
     progress: "bg-amber-500",
     chip: "border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400",
   },
   slowing: {
     label: "Desacelerando",
-    hint: "sem ler há mais de 30 dias",
+    hint: `faltam até ${NEAR_CHAPTERS} e você não lê há ${STALE_DAYS} dias ou mais`,
     bar: "bg-orange-500",
     progress: "bg-orange-500",
     chip: "border-orange-500/30 bg-orange-500/15 text-orange-600 dark:text-orange-400",
   },
-  /**
-   * As duas bandas de hiato QUALIFICADO. Cor própria porque nesta superfície a cor é o
-   * organizador da lista (cada banda já tem a sua) — não é o caso do badge de publicação, onde
-   * os dois tipos dividem o âmbar do status e quem separa é a forma.
-   *
-   * Azul para a espera previsível, ardósia para a parada sem previsão: a segunda perde
-   * saturação de propósito, porque é a única das duas em que não há nada acontecendo.
-   */
+  quiet: {
+    label: "Sem capítulo novo",
+    hint: `você leu tudo e a obra não lança há ${SILENT_RELEASE_DAYS} dias ou mais`,
+    bar: "bg-violet-500",
+    progress: "bg-violet-500",
+    chip: "border-violet-500/30 bg-violet-500/15 text-violet-600 dark:text-violet-400",
+  },
+  behind: {
+    label: "Atrasado",
+    hint: `faltam mais de ${NEAR_CHAPTERS} e você não lê há ${STALE_DAYS} dias ou mais`,
+    bar: "bg-rose-500",
+    progress: "bg-rose-500",
+    chip: "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400",
+  },
+}
+
+/**
+ * Traduz o par (obra, resultado da checagem em voo) para a régua de `pace-bands`. A checagem pode
+ * ter trazido um total e uma data de lançamento mais novos que os gravados.
+ */
+function paceInputOf(w: ReadingWork, result: ReadingUpdateResult | undefined): PaceInput {
+  return {
+    chaptersRead: w.chaptersRead,
+    totalChapters: latestOf(w, result),
+    pending: pendingOf(w, result, w.chaptersRead ?? 0),
+    lastReadAt: w.lastReadAt,
+    lastTouchedAt: w.lastTouchedAt,
+    lastReleasedAt: result?.releasedAt ?? w.lastChapterReleasedAt,
+    publicationHiatus: false,
+  }
+}
+
+/** Grupo da seção "Em andamento". Obra em hiato de publicação mora em "Outras", por motivo. */
+function classifyReadingState(w: ReadingWork, result: ReadingUpdateResult | undefined): ReadingState {
+  return classifyOngoing(paceInputOf(w, result))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TAXONOMIA B — Concluídas. A pergunta é "vou terminar?", e a distância também é em capítulos.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type TriageState = CompletedBand
+
+const TRIAGE_STATE_ORDER: readonly TriageState[] = ["finish", "near", "continuar", "definir", "parado"]
+
+const TRIAGE_STATE_CONFIG: Record<TriageState, BandConfig> = {
+  finish: {
+    label: "Lidas até o fim",
+    hint: "você leu tudo — falta só marcar como terminada",
+    bar: "bg-emerald-500",
+    progress: "bg-emerald-500",
+    chip: "border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  },
+  near: {
+    label: "Quase no fim",
+    hint: `faltam até ${NEAR_CHAPTERS} capítulos`,
+    bar: "bg-lime-500",
+    progress: "bg-lime-500",
+    chip: "border-lime-500/30 bg-lime-500/15 text-lime-600 dark:text-lime-400",
+  },
+  continuar: {
+    label: "Continuar",
+    hint: `faltam mais de ${NEAR_CHAPTERS}, mais de ${CONTINUE_PCT * 100}% lido, leu há menos de ${STALLED_DAYS} dias`,
+    bar: "bg-sky-500",
+    progress: "bg-sky-500",
+    chip: "border-sky-500/30 bg-sky-500/15 text-sky-600 dark:text-sky-400",
+  },
+  definir: {
+    label: "Definir",
+    hint: `faltam mais de ${NEAR_CHAPTERS}, até ${CONTINUE_PCT * 100}% lido, leu há menos de ${STALLED_DAYS} dias`,
+    bar: "bg-indigo-500",
+    progress: "bg-indigo-500",
+    chip: "border-indigo-500/30 bg-indigo-500/15 text-indigo-600 dark:text-indigo-400",
+  },
+  parado: {
+    label: "Parado",
+    hint: `faltam mais de ${NEAR_CHAPTERS} e você não lê há ${STALLED_DAYS} dias ou mais`,
+    bar: "bg-slate-500",
+    progress: "bg-slate-500",
+    chip: "border-slate-500/30 bg-slate-500/15 text-slate-600 dark:text-slate-400",
+  },
+}
+
+function classifyTriageState(w: ReadingWork, result: ReadingUpdateResult | undefined): TriageState {
+  return classifyCompleted(paceInputOf(w, result))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TAXONOMIA C — MOTIVO (seção "Outras": hiato, cancelada, sem status).
+// Aqui a pergunta não é "vou terminar?" e sim "o que houve com a publicação?". Pela triagem as 8
+// obras de hoje cairiam todas em "Parado", que não separa nada; o tipo do hiato (migration 183) separa.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type PauseState = "season_break" | "hiatus" | "interrupted" | "cancelled" | "unknown"
+
+const PAUSE_STATE_ORDER: readonly PauseState[] = ["season_break", "hiatus", "interrupted", "cancelled", "unknown"]
+
+/**
+ * Azul para a espera previsível, ardósia para a parada sem previsão: a segunda perde saturação
+ * de propósito, porque é a única em que não há nada acontecendo.
+ */
+const PAUSE_STATE_CONFIG: Record<PauseState, BandConfig> = {
   season_break: {
     label: "Entre temporadas",
     hint: "a próxima temporada já foi anunciada",
     bar: "bg-sky-500",
     progress: "bg-sky-500",
     chip: "border-sky-500/30 bg-sky-500/15 text-sky-600 dark:text-sky-400",
+  },
+  hiatus: {
+    label: "Em hiato",
+    hint: "a fonte não diz se ou quando volta",
+    bar: "bg-violet-500",
+    progress: "bg-violet-500",
+    chip: "border-violet-500/30 bg-violet-500/15 text-violet-600 dark:text-violet-400",
   },
   interrupted: {
     label: "Publicação interrompida",
@@ -237,95 +365,26 @@ const READING_STATE_CONFIG: Record<ReadingState, BandConfig> = {
     progress: "bg-slate-500",
     chip: "border-slate-500/30 bg-slate-500/15 text-slate-600 dark:text-slate-400",
   },
-  hiatus: {
-    label: "Possível hiato",
-    hint: "leu tudo e parou — ou série em hiato",
-    bar: "bg-violet-500",
-    progress: "bg-violet-500",
-    chip: "border-violet-500/30 bg-violet-500/15 text-violet-600 dark:text-violet-400",
-  },
-  behind: {
-    label: "Atrasado",
-    hint: "menos de 40% lido",
+  cancelled: {
+    label: "Cancelada",
+    hint: "a publicação foi encerrada",
     bar: "bg-rose-500",
     progress: "bg-rose-500",
     chip: "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400",
   },
-}
-
-/**
- * Classifica a obra numa das 6 bandas de ritmo. Aplicada SÓ à seção "Em andamento"
- * (publicação Ongoing).
- *
- * Só ADAPTA: traduz o par (obra, resultado da edição em voo) para o `PaceInput` da regra
- * compartilhada. A matriz % lido × recência + hiato vive em `classifyPace` — inclusive o
- * caso "sem total conhecido → Acompanhando (neutro)".
- */
-function classifyReadingState(
-  w: ReadingWork,
-  result: ReadingUpdateResult | undefined,
-): ReadingState {
-  return classifyPace({
-    chaptersRead: w.chaptersRead,
-    totalChapters: latestOf(w, result),
-    pending: pendingOf(w, result, w.chaptersRead ?? 0),
-    lastReadAt: w.lastReadAt,
-    publicationHiatus:
-      w.publicationStatusId != null &&
-      PUBLICATION_STATUSES_BY_ID[w.publicationStatusId]?.status === "Hiatus",
-    hiatusKind: w.hiatusKind,
-  })
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TAXONOMIA B — TRIAGEM (seção "Concluída & outras": completa · hiato · cancelada).
-// Obra sem capítulos novos previsíveis não se mede por "ritmo"; a pergunta vira "vou
-// terminar / vou decidir / parei". Só % lido × recência (STALLED_DAYS).
-// ─────────────────────────────────────────────────────────────────────────────
-
-type TriageState = "continuar" | "definir" | "parado"
-
-const CONTINUE_PCT = 0.5 // > 50% lido → você está dentro → Continuar
-const STALLED_DAYS = 45 // ≥ 45 dias sem ler → Parado (decida o que fazer)
-
-const TRIAGE_STATE_ORDER: readonly TriageState[] = ["continuar", "definir", "parado"]
-
-const TRIAGE_STATE_CONFIG: Record<TriageState, BandConfig> = {
-  continuar: {
-    label: "Continuar",
-    hint: "mais de 50% lido · leu há menos de 45 dias — você está dentro",
-    bar: "bg-emerald-500",
-    progress: "bg-emerald-500",
-    chip: "border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  },
-  definir: {
-    label: "Definir",
-    hint: "menos de 50% lido · leu há menos de 45 dias — ainda decidindo se vai",
-    bar: "bg-sky-500",
-    progress: "bg-sky-500",
-    chip: "border-sky-500/30 bg-sky-500/15 text-sky-600 dark:text-sky-400",
-  },
-  parado: {
-    label: "Parado",
-    hint: "sem ler há 45 dias ou mais — decida o que fazer",
-    bar: "bg-slate-500",
-    progress: "bg-slate-500",
+  unknown: {
+    label: "Sem status",
+    hint: "a fonte não informa a publicação",
+    bar: "bg-slate-400",
+    progress: "bg-slate-400",
     chip: "border-slate-500/30 bg-slate-500/15 text-slate-600 dark:text-slate-400",
   },
 }
 
-/**
- * Classifica uma obra da seção "Concluída & outras" na triagem. Frio (≥45d) vence sempre
- * (Parado). Recente: >50% → Continuar; senão (ou % desconhecido) → Definir.
- */
-function classifyTriageState(
-  w: ReadingWork,
-  result: ReadingUpdateResult | undefined,
-): TriageState {
-  if (daysSince(w.lastReadAt) >= STALLED_DAYS) return "parado"
-  const pct = progressOf(w, result)
-  if (pct != null && pct > CONTINUE_PCT) return "continuar"
-  return "definir"
+function classifyPauseState(w: ReadingWork): PauseState {
+  if (isCancelledPublicationStatus(w.publicationStatusId)) return "cancelled"
+  if (!isHiatusPublicationStatus(w.publicationStatusId)) return "unknown"
+  return hiatusBand(w.hiatusKind)
 }
 
 /** "Recém-começou": pouco lido (< 40%) mas aberto nos últimos 30 dias — tag de textura no card. */
@@ -370,11 +429,26 @@ function matchesReadFilter(
   return filter === "pending" ? p > 0 : p === 0
 }
 
-/** Publicação em andamento (dita a divisão em seções). Status ausente cai em "outras". */
+/** Publicação em andamento. */
 function isOngoing(w: ReadingWork): boolean {
   const id = w.publicationStatusId
   return id != null && PUBLICATION_STATUSES_BY_ID[id]?.status === "Ongoing"
 }
+
+/** A seção sai só do status de publicação. Status ausente ou desconhecido cai em "Outras". */
+function sectionOf(w: ReadingWork): SectionKey {
+  if (isOngoing(w)) return "ongoing"
+  return isConcludedPublicationStatus(w.publicationStatusId) ? "completed" : "others"
+}
+
+/** A banda da obra na taxonomia da seção dela. */
+function bandOf(w: ReadingWork, result: ReadingUpdateResult | undefined): string {
+  const section = sectionOf(w)
+  if (section === "ongoing") return classifyReadingState(w, result)
+  return section === "completed" ? classifyTriageState(w, result) : classifyPauseState(w)
+}
+
+const bandKey = (section: SectionKey, band: string) => `${section}:${band}`
 
 /** Comparator por data com nulos sempre por último (independente da direção). */
 function byDate(get: (w: ReadingWork) => string | null, dir: "asc" | "desc") {
@@ -424,12 +498,18 @@ export function ReadingList({
   works,
   defaultView = "list",
   nowIso,
+  initialFilterQuery = "",
+  defaultCollapsedBands = [],
 }: {
   works: ReadingWork[]
   /** Vista inicial lida do cookie no servidor (evita divergência de hidratação). */
   defaultView?: ReadingView
   /** "agora" do servidor (ISO) — base do mês/hoje do calendário, igual nos dois lados. */
   nowIso: string
+  /** A query string do pedido: os filtros começam dela, nos dois lados. */
+  initialFilterQuery?: string
+  /** Grupos recolhidos, lidos do cookie no servidor (evita divergência de hidratação). */
+  defaultCollapsedBands?: readonly string[]
 }) {
   const refresh = useRefresh()
   const [results, setResults] = useState<Record<string, ReadingUpdateResult>>({})
@@ -437,6 +517,24 @@ export function ReadingList({
   const checking = tasks.some((t) => t.id === CHECK_TASK_ID && t.status === "running")
   const [readFilter, setReadFilter] = useState<string>("all")
   const [sortBy, setSortBy] = useState<SortKey>("last_read")
+  // Filtros do painel: a query string É o estado. `replaceState` e não navegação, porque filtrar
+  // aqui não consulta nada; e na URL, porque é o que devolve o recorte ao voltar de uma obra.
+  const [filterQuery, setFilterQuery] = useState(initialFilterQuery)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const filterParams = useMemo(() => new URLSearchParams(filterQuery), [filterQuery])
+  const filters = useMemo(() => parseReadingFilters(filterParams), [filterParams])
+  const activeFilterCount = activeReadingFilterCount(filters)
+  const updateFilterParams = (updates: Record<string, string | null>) => {
+    const next = new URLSearchParams(filterParams)
+    for (const [key, value] of Object.entries(updates)) {
+      if (value == null) next.delete(key)
+      else next.set(key, value)
+    }
+    const query = next.toString()
+    setFilterQuery(query)
+    window.history.replaceState(null, "", query ? `${window.location.pathname}?${query}` : window.location.pathname)
+  }
+  const clearFilters = () => updateFilterParams(clearedReadingFilterParams())
   // Otimista: marca "agora" assim que a checagem termina (antes do refresh trazer o persistido).
   const [justCheckedAt, setJustCheckedAt] = useState<string | null>(null)
   // Vermelho no "Última verificação" quando a última checagem DESTA sessão deu erro (obra
@@ -458,10 +556,14 @@ export function ReadingList({
   // "Em andamento" aberta, ou "outras" se não houver nenhuma em andamento). Depois do
   // primeiro clique, passa a valer o Set explícito.
   const [openKeys, setOpenKeys] = useState<Set<SectionKey> | null>(null)
-  const ongoingRef = useRef<HTMLElement>(null)
-  const othersRef = useRef<HTMLElement>(null)
-  // `workId` opcional: quando presente, o efeito rola até o CARD (não só o topo da seção).
-  const pendingScroll = useRef<{ section: SectionKey; workId?: string } | null>(null)
+  // Grupos recolhidos, por `seção:banda`. Lembrados em cookie, como a vista.
+  const [collapsedBands, setCollapsedBands] = useState<ReadonlySet<string>>(() => new Set(defaultCollapsedBands))
+  const saveCollapsedBands = (next: ReadonlySet<string>) => {
+    setCollapsedBands(next)
+    writeCollapsedBandsCookie(next)
+  }
+  // O elemento para onde rolar depois que a seção ou o grupo abrir.
+  const pendingScroll = useRef<string | null>(null)
 
   // Última verificação = a mais recente entre as obras (cada uma grava chapters_checked_at).
   const lastChecked = useMemo(() => {
@@ -470,8 +572,14 @@ export function ReadingList({
     return justCheckedAt && (!latest || justCheckedAt > latest) ? justCheckedAt : latest
   }, [works, justCheckedAt])
 
+  // O painel vale nas duas vistas; "Leitura" só existe na lista, então só corta a lista.
+  const filteredWorks = useMemo(
+    () => (activeFilterCount > 0 ? works.filter((w) => matchesReadingFilters(w, filters)) : works),
+    [works, filters, activeFilterCount],
+  )
+
   const displayed = useMemo(() => {
-    let list = works
+    let list = filteredWorks
     if (readFilter !== "all") {
       list = list.filter((w) => matchesReadFilter(w, results[w.id], readFilter))
     }
@@ -489,58 +597,77 @@ export function ReadingList({
       arr.sort(DATE_SORTERS[sortBy])
     }
     return arr
-  }, [works, readFilter, sortBy, results])
+  }, [filteredWorks, readFilter, sortBy, results])
 
-  const ongoing = useMemo(() => displayed.filter(isOngoing), [displayed])
-  const others = useMemo(() => displayed.filter((w) => !isOngoing(w)), [displayed])
+  const worksBySection = useMemo(() => {
+    const out: Record<SectionKey, ReadingWork[]> = { ongoing: [], completed: [], others: [] }
+    for (const w of displayed) out[sectionOf(w)].push(w)
+    return out
+  }, [displayed])
 
-  // Default de abertura quando o usuário ainda não interagiu.
-  const defaultOpen: SectionKey = ongoing.length > 0 ? "ongoing" : "others"
+  // Default de abertura quando o usuário ainda não interagiu: a primeira seção com obra.
+  const defaultOpen = SECTION_ORDER.find((key) => worksBySection[key].length > 0) ?? "ongoing"
   const effectiveOpen = openKeys ?? new Set<SectionKey>([defaultOpen])
   const isOpen = (key: SectionKey) => effectiveOpen.has(key)
 
-  // Rola até a seção (ou até um card específico dentro dela) depois que ela expande —
-  // efeito só faz scroll, nada de setState.
+  // Rola até o alvo depois que a seção ou o grupo expande — efeito só faz scroll, nada de setState.
   useEffect(() => {
     const target = pendingScroll.current
     if (!target) return
     pendingScroll.current = null
-    if (target.workId) {
-      document.getElementById(`work-${target.workId}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
-      return
-    }
-    const ref = target.section === "ongoing" ? ongoingRef : othersRef
-    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" })
-  }, [openKeys])
+    document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }, [openKeys, collapsedBands])
 
-  // Clique na aba: abre só aquela, fecha a outra e rola até ela.
+  const scrollTo = (elementId: string) =>
+    document.getElementById(elementId)?.scrollIntoView({ behavior: "smooth", block: "start" })
+
+  // Clique na aba: abre só aquela, fecha as outras e rola até ela.
   const selectSection = (key: SectionKey) => {
-    pendingScroll.current = { section: key }
+    pendingScroll.current = `section-${key}`
     setOpenKeys(new Set([key]))
   }
 
-  // Chip da faixa de novidades: abre a seção certa (se ainda fechada) e rola até o card.
-  const jumpToWork = (work: ReadingWork) => {
-    const section: SectionKey = isOngoing(work) ? "ongoing" : "others"
-    if (effectiveOpen.has(section)) {
-      document.getElementById(`work-${work.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
-      return
-    }
-    pendingScroll.current = { section, workId: work.id }
-    setOpenKeys((prev) => {
-      const next = new Set(prev ?? new Set<SectionKey>([defaultOpen]))
-      next.add(section)
-      return next
-    })
+  const toggleBand = (key: string) => {
+    const next = new Set(collapsedBands)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    saveCollapsedBands(next)
   }
 
-  // Obras com capítulo novo nesta sessão (pós "Verificar atualizações"), pra faixa do topo.
+  /** Rola até algo dentro de um grupo, abrindo antes o que estiver fechado no caminho. */
+  const revealInBand = (section: SectionKey, band: string, elementId: string) => {
+    const key = bandKey(section, band)
+    const closed = collapsedBands.has(key)
+    const sectionOpen = effectiveOpen.has(section)
+    if (sectionOpen && !closed) {
+      scrollTo(elementId)
+      return
+    }
+    pendingScroll.current = elementId
+    if (closed) {
+      const next = new Set(collapsedBands)
+      next.delete(key)
+      saveCollapsedBands(next)
+    }
+    if (!sectionOpen) setOpenKeys(new Set([...effectiveOpen, section]))
+  }
+
+  // Chip do resumo: leva ao grupo, mesmo recolhido.
+  const jumpToBand = (section: SectionKey, band: string) => revealInBand(section, band, `band-${section}-${band}`)
+
+  // Chip da faixa de novidades: abre o que precisar e rola até o card.
+  const jumpToWork = (work: ReadingWork) =>
+    revealInBand(sectionOf(work), bandOf(work, results[work.id]), `work-${work.id}`)
+
+  // Obras com capítulo novo nesta sessão (pós "Verificar atualizações"), pra faixa do topo. Só as
+  // que estão na tela: o clique da faixa rola até o card, e obra filtrada não tem card. O toast da
+  // verificação continua nomeando todas.
   const newReleases = useMemo(
     () =>
-      works
+      displayed
         .filter((w) => results[w.id]?.hasNew)
         .map((w) => ({ work: w, result: results[w.id] })),
-    [works, results],
+    [displayed, results],
   )
 
   // Limpa "hasNew" quando o usuário se atualiza (marcar até o último ou stepper alcança
@@ -553,7 +680,7 @@ export function ReadingList({
     })
   }
 
-  // Clique no cabeçalho: alterna aquela seção livremente (pode deixar as duas abertas).
+  // Clique no cabeçalho: alterna aquela seção livremente (pode deixar várias abertas).
   const toggleSection = (key: SectionKey) => {
     setOpenKeys((prev) => {
       const base = prev ?? new Set<SectionKey>([defaultOpen])
@@ -666,7 +793,43 @@ export function ReadingList({
     )
   }
 
-  const filtering = readFilter !== "all"
+  const filtering = readFilter !== "all" || activeFilterCount > 0
+  // O que as três seções recebem igual.
+  const sectionProps = {
+    results,
+    filters,
+    collapsedBands,
+    onToggleSection: toggleSection,
+    onToggleBand: toggleBand,
+    onJumpBand: jumpToBand,
+    onCaughtUp: clearHasNew,
+  }
+  const filtersButton = (
+    <ReadingFiltersButton
+      open={filtersOpen}
+      onToggle={() => setFiltersOpen((open) => !open)}
+      activeCount={activeFilterCount}
+    />
+  )
+  // No calendário a contagem é a do painel: "Leitura" não existe naquela vista.
+  const shownCount = view === "calendar" ? filteredWorks.length : displayed.length
+  // Fecha o grupo da esquerda: o total é a soma do que está ali, não um controle.
+  const countLabel = (
+    <>
+      <span className="mx-1.5 hidden h-5 w-px bg-border sm:block" aria-hidden />
+      <span className="text-xs tabular-nums text-muted-foreground">
+        {shownCount !== works.length || filtering ? (
+          <>
+            <b className="font-semibold text-foreground">{shownCount}</b> de {works.length}
+          </>
+        ) : (
+          <>
+            <b className="font-semibold text-foreground">{works.length}</b> obra{works.length !== 1 ? "s" : ""}
+          </>
+        )}
+      </span>
+    </>
+  )
 
   return (
     <div className="space-y-4">
@@ -720,15 +883,19 @@ export function ReadingList({
                 <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={() => setMonthAnchor(startOfMonth(new Date(nowIso)))}>
                   Hoje
                 </Button>
+                {countLabel}
               </div>
-              <CalendarLegend />
+              <div className="flex flex-wrap items-center gap-3">
+                <CalendarLegend />
+                {filtersButton}
+              </div>
             </>
           ) : (
             <>
               {/* Navegação de seção (pills discretas — split de publicação, rola até a seção). */}
               <div className="flex flex-wrap items-center gap-1.5">
-                {(Object.keys(SECTIONS) as SectionKey[]).map((key) => {
-                  const count = key === "ongoing" ? ongoing.length : others.length
+                {SECTION_ORDER.map((key) => {
+                  const count = worksBySection[key].length
                   return (
                     <button
                       key={key}
@@ -747,20 +914,11 @@ export function ReadingList({
                     </button>
                   )
                 })}
+                {countLabel}
               </div>
-              {/* Contagem + filtros. "25 obras" discreto; vira "N de 25" quando há filtro. */}
+              {/* À direita, só o que muda a vista: filtros e ordenação. */}
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs tabular-nums text-muted-foreground">
-                  {filtering ? (
-                    <>
-                      <b className="font-semibold text-foreground">{displayed.length}</b> de {works.length}
-                    </>
-                  ) : (
-                    <>
-                      <b className="font-semibold text-foreground">{works.length}</b> obra{works.length !== 1 ? "s" : ""}
-                    </>
-                  )}
-                </span>
+                {filtersButton}
                 <Select value={readFilter} onValueChange={setReadFilter}>
                   <SelectTrigger size="sm" className="w-auto min-w-28 gap-1.5 text-xs">
                     <BookOpenCheck className="size-3.5 text-muted-foreground" />
@@ -804,6 +962,16 @@ export function ReadingList({
             </>
           )}
         </div>
+
+        <ReadingActiveFilters filters={filters} updateParams={updateFilterParams} onClear={clearFilters} />
+        {filtersOpen && (
+          <ReadingFiltersPanel
+            works={works}
+            filters={filters}
+            params={filterParams}
+            updateParams={updateFilterParams}
+          />
+        )}
 
         {/* Faixa de novidades — só na lista, e só quando a checagem achou algo pendente.
             Mini-CARD, não chip: a versão anterior era uma pílula com capa de 18×24px e o
@@ -856,72 +1024,52 @@ export function ReadingList({
 
       {/* Conteúdo da vista ativa */}
       {view === "calendar" ? (
-        <ReadingCalendar works={works} results={results} monthAnchor={monthAnchor} nowIso={nowIso} />
+        <ReadingCalendar works={filteredWorks} results={results} monthAnchor={monthAnchor} nowIso={nowIso} />
       ) : displayed.length === 0 ? (
         <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          <CardContent className="flex flex-col items-center gap-3 py-8 text-center text-sm text-muted-foreground">
             Nenhuma obra com esse filtro.
+            {activeFilterCount > 0 && (
+              <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
+                Limpar filtros
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-6">
-          {ongoing.length > 0 && (
-            <ReadingSection
-              ref={ongoingRef}
-              sectionKey="ongoing"
-              count={ongoing.length}
-              open={isOpen("ongoing")}
-              onToggle={() => toggleSection("ongoing")}
-            >
-              <SectionSummary
-                works={ongoing}
-                results={results}
-                classify={classifyReadingState}
-                order={READING_STATE_ORDER}
-                config={READING_STATE_CONFIG}
-                sectionKey="ongoing"
-                label={`Seu ritmo nas ${ongoing.length} em andamento`}
-              />
-              <BandedGrid
-                works={ongoing}
-                results={results}
-                sectionKey="ongoing"
-                classify={classifyReadingState}
-                order={READING_STATE_ORDER}
-                config={READING_STATE_CONFIG}
-                onCaughtUp={clearHasNew}
-              />
-            </ReadingSection>
-          )}
-          {others.length > 0 && (
-            <ReadingSection
-              ref={othersRef}
-              sectionKey="others"
-              count={others.length}
-              open={isOpen("others")}
-              onToggle={() => toggleSection("others")}
-            >
-              <SectionSummary
-                works={others}
-                results={results}
-                classify={classifyTriageState}
-                order={TRIAGE_STATE_ORDER}
-                config={TRIAGE_STATE_CONFIG}
-                sectionKey="others"
-                label={`Sua triagem nas ${others.length} concluídas & outras`}
-              />
-              <BandedGrid
-                works={others}
-                results={results}
-                sectionKey="others"
-                classify={classifyTriageState}
-                order={TRIAGE_STATE_ORDER}
-                config={TRIAGE_STATE_CONFIG}
-                actionState="parado"
-                onCaughtUp={clearHasNew}
-              />
-            </ReadingSection>
-          )}
+          <BandedSection
+            sectionKey="ongoing"
+            works={worksBySection.ongoing}
+            classify={classifyReadingState}
+            order={READING_STATE_ORDER}
+            config={READING_STATE_CONFIG}
+            label={`Seu ritmo nas ${worksBySection.ongoing.length} em andamento`}
+            open={isOpen("ongoing")}
+            {...sectionProps}
+          />
+          <BandedSection
+            sectionKey="completed"
+            works={worksBySection.completed}
+            classify={classifyTriageState}
+            order={TRIAGE_STATE_ORDER}
+            config={TRIAGE_STATE_CONFIG}
+            label={`Sua triagem nas ${worksBySection.completed.length} concluídas`}
+            showActions={(_, state) => state === "parado"}
+            open={isOpen("completed")}
+            {...sectionProps}
+          />
+          <BandedSection
+            sectionKey="others"
+            works={worksBySection.others}
+            classify={classifyPauseState}
+            order={PAUSE_STATE_ORDER}
+            config={PAUSE_STATE_CONFIG}
+            label={`O que houve com as ${worksBySection.others.length} outras`}
+            showActions={(w) => daysSince(recencyDate(w)) >= STALLED_DAYS}
+            open={isOpen("others")}
+            {...sectionProps}
+          />
         </div>
       )}
     </div>
@@ -960,14 +1108,12 @@ function ViewToggleButton({
 
 /** Seção colapsável (cabeçalho com contagem + faixa-resumo + grade de cards). */
 function ReadingSection({
-  ref,
   sectionKey,
   count,
   open,
   onToggle,
   children,
 }: {
-  ref: React.Ref<HTMLElement>
   sectionKey: SectionKey
   count: number
   open: boolean
@@ -976,7 +1122,7 @@ function ReadingSection({
 }) {
   const cfg = SECTIONS[sectionKey]
   return (
-    <section ref={ref} className="scroll-mt-4 space-y-3">
+    <section id={`section-${sectionKey}`} className="scroll-mt-4 space-y-3">
       <button
         type="button"
         onClick={onToggle}
@@ -999,6 +1145,70 @@ function ReadingSection({
   )
 }
 
+/** Uma seção inteira: cabeçalho, faixa-resumo e grupos. Sem obra, ela não aparece. */
+function BandedSection<S extends string>({
+  sectionKey,
+  works,
+  results,
+  classify,
+  order,
+  config,
+  label,
+  showActions,
+  filters,
+  collapsedBands,
+  open,
+  onToggleSection,
+  onToggleBand,
+  onJumpBand,
+  onCaughtUp,
+}: {
+  sectionKey: SectionKey
+  works: ReadingWork[]
+  results: Record<string, ReadingUpdateResult>
+  classify: (w: ReadingWork, r: ReadingUpdateResult | undefined) => S
+  order: readonly S[]
+  config: Record<S, BandConfig>
+  label: string
+  /** Quais cards ganham as ações On-hold / Arquivar. */
+  showActions?: (w: ReadingWork, state: S) => boolean
+  filters: ReadingFilters
+  collapsedBands: ReadonlySet<string>
+  open: boolean
+  onToggleSection: (key: SectionKey) => void
+  onToggleBand: (key: string) => void
+  onJumpBand: (section: SectionKey, band: string) => void
+  onCaughtUp: (workId: string) => void
+}) {
+  if (works.length === 0) return null
+  return (
+    <ReadingSection sectionKey={sectionKey} count={works.length} open={open} onToggle={() => onToggleSection(sectionKey)}>
+      <SectionSummary
+        works={works}
+        results={results}
+        classify={classify}
+        order={order}
+        config={config}
+        label={label}
+        onJump={(band) => onJumpBand(sectionKey, band)}
+      />
+      <BandedGrid
+        works={works}
+        results={results}
+        sectionKey={sectionKey}
+        classify={classify}
+        order={order}
+        config={config}
+        showActions={showActions}
+        filters={filters}
+        collapsedBands={collapsedBands}
+        onToggleBand={onToggleBand}
+        onCaughtUp={onCaughtUp}
+      />
+    </ReadingSection>
+  )
+}
+
 /**
  * Faixa-resumo de UMA seção: barra segmentada + chips por banda. Vive DENTRO da seção
  * (não é mais fixa no topo). Clicar (segmento ou chip) rola até a banda pelo id
@@ -1010,16 +1220,17 @@ function SectionSummary<S extends string>({
   classify,
   order,
   config,
-  sectionKey,
   label,
+  onJump,
 }: {
   works: ReadingWork[]
   results: Record<string, ReadingUpdateResult>
   classify: (w: ReadingWork, r: ReadingUpdateResult | undefined) => S
   order: readonly S[]
   config: Record<S, BandConfig>
-  sectionKey: SectionKey
   label: string
+  /** Leva ao grupo, abrindo-o se estiver recolhido. */
+  onJump: (state: S) => void
 }) {
   const counts = useMemo(
     () => tallyBands(works, results, classify, order),
@@ -1027,12 +1238,6 @@ function SectionSummary<S extends string>({
   )
   const present = order.filter((s) => counts[s] > 0)
   if (works.length === 0 || present.length === 0) return null
-
-  const jump = (s: S) => {
-    document
-      .getElementById(`band-${sectionKey}-${s}`)
-      ?.scrollIntoView({ behavior: "smooth", block: "start" })
-  }
 
   return (
     <div className="rounded-xl border border-border bg-muted/30 px-3.5 py-2.5">
@@ -1046,7 +1251,7 @@ function SectionSummary<S extends string>({
             key={s}
             type="button"
             aria-label={`Ir para ${config[s].label} (${counts[s]})`}
-            onClick={() => jump(s)}
+            onClick={() => onJump(s)}
             className={cn("h-full cursor-pointer transition-[filter] hover:brightness-125", config[s].bar)}
             style={{ flexGrow: counts[s] }}
           />
@@ -1061,7 +1266,7 @@ function SectionSummary<S extends string>({
               key={s}
               type="button"
               disabled={disabled}
-              onClick={() => jump(s)}
+              onClick={() => onJump(s)}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors",
                 "hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
@@ -1086,7 +1291,10 @@ function BandedGrid<S extends string>({
   classify,
   order,
   config,
-  actionState,
+  showActions,
+  filters,
+  collapsedBands,
+  onToggleBand,
   onCaughtUp,
 }: {
   works: ReadingWork[]
@@ -1095,8 +1303,12 @@ function BandedGrid<S extends string>({
   classify: (w: ReadingWork, r: ReadingUpdateResult | undefined) => S
   order: readonly S[]
   config: Record<S, BandConfig>
-  /** Banda cujos cards ganham ações (On-hold / Arquivar) — ex.: "parado". */
-  actionState?: S
+  /** Quais cards ganham as ações On-hold / Arquivar. */
+  showActions?: (w: ReadingWork, state: S) => boolean
+  /** Os filtros ligados: cada card mostra o próprio valor neles. */
+  filters: ReadingFilters
+  collapsedBands: ReadonlySet<string>
+  onToggleBand: (key: string) => void
   /** Chamado quando o card alcança o lançado (marcar até o X / stepper) — limpa o "hasNew". */
   onCaughtUp: (workId: string) => void
 }) {
@@ -1108,9 +1320,19 @@ function BandedGrid<S extends string>({
     <div className="space-y-6">
       {bands.map(({ state, works: items }) => {
         const cfg = config[state]
+        const key = bandKey(sectionKey, state)
+        const closed = collapsedBands.has(key)
         return (
           <div key={state} id={`band-${sectionKey}-${state}`} className="scroll-mt-4 space-y-2.5">
-            <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => onToggleBand(key)}
+              aria-expanded={!closed}
+              className="-mx-1 flex w-[calc(100%+0.5rem)] items-center gap-2.5 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-muted/40"
+            >
+              <ChevronDown
+                className={cn("size-4 shrink-0 text-muted-foreground transition-transform", closed && "-rotate-90")}
+              />
               <span className={cn("h-3.5 w-1 shrink-0 rounded-full", cfg.bar)} />
               <h3 className="text-sm font-semibold">{cfg.label}</h3>
               <span className="rounded-full border border-border px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground">
@@ -1119,21 +1341,24 @@ function BandedGrid<S extends string>({
               <span className="hidden truncate pl-1 text-[11px] text-muted-foreground/70 sm:inline">
                 {cfg.hint}
               </span>
-            </div>
+            </button>
             {/* Altura idêntica em TODA a banda, e ela sai do conteúdo — não de um número
                 mágico. `auto-rows-fr` iguala as linhas da grade pela mais alta; sem
                 `items-start` cada card estica até a linha. Só isso não bastava: com
                 `items-start` (versão anterior) título de 1 vs 2 linhas e uma data a mais
                 davam a cada card uma altura própria — medido no catálogo: 304 e 318px na
-                mesma banda. O `min-h` do card é o piso que alinha uma banda com a outra. */}
-            <div className="grid auto-rows-fr grid-cols-1 gap-3 lg:grid-cols-2">
+                mesma banda. O `min-h` do card é o piso que alinha uma banda com a outra.
+                ⚠️ Recolher ESCONDE, não desmonta: o card segura o save do stepper num debounce de
+                500ms, e desmontá-lo cancelaria o último clique. */}
+            <div className={cn("grid auto-rows-fr grid-cols-1 gap-3 lg:grid-cols-2", closed && "hidden")}>
               {items.map((work) => (
                 <ReadingCard
                   key={work.id}
                   work={work}
                   result={results[work.id]}
                   cfg={cfg}
-                  showActions={actionState != null && state === actionState}
+                  showActions={showActions?.(work, state)}
+                  filters={filters}
                   onCaughtUp={onCaughtUp}
                 />
               ))}
@@ -1151,12 +1376,14 @@ function ReadingCard({
   result,
   cfg,
   showActions,
+  filters,
   onCaughtUp,
 }: {
   work: ReadingWork
   result: ReadingUpdateResult | undefined
   cfg: BandConfig
   showActions?: boolean
+  filters: ReadingFilters
   onCaughtUp: (workId: string) => void
 }) {
   const refresh = useRefresh()
@@ -1304,14 +1531,18 @@ function ReadingCard({
             </span>
           )}
         </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-2.5">
-          <div className="flex items-start justify-between gap-2">
+        <div className="@container flex min-w-0 flex-1 flex-col gap-2.5">
+          {/* Coluna estreita: os selos sobem para uma linha própria. Lado a lado eles não encolhem, e o
+              título ficava com largura zero no celular (só sobrava um "·") e com ~120px no tablet em duas
+              colunas. Quem decide é a largura da COLUNA (container query), não a da tela. O DOM segue
+              título primeiro, então leitor de tela e Tab não mudam de ordem. */}
+          <div className="flex flex-col-reverse items-start gap-1.5 @sm:flex-row @sm:justify-between @sm:gap-2">
             <WorkTitleLink
               title={work.title}
               workId={work.id}
-              className="line-clamp-2 text-lg font-semibold leading-snug hover:underline"
+              className="line-clamp-2 min-w-0 text-lg font-semibold leading-snug hover:underline"
             />
-            <div className="flex shrink-0 items-center gap-1.5">
+            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
               <WorkContentChip isAdult={work.isAdult} isMixed={work.isMixed} className="px-1.5 py-0" />
               <ReadingStatusBadge pending={pending} cfg={cfg} />
               <PublicationStatusBadge
@@ -1338,7 +1569,9 @@ function ReadingCard({
             </div>
           )}
 
-          <div className="flex items-end gap-3">
+          {/* No celular a coluna de texto tem ~190px e o par stepper → "Último lançado" não cabe: a seta sai
+              e o lançado desce de linha se precisar, em vez de ser cortado pelo `overflow-hidden` do card. */}
+          <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
             <div className="flex flex-col gap-1">
               <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
                 Último lido
@@ -1366,7 +1599,7 @@ function ReadingCard({
                 </button>
               </div>
             </div>
-            <span className="flex h-9 items-center text-muted-foreground/50">→</span>
+            <span className="hidden h-9 items-center text-muted-foreground/50 sm:flex">→</span>
             <Stat label="Último lançado" value={lancado ?? "—"} highlight={result?.hasNew} />
             {saving && (
               <span className="flex h-9 items-center">
@@ -1376,6 +1609,12 @@ function ReadingCard({
           </div>
 
           <div className="min-h-[1.25rem] space-y-0.5 text-sm text-muted-foreground">
+            {!work.lastReadAt && work.lastTouchedAt && (
+              <span className="flex items-center gap-1.5 text-muted-foreground/70">
+                <BookOpenCheck className="size-4 shrink-0" /> Sem data de leitura · última alteração:{" "}
+                {formatRelativeDate(work.lastTouchedAt)}
+              </span>
+            )}
             {work.lastReadAt && (
               <span className="flex items-center gap-1.5 text-muted-foreground/70">
                 <BookOpenCheck className="size-4 shrink-0" /> Última leitura:{" "}
@@ -1430,6 +1669,8 @@ function ReadingCard({
             )}
           </div>
 
+          <ReadingFilterEcho work={work} filters={filters} />
+
           <div className="mt-auto flex flex-wrap items-center gap-2 pt-1">
             {readUrl ? (
               <Button asChild size="sm" variant="outline">
@@ -1458,7 +1699,7 @@ function ReadingCard({
             )}
 
             {showActions && (
-              <div className="ml-auto flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto">
                 <Button
                   size="sm"
                   variant="ghost"

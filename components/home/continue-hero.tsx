@@ -24,8 +24,8 @@ function isOngoing(statusId: number | null): boolean {
 /**
  * O rótulo da banda depende de a obra ainda estar saindo.
  *
- * A banda é a mesma (≥85% lido), mas o que 85% SIGNIFICA muda: numa obra concluída falta
- * pouco para acabar — "quase no fim"; numa que ainda publica, não há fim à vista, você está é
+ * A banda é a mesma (faltam poucos capítulos), mas o que isso SIGNIFICA muda: numa obra concluída
+ * falta pouco para acabar — "quase no fim"; numa que ainda publica, não há fim à vista, você está é
  * alcançando os lançamentos — "quase em dia". Dizer "quase no fim" de uma obra em publicação
  * é simplesmente falso, e o leitor percebe.
  */
@@ -58,7 +58,8 @@ function groupByPublication(
 /**
  * Escolhe a obra em destaque e a ordem das demais.
  *
- * O destaque sai da banda **Acompanhando** da /reading (≥85% lido e leitura recente) — não do
+ * O destaque sai da banda **Acompanhando** da /reading (faltam até `NEAR_CHAPTERS` capítulos e
+ * leitura recente, ver `lib/reading/pace-bands.ts`) — não do
  * "li por último". Uma obra em que faltam 37 de 51 capítulos não é o que a pessoa está prestes
  * a terminar; ocupar o hero com ela desperdiça o espaço mais valioso da home. Entre as que se
  * qualificam, vence a de capítulo mais novo: é a que tem algo esperando agora.

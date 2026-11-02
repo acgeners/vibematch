@@ -21,3 +21,24 @@ export function writeReadingViewCookie(view: ReadingView): void {
   if (typeof document === "undefined") return
   document.cookie = `${READING_VIEW_COOKIE}=${view}; path=/; max-age=${ONE_YEAR_SECONDS}; samesite=lax`
 }
+
+/**
+ * Os grupos recolhidos da /reading (`seção:banda`), também em cookie e pelo mesmo motivo: o
+ * servidor já desenha a lista recolhida. O separador é `|` porque vírgula não é válida em valor de
+ * cookie (RFC 6265).
+ */
+export const READING_COLLAPSED_BANDS_COOKIE = "reading_collapsed_bands"
+
+const BAND_KEY = /^[a-z_]+:[a-z_]+$/
+
+/** Cookie cru → chaves válidas. Valor adulterado vira lista vazia, nunca erro de render. */
+export function parseCollapsedBands(value: string | null | undefined): string[] {
+  if (!value) return []
+  return value.split("|").filter((key) => BAND_KEY.test(key))
+}
+
+export function writeCollapsedBandsCookie(keys: Iterable<string>): void {
+  if (typeof document === "undefined") return
+  const value = [...keys].join("|")
+  document.cookie = `${READING_COLLAPSED_BANDS_COOKIE}=${value}; path=/; max-age=${ONE_YEAR_SECONDS}; samesite=lax`
+}
