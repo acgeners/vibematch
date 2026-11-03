@@ -52,6 +52,34 @@ const synopsisEntrySchema = z.object({
   isPrimary: z.boolean(),
 })
 
+/**
+ * Teto de itens por lista do formulário da obra.
+ *
+ * 🔴 É defesa contra NEGAÇÃO DE SERVIÇO, não regra de catálogo. `createWork` (qualquer conta) e
+ * `updateWork` são endpoints públicos, e um array sem teto deixava um pedido de 1 MB gerar 500 mil
+ * erros de validação: medido, +521 MB no zod 4.4.2, numa máquina de 1 GB. Desde o zod 4.6.6 o
+ * tamanho é conferido ANTES dos itens, mas só quando o array tem `.max()` — sem ele a 4.6.7 ainda
+ * gasta +272 MB no mesmo pedido. As duas coisas são necessárias.
+ *
+ * ⚠️ O carregador da edição (`dbWorkToFormValues`) valida com este schema e LANÇA: um teto abaixo
+ * do que já existe no banco tranca a edição daquela obra. Por isso a folga é de ~10× sobre o maior
+ * caso medido na nuvem em 2026-11-02 (1.087 obras): 40 títulos alternativos, 10 gêneros, 259 tags,
+ * 9 notas de plataforma, 27 capas, 10 capas arquivadas, 6 sinopses. Folga não custa nada: com o
+ * tamanho conferido antes, 2.500 itens inválidos geram um erro só.
+ */
+export const WORK_FORM_LIST_MAX = {
+  alternative_titles: 400,
+  genres: 100,
+  tags: 2500,
+  extra_platform_ratings: 100,
+  covers: 300,
+  archived_covers: 100,
+  synopses: 60,
+} as const
+
+const listMaxMessage = (field: keyof typeof WORK_FORM_LIST_MAX, label: string) =>
+  `No máximo ${WORK_FORM_LIST_MAX[field]} ${label}.`
+
 // Objeto-base SEM a checagem de campo cruzado. Exportado porque o LOADER (que
 // converte uma obra armazenada → valores do form pra edição) precisa parsear SEM
 // lançar: se um dado corrompido (year_end < year) já existir no banco, você tem que
@@ -72,12 +100,17 @@ export const workFormBase = z.object({
    */
   alternative_titles: z
     .array(z.string())
+    .max(WORK_FORM_LIST_MAX.alternative_titles, listMaxMessage("alternative_titles", "títulos alternativos"))
     .default([])
     .transform(normalizeAlternativeTitles)
-    .pipe(z.array(z.string().min(1).max(500))),
+    .pipe(
+      z
+        .array(z.string().min(1).max(500))
+        .max(WORK_FORM_LIST_MAX.alternative_titles, listMaxMessage("alternative_titles", "títulos alternativos")),
+    ),
   synopsis: z.string().max(30000).nullable().optional(),
-  genres: z.array(z.string().max(100)).default([]),
-  tags: z.array(z.string().max(100)).default([]),
+  genres: z.array(z.string().max(100)).max(WORK_FORM_LIST_MAX.genres, listMaxMessage("genres", "gêneros")).default([]),
+  tags: z.array(z.string().max(100)).max(WORK_FORM_LIST_MAX.tags, listMaxMessage("tags", "tags")).default([]),
   year: z.number({ message: "Ano deve ser um número" }).int().min(1900).max(2100).nullable().optional(),
   year_end: z.number({ message: "Ano deve ser um número" }).int().min(1900).max(2100).nullable().optional(),
   publication_status: z.enum(PUBLICATION_STATUSES).default("Unknown"),
@@ -142,14 +175,20 @@ export const workFormBase = z.object({
   ap_votes: z.number().int().min(0).nullable().optional(),
   cmx_rating: z.number().min(0).max(10).nullable().optional(),
   cmx_votes: z.number().int().min(0).nullable().optional(),
-  extra_platform_ratings: z.array(extraPlatformRatingSchema).default([]),
+  extra_platform_ratings: z
+    .array(extraPlatformRatingSchema)
+    .max(WORK_FORM_LIST_MAX.extra_platform_ratings, listMaxMessage("extra_platform_ratings", "notas de plataforma"))
+    .default([]),
 
   // Multi-source metadata (Fase 2)
-  covers: z.array(coverEntrySchema).default([]),
+  covers: z.array(coverEntrySchema).max(WORK_FORM_LIST_MAX.covers, listMaxMessage("covers", "capas")).default([]),
   // Capas que você apagou. Ficam fora de `covers` mas persistem, pra que
   // "Atualizar dados" não as traga de volta (migration 163).
-  archived_covers: z.array(archivedCoverEntrySchema).default([]),
-  synopses: z.array(synopsisEntrySchema).default([]),
+  archived_covers: z
+    .array(archivedCoverEntrySchema)
+    .max(WORK_FORM_LIST_MAX.archived_covers, listMaxMessage("archived_covers", "capas arquivadas"))
+    .default([]),
+  synopses: z.array(synopsisEntrySchema).max(WORK_FORM_LIST_MAX.synopses, listMaxMessage("synopses", "sinopses")).default([]),
 
   // External source IDs (anilist, mangaupdates, myanimelist, kitsu, mangadex, comick, comix, animeplanet)
   // Persisted to work_external_ids so future "Atualizar dados" can rehydrate without a title search.
