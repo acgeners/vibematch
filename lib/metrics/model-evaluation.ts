@@ -120,9 +120,12 @@ const METRIC_KEYS = [
  * Normaliza + valida via Zod um objeto cru (ex.: linha de formula_config +
  * agregados do snapshot/ledger). Chaves ausentes ou inválidas viram `null`.
  *
- * Pré-preenchemos todas as chaves (Zod v4 trata chave ausente como erro
- * "nonoptional" mesmo com preprocess) — só `undefined`/`null` viram null, então
+ * Pré-preenchemos todas as chaves — só `undefined`/`null` viram null, então
  * valores legítimos como `0`/`""`/`NaN` ainda passam pela validação por campo.
+ * ⚠️ Até o zod 4.4.2 isto era OBRIGATÓRIO: chave ausente falhava como "nonoptional"
+ * mesmo com preprocess. A 4.4.3 corrigiu, e o schema cru passou a aceitar chave ausente
+ * (conferido em 2026-11-02 com as duas versões sobre o mesmo corpus: esta função devolve
+ * o mesmo resultado nas duas). O pré-preenchimento fica: ele não depende da versão.
  */
 export function parseModelEvaluationMetrics(raw: unknown): ModelEvaluationMetrics {
   const obj = raw != null && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
