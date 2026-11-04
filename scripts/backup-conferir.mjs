@@ -10,6 +10,7 @@
  * próximo backup manteria e o que apagaria se rodasse com BACKUP_PODAR=1.
  */
 import path from "node:path"
+import { spawnSync } from "node:child_process"
 import { classificarBackup } from "./lib/backup-integridade.mjs"
 import { BASE, listarFamilia, planejarPoda } from "./lib/backups-retencao.mjs"
 
@@ -37,3 +38,7 @@ console.log(`  com BACKUP_PODAR=1, a poda de hoje apagaria ${plano.apagar.length
   (plano.apagar.length ? `: ${plano.apagar.join(", ")}` : ""))
 console.log(`  (o próximo backup completo entra na contagem e empurra mais um; pasta que não é`)
 console.log(`   "completo" nunca conta nem é apagada)`)
+
+// A cópia externa: o mesmo relatório que `npm run backup:icloud -- --conferir` imprime.
+console.log("")
+spawnSync("node", [path.join(import.meta.dirname, "backup-icloud.mjs"), "--conferir", `--origem=${base}`], { stdio: "inherit" })

@@ -32,4 +32,11 @@ if (localPrimaryAtivo()) {
 }
 
 console.log(`\n▶ PRIMÁRIO = NUVEM (sem sentinela .local-primary)`)
-process.exit(run("node", ["scripts/backup-db.mjs"], { BACKUP_ENV_FILE: ".env.supabase-cloud" }))
+const banco = run("node", ["scripts/backup-db.mjs"], { BACKUP_ENV_FILE: ".env.supabase-cloud" })
+
+// A cópia externa roda mesmo se o backup de hoje falhou: ela manda os completos que ainda não
+// estão no iCloud, então a semana que falhou é recuperada na seguinte. O código de saída do banco
+// vence — é a falha mais grave das duas.
+console.log(`\n▶ CÓPIA NO iCLOUD`)
+const icloud = run("node", ["scripts/backup-icloud.mjs"])
+process.exit(banco !== 0 ? banco : icloud)

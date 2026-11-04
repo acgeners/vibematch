@@ -84,6 +84,11 @@ domingo 04:00, chamando `scripts/backup-primary.mjs` (= `npm run backup`), que p
 `BACKUP_ENV_FILE=.env.supabase-cloud` ao `backup-db.mjs`. O log (`~/Library/Logs/animedb-backup.log`)
 ninguém lê: confira o resultado com `npm run backup:conferir`.
 
+🟢 **No fim, a cópia vai para o iCloud** (`scripts/backup-icloud.mjs`, dono `scripts/lib/backup-icloud.mjs`):
+os 5 completos mais recentes viram DMG AES-256 em `iCloud Drive/VibeMatch-backups/`, senha no Keychain
+(serviço `animedb-backup-icloud`). Só conta a cópia com `.sha256`, escrito depois de conferir hash,
+abertura e conteúdo; sem senha ou com falha, sai 1 e avisa. A poda só toca `VibeMatch-backup-*`.
+
 ⚠️ **Por que um env file FIXO, se o `.env.local` já aponta pra nuvem:** porque ele é um
 INTERRUPTOR — `db:local`/`db:cloud` reescrevem o alvo dele (`scripts/db-target.mjs`). Sem o
 `BACKUP_ENV_FILE`, o agente salvaria o banco que estivesse selecionado no domingo de manhã, e um
@@ -149,8 +154,8 @@ pela env declarada em cada uma — `BACKUP_KEEP` (5), `PULL_KEEP` (3), `PUSH_STA
 🔴 **A família `backup` só conta e só apaga backups COMPLETOS, e por padrão só SIMULA.** Pasta
 incompleta, sem-schema ou de validade desconhecida nunca entra no limite de `BACKUP_KEEP` nem é
 apagada (`.incompleto`/`.sem-schema` são a família `backup-parcial`, nunca podada). Apagar completo
-exige `BACKUP_PODAR=1` — e só ligue isso quando houver cópia externa RECORRENTE e conferida: hoje
-o iCloud é manual, e a cópia local mais antiga pode ser a única. Custo de não podar: ~50 MB/semana.
+exige `BACKUP_PODAR=1` — e só ligue isso quando a cópia externa estiver conferida: o iCloud guarda
+só as 5 mais recentes, então a cópia local mais antiga pode ser a única. Custo de não podar: ~50 MB/semana.
 
 ⚠️ **São 17 hoje**, e esta linha já disse **7** e **11** — a lista de envs acima cobre 6 delas.
 Contagem em prosa não acusa a própria defasagem: **não a repita aqui, leia o `FAMILIAS`.**
@@ -4101,10 +4106,11 @@ faz `relatar()` devolver `false`. É o "declara o que esperava achar" do título
 
 ### Onde vale, e a válvula
 
-Aplicado a **12 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos`
+Aplicado a **13 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos`
 · `normalizar-titulos-alternativos` · `reverter-calibracao-auto-aplicada` ·
 `backfill-faixa-citada` · `repick-dead-covers` · `seed-art-signal` · `tag-r19-adult` ·
-`push-opening-structure` · `recalcular-vies-da-dona` · `reconciliar-inferencia-estrutural`.
+`push-opening-structure` · `recalcular-vies-da-dona` · `reconciliar-inferencia-estrutural` ·
+`backup-icloud` (não corrige nada, mas o seu "nada a enviar" também prova que olhou).
 
 ⚠️ **`funil.nadaAFazer("…")` substitui o `console.log` da frase**, e não é estilo: separados,
 volta a ser possível imprimir a conclusão sem a evidência, que é o estado exato que custou o
