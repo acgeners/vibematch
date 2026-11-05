@@ -3,12 +3,22 @@ import { extractMangaUpdatesEditionEvidence } from "@/lib/editions/edition-evide
 import type { EditionEvidence } from "@/lib/editions/edition-evidence"
 import { rememberEditionEvidence } from "@/lib/editions/edition-evidence-cache"
 import type { ExternalSearchResult } from "./types"
+import { formatMangaUpdatesComment } from "./mangaupdates-comments"
 
 const MU_BASE = "https://api.mangaupdates.com/v1"
-const MU_HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  Accept: "text/html,application/xhtml+xml,application/json",
+/**
+ * Identificação HONESTA para a API. Não fingir navegador: foi um UA fixo de Chrome 124 que o
+ * `www` passou a recusar em ~17/06/2026 (ver `mangaupdates-comments.ts`), e a API não exige
+ * nenhum — o que ela recebe aqui é quem de fato está chamando.
+ */
+const MU_API_HEADERS = {
+  "User-Agent": "SatorIA/1.0 (+https://satoria.fly.dev)",
+  Accept: "application/json",
+  "Content-Type": "application/json",
 }
+/** A página entregava os 50 mais úteis e o parser guardava até 30 com corpo; mantido. */
+const MU_COMMENTS_PER_PAGE = 50
+const MU_COMMENTS_MAX = 30
 
 /**
  * O "Status in Country of Origin" do MangaUpdates não é um campo de status — é um texto
@@ -90,33 +100,6 @@ function uniqueTitles(values: Array<string | null | undefined>, primary?: string
   return out
 }
 
-function parseMangaUpdatesComments(html: string): string[] {
-  const comments: string[] = []
-  const rowRegex = /<div class="row g-0" data-cy="comment-row">([\s\S]*?)(?=<div class="row g-0" data-cy="comment-row">|<div class="p-2 pt-2 pb-2 text">|<\/div><script nonce=)/g
-
-  let match: RegExpExecArray | null
-  while ((match = rowRegex.exec(html)) !== null && comments.length < 30) {
-    const row = match[1]
-    const title = cleanHtml(row.match(/comment_title[^>]*>([\s\S]*?)(?:<!-- -->|<\/div>)/)?.[1])
-    const rating = cleanHtml(row.match(/Rating:\s*(?:<\/span>)?([\s\S]*?)(?:<span|<\/div>)/)?.[1])
-    const body = cleanHtml(
-      row.match(/<div class="p-3 col-12">\s*<div class="[^"]*mu_markdown[^"]*">([\s\S]*?)<\/div>\s*<\/div>/)?.[1]
-    )
-
-    if (!body) continue
-
-    comments.push(
-      [
-        title ? `Título do comentário: ${title}` : null,
-        rating && !rating.includes("N/A") ? `Nota do usuário: ${rating}/10` : null,
-        body,
-      ].filter(Boolean).join("\n")
-    )
-  }
-
-  return comments
-}
-
 export async function searchMangaUpdates(search: string): Promise<ExternalSearchResult[]> {
   try {
     const res = await fetch(`${MU_BASE}/series/search`, {
@@ -188,48 +171,65 @@ export interface MangaUpdatesDetail {
   editionEvidence?: EditionEvidence
 }
 
-export async function fetchMangaUpdatesReviews(id: number): Promise<string[]> {
-  try {
-    const detailRes = await fetch(`${MU_BASE}/series/${id}`, {
-      cache: "no-store",
-      headers: MU_HEADERS,
-    })
-    if (!detailRes.ok) {
-      console.warn(`[fetchMangaUpdatesReviews] MU id=${id}: detail HTTP ${detailRes.status}`)
-      return []
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const detail: any = await detailRes.json()
-    const pageUrl = typeof detail?.url === "string" ? detail.url : null
-    if (!pageUrl) {
-      console.warn(`[fetchMangaUpdatesReviews] MU id=${id}: detail sem campo url (página de comentários não localizada)`)
-      return []
-    }
-
-    const url = new URL(pageUrl)
-    url.searchParams.set("perpage", "50")
-    url.searchParams.set("method", "useful")
-
-    const pageRes = await fetch(url, {
-      cache: "no-store",
-      headers: MU_HEADERS,
-    })
-    if (!pageRes.ok) {
-      console.warn(`[fetchMangaUpdatesReviews] MU id=${id}: página HTTP ${pageRes.status} (${url.href})`)
-      return []
-    }
-
-    const html = await pageRes.text()
-    const comments = parseMangaUpdatesComments(html)
-    if (comments.length === 0) {
-      console.warn(`[fetchMangaUpdatesReviews] MU id=${id}: scrape devolveu 0 comentários (HTML ${html.length} chars — possível mudança de layout/bloqueio)`)
-    }
-    return comments.map((comment) => comment.slice(0, 900))
-  } catch (err) {
-    console.warn(`[fetchMangaUpdatesReviews] MU id=${id} falhou:`, err instanceof Error ? err.message : err)
-    return []
+/**
+ * Falha de COLETA dos comentários (rede, HTTP de erro, resposta que não é a esperada).
+ * Rejeitar — e não devolver `[]` — é o que põe a fonte em `failedSources` e lhe dá a 2ª
+ * passada dirigida: até 2026-11 a falha saía como "0 reviews" e o MU ficou ~4,5 meses sem
+ * coletar nada com o log dizendo `falharam=nenhuma`.
+ */
+export class MangaUpdatesUnavailableError extends Error {
+  constructor(
+    readonly reason: "network" | "http" | "invalid_response",
+    readonly seriesId: number,
+    detail: string,
+  ) {
+    super(`MangaUpdates: comentários indisponíveis (${detail})`)
+    this.name = "MangaUpdatesUnavailableError"
   }
+}
+
+/**
+ * Comentários de série pela API oficial (`POST /series/{id}/comments/search`, os mais úteis
+ * primeiro). Zero comentários é resultado LEGÍTIMO (`[]`): medido em 2026-08, ~7% das obras
+ * coletadas antes do bloqueio não tinham nenhum. Erro de coleta rejeita
+ * (`MangaUpdatesUnavailableError`).
+ */
+export async function fetchMangaUpdatesReviews(id: number): Promise<string[]> {
+  let res: Response
+  try {
+    res = await fetch(`${MU_BASE}/series/${id}/comments/search`, {
+      method: "POST",
+      cache: "no-store",
+      headers: MU_API_HEADERS,
+      body: JSON.stringify({ method: "useful", perpage: MU_COMMENTS_PER_PAGE, page: 1 }),
+    })
+  } catch (err) {
+    throw new MangaUpdatesUnavailableError("network", id, err instanceof Error ? err.message : String(err))
+  }
+  if (!res.ok) throw new MangaUpdatesUnavailableError("http", id, `HTTP ${res.status}`)
+
+  let json: unknown
+  try {
+    json = await res.json()
+  } catch {
+    throw new MangaUpdatesUnavailableError("invalid_response", id, "corpo não é JSON")
+  }
+  const results = (json as { results?: unknown } | null)?.results
+  if (!Array.isArray(results)) throw new MangaUpdatesUnavailableError("invalid_response", id, "sem `results`")
+
+  const comments: string[] = []
+  for (const item of results) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { record, metadata } = (item ?? {}) as { record?: any; metadata?: any }
+    const text = formatMangaUpdatesComment({
+      subject: typeof record?.subject === "string" ? record.subject : null,
+      content: typeof record?.content === "string" ? record.content : null,
+      rating: typeof metadata?.author_series_rating === "number" ? metadata.author_series_rating : null,
+    })
+    if (text) comments.push(text.slice(0, 900))
+    if (comments.length >= MU_COMMENTS_MAX) break
+  }
+  return comments
 }
 
 /**
