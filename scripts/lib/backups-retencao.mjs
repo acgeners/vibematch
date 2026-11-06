@@ -213,6 +213,18 @@ export const FAMILIAS = [
     env: "NORMALIZAR_ALT_TITULOS_KEEP",
   },
   {
+    id: "limpar-sufixo-mu",
+    dono: "limpar-sufixo-legado-mangaupdates.mjs",
+    // Datado, um diretório por execução com o texto ANTES e DEPOIS de cada review tocada
+    // (~350 KB para as 563 de 2026-11). É a única forma de desfazer — o banco não tem PITR —, e
+    // o texto original é da página antiga do MangaUpdates, que o site já não serve.
+    oQueE: "texto anterior das reviews do MangaUpdates com o rodapé legado cortado",
+    casa: (n) => /^limpar-sufixo-mu-\d{4}/.test(n),
+    exemplo: "limpar-sufixo-mu-2026-11-05T20-11-22-333Z",
+    keepPadrao: 10,
+    env: "LIMPAR_SUFIXO_MU_KEEP",
+  },
+  {
     id: "push-opening-structure",
     dono: "push-opening-structure.ts",
     oQueE: "estado anterior da nuvem ao resgatar estrutura de abertura do local",
