@@ -14,8 +14,11 @@ import { normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { anotarPayloadRecusado, createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { SONNET_MODEL } from "@/lib/ai/models"
 import { coerceToolPayload, descreverPayloadRecusado } from "@/lib/ai/tool-payload"
-import type { ClassePayloadRecusado } from "@/lib/ai/tool-payload"
+import type { ClassePayloadRecusado, ParcialPreservado } from "@/lib/ai/tool-payload"
+import { pgSafeDeep } from "@/lib/text/pg-safe-text"
 import { recoverEvaluationToolPayload } from "@/lib/ai-evaluation/tool-payload-recovery"
+import { conferirCriterios, descreverConferencia } from "@/lib/ai-evaluation/criteria-completeness"
+import type { ConferenciaDosCriterios } from "@/lib/ai-evaluation/criteria-completeness"
 import { deduplicateReviews } from "@/lib/ai-evaluation/review-dedup"
 import { ART_TOOL_PROPERTY, INSTRUCAO_ARTE, normalizarArte } from "@/lib/ai-evaluation/art-signal"
 import type { ArtAvaliacao } from "@/lib/ai-evaluation/art-signal"
@@ -1011,11 +1014,15 @@ function buildResponseFromToolPayload(
     }
   }
 
-  const scores = CRITERION_SLUGS.map((slug) => ({
-    criterionSlug: slug,
-    suggestedScore: scoreMap[slug]?.score ?? 5,
-    justification: scoreMap[slug]?.justification ?? "Não avaliado.",
-  }))
+  // 🔴 Nunca completa critério ausente. Até 2026-10-23 isto escrevia nota 5 e "Não avaliado." no que
+  // faltava, e a resposta entrava como avaliação completa. Quem barra o incompleto é
+  // `conferirCriterios`, ANTES de chegar aqui; se algum caminho futuro pular a conferência, a
+  // montagem falha alto em vez de inventar a nota.
+  const scores = CRITERION_SLUGS.map((slug) => {
+    const s = scoreMap[slug]
+    if (!s) throw new Error(`montagem da avaliação sem o critério "${slug}": a resposta não foi conferida`)
+    return { criterionSlug: slug, suggestedScore: s.score, justification: s.justification }
+  })
 
   return {
     modelName,
@@ -1462,14 +1469,25 @@ async function readDbCache(
     const rows = (data.ai_evaluation_scores as ScoreRow[] | null) ?? []
     if (rows.length === 0) return null
 
-    const byCriterion = new Map(rows.map((r) => [r.criterion_slug, r]))
+    // A mesma régua da aceitação: uma linha gravada que não forma os 11 (ou que traz o preenchimento
+    // antigo, nota 5 + "Não avaliado.") não é servida como avaliação completa — vira falta de cache.
+    // `numeric` do PostgREST pode vir como string; a conversão vem antes da conferência.
+    const registros = rows.map((r) => ({
+      criterion: r.criterion_slug,
+      score: r.suggested_score != null ? Number(r.suggested_score) : null,
+      justification: r.justification,
+    }))
+    const conferencia = conferirCriterios(registros, CRITERION_SLUGS)
+    if (!conferencia.completa) {
+      console.warn(
+        `[AI] Cache L2 ignorado (hash=${hash.slice(0, 8)}): a avaliação gravada não forma os ${CRITERION_SLUGS.length} critérios — ${descreverConferencia(conferencia, CRITERION_SLUGS.length)}.`,
+      )
+      return null
+    }
+    const byCriterion = new Map(registros.map((r) => [r.criterion, r]))
     const scores = CRITERION_SLUGS.map((slug) => {
-      const row = byCriterion.get(slug)
-      return {
-        criterionSlug: slug,
-        suggestedScore: row?.suggested_score != null ? Number(row.suggested_score) : 5,
-        justification: row?.justification ?? "Não avaliado.",
-      }
+      const r = byCriterion.get(slug)!
+      return { criterionSlug: slug, suggestedScore: r.score as number, justification: r.justification as string }
     })
 
     const raw = data.raw_response as Record<string, unknown> | null
@@ -1516,11 +1534,48 @@ export type InterpretacaoDaTool =
     }
   | {
       tipo: "recusada"
-      classe: "schema" | "pos_processamento"
+      /** `incompleta`: o formato passou, mas a resposta não forma os 11 critérios (`conferirCriterios`). */
+      classe: "schema" | "pos_processamento" | "incompleta"
       erro: unknown
       coerced: string[]
       recuperacao: { motivo: string; formas: string[] } | null
+      /** Só em `incompleta`: o que a resposta trouxe de aproveitável. */
+      parcial?: ParcialDaResposta
     }
+
+/**
+ * O que uma resposta INCOMPLETA trouxe, exatamente como o modelo mandou: sem clamp, sem completar o que
+ * falta, sem pós-processamento (as regras de `adult_content` e de confiança supõem a avaliação inteira).
+ * Serve ao diagnóstico e a um aproveitamento declarado FORA do produto — nunca vira avaliação gravada.
+ */
+export interface ParcialDaResposta {
+  criterios: ConferenciaDosCriterios
+  /** Os registros recebidos uma única vez e válidos, na ordem em que vieram. */
+  scores: Array<{ criterion: string; score: number; justification: string }>
+  summary: string
+  confidence: number
+  /** Só na variante com Arte: a Arte normalizada, com a mesma rede da resposta aceita. Um defeito nos
+   *  11 não a descarta, como um defeito nela não descarta os 11. */
+  art?: ArtAvaliacao
+}
+
+/** A Arte da resposta, com rede própria: nada aqui transforma a interpretação em recusa. */
+function arteDaResposta(
+  payloadFinal: unknown,
+  req: AiEvaluationRequest,
+  prepared: PreparedReviews,
+  variant: EvaluatorVariant,
+): { art: ArtAvaliacao; artBruto: unknown } {
+  const artBruto = (payloadFinal as Record<string, unknown> | null)?.art ?? null
+  let art: ArtAvaliacao
+  try {
+    art = normalizarArte(artBruto, evidenciaDeArteComoEnviada(req, prepared, variant))
+  } catch (err) {
+    art = normalizarArte(null, [])
+    art.rebaixamentos.push(`erro ao montar a régua de citações: ${err instanceof Error ? err.message : String(err)}`)
+  }
+  return { art, artBruto }
+}
 
 export function interpretarRespostaDaTool(
   rawInput: unknown,
@@ -1558,6 +1613,25 @@ export function interpretarRespostaDaTool(
     recuperacao = { motivo: recusa.message, formas: recovered }
   }
 
+  // Os 11, cada um uma vez, ANTES de montar: o schema confere o formato de cada registro, não o
+  // conjunto. A resposta incompleta não é montada nem pós-processada; o que veio fica em `parcial`.
+  // Vale também para o que as regras 1 e 2 recuperam — a mesma régua das regras novas.
+  const conferencia = conferirCriterios(parsed.data.scores, CRITERION_SLUGS)
+  if (!conferencia.completa) {
+    const recebidos = new Set(conferencia.recebidos)
+    const parcial: ParcialDaResposta = {
+      criterios: conferencia,
+      scores: parsed.data.scores
+        .filter((s) => recebidos.has(s.criterion))
+        .map((s) => ({ criterion: s.criterion, score: s.score, justification: s.justification })),
+      summary: parsed.data.summary,
+      confidence: parsed.data.confidence,
+      ...(variant.art ? { art: arteDaResposta(payloadFinal, req, prepared, variant).art } : {}),
+    }
+    const erro = new Error(`Resposta da IA incompleta: ${descreverConferencia(conferencia, CRITERION_SLUGS.length)}.`)
+    return { tipo: "recusada", classe: "incompleta", erro, coerced, recuperacao, parcial }
+  }
+
   let final: AiEvaluationResponse
   try {
     const built = buildResponseFromToolPayload(parsed.data, req.title, modelName, inputHash, variant.promptVersion)
@@ -1569,19 +1643,30 @@ export function interpretarRespostaDaTool(
   // Arte, só na variante com Arte — FORA do try dos 11 e com rede própria: nada nela consegue
   // transformar uma resposta aceita em recusa nem disparar retry.
   if (variant.art) {
-    const artBruto = (payloadFinal as Record<string, unknown> | null)?.art ?? null
-    let art: ArtAvaliacao
-    try {
-      art = normalizarArte(artBruto, evidenciaDeArteComoEnviada(req, prepared, variant))
-    } catch (err) {
-      art = normalizarArte(null, [])
-      art.rebaixamentos.push(`erro ao montar a régua de citações: ${err instanceof Error ? err.message : String(err)}`)
-    }
+    const { art, artBruto } = arteDaResposta(payloadFinal, req, prepared, variant)
     final.art = art
     final.artAppendix = req.artAppendix ?? []
     final.rawResponse = { ...(final.rawResponse as Record<string, unknown>), art, art_bruto: artBruto }
   }
   return { tipo: "aceita", resposta: final, coerced, recuperacao }
+}
+
+/**
+ * O parcial na forma em que vai para `ai_api_calls.metadata.payload_recusado.parcial`: estruturado e
+ * SEM o corte de 16 mil code points do `bruto` — o tamanho já é limitado pela saída do modelo
+ * (`max_tokens`). A Arte só entra válida. A sanitização para o Postgres (`pgSafeDeep`) acontece na
+ * gravação; aqui só se registra se ela vai mudar algum texto.
+ */
+export function parcialParaDiagnostico(p: ParcialDaResposta): ParcialPreservado {
+  const bloco: Omit<ParcialPreservado, "alterado_pela_sanitizacao"> = {
+    versao: 1,
+    criterios: p.criterios,
+    scores: p.scores.map((s) => ({ criterion: s.criterion, score: s.score, justification: s.justification })),
+    summary: p.summary,
+    confidence: p.confidence,
+    ...(p.art && p.art.status !== "invalid" ? { art: p.art } : {}),
+  }
+  return { ...bloco, alterado_pela_sanitizacao: JSON.stringify(pgSafeDeep(bloco)) !== JSON.stringify(bloco) }
 }
 
 /**
@@ -1595,10 +1680,15 @@ async function registrarRecusa(
   motivo: string,
   classe: ClassePayloadRecusado,
   recuperado?: readonly string[],
+  parcial?: ParcialDaResposta,
 ): Promise<void> {
   try {
-    const detalhe = descreverPayloadRecusado(input, motivo, classe)
-    await anotarPayloadRecusado(apiCallId, recuperado?.length ? { ...detalhe, recuperado: [...recuperado] } : detalhe)
+    const detalhe = {
+      ...descreverPayloadRecusado(input, motivo, classe),
+      ...(recuperado?.length ? { recuperado: [...recuperado] } : {}),
+      ...(parcial ? { parcial: parcialParaDiagnostico(parcial) } : {}),
+    }
+    await anotarPayloadRecusado(apiCallId, detalhe)
   } catch (err) {
     console.warn("[AI] diagnóstico da resposta recusada falhou:", err instanceof Error ? err.message : err)
   }
@@ -1763,7 +1853,12 @@ async function runEvaluationProvider(
         interp.erro instanceof Error ? interp.erro.message : String(interp.erro),
         interp.classe,
         recuperacao?.formas,
+        interp.parcial,
       )
+      // 🔴 Incompleta NÃO repete (decisão de 2026-10-23): a 2ª tentativa seria uma chamada paga
+      // automática para completar critérios. O recebido fica no diagnóstico acima, e quem decide
+      // pedir de novo é a pessoa. As demais recusas seguem com a repetição de sempre.
+      if (interp.classe === "incompleta") break
       continue
     }
 

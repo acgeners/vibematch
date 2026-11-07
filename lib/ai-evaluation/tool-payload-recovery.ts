@@ -45,9 +45,17 @@
  * 6. O mesmo vazamento de `confidence`, fechado com `</summary>` (o NOME do campo) em vez de
  *    `</parameter>`. Ver `recoverConfidenceAfterSummaryTag`.
  *
- * As novas (3 a 6) exigem, no fim, os 11 critérios completos e únicos: recuperar não pode produzir
- * um payload que o pós-processamento completaria com "Não avaliado." em silêncio.
+ * E uma variante da regra 2, do piloto v32 × v3.1 com W3 (2026-10-24, *Dragondaily*, braço v3.1):
+ *
+ * 7. `scores` como string com as duas convenções de aspa ao mesmo tempo: alguns registros com as
+ *    aspas internas escapadas (`\"`) e outros com elas cruas. A regra 2 recusa por princípio quando
+ *    há barra invertida. Ver `recoverScoresWithMixedQuoteEscaping`.
+ *
+ * As novas (3 a 7) exigem, no fim, os 11 critérios completos e únicos (`conferirCriterios`, a mesma
+ * régua que decide aceitar a resposta): recuperar não pode produzir um payload incompleto.
  */
+
+import { conferirCriterios } from "@/lib/ai-evaluation/criteria-completeness"
 
 export type PayloadRecovery =
   | "confidence_leaked_into_summary"
@@ -57,6 +65,7 @@ export type PayloadRecovery =
   | "scores_comment_line"
   | "scores_unescaped_quotes_multiline"
   | "confidence_leaked_after_summary_tag"
+  | "scores_mixed_quote_escaping"
 
 export interface RecoveryOptions {
   /** Só a variante que PEDE `art` pode recuperar um `art` vazado — na produção é parâmetro desconhecido. */
@@ -127,6 +136,72 @@ function compactarSeparadoresEmLinha(raw: string): string | null {
   return `[${raw.slice(2, -2)}]`.split(SEP_NL).join(SEP)
 }
 
+/** O que a leitura de uma justificativa devolve: o texto já decodificado e a convenção de aspa dele. */
+interface TextoLido {
+  texto: string
+  aspas: "nenhuma" | "cruas" | "escapadas"
+}
+
+type RegistroLido = { criterion: string; score: number; justification: string; aspas: TextoLido["aspas"] }
+
+/**
+ * Lê `raw` (compacto, numa linha) como a sequência de registros do molde da tool
+ * `{"criterion":"…","score":…,"justification":"…"}`. Dono único das FRONTEIRAS, para as regras 2, 5 e
+ * 7: cada registro começa num `{"criterion":"` e termina logo antes do seguinte (ou do `]`); critério
+ * canônico e sem repetição; nota literal em [0, 10]. A justificativa de cada registro passa por
+ * `lerTexto`, que a valida e decodifica — um `null` em qualquer registro recusa a string inteira.
+ */
+function lerRegistrosDoMolde(
+  raw: string,
+  criterionSlugs: readonly string[],
+  lerTexto: (text: string) => TextoLido | null,
+): RegistroLido[] | null {
+  if (!raw.startsWith(`[${RECORD_OPEN}`) || !raw.endsWith('"}]')) return null
+
+  const starts: number[] = []
+  for (let i = raw.indexOf(RECORD_OPEN); i !== -1; i = raw.indexOf(RECORD_OPEN, i + 1)) starts.push(i)
+
+  const slugs = new Set(criterionSlugs)
+  const seen = new Set<string>()
+  const records: RegistroLido[] = []
+
+  for (let i = 0; i < starts.length; i++) {
+    const isLast = i === starts.length - 1
+    const end = isLast ? raw.length - 1 : starts[i + 1] - 1
+    if (raw[end] !== (isLast ? "]" : ",")) return null
+    const record = raw.slice(starts[i], end)
+
+    const m = /^\{"criterion":"([a-z_]+)","score":([^,"]+),"justification":"([\s\S]*)"\}$/.exec(record)
+    if (!m) return null
+    const [, criterion, scoreLiteral, text] = m
+
+    if (!slugs.has(criterion) || seen.has(criterion)) return null
+    if (!SCORE_LITERAL.test(scoreLiteral)) return null
+    const score = Number(scoreLiteral)
+    if (score < 0 || score > 10) return null
+
+    const lido = lerTexto(text)
+    if (!lido) return null
+
+    seen.add(criterion)
+    records.push({ criterion, score, justification: lido.texto, aspas: lido.aspas })
+  }
+  return records.length > 0 ? records : null
+}
+
+const semAspas = (records: RegistroLido[]) =>
+  records.map(({ criterion, score, justification }) => ({ criterion, score, justification }))
+
+/** A justificativa na convenção da regra 2: aspas internas cruas, sem nenhum fragmento do molde. */
+function textoComAspasCruas(text: string): TextoLido | null {
+  if (AMBIGUOUS_IN_TEXT.some((frag) => text.includes(frag))) return null
+  // Aspas internas têm de vir em PARES: uma aspa solta é texto que abriu e não fechou —
+  // o sinal de que a fronteira pode estar noutro lugar.
+  const quotes = (text.match(/"/g) ?? []).length
+  if (quotes % 2 !== 0) return null
+  return { texto: text, aspas: quotes > 0 ? "cruas" : "nenhuma" }
+}
+
 function recoverScoresWithRawQuotes(
   obj: Record<string, unknown>,
   criterionSlugs: readonly string[],
@@ -151,49 +226,69 @@ function recoverScoresWithRawQuotes(
   }
 
   // Nenhum escape e nenhum caractere de controle: a única diferença para um JSON válido pode
-  // ser a aspa interna sem escape. Com `\` presente, a string mistura convenções e não há
-  // leitura única.
+  // ser a aspa interna sem escape. Com `\` presente, a string mistura convenções — essa forma, se
+  // tiver leitura única, é a regra 7, com travas próprias.
   if (raw.includes("\\") || hasControlChar(raw)) return null
-  if (!raw.startsWith(`[${RECORD_OPEN}`) || !raw.endsWith('"}]')) return null
 
-  const starts: number[] = []
-  for (let i = raw.indexOf(RECORD_OPEN); i !== -1; i = raw.indexOf(RECORD_OPEN, i + 1)) starts.push(i)
-
-  const slugs = new Set(criterionSlugs)
-  const seen = new Set<string>()
-  const records: Array<{ criterion: string; score: number; justification: string }> = []
-  let hadRawQuote = false
-
-  for (let i = 0; i < starts.length; i++) {
-    const isLast = i === starts.length - 1
-    const end = isLast ? raw.length - 1 : starts[i + 1] - 1
-    if (raw[end] !== (isLast ? "]" : ",")) return null
-    const record = raw.slice(starts[i], end)
-
-    const m = /^\{"criterion":"([a-z_]+)","score":([^,"]+),"justification":"([\s\S]*)"\}$/.exec(record)
-    if (!m) return null
-    const [, criterion, scoreLiteral, text] = m
-
-    if (!slugs.has(criterion) || seen.has(criterion)) return null
-    if (!SCORE_LITERAL.test(scoreLiteral)) return null
-    const score = Number(scoreLiteral)
-    if (score < 0 || score > 10) return null
-    if (AMBIGUOUS_IN_TEXT.some((frag) => text.includes(frag))) return null
-
-    // Aspas internas têm de vir em PARES: uma aspa solta é texto que abriu e não fechou —
-    // o sinal de que a fronteira pode estar noutro lugar.
-    const quotes = (text.match(/"/g) ?? []).length
-    if (quotes % 2 !== 0) return null
-    if (quotes > 0) hadRawQuote = true
-
-    seen.add(criterion)
-    records.push({ criterion, score, justification: text })
-  }
-
+  const records = lerRegistrosDoMolde(raw, criterionSlugs, textoComAspasCruas)
   // Sem aspa crua, o que quebrou o JSON foi outra coisa — que esta regra não conhece.
-  if (!hadRawQuote || records.length === 0) return null
+  if (!records || !records.some((r) => r.aspas === "cruas")) return null
 
-  return { obj: { ...obj, scores: records }, multiline }
+  return { obj: { ...obj, scores: semAspas(records) }, multiline }
+}
+
+// ── Regra 7 (variante da regra 2) ──────────────────────────────────────────────────────────
+
+const ASPA_ESCAPADA = '\\"'
+
+/**
+ * A justificativa de um registro na string de convenção MISTA. Cada registro usa UMA convenção, como
+ * no caso observado (as aspas escapadas concentradas em 3 registros, as cruas nos demais):
+ *
+ * - **crua** — sem barra nenhuma: a régua da regra 2, sem tirar nem pôr;
+ * - **escapada** — toda aspa interna escrita `\"`, nenhuma crua junto, em pares. A decodificação é
+ *   só `\"` → `"`, que é exatamente o que `JSON.parse` faria com esse texto.
+ *
+ * Recusa: barra que não seja a de um `\"` (`\\`, `\n`, `\u…`, barra solta); barra no FIM do texto (ela
+ * escaparia a aspa de fechamento — outra fronteira possível); as duas convenções no mesmo registro;
+ * fragmento do molde no texto, cru ou depois de decodificar.
+ */
+function textoComEscapeMisto(text: string): TextoLido | null {
+  if (/\\(?!")/.test(text)) return null
+  if (!text.includes(ASPA_ESCAPADA)) return textoComAspasCruas(text)
+
+  const partes = text.split(ASPA_ESCAPADA)
+  if (partes.some((p) => p.includes('"'))) return null // as duas convenções no mesmo registro
+  if ((partes.length - 1) % 2 !== 0) return null
+  const texto = partes.join('"')
+  if (AMBIGUOUS_IN_TEXT.some((frag) => text.includes(frag) || texto.includes(frag))) return null
+  return { texto, aspas: "escapadas" }
+}
+
+/**
+ * Regra 7: `scores` como string com registros escapados E registros crus. Mesma forma da regra 2 (uma
+ * linha, sem caractere de controle, fronteiras pelo molde da tool), com a barra invertida permitida só
+ * como `\"` e só dentro das justificativas. Exige as DUAS convenções: sem registro escapado é a regra
+ * 2; sem registro cru, o que quebrou o JSON foi outra coisa.
+ */
+function recoverScoresWithMixedQuoteEscaping(
+  obj: Record<string, unknown>,
+  criterionSlugs: readonly string[],
+): Record<string, unknown> | null {
+  if (typeof obj.scores !== "string") return null
+  const raw: string = obj.scores
+  try {
+    JSON.parse(raw)
+    return null
+  } catch {
+    // segue — o JSON está quebrado, é o caso desta regra
+  }
+  if (!raw.includes("\\") || hasControlChar(raw)) return null
+
+  const records = lerRegistrosDoMolde(raw, criterionSlugs, textoComEscapeMisto)
+  if (!records) return null
+  if (!records.some((r) => r.aspas === "escapadas") || !records.some((r) => r.aspas === "cruas")) return null
+  return { ...obj, scores: semAspas(records) }
 }
 
 // ── Regras 3 e 4 ───────────────────────────────────────────────────────────────────────────
@@ -291,20 +386,20 @@ function recoverScoresCommentLine(obj: Record<string, unknown>): Record<string, 
   }
 }
 
-/** Os 11 critérios, cada um uma vez, com a forma exata do schema da tool. */
+/**
+ * Os 11 critérios pela régua canônica (`conferirCriterios`, a mesma da aceitação) e, além dela, a
+ * FORMA exata do molde da tool em cada registro: o que uma recuperação produz não traz chave a mais.
+ */
 function scoresCompletos(scores: unknown, criterionSlugs: readonly string[]): boolean {
-  if (!Array.isArray(scores) || scores.length !== criterionSlugs.length) return false
-  const vistos = new Set<string>()
-  for (const s of scores) {
-    if (!s || typeof s !== "object" || Array.isArray(s)) return false
-    const r = s as Record<string, unknown>
-    if (Object.keys(r).sort().join() !== "criterion,justification,score") return false
-    if (typeof r.criterion !== "string" || !criterionSlugs.includes(r.criterion) || vistos.has(r.criterion)) return false
-    if (typeof r.score !== "number" || !Number.isFinite(r.score) || r.score < 0 || r.score > 10) return false
-    if (typeof r.justification !== "string") return false
-    vistos.add(r.criterion)
-  }
-  return vistos.size === criterionSlugs.length
+  if (!Array.isArray(scores)) return false
+  const moldeExato = scores.every(
+    (s) =>
+      s !== null &&
+      typeof s === "object" &&
+      !Array.isArray(s) &&
+      Object.keys(s as Record<string, unknown>).sort().join() === "criterion,justification,score",
+  )
+  return moldeExato && conferirCriterios(scores, criterionSlugs).completa
 }
 
 // ── Regra 6 (variante da regra 1) ──────────────────────────────────────────────────────────
@@ -388,15 +483,24 @@ export function recoverEvaluationToolPayload(
   if (withScores) {
     obj = withScores.obj
     recovered.push(withScores.multiline ? "scores_unescaped_quotes_multiline" : "scores_unescaped_quotes")
+  } else {
+    // Só quando a regra 2 não se aplica — e ela recusa sozinha qualquer string com barra invertida.
+    const withMixed = recoverScoresWithMixedQuoteEscaping(obj, criterionSlugs)
+    if (withMixed) {
+      obj = withMixed
+      recovered.push("scores_mixed_quote_escaping")
+    }
   }
 
-  // As regras novas não entregam payload incompleto: sem os 11, nada é recuperado.
+  // As regras novas não entregam payload incompleto: sem os 11, nada é recuperado. As antigas (1 e 2)
+  // podem entregar, e quem barra o incompleto é a conferência da aceitação — a MESMA régua.
   const NOVAS: PayloadRecovery[] = [
     "payload_leaked_into_summary",
     "payload_and_art_leaked_into_summary",
     "scores_comment_line",
     "scores_unescaped_quotes_multiline",
     "confidence_leaked_after_summary_tag",
+    "scores_mixed_quote_escaping",
   ]
   if (recovered.some((r) => NOVAS.includes(r)) && !scoresCompletos(obj.scores, criterionSlugs)) {
     return { value: input, recovered: [] }

@@ -107,6 +107,14 @@ Existem, mas não justificam frente agora. Corrigir quando o código for tocado 
 
 Não reabrir sem evidência nova e concreta.
 
+- **Proteções da resposta da IA (07/11/2026, na `main`; valem em produção no próximo `npm run deploy`):**
+  a avaliação deixa de completar critério ausente com nota 5 e "Não avaliado." (piloto de 24/10:
+  *Charming* veio com 1 de 11 e teria sido aceita com 10 notas inventadas). Resposta incompleta é recusada
+  SEM 2ª chamada paga (decisão da curadora de 23/10), e o recebido fica estruturado em
+  `ai_api_calls.metadata.payload_recusado.parcial`. O cache L2 também não serve avaliação gravada
+  incompleta. Regra 7 da recuperação: `scores` com aspas escapadas e cruas na mesma string (*Dragondaily*,
+  recuperado offline em 24/10, 11/11). Prompt e tool intocados (v32 byte a byte). Dono:
+  `lib/ai-evaluation/criteria-completeness.ts`.
 - **MangaUpdates religado (05–06/11/2026):** desde ~17/06 o site respondia 429 a navegador antigo e o
   conector devolvia `[]` calado (4,5 meses sem coletar). Comentários pela API oficial com falha que rejeita
   (#583, publicado na v60 em 06/11); rodapé legado de 563 linhas limpo na nuvem em 05/11 (#584). [fato]
