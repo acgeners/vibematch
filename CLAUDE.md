@@ -6699,6 +6699,11 @@ modelo. Isso contamina toda comparação entre obras: ordenação do `/ranking`,
 
 The model is `claude-sonnet-5` (`SONNET_MODEL`), prompt version **`v26`** (toggled by `CONCISE_OUTPUT` in `service.ts`: `v26` concise output / `v18` verbose — flipping it falls back to the old caches; `v21` = concise + **consensus** review citation, `v22` = piso/teto de `adult_content` por procedência), up to 2 attempts (4500 max tokens on **both** attempts; temperature 0.2 then 0). Opus 4.7 and Haiku 4.5 are supported as per-evaluation overrides (the A/B "Reavaliar com…" buttons); Opus 4.7 doesn't accept the `temperature` param. MAE values stored in `formula_config` reflect calibration runs against the current model+prompt; the hardcoded fallbacks in `calibration.ts` (1.27/0.92) are historical defaults from the original spreadsheet — not authoritative.
 
+🔴 **Resposta sem os 11 critérios (ausente, repetido, desconhecido ou nota/justificativa inválida) é
+recusada e NÃO repete.** Nada é completado com 5/"Não avaliado.", nem na aceitação nem no cache L2; o
+recebido fica só em `ai_api_calls.metadata.payload_recusado.parcial`. As demais recusas seguem com a 2ª
+tentativa. Dono da régua: `conferirCriterios` (`lib/ai-evaluation/criteria-completeness.ts`).
+
 ## Importação (`/import`)
 
 Quatro métodos, **todos pela MESMA reconciliação** (`analyzeExternalListImport` → buckets de

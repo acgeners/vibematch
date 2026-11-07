@@ -60,8 +60,9 @@ export const PAYLOAD_RECUSADO_MAX_CODE_POINTS = 16_000
 const MOTIVO_MAX_CODE_POINTS = 2_000
 
 /** Por que a resposta paga foi descartada. Erro de provider/rede NÃO entra aqui: esse já é
- *  `status: error` na própria linha, e nunca chega ao parse. */
-export type ClassePayloadRecusado = "schema" | "sem_tool" | "pos_processamento"
+ *  `status: error` na própria linha, e nunca chega ao parse. `incompleta`: o formato passou, mas a
+ *  resposta não traz os critérios esperados (falta, sobra ou repete critério). */
+export type ClassePayloadRecusado = "schema" | "sem_tool" | "pos_processamento" | "incompleta"
 
 export interface PayloadRecusado {
   versao: 1
@@ -80,6 +81,32 @@ export interface PayloadRecusado {
   /** Presente quando a recuperação de payload (`tool-payload-recovery.ts`) salvou esta resposta
    *  sem retentativa: as formas aplicadas. O `bruto` continua sendo o ORIGINAL recusado. */
   recuperado?: string[]
+  /** Presente na classe `incompleta`: o que a resposta trouxe de útil, ESTRUTURADO e sem o corte do
+   *  `bruto`. O `bruto` segue sendo o diagnóstico abreviado (até 16 mil code points); quando ele é
+   *  truncado, é daqui que os critérios recebidos saem inteiros. Nada aqui é completado ou inventado. */
+  parcial?: ParcialPreservado
+}
+
+export interface ParcialPreservado {
+  versao: 1
+  /** A conferência dos 11: quais vieram, quais faltam, repetidos, desconhecidos, inválidos. */
+  criterios: {
+    completa: boolean
+    recebidos: string[]
+    ausentes: string[]
+    duplicados: string[]
+    desconhecidos: string[]
+    invalidos: string[]
+  }
+  /** Os critérios recebidos uma vez e válidos — identificador, nota e justificativa como o modelo mandou. */
+  scores: Array<{ criterion: string; score: number; justification: string }>
+  summary: string
+  confidence: number
+  /** A Arte como o produto a normalizou, só quando válida (`rated` ou `abstained`). */
+  art?: unknown
+  /** `true` quando algum texto trazia caractere que o Postgres não grava (surrogate solto, NUL), e a
+   *  gravação o remove — o único ponto em que o preservado pode diferir do que o modelo mandou. */
+  alterado_pela_sanitizacao: boolean
 }
 
 /**
