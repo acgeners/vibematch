@@ -60,11 +60,16 @@ async function fetchRows(): Promise<Row[]> {
   const out: Row[] = []
   let from = 0
   for (;;) {
+    // `works_owner`, não `works`: desde a Fase F `user_score` mora em `user_work_state`, e a view é a
+    // leitura canônica do rótulo do dono (1:1 com `works`). Lendo `works`, o script morria com
+    // "column works.user_score does not exist". `.order("id")` antes do `.range()`: o catálogo passa
+    // de 1000 obras, e paginar sem ordem total repete e perde linhas entre as páginas.
     const { data, error } = await db
-      .from("works")
+      .from("works_owner")
       .select(
         "id, user_score, is_archived, calculated_scores(expected_score, calc_score, chance_score, personal_fit, tag_overlap_net, platform_avg, total_votes)",
       )
+      .order("id")
       .range(from, from + 999)
     if (error) throw new Error(error.message)
     for (const w of (data ?? []) as unknown as RawWork[]) {
