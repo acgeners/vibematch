@@ -39,4 +39,9 @@ const banco = run("node", ["scripts/backup-db.mjs"], { BACKUP_ENV_FILE: ".env.su
 // vence — é a falha mais grave das duas.
 console.log(`\n▶ CÓPIA NO iCLOUD`)
 const icloud = run("node", ["scripts/backup-icloud.mjs"])
-process.exit(banco !== 0 ? banco : icloud)
+
+// O que não é banco nem está no GitHub (Auditoria, gold, estado anterior, branches só locais, WIP).
+// Roda mesmo com falha acima: são dados independentes. A ordem de gravidade fica no exit.
+console.log(`\n▶ CÓPIA DOS DADOS LOCAIS NO iCLOUD`)
+const locais = run("node", ["scripts/backup-locais-icloud.mjs"])
+process.exit(banco !== 0 ? banco : icloud !== 0 ? icloud : locais)

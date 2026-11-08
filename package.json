@@ -78,6 +78,7 @@
     "backup": "node scripts/backup-primary.mjs",
     "backup:conferir": "node scripts/backup-conferir.mjs",
     "backup:icloud": "node scripts/backup-icloud.mjs",
+    "backup:locais": "node scripts/backup-locais-icloud.mjs",
     "db:local:backup": "node --env-file=.env.local --env-file=.env.analysis scripts/db-local-backup.mjs",
     "db:local:restore": "node --env-file=.env.local --env-file=.env.analysis scripts/db-local-restore.mjs",
     "db:local-primary": "node --env-file=.env.local --env-file=.env.analysis scripts/db-local-primary.mjs"

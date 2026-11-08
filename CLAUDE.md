@@ -89,6 +89,13 @@ os 5 completos mais recentes viram DMG AES-256 em `iCloud Drive/VibeMatch-backup
 (serviço `animedb-backup-icloud`). Só conta a cópia com `.sha256`, escrito depois de conferir hash,
 abertura e conteúdo; sem senha ou com falha, sai 1 e avisa. A poda só toca `VibeMatch-backup-*`.
 
+🟢 **O que não é banco também vai, toda semana** (`scripts/backup-locais-icloud.mjs`, dono
+`scripts/lib/copia-locais.mjs`): tudo que o git ignora ou não rastreia, menos `EXCLUIDOS` (cada um com
+motivo), o estado anterior de `.backups/` (famílias com `copiaLocal: true`), as branches só locais e o WIP
+dos worktrees, em DMG criptografado em `iCloud Drive/VibeMatch-copias/` (as 2 mais recentes). Família
+nova de `.backups/` declara `copiaLocal`. Ensaio sem tocar o iCloud: `npm run backup:locais -- --ensaio`.
+🔴 O repositório no GitHub é **público**: material de auditoria nunca vai para lá, nem como branch.
+
 ⚠️ **Por que um env file FIXO, se o `.env.local` já aponta pra nuvem:** porque ele é um
 INTERRUPTOR — `db:local`/`db:cloud` reescrevem o alvo dele (`scripts/db-target.mjs`). Sem o
 `BACKUP_ENV_FILE`, o agente salvaria o banco que estivesse selecionado no domingo de manhã, e um

@@ -68,12 +68,12 @@ export function completosLocais(origem) {
  * Não relê o DMG: o iCloud pode ter tirado o conteúdo do disco ("Otimizar armazenamento"), e ler
  * forçaria o download. A conferência profunda acontece uma vez, ao enviar.
  */
-export function copiasNoDestino(dir) {
+export function copiasNoDestino(dir, padrao = RE_DMG) {
   if (!fs.existsSync(dir)) return []
   const nomes = new Set(fs.readdirSync(dir))
   const copias = []
   for (const nome of nomes) {
-    const stamp = stampDoDmg(nome)
+    const stamp = nome.match(padrao)?.[1] ?? null
     if (!stamp) continue
     let hash = null
     if (nomes.has(`${nome}.sha256`)) {
@@ -161,49 +161,64 @@ export function desmontar({ ponto, pai }) {
   return r.status === 0
 }
 
+/**
+ * Arquivos e links da árvore: `rel` → `{ link: null }` (arquivo) ou `{ link: "<alvo>" }`.
+ * 🔴 Link simbólico é comparado pelo ALVO escrito nele, nunca seguido: seguir um link para pasta
+ * estoura `EISDIR`, um link quebrado estoura `ENOENT`, e os dois derrubariam a conferência de uma
+ * cópia certa. A `Auditoria/` tem centenas de atalhos relativos (o índice).
+ */
 function listarArquivos(raiz) {
-  const out = []
+  const out = new Map()
   const andar = (rel) => {
     for (const e of fs.readdirSync(path.join(raiz, rel), { withFileTypes: true })) {
       // Entradas do sistema de arquivos do volume (.fseventsd, .Trashes…), não do backup.
       if (rel === "" && e.name.startsWith(".")) continue
       const r = rel ? `${rel}/${e.name}` : e.name
-      if (e.isDirectory()) andar(r)
-      else out.push(r)
+      if (e.isSymbolicLink()) out.set(r, { link: fs.readlinkSync(path.join(raiz, r)) })
+      else if (e.isDirectory()) andar(r)
+      else out.set(r, { link: null })
     }
   }
   andar("")
-  return out.sort()
+  return out
 }
 
-/** Confere arquivo a arquivo (nome + sha256). Devolve a lista de problemas (vazia = confere). */
+/** Confere arquivo a arquivo (nome + sha256; link pelo alvo). Devolve os problemas (vazio = confere). */
 export function compararConteudo(origemDir, montadoDir) {
   const a = listarArquivos(origemDir)
-  const b = new Set(listarArquivos(montadoDir))
+  const b = listarArquivos(montadoDir)
   const problemas = []
-  for (const rel of a) {
-    if (!b.has(rel)) problemas.push(`falta ${rel}`)
-    else if (sha256Arquivo(path.join(origemDir, rel)) !== sha256Arquivo(path.join(montadoDir, rel))) {
+  for (const [rel, ea] of [...a].sort(([x], [y]) => (x < y ? -1 : 1))) {
+    const eb = b.get(rel)
+    if (!eb) problemas.push(`falta ${rel}`)
+    else if (ea.link !== null || eb.link !== null) {
+      if (ea.link !== eb.link) problemas.push(`${rel}: link difere do original`)
+    } else if (sha256Arquivo(path.join(origemDir, rel)) !== sha256Arquivo(path.join(montadoDir, rel))) {
       problemas.push(`${rel} difere do original`)
     }
     b.delete(rel)
   }
-  for (const rel of b) problemas.push(`arquivo a mais: ${rel}`)
-  if (a.length === 0) problemas.push("a pasta de origem está vazia")
+  for (const rel of [...b.keys()].sort()) problemas.push(`arquivo a mais: ${rel}`)
+  if (a.size === 0) problemas.push("a pasta de origem está vazia")
   return problemas
 }
 
-/**
- * Envia UM backup: gera o DMG fora do iCloud, copia como `.parcial`, confere a cópia (hash,
- * abertura com a senha, conteúdo) e só então renomeia e escreve o `.sha256`.
- */
+/** Envia UM backup do banco — ver `enviarPasta`. */
 export function enviarBackup({ origemDir, stamp, destinoDir, senha }) {
-  const nome = nomeDoDmg(stamp)
+  return enviarPasta({ origemDir, nome: nomeDoDmg(stamp), volume: `SatorIA backup ${stamp}`, destinoDir, senha })
+}
+
+/**
+ * Envia UMA pasta como DMG criptografado: gera fora do iCloud, copia como `.parcial`, confere a
+ * cópia (hash, abertura com a senha, conteúdo) e só então renomeia e escreve o `.sha256`. Usado
+ * pelos dumps do banco e pela cópia semanal dos dados só locais (`copia-locais.mjs`).
+ */
+export function enviarPasta({ origemDir, nome, volume, destinoDir, senha }) {
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), "animedb-icloud-"))
   const parcial = path.join(destinoDir, nome + SUFIXO_PARCIAL)
   try {
     const gerado = path.join(staging, nome)
-    criarDmg(origemDir, gerado, senha, `SatorIA backup ${stamp}`)
+    criarDmg(origemDir, gerado, senha, volume)
     const hash = sha256Arquivo(gerado)
     fs.copyFileSync(gerado, parcial)
     const hashCopia = sha256Arquivo(parcial)
@@ -231,10 +246,10 @@ export function enviarBackup({ origemDir, stamp, destinoDir, senha }) {
   }
 }
 
-/** Restos de execução interrompida: só os `.parcial` deste módulo. */
-export function limparParciais(dir) {
+/** Restos de execução interrompida: só os `.parcial` com o prefixo dado (padrão: o deste módulo). */
+export function limparParciais(dir, prefixo = PREFIXO) {
   if (!fs.existsSync(dir)) return []
-  const restos = fs.readdirSync(dir).filter((n) => n.startsWith(PREFIXO) && n.endsWith(SUFIXO_PARCIAL))
+  const restos = fs.readdirSync(dir).filter((n) => n.startsWith(prefixo) && n.endsWith(SUFIXO_PARCIAL))
   for (const n of restos) fs.rmSync(path.join(dir, n), { force: true })
   return restos
 }

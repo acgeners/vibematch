@@ -55,6 +55,11 @@ export const BASE = path.join(ROOT, ".backups")
  * `keep: null` = tem dono, mas não se poda automaticamente (diretório fixo, ou família que só se
  * apaga à mão).
  *
+ * `copiaLocal` (obrigatório, booleano): a família entra na cópia SEMANAL dos dados só locais
+ * (`copia-locais.mjs`, DMG criptografado no iCloud)? Sim para o "estado anterior" de correções na
+ * nuvem — pequeno e a única forma de desfazer. Não para dump grande que tem outra cópia ou se
+ * recria (os dumps do banco já vão em DMG próprio). Família nova sem o campo reprova no teste.
+ *
  * Dois campos opcionais, hoje só na família `backup`:
  *   `classificar(dir)` — a pasta só CONTA e só pode ser apagada se `.completo`; o resto é preservado
  *   `exigeHabilitacao` — env que precisa valer "1" para apagar de verdade; sem ela, só simula
@@ -75,6 +80,7 @@ export const FAMILIAS = [
     oQueE: "backup lógico da nuvem: NDJSON de todas as tabelas + schema.sql.gz",
     casa: (n) => /^\d{4}-\d{2}-\d{2}T[\d-]+Z$/.test(n),
     exemplo: "2026-08-10T15-46-58-638Z",
+    copiaLocal: false, // já vai para o iCloud em DMG próprio (backup-icloud.mjs), os 5 mais recentes
     keepPadrao: 5,
     env: "BACKUP_KEEP",
     // 🔴 O nome NÃO prova que a pasta é backup: a de 18/10 (interrompida, sem manifesto) tinha
@@ -94,6 +100,7 @@ export const FAMILIAS = [
     oQueE: "backup interrompido (.incompleto, motivo em FALHA.json) ou só de dado (.sem-schema)",
     casa: (n) => /^\d{4}-\d{2}-\d{2}T[\d-]+Z\.(incompleto|sem-schema)$/.test(n),
     exemplo: "2026-10-18T07-00-02-555Z.incompleto",
+    copiaLocal: false, // diagnóstico de falha (~30 MB); o completo da semana seguinte o substitui
     keepPadrao: null,
     env: null,
   },
@@ -107,6 +114,9 @@ export const FAMILIAS = [
     oQueE: "pg_dump do banco LOCAL enquanto LOCAL PRIMARY está ativo — schema + dado + os UUIDs do auth",
     casa: (n) => /^local-primary-\d{4}-\d{2}-\d{2}T/.test(n),
     exemplo: "local-primary-2026-08-22T21-30-00-000Z",
+    // ~125 MB cada. O período LOCAL PRIMARY (23/08–22/09) voltou para a nuvem, que tem backup próprio;
+    // levar estes toda semana dobraria o tamanho da cópia por um histórico que não muda.
+    copiaLocal: false,
     keepPadrao: 12,
     env: "LOCAL_PRIMARY_KEEP",
   },
@@ -118,6 +128,7 @@ export const FAMILIAS = [
     oQueE: "pg_dump da nuvem — único backup COM schema, policies e functions",
     casa: (n) => /^pull-\d{4}-\d{2}-\d{2}T/.test(n),
     exemplo: "pull-2026-07-30T00-31-49-679Z",
+    copiaLocal: false, // ~120 MB cada; o schema entra no backup semanal do banco desde 10/08
     keepPadrao: 3,
     env: "PULL_KEEP",
   },
@@ -131,6 +142,7 @@ export const FAMILIAS = [
     oQueE: "mapa de tags externas → internas gerado pelo backfill (um JSON por execução)",
     casa: (n) => n === "backfill-tags",
     exemplo: "backfill-tags",
+    copiaLocal: true, // pequeno, e o mapa é o registro do que o backfill gravou
     keepPadrao: 1,
     env: "BACKFILL_TAGS_KEEP",
   },
@@ -144,6 +156,7 @@ export const FAMILIAS = [
     oQueE: "estado anterior das linhas corrigidas (ids externos trocados)",
     casa: (n) => /^fix-external-ids-\d{4}/.test(n),
     exemplo: "fix-external-ids-2026-08-14T00-15-58-115Z",
+    copiaLocal: true, // estado anterior: a única forma de desfazer
     keepPadrao: 10,
     env: "FIX_IDS_KEEP",
   },
@@ -157,6 +170,7 @@ export const FAMILIAS = [
     oQueE: "estado anterior de is_primary ao repescar capa morta",
     casa: (n) => /^repick-cover-\d{4}/.test(n),
     exemplo: "repick-cover-2026-08-15T03-11-22-333Z",
+    copiaLocal: true, // estado anterior: a única forma de desfazer
     keepPadrao: 10,
     env: "REPICK_COVER_KEEP",
   },
@@ -170,6 +184,7 @@ export const FAMILIAS = [
     oQueE: "justificativa anterior das notas de adult_content que ganharam a razão do limite",
     casa: (n) => /^adult-content-razao-\d{4}/.test(n),
     exemplo: "adult-content-razao-2026-08-20T05-42-10-123Z",
+    copiaLocal: true, // estado anterior, e o texto original é irreconstruível
     keepPadrao: 10,
     env: "ADULT_CONTENT_RAZAO_KEEP",
   },
@@ -181,6 +196,7 @@ export const FAMILIAS = [
     oQueE: "attribute_bias da conta principal antes do recálculo pela régua da versão lida",
     casa: (n) => /^vies-dona-\d{4}/.test(n),
     exemplo: "vies-dona-2026-10-12T21-30-00-000Z",
+    copiaLocal: true, // estado anterior: é o que o --restaurar devolve
     keepPadrao: 10,
     env: "VIES_DONA_KEEP",
   },
@@ -193,6 +209,7 @@ export const FAMILIAS = [
     oQueE: "título anterior das obras normalizadas (espaço nas pontas + caixa)",
     casa: (n) => /^normalizar-titulos-\d{4}/.test(n),
     exemplo: "normalizar-titulos-2026-08-17T03-11-22-333Z",
+    copiaLocal: true, // estado anterior: a única forma de desfazer
     keepPadrao: 10,
     env: "NORMALIZAR_TITULOS_KEEP",
   },
@@ -209,6 +226,7 @@ export const FAMILIAS = [
     oQueE: "lista anterior de títulos alternativos das obras normalizadas",
     casa: (n) => /^normalizar-titulos-alternativos-\d{4}/.test(n),
     exemplo: "normalizar-titulos-alternativos-2026-08-18T03-11-22-333Z",
+    copiaLocal: true, // estado anterior: a única forma de desfazer
     keepPadrao: 10,
     env: "NORMALIZAR_ALT_TITULOS_KEEP",
   },
@@ -221,6 +239,7 @@ export const FAMILIAS = [
     oQueE: "texto anterior das reviews do MangaUpdates com o rodapé legado cortado",
     casa: (n) => /^limpar-sufixo-mu-\d{4}/.test(n),
     exemplo: "limpar-sufixo-mu-2026-11-05T20-11-22-333Z",
+    copiaLocal: true, // estado anterior, e o site já não serve o texto antigo
     keepPadrao: 10,
     env: "LIMPAR_SUFIXO_MU_KEEP",
   },
@@ -232,6 +251,7 @@ export const FAMILIAS = [
     // de engolir estas entradas — e vice-versa. Famílias têm de ser mutuamente exclusivas.
     casa: (n) => /^push-opening-structure-\d{4}/.test(n),
     exemplo: "push-opening-structure-2026-08-14T01-00-49-104Z",
+    copiaLocal: true, // estado anterior: a única forma de desfazer
     keepPadrao: 10,
     env: "PUSH_OPENING_KEEP",
   },
@@ -241,6 +261,7 @@ export const FAMILIAS = [
     oQueE: "STAGING do push de curadoria (~95 MB) — TSV do que foi lido, não é backup",
     casa: (n) => /^push-curation-\d{4}-\d{2}-\d{2}T/.test(n),
     exemplo: "push-curation-2026-08-10T17-37-07-121Z",
+    copiaLocal: false, // staging de ~96 MB, não é backup
     keepPadrao: 2,
     env: "PUSH_STAGE_KEEP",
   },
@@ -250,6 +271,7 @@ export const FAMILIAS = [
     oQueE: "staging do push de avaliações de IA (~2 MB)",
     casa: (n) => /^push-\d{4}-\d{2}-\d{2}T/.test(n),
     exemplo: "push-2026-08-04T04-19-44-904Z",
+    copiaLocal: false, // staging, não é backup
     keepPadrao: 3,
     env: "PUSH_EVALS_KEEP",
   },
@@ -259,6 +281,7 @@ export const FAMILIAS = [
     oQueE: "cofre auto-contido das obras novas (~1,3 MB) — grava inclusive em --dry-run",
     casa: (n) => /^new-works-\d{4}-\d{2}-\d{2}T/.test(n),
     exemplo: "new-works-2026-08-04T15-56-02-670Z",
+    copiaLocal: true, // cofre das obras novas (~1,3 MB cada)
     keepPadrao: 5,
     env: "COFRE_KEEP",
   },
@@ -268,6 +291,7 @@ export const FAMILIAS = [
     oQueE: "saídas do laboratório de prompt de sinopse (~44 KB)",
     casa: (n) => /^synopsis-lab-\d{4}-\d{2}-\d{2}T/.test(n),
     exemplo: "synopsis-lab-2026-07-30T05-38-06-927Z",
+    copiaLocal: true, // saídas pagas do laboratório (~44 KB)
     keepPadrao: 3,
     env: "SYNOPSIS_LAB_KEEP",
   },
@@ -277,6 +301,7 @@ export const FAMILIAS = [
     oQueE: "snapshots de fingerprint por tabela — diretório FIXO, não versionado",
     casa: (n) => n === "fingerprints",
     exemplo: "fingerprints",
+    copiaLocal: false, // snapshots de hash, recriáveis a qualquer momento
     keepPadrao: null,
     env: null,
   },
