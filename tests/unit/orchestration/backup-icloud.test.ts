@@ -160,12 +160,14 @@ describe.runIf(process.platform === "darwin")("envio de verdade com hdiutil", ()
 })
 
 describe("o agente de domingo chama a cópia", () => {
-  it("backup-primary roda a cópia no iCloud depois do backup do banco, sem esconder a falha do banco", () => {
+  it("backup-primary roda as duas cópias no iCloud depois do banco, sem esconder a falha mais grave", () => {
     const src = fs.readFileSync(path.join(process.cwd(), "scripts/backup-primary.mjs"), "utf8")
     const banco = src.indexOf('"scripts/backup-db.mjs"')
     const icloud = src.indexOf('"scripts/backup-icloud.mjs"')
+    const locais = src.indexOf('"scripts/backup-locais-icloud.mjs"')
     expect(banco).toBeGreaterThan(-1)
     expect(icloud).toBeGreaterThan(banco)
-    expect(src).toMatch(/process\.exit\(banco !== 0 \? banco : icloud\)/)
+    expect(locais).toBeGreaterThan(icloud)
+    expect(src).toMatch(/process\.exit\(banco !== 0 \? banco : icloud !== 0 \? icloud : locais\)/)
   })
 })
