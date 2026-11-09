@@ -8,6 +8,7 @@ import { fetchMangaDexChapterDates } from "@/lib/external/mangadex"
 import { fetchMangaUpdatesStatus } from "@/lib/external/mangaupdates"
 import { withTimeout } from "@/lib/external/with-timeout"
 import { toChapterCount } from "@/lib/external/chapter-total"
+import { decidePublicationStatus } from "@/lib/external/publication-status-sync"
 import { mapWithConcurrency } from "@/lib/external/map-with-concurrency"
 import { markRecalcPending } from "@/server/recalc/queue"
 import { ensureAdmin } from "@/server/queries/current-user"
@@ -93,8 +94,10 @@ export interface ReadingUpdateResult {
 
 /**
  * Verifica, pra cada obra, o último capítulo disponível nas fontes externas e
- * compara com o `total_chapters` salvo. Não grava nada — só sinaliza. Fan-out
- * por obra; falhas de fonte caem fail-soft (`failed: true`).
+ * compara com o `total_chapters` salvo. GRAVA no catálogo: o total de capítulos, o
+ * status de publicação e as datas de capítulo (e marca o recálculo). Serve à `/reading`
+ * e ao lote do catálogo (`CatalogSyncPanel`). Fan-out por obra; falhas de fonte caem
+ * fail-soft (`failed: true`) e não gravam nada daquela obra.
  */
 export async function checkReadingUpdates(
   workIds: string[],
@@ -222,16 +225,13 @@ export async function checkReadingUpdates(
           await markRecalcPending("reading-chapter-sync").catch(() => {})
         }
 
-        // Sincroniza status de publicação da comix. Política: só aplica transições de
-        // FIM/HIATO (Completed/Hiatus/Cancelled) que diferem do atual; nunca escreve
-        // "Ongoing" (não reverte); e não mexe em obra já terminal (Completed/Cancelled)
-        // pra não "des-terminar". Status é feature do Ridge → marca recálculo pendente.
-        const statusApplied = await maybeApplyPublicationStatus(
-          supabase,
-          w.id,
-          w.publication_status_id,
-          statusExternal ?? null,
-        )
+        // Sincroniza o status de publicação pela regra única (`decidePublicationStatus`): o
+        // MangaUpdates decide, o Comix só sem ele; nunca tira de Completed/Cancelled; "Ongoing"
+        // só pelo MangaUpdates, no fim do hiato. Status é feature do Ridge → marca recálculo.
+        const statusApplied = await maybeApplyPublicationStatus(supabase, w.id, w.publication_status_id, {
+          mangaupdates: muStatus,
+          comix: comixStatus,
+        })
 
         return {
           workId: w.id,
@@ -264,31 +264,20 @@ async function fetchMuStatus(muId: string | null | undefined): Promise<string | 
 }
 
 /**
- * Aplica o status de publicação resolvido das fontes (MangaUpdates preferido,
- * senão comix), com política conservadora: só grava transições de FIM/HIATO
- * (Completed/Hiatus/Cancelled) que diferem do atual; nunca escreve "Ongoing"
- * (não reverte); e não mexe em obra já terminal (Completed/Cancelled), pra não
- * "des-terminar". Status é feature categórica do Ridge → dispara markRecalcPending.
+ * Grava o status de publicação que a regra única decidir (`decidePublicationStatus`,
+ * `lib/external/publication-status-sync.ts` — a mesma do "Atualizar automático").
+ * Status é feature categórica do Ridge → dispara markRecalcPending.
  * Retorna o status gravado (pra UI) ou `null`.
  */
 async function maybeApplyPublicationStatus(
   supabase: ReturnType<typeof createAdminClient>,
   workId: string,
   currentStatusId: number | null,
-  externalStatus: string | null,
+  external: { mangaupdates: string | null; comix: string | null },
 ): Promise<string | null> {
-  if (
-    externalStatus !== "Completed" &&
-    externalStatus !== "Hiatus" &&
-    externalStatus !== "Cancelled"
-  ) {
-    return null
-  }
-  const currentName = getPublicationStatusNameById(currentStatusId)
-  if (currentName === "Completed" || currentName === "Cancelled" || currentName === externalStatus) {
-    return null
-  }
-  const newId = getPublicationStatusIdByName(externalStatus)
+  const decision = decidePublicationStatus(getPublicationStatusNameById(currentStatusId), external)
+  if (!decision) return null
+  const newId = getPublicationStatusIdByName(decision.status)
   if (newId == null) return null
 
   const { error } = await supabase
@@ -300,7 +289,7 @@ async function maybeApplyPublicationStatus(
     return null
   }
   await markRecalcPending("reading-status-sync").catch(() => {})
-  return externalStatus
+  return decision.status
 }
 
 /**

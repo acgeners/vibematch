@@ -3190,7 +3190,19 @@ export async function autoRefreshWorkData(workId: string): Promise<AutoRefreshWo
     return { ok: false, error: message }
   }
 
-  const plan = buildAutoRefreshPlan(refreshed.data, refreshed.conflicts)
+  // O status passa pela regra única (`decidePublicationStatus`), que precisa do status GRAVADO:
+  // é ela que impede tirar uma obra de Completed e só deixa "Ongoing" entrar no fim do hiato.
+  const { data: current, error: currentError } = await createAdminClient()
+    .from("works")
+    .select("publication_status_id")
+    .eq("id", workId)
+    .single()
+  if (currentError) return { ok: false, error: currentError.message }
+  const plan = buildAutoRefreshPlan(
+    refreshed.data,
+    refreshed.conflicts,
+    getPublicationStatusNameById(current?.publication_status_id ?? null),
+  )
   if (Object.keys(plan.updates).length === 0) {
     return { ok: true, updatedFields: [], skippedConflicts: plan.skippedConflicts, sources: refreshed.sources }
   }

@@ -1,4 +1,5 @@
 import type { ConflictField, ExternalWorkData } from "./types"
+import { decidePublicationStatus, statusBySource } from "./publication-status-sync"
 
 /**
  * Campos que a atualização AUTOMÁTICA (Assinante) pode gravar.
@@ -72,26 +73,39 @@ export function buildPlatformRatings(
  *     o que o Curador deixou, não chutar.
  *  2. Campo fora da lista `AUTO_REFRESHABLE` → NÃO toca (ver a fronteira acima).
  *
+ * 🔴 **O status de publicação é a EXCEÇÃO à regra 1** (2026-11-09): ele sai da regra única
+ * `decidePublicationStatus`, a mesma da checagem da `/reading`. As fontes discordam quase
+ * sempre sobre status (a AniList atrasa, o Comix diz "releasing" em obra concluída), então
+ * "conflito ⇒ não toca" fazia este caminho NÃO GRAVAR status nunca — medido: 5 de 5 obras
+ * que o MangaUpdates dava como concluídas. E sem conflito ele gravava qualquer valor, até
+ * tirar uma obra de Completed. `currentStatus` é o status gravado hoje.
+ *
  * `platformRatings` é sempre aplicado: é aditivo por plataforma (nota/votos de cada
  * fonte), nunca ambíguo, e é o dado que mais envelhece.
  */
 export function buildAutoRefreshPlan(
   data: ExternalWorkData,
   conflicts: ConflictField[],
+  currentStatus: string | null,
 ): AutoRefreshPlan {
   const conflicted = new Set<string>(conflicts.map((c) => String(c.field)))
   const updates: AutoRefreshUpdate = {}
   const skippedConflicts: string[] = []
 
   for (const field of AUTO_REFRESHABLE) {
+    if (field === "publicationStatus") {
+      const decision = decidePublicationStatus(
+        currentStatus,
+        statusBySource(data.fieldProvenance?.publicationStatus),
+      )
+      if (decision) updates.publicationStatus = decision.status
+      continue
+    }
     if (conflicted.has(field)) {
       skippedConflicts.push(field)
       continue
     }
     switch (field) {
-      case "publicationStatus":
-        if (data.publicationStatus != null) updates.publicationStatus = data.publicationStatus
-        break
       case "totalChapters":
         if (data.totalChapters != null) updates.totalChapters = data.totalChapters
         break

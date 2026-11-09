@@ -14,11 +14,14 @@ const base: ExternalWorkData = {
   muRating: 8.4,
   muVotes: 1200,
   externalIds: { mangaupdates: "123", comick: "abc" },
+  fieldProvenance: {
+    publicationStatus: [{ value: "Completed", sources: ["mangaupdates"] }],
+  },
 } as ExternalWorkData
 
 describe("buildAutoRefreshPlan — a fronteira do Assinante", () => {
   it("atualiza o que ENVELHECE: status, capítulos, tags, IDs, notas de plataforma", () => {
-    const { updates } = buildAutoRefreshPlan(base, [])
+    const { updates } = buildAutoRefreshPlan(base, [], "Ongoing")
 
     expect(updates.publicationStatus).toBe("Completed")
     expect(updates.totalChapters).toBe(120)
@@ -31,7 +34,7 @@ describe("buildAutoRefreshPlan — a fronteira do Assinante", () => {
   })
 
   it("NUNCA grava o que é ESCOLHA — título, sinopse e capa não saem do Curador", () => {
-    const { updates } = buildAutoRefreshPlan(base, [])
+    const { updates } = buildAutoRefreshPlan(base, [], "Ongoing")
     const written = Object.keys(updates)
 
     // Se qualquer um destes aparecer, o Assinante passou a poder sobrescrever a
@@ -45,16 +48,12 @@ describe("buildAutoRefreshPlan — a fronteira do Assinante", () => {
   })
 
   it("campo em CONFLITO é pulado — sem humano pra decidir, preserva o que está salvo", () => {
-    const conflicts = [
-      { field: "publicationStatus", label: "Status", options: [] },
-      { field: "totalChapters", label: "Capítulos", options: [] },
-    ] as unknown as ConflictField[]
+    const conflicts = [{ field: "totalChapters", label: "Capítulos", options: [] }] as unknown as ConflictField[]
 
-    const { updates, skippedConflicts } = buildAutoRefreshPlan(base, conflicts)
+    const { updates, skippedConflicts } = buildAutoRefreshPlan(base, conflicts, "Ongoing")
 
-    expect(updates.publicationStatus).toBeUndefined()
     expect(updates.totalChapters).toBeUndefined()
-    expect(skippedConflicts).toEqual(["publicationStatus", "totalChapters"])
+    expect(skippedConflicts).toEqual(["totalChapters"])
 
     // O que não conflita segue atualizando — o conflito não paralisa a obra inteira.
     expect(updates.tags).toEqual(["Revenge"])
@@ -63,8 +62,59 @@ describe("buildAutoRefreshPlan — a fronteira do Assinante", () => {
 
   it("dado ausente na fonte não vira escrita (não apaga o que já existe)", () => {
     const vazio = { title: "X", genres: [], tags: [] } as ExternalWorkData
-    const { updates } = buildAutoRefreshPlan(vazio, [])
+    const { updates } = buildAutoRefreshPlan(vazio, [], "Ongoing")
     expect(updates).toEqual({})
+  })
+})
+
+// O status de publicação é a exceção ao "conflito ⇒ não toca": ele segue a regra única
+// (`decidePublicationStatus`), a mesma da checagem da /reading.
+describe("buildAutoRefreshPlan — status pela regra única", () => {
+  // O caso medido em 2026-11-09: MangaUpdates diz Completed, a AniList ainda diz Ongoing e o
+  // Comix diz "releasing" (Unknown). Antes, o conflito fazia este caminho não gravar nada.
+  const discordando = {
+    ...base,
+    fieldProvenance: {
+      publicationStatus: [
+        { value: "Completed", sources: ["mangaupdates"] },
+        { value: "Ongoing", sources: ["anilist"] },
+        { value: "Unknown", sources: ["comix"] },
+      ],
+    },
+  } as ExternalWorkData
+  const conflitoDeStatus = [
+    { field: "publicationStatus", label: "Status", options: [] },
+  ] as unknown as ConflictField[]
+
+  it("as fontes discordam e o MangaUpdates decide: grava Completed", () => {
+    const { updates, skippedConflicts } = buildAutoRefreshPlan(discordando, conflitoDeStatus, "Ongoing")
+    expect(updates.publicationStatus).toBe("Completed")
+    expect(skippedConflicts).not.toContain("publicationStatus")
+  })
+
+  it("nunca tira uma obra de Completed, mesmo sem conflito", () => {
+    const voltou = {
+      ...base,
+      publicationStatus: "Ongoing",
+      fieldProvenance: { publicationStatus: [{ value: "Ongoing", sources: ["mangaupdates", "anilist"] }] },
+    } as ExternalWorkData
+    expect(buildAutoRefreshPlan(voltou, [], "Completed").updates.publicationStatus).toBeUndefined()
+  })
+
+  it("status só de outra fonte (sem MangaUpdates nem Comix) não é gravado", () => {
+    const soAniList = {
+      ...base,
+      fieldProvenance: { publicationStatus: [{ value: "Completed", sources: ["anilist"] }] },
+    } as ExternalWorkData
+    expect(buildAutoRefreshPlan(soAniList, [], "Ongoing").updates.publicationStatus).toBeUndefined()
+  })
+
+  it("fim do hiato pelo MangaUpdates: Hiatus → Ongoing", () => {
+    const voltou = {
+      ...base,
+      fieldProvenance: { publicationStatus: [{ value: "Ongoing", sources: ["mangaupdates"] }] },
+    } as ExternalWorkData
+    expect(buildAutoRefreshPlan(voltou, [], "Hiatus").updates.publicationStatus).toBe("Ongoing")
   })
 })
 
