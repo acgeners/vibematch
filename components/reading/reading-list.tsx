@@ -1630,10 +1630,6 @@ function ReadingCard({
               <span className="flex items-center gap-1.5">
                 <AlertCircle className="size-4" /> não verificado
               </span>
-            ) : result?.skipped ? (
-              <span className="flex items-center gap-1.5">
-                <Check className="size-4 shrink-0 text-emerald-500" /> Concluída — sem capítulos novos
-              </span>
             ) : (
               <>
                 {result?.statusApplied && (

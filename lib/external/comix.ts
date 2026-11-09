@@ -499,6 +499,19 @@ function mapStatus(status: unknown): PublicationStatus {
   }
 }
 
+/**
+ * Contagem de capítulos do Comix = o ÚLTIMO capítulo postado (`latestChapter`).
+ *
+ * `finalChapter` fica de fora de propósito: é cadastro (o capítulo final declarado da obra) e
+ * pode estar à frente do que existe para ler. Até 2026-11-09 ele vencia o `latestChapter`, e a
+ * `/reading` (que chama este número de "lançados" e calcula o que falta ler a partir dele) podia
+ * mostrar capítulos que nem o Comix nem o Mangago têm. Dono único: a busca e o detalhe usam isto.
+ */
+export function comixChapterCount(item: { latestChapter?: unknown } | null | undefined): number | undefined {
+  const latest = item?.latestChapter
+  return typeof latest === "number" && Number.isFinite(latest) && latest > 0 ? latest : undefined
+}
+
 function coverFromPoster(poster: unknown): string | undefined {
   if (!poster || typeof poster !== "object") return undefined
   const p = poster as { large?: string; medium?: string }
@@ -567,12 +580,7 @@ export async function searchComix(query: string): Promise<ExternalSearchResult[]
         synopsis: typeof item.synopsis === "string" ? item.synopsis : undefined,
         coverUrl: coverFromPoster(item.poster),
         year: typeof item.year === "number" ? item.year : undefined,
-        chapters:
-          typeof item.finalChapter === "number" && item.finalChapter > 0
-            ? item.finalChapter
-            : typeof item.latestChapter === "number" && item.latestChapter > 0
-              ? item.latestChapter
-              : undefined,
+        chapters: comixChapterCount(item),
         publicationStatus: mapStatus(item.status),
         score: typeof item.ratedAvg === "number" ? item.ratedAvg : undefined,
         votes: typeof item.ratedCount === "number" ? item.ratedCount : undefined,
@@ -603,12 +611,7 @@ export async function fetchComixById(hid: string): Promise<ComixDetail | null> {
     synopsis: typeof r.synopsis === "string" ? r.synopsis : undefined,
     coverUrl: coverFromPoster(r.poster),
     year: typeof r.year === "number" ? r.year : undefined,
-    chapters:
-      typeof r.finalChapter === "number" && r.finalChapter > 0
-        ? r.finalChapter
-        : typeof r.latestChapter === "number" && r.latestChapter > 0
-          ? r.latestChapter
-          : undefined,
+    chapters: comixChapterCount(r),
     publicationStatus: mapStatus(r.status),
     rating: typeof r.ratedAvg === "number" ? r.ratedAvg : undefined,
     votes: typeof r.ratedCount === "number" ? r.ratedCount : undefined,

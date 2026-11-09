@@ -89,8 +89,6 @@ export interface ReadingUpdateResult {
   statusExternal: string | null
   /** Novo status GRAVADO nesta checagem (Completed/Hiatus/Cancelled), ou `null` se nada mudou. */
   statusApplied: string | null
-  /** `true` quando a obra foi PULADA (publicação já concluída → sem capítulos novos). */
-  skipped: boolean
 }
 
 /**
@@ -136,29 +134,31 @@ export async function checkReadingUpdates(
     CHECK_CONCURRENCY,
     async (w): Promise<ReadingUpdateResult> => {
       try {
-        // Obra com publicação já CONCLUÍDA não terá capítulos novos → pula o fetch
-        // externo (o mais caro, via FlareSolverr). O contador de pendentes continua
-        // vindo do total_chapters/chapters_read salvos (sem checagem).
-        if (getPublicationStatusNameById(w.publication_status_id) === "Completed") {
-          return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: false, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: "Completed", statusApplied: null, skipped: true }
-        }
-
+        // ⚠️ Obra CONCLUÍDA também é checada (até 2026-11-09 era pulada). "Concluída" é o
+        // ORIGINAL; a tradução pode seguir saindo — medido: obra concluída com 29 no
+        // banco e 22 traduzidos. Pulada, ela nunca recebia o capítulo traduzido seguinte, e o
+        // card mostrava capítulos a ler que não existem. O status do Comix não serve para
+        // separar os dois casos: ele diz "releasing" em 14 das 17 concluídas, inclusive em
+        // obras com a tradução completa.
         const { comixHid, comixRejected, mangagoSlug, crossIds } = readExternalIds(w.work_external_ids)
         // Respeita rejeição explícita do comix: não busca nem persiste. (Nota: por ora
         // isto também pula o mangago da obra — comix-rejeitada é caso raro.)
         if (comixRejected && !comixHid) {
-          return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null, skipped: false }
+          return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null }
         }
 
         const [chapterResult, muStatus] = await Promise.all([
-          getLatestChapter({
-            title: w.title,
-            originalTitle: w.original_title,
-            alternativeTitles: w.alternative_titles ?? [],
-            comixHid,
-            mangagoSlug,
-            crossIds,
-          }),
+          getLatestChapter(
+            {
+              title: w.title,
+              originalTitle: w.original_title,
+              alternativeTitles: w.alternative_titles ?? [],
+              comixHid,
+              mangagoSlug,
+              crossIds,
+            },
+            { currentTotal: w.total_chapters },
+          ),
           fetchMuStatus(crossIds.mangaupdates),
         ])
         const { latest, resolvedComixHid, releasedLabel, releasedAt, cadenceDates, chapterNumbers, latestUrl: winnerUrl } =
@@ -206,8 +206,8 @@ export async function checkReadingUpdates(
           ? chapterNumbers.filter((n) => n > (w.chapters_read ?? 0)).length
           : null
 
-        // Sincroniza total_chapters com o cap da fonte autoritativa (a de MAIOR capítulo
-        // entre Comix e Mangago — ver `getLatestChapter`) e recalcula. `ceil` porque um cap decimal é 1 cap inteiro
+        // Sincroniza total_chapters com o último capítulo disponível (Comix primeiro, o Mangago
+        // só sem ele — ver `pickTotalChapters`) e recalcula. `ceil` porque um cap decimal é 1 cap inteiro
         // e mantém total ≥ latest (não re-detecta o mesmo decimal como "novo"). Ajusta
         // pra cima OU pra baixo — corrige totais antigos inflados (ex.: 130 do round(129.7)).
         //
@@ -248,10 +248,9 @@ export async function checkReadingUpdates(
           nextPredictedAt,
           statusExternal: statusExternal ?? null,
           statusApplied,
-          skipped: false,
         }
       } catch {
-        return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null, skipped: false }
+        return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null }
       }
     },
   )

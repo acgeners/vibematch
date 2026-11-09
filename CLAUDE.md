@@ -858,6 +858,11 @@ os 12 status de hoje.
 **Três seções pela publicação (Em andamento, Concluídas, Outras); Outras agrupa pelo motivo da parada.** A distância é em capítulos faltando (até 7 = perto), cruzada com 30 dias sem ler; "leu tudo" só vira "Sem capítulo novo" pela data do LANÇAMENTO. Dona única: `lib/reading/pace-bands.ts`, que também escolhe o "Continue lendo" da home; os textos dos grupos derivam das constantes de lá.
 Obra sem `last_read_at` usa `user_work_state.updated_at` só para classificar, e o card diz que é estimativa; nunca grave data inventada. Quem salva capítulos lidos carimba a data por `withReadDateStamp` (`lib/reading/read-stamp.ts`), exceto importação, que não sabe quando foi lido.
 
+### O número de capítulos é o ÚLTIMO DISPONÍVEL PARA LER, não o total do original
+
+**`works.total_chapters` = último capítulo disponível: Comix (`latestChapter`) primeiro, o Mangago só sem ele, as demais fontes só sem os dois — em obra em andamento E concluída.** O total do original fazia a `/reading` cobrar capítulos que não existem traduzidos. Nunca "o maior entre as fontes" (um capítulo-aviso do Mangago vira capítulo novo) nem o `finalChapter` do Comix (é cadastro, não o postado); e o status do Comix não separa tradução completa de incompleta (diz "releasing" quase sempre).
+Dono: `pickTotalChapters` (`lib/external/chapter-total.ts`), usado pela checagem da `/reading` e pelo "Atualizar dados"; a conferência de número corrompido (`isImplausibleChapter`) só descarta erro de ordem de grandeza, nunca fonte mais baixa.
+
 ### Os filtros da `/reading` seguem a versão LIDA
 
 **Obra `mixed` segue `read_edition` no filtro de 18+ da `/reading`; sem versão marcada, fica em Ocultar e em Só 18+.** A lista é do que a pessoa está lendo, então não copie a régua do `/ranking` para cá, nem a daqui para lá. Dono: `lib/reading/reading-filters.ts`.

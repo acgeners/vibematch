@@ -22,7 +22,12 @@ vi.mock("@/lib/external/mangago", async (importOriginal) => ({
   fetchMangagoById: vi.fn(),
 }))
 
-import { pickTotalChapters, toChapterCount } from "@/lib/external/chapter-total"
+import {
+  IMPLAUSIBLE_MIN_GAP,
+  isImplausibleChapter,
+  pickTotalChapters,
+  toChapterCount,
+} from "@/lib/external/chapter-total"
 import { CHAPTER_SOURCE_IDS } from "@/lib/external/chapter-sources/types"
 import { fetchMultiSourceDetails } from "@/lib/external/index"
 import { fetchMangaUpdatesById } from "@/lib/external/mangaupdates"
@@ -38,50 +43,107 @@ type Fonte = { source: ExternalSourceId; chapters?: number | null }
 const fontes = (valores: Partial<Record<ExternalSourceId, number | null>>): Fonte[] =>
   (Object.entries(valores) as Array<[ExternalSourceId, number | null]>).map(([source, chapters]) => ({ source, chapters }))
 
+// A régua (decidida em 2026-11-09): o número é o ÚLTIMO CAPÍTULO DISPONÍVEL PARA LER. Comix
+// primeiro; o Mangago só sem ele; as demais fontes só sem nenhum dos dois.
 describe("pickTotalChapters — a régua", () => {
-  it("obra em andamento: o MAIOR entre Comix e Mangago, mesmo com o MangaUpdates atrás", () => {
-    // That's Not What My Will Said: banco 62, e o merge antigo devolvia 62 (o MU).
+  it("o Comix vence mesmo com o Mangago à FRENTE — um capítulo-aviso do Mangago não vira capítulo novo", () => {
+    // Obra real em andamento: MU 62, ComicK 63, Comix 69, Mangago 70. A régua antiga (o MAIOR
+    // dos dois) dava 70.
     const r = pickTotalChapters(fontes({ mangaupdates: 62, comick: 63, comix: 69, mangago: 70 }), "Ongoing")
-    expect(r).toEqual({ value: 70, decidedByRule: true })
+    expect(r).toEqual({ value: 69, source: "comix", decidedByRule: true })
   })
 
   it("obra em andamento: não BAIXA para o MangaUpdates atrasado", () => {
-    // Dokkaebi: banco 16, MU 13, Comix 31 — o merge antigo propunha 13.
+    // Obra real: banco 16, MU 13, Comix 31 — o merge antigo propunha 13.
     expect(pickTotalChapters(fontes({ mangaupdates: 13, comix: 31 }), "Ongoing").value).toBe(31)
   })
 
-  it("obra em andamento: Comix/Mangago vencem mesmo quando o MU está à FRENTE — é o que a /reading grava", () => {
-    // Monster Princess of the Snowy Mountain: MU 74, os três de scan em 68. Com "o maior de
-    // todos" o merge diria 74 e a /reading voltaria a 68 na checagem seguinte.
+  it("o Comix vence o MangaUpdates à FRENTE — é o que a /reading grava", () => {
+    // Obra real: MU 74, os três de scan em 68.
     const r = pickTotalChapters(fontes({ mangaupdates: 74, comick: 68, comix: 68, mangago: 68 }), "Ongoing")
     expect(r.value).toBe(68)
+  })
+
+  it("sem Comix: o Mangago, ainda decidido pela régua", () => {
+    expect(pickTotalChapters(fontes({ mangaupdates: 30, mangago: 25 }), "Ongoing")).toEqual({
+      value: 25,
+      source: "mangago",
+      decidedByRule: true,
+    })
   })
 
   it("sem Comix nem Mangago: o maior entre as demais, e a divergência segue sendo decisão humana", () => {
     expect(pickTotalChapters(fontes({ mangaupdates: 25, comick: 30 }), "Ongoing")).toEqual({
       value: 30,
+      source: "comick",
       decidedByRule: false,
     })
   })
 
-  it.each(["Hiatus", "Unknown", null, undefined])("status %s conta como ainda saindo", (status) => {
-    expect(pickTotalChapters(fontes({ mangaupdates: 13, comix: 31 }), status).value).toBe(31)
+  it.each(["Hiatus", "Unknown", "Completed", "Cancelled", null, undefined])(
+    "status %s não muda a escolha quando o Comix responde",
+    (status) => {
+      expect(pickTotalChapters(fontes({ mangaupdates: 13, comix: 31 }), status).value).toBe(31)
+    },
+  )
+
+  it("obra CONCLUÍDA com tradução atrasada: o disponível, não o total do original", () => {
+    // Obra real (medido em 2026-11-09): concluída, 29 no banco, 22 no Comix e no Mangago, tudo
+    // lido. Com o total do original a /reading mostrava 7 capítulos a ler que não existem.
+    expect(pickTotalChapters(fontes({ mangaupdates: 29, comix: 22, mangago: 22 }), "Completed")).toEqual({
+      value: 22,
+      source: "comix",
+      decidedByRule: true,
+    })
   })
 
-  it("obra CONCLUÍDA: segue no MangaUpdates-primeiro — scan incompleta não derruba o total", () => {
-    // Stained Scarlet: MU 94 (o banco), Comix 56, Mangago 35, ComicK 19.
-    const r = pickTotalChapters(fontes({ mangaupdates: 94, comick: 19, comix: 56, mangago: 35 }), "Completed")
-    expect(r).toEqual({ value: 94, decidedByRule: false })
+  it("contraprova do preço aceito: tradução abandonada fica com o tamanho traduzido", () => {
+    // Obra real: MU 94, Comix 56, Mangago 35, ComicK 19. Era 94 (MangaUpdates-primeiro).
+    expect(pickTotalChapters(fontes({ mangaupdates: 94, comick: 19, comix: 56, mangago: 35 }), "Completed").value).toBe(56)
   })
 
-  it("obra CONCLUÍDA: número corrompido numa fonte não vence pelo tamanho", () => {
-    // The Princess's Bedroom Doll: Comix 815 numa obra de 81.
-    expect(pickTotalChapters(fontes({ mangaupdates: 81, comix: 815, mangago: 81 }), "Completed").value).toBe(81)
+  it("sem Comix nem Mangago, obra terminada segue a ordem das fontes (MU na frente)", () => {
+    expect(pickTotalChapters(fontes({ mangaupdates: 40, comick: 55 }), "Completed").value).toBe(40)
+    expect(pickTotalChapters(fontes({ mangaupdates: 40, comick: 55 }), "Cancelled").value).toBe(40)
+  })
+})
+
+describe("pickTotalChapters — a conferência de número corrompido", () => {
+  it("o Comix corrompido é descartado e o Mangago assume", () => {
+    // Obra real: Comix 815 numa obra de 81.
+    expect(pickTotalChapters(fontes({ mangaupdates: 81, comix: 815, mangago: 81 }), "Completed")).toEqual({
+      value: 81,
+      source: "mangago",
+      decidedByRule: true,
+    })
   })
 
-  it("obra CANCELADA conta como terminada", () => {
-    expect(pickTotalChapters(fontes({ mangaupdates: 40, comix: 55 }), "Cancelled").value).toBe(40)
+  it("o total já gravado serve de referência quando a /reading só tem o Comix", () => {
+    const r = pickTotalChapters(fontes({ comix: 815 }), null, { current: 81 })
+    expect(r).toEqual({ value: undefined, decidedByRule: false })
   })
+
+  it("fonte BAIXA nunca derruba quem está acima: tradução atrasada e slug errado são o caso comum", () => {
+    // Obra real (medido em 2026-11-09): Comix 41, Mangago 1 — o 41 é o certo.
+    expect(pickTotalChapters(fontes({ comix: 41, mangago: 1 }), "Ongoing").value).toBe(41)
+    // Obra longa com a outra fonte bem atrás: razão alta, mas abaixo da folga absoluta.
+    expect(pickTotalChapters(fontes({ comix: 90, mangadex: 10 }), "Ongoing").value).toBe(90)
+  })
+
+  it("as duas condições juntas — razão E folga", () => {
+    expect(isImplausibleChapter(815, 81)).toBe(true)
+    expect(isImplausibleChapter(41, 1)).toBe(false) // razão alta, folga pequena
+    expect(isImplausibleChapter(250, 120)).toBe(false) // folga grande, razão pequena
+    expect(isImplausibleChapter(500, null)).toBe(false) // sem referência, nada a conferir
+    expect(isImplausibleChapter(IMPLAUSIBLE_MIN_GAP * 2, IMPLAUSIBLE_MIN_GAP / 10)).toBe(true)
+  })
+
+  it("o total gravado é só referência — nunca vira o valor escolhido", () => {
+    expect(pickTotalChapters(fontes({ comix: 22 }), "Completed", { current: 29 }).value).toBe(22)
+  })
+})
+
+describe("pickTotalChapters — contagem", () => {
 
   it("capítulo decimal vira o inteiro de cima e zero não é contagem", () => {
     expect(toChapterCount(29.1)).toBe(30)
@@ -92,21 +154,22 @@ describe("pickTotalChapters — a régua", () => {
     expect(pickTotalChapters(fontes({ kitsu: 0, mangaupdates: null }), "Ongoing").value).toBeUndefined()
   })
 
-  it("as fontes autorizadas são as mesmas do agregador da /reading", () => {
+  it("as fontes autorizadas são as mesmas do agregador da /reading, e a ORDEM é a preferência", () => {
     // O agregador monta o registro sobre esta lista (um Record — o `tsc` reprova fonte sem
-    // checadora); aqui fica escrito que a lista É a das duas fontes que ele consulta hoje.
-    expect([...CHAPTER_SOURCE_IDS].sort()).toEqual(["comix", "mangago"])
+    // checadora). A ordem decide quem vence: trocá-la põe o Mangago (e o capítulo-aviso dele)
+    // na frente do Comix sem ninguém decidir nada.
+    expect([...CHAPTER_SOURCE_IDS]).toEqual(["comix", "mangago"])
   })
 })
 
 describe("o merge do 'Atualizar dados' usa a régua", () => {
   const candidato: MergedCandidate = {
-    title: "That's Not What My Will Said",
+    title: "Obra Teste",
     sources: ["mangaupdates", "comix", "mangago"],
     trustedSources: ["mangaupdates", "comix", "mangago"],
     muId: 123,
     comixHid: "abc12",
-    mangagoSlug: "thats_not_what_my_will_said",
+    mangagoSlug: "obra_teste",
   }
 
   beforeEach(() => {
@@ -130,23 +193,25 @@ describe("o merge do 'Atualizar dados' usa a régua", () => {
     mangago.mockResolvedValue({ title: candidato.title, chapters: valores.mangago } as never)
   }
 
-  it("obra em andamento: o total é o da /reading e a divergência com o MU não vira conflito", async () => {
+  it("obra em andamento: o total é o da /reading (o Comix) e a divergência com o MU não vira conflito", async () => {
     fontesResponde("Ongoing", { mu: 62, comix: 69, mangago: 70 })
     const out = await fetchMultiSourceDetails(candidato)
 
-    expect(out.data.totalChapters).toBe(70)
+    expect(out.data.totalChapters).toBe(69)
     // Sem isto, o "Atualizar" do Assinante (que PULA campo em conflito) nunca subia o total.
     expect(out.conflicts.some((c) => c.field === "totalChapters")).toBe(false)
     // O valor do MU continua visível como alternativa no passo de conflitos do curador.
     expect(out.data.fieldProvenance?.totalChapters?.map((p) => p.value)).toEqual(expect.arrayContaining([62, 69, 70]))
   })
 
-  it("contraprova: obra concluída segue no MU, e a divergência continua sendo conflito", async () => {
+  it("obra concluída também: o disponível, sem conflito — a /reading grava o mesmo número", async () => {
+    // Antes era o MangaUpdates (94) com conflito; aí a /reading, que agora também checa obra
+    // concluída, gravaria 56 e o "Atualizar dados" seguinte proporia voltar a 94.
     fontesResponde("Completed", { mu: 94, comix: 56, mangago: 35 })
     const out = await fetchMultiSourceDetails(candidato)
 
-    expect(out.data.totalChapters).toBe(94)
-    expect(out.conflicts.some((c) => c.field === "totalChapters")).toBe(true)
+    expect(out.data.totalChapters).toBe(56)
+    expect(out.conflicts.some((c) => c.field === "totalChapters")).toBe(false)
   })
 })
 

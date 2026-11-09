@@ -1901,8 +1901,8 @@ function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[],
       accepted.find((result) => result.yearEnd)?.yearEnd ?? candidate.yearEnd,
     ),
     publicationStatus,
-    // Régua com dono (`pickTotalChapters`): obra ainda saindo usa o mesmo total que a
-    // `/reading` grava; obra terminada segue no MangaUpdates-primeiro.
+    // Régua com dono (`pickTotalChapters`): o último capítulo disponível (Comix primeiro), o
+    // mesmo número que a `/reading` grava — em obra em andamento E concluída.
     totalChapters: pickTotalChapters(accepted, publicationStatus).value ?? toChapterCount(candidate.chapters),
     genres: uniqueStrings(accepted.flatMap((result) => result.genres ?? [])),
     tags: [],
@@ -2081,10 +2081,9 @@ export async function fetchMultiSourceDetails(candidate: MergedCandidate): Promi
   if (Object.keys(externalIds).length > 0) data.externalIds = externalIds
 
   const conflicts: ConflictField[] = []
-  // Obra ainda saindo com Comix/Mangago respondendo: o total sai da régua, sem nada a
-  // decidir — é o que a `/reading` aplica sozinha. Sem isto a divergência MU × Comix (quase
-  // toda obra em andamento) virava conflito, e o "Atualizar" do Assinante, que PULA campo em
-  // conflito, nunca subia o total.
+  // Com Comix ou Mangago respondendo (qualquer status de publicação): o total sai da régua, sem
+  // nada a decidir — é o que a `/reading` aplica sozinha. Sem isto a divergência MU × Comix
+  // virava conflito, e o "Atualizar" do Assinante, que PULA campo em conflito, nunca subia o total.
   if (!pickTotalChapters(uniqueAccepted, data.publicationStatus).decidedByRule) {
     const chaptersConflict = detectConflict("chapters", "totalChapters", "Total de capítulos", uniqueAccepted)
     if (chaptersConflict) conflicts.push(chaptersConflict)
