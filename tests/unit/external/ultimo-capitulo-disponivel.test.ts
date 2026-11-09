@@ -114,7 +114,8 @@ vi.mock("@/lib/supabase/admin", () => ({
 vi.mock("@/server/queries/current-user", () => ({ ensureAdmin: async () => ({ ok: true }) }))
 vi.mock("@/server/recalc/queue", () => ({ markRecalcPending: vi.fn(async () => {}) }))
 vi.mock("@/server/actions/comix-hid", () => ({ persistComixHid: vi.fn(async () => {}) }))
-vi.mock("@/lib/external/mangaupdates", () => ({ fetchMangaUpdatesStatus: vi.fn(async () => "Completed") }))
+const mu = vi.hoisted(() => ({ status: "Completed" as string | null }))
+vi.mock("@/lib/external/mangaupdates", () => ({ fetchMangaUpdatesStatus: vi.fn(async () => mu.status) }))
 vi.mock("@/lib/external/mangadex", () => ({ fetchMangaDexChapterDates: vi.fn(async () => []) }))
 
 import { checkReadingUpdates } from "@/server/actions/reading"
@@ -162,5 +163,55 @@ describe("checkReadingUpdates — obra concluída no original com a tradução a
     expect(r.hasNew).toBe(true)
     expect(r.latestExternal).toBe(23)
     expect(banco.updates).toContainEqual({ total_chapters: 23 })
+  })
+})
+
+// ── O status pela regra única (`decidePublicationStatus`) ──────────────────────────────────
+
+describe("checkReadingUpdates — status de publicação", () => {
+  const comMangaUpdates = (publication: string) => ({
+    ...banco.obra,
+    total_chapters: 23,
+    publication_status_id: getPublicationStatusIdByName(publication),
+    work_external_ids: [
+      { source: "comix", external_id: "abc12", is_rejected: false },
+      { source: "mangago", external_id: "obra_teste", is_rejected: false },
+      { source: "mangaupdates", external_id: "123", is_rejected: false },
+    ],
+  })
+
+  beforeEach(() => {
+    lookups.comix.mockReset()
+    lookups.mangago.mockReset()
+    banco.updates = []
+    comixResponde(23)
+    mangagoResponde(23)
+  })
+
+  it("fim do hiato: o MangaUpdates diz que voltou e a obra passa a Ongoing", async () => {
+    banco.obra = comMangaUpdates("Hiatus")
+    mu.status = "Ongoing"
+    const [r] = await checkReadingUpdates(["w1"])
+
+    expect(r.statusApplied).toBe("Ongoing")
+    expect(banco.updates).toContainEqual({ publication_status_id: getPublicationStatusIdByName("Ongoing") })
+  })
+
+  it("em andamento que terminou no original passa a Completed", async () => {
+    banco.obra = comMangaUpdates("Ongoing")
+    mu.status = "Completed"
+    const [r] = await checkReadingUpdates(["w1"])
+
+    expect(r.statusApplied).toBe("Completed")
+    expect(banco.updates).toContainEqual({ publication_status_id: getPublicationStatusIdByName("Completed") })
+  })
+
+  it("nunca tira uma obra de Completed", async () => {
+    banco.obra = comMangaUpdates("Completed")
+    mu.status = "Ongoing"
+    const [r] = await checkReadingUpdates(["w1"])
+
+    expect(r.statusApplied).toBeNull()
+    expect(banco.updates.some((u) => "publication_status_id" in u)).toBe(false)
   })
 })

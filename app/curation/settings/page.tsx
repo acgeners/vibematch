@@ -27,6 +27,8 @@ import { ResolveComixPanel, CoberturaInfoTooltip } from "@/components/settings/r
 import { ItemHelpPopover } from "@/components/settings/item-help-popover"
 import { ComixHealthPanel } from "@/components/settings/comix-health-panel"
 import { ProtectedSourcesHealthPanel } from "@/components/settings/protected-sources-health-panel"
+import { CatalogSyncPanel } from "@/components/settings/catalog-sync-panel"
+import { CATALOG_SYNC_STALE_DAYS, getCatalogSyncOverview } from "@/server/queries/catalog-sync"
 import { AiEvalOnCreateToggle } from "@/components/settings/ai-eval-on-create-toggle"
 import { SynopsisCanonicalOnCreateToggle } from "@/components/settings/synopsis-canonical-on-create-toggle"
 import { ReviewSummaryEnabledToggle } from "@/components/settings/review-summary-enabled-toggle"
@@ -378,6 +380,11 @@ async function ItemBody({
         countPendingReviewSummaries(),
       ])
       return <ReviewSummaryPanel accent={accent} pendingCount={pendingCount} totalCount={worksCount} />
+    }
+
+    case "catalog-sync": {
+      const overview = await getCatalogSyncOverview()
+      return <CatalogSyncPanel accent="amber" overview={overview} staleDays={CATALOG_SYNC_STALE_DAYS} />
     }
 
     case "cloudflare-sources": {

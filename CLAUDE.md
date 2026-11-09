@@ -863,6 +863,11 @@ Obra sem `last_read_at` usa `user_work_state.updated_at` só para classificar, e
 **`works.total_chapters` = último capítulo disponível: Comix (`latestChapter`) primeiro, o Mangago só sem ele, as demais fontes só sem os dois — em obra em andamento E concluída.** O total do original fazia a `/reading` cobrar capítulos que não existem traduzidos. Nunca "o maior entre as fontes" (um capítulo-aviso do Mangago vira capítulo novo) nem o `finalChapter` do Comix (é cadastro, não o postado); e o status do Comix não separa tradução completa de incompleta (diz "releasing" quase sempre).
 Dono: `pickTotalChapters` (`lib/external/chapter-total.ts`), usado pela checagem da `/reading` e pelo "Atualizar dados"; a conferência de número corrompido (`isImplausibleChapter`) só descarta erro de ordem de grandeza, nunca fonte mais baixa.
 
+### O status de publicação tem UMA regra, e o MangaUpdates decide
+
+**Sem humano escolhendo, o status sai de `decidePublicationStatus` (`lib/external/publication-status-sync.ts`): o MangaUpdates decide, o Comix só sem ele; nunca tira uma obra de Completed ou Cancelled; "Ongoing" só pelo MangaUpdates, sobre obra em Hiatus ou sem status.** Vale para a checagem da `/reading`, o lote do catálogo e o "Atualizar automático"; o "Atualizar dados" do curador segue mostrando o conflito. Não trate discordância entre fontes como conflito aqui: elas discordam quase sempre, e era isso que fazia o "Atualizar automático" nunca gravar status.
+O lote do catálogo (`/curation/settings?g=fontes`, "Capítulos e status") roda a checagem da `/reading` nas obras Ongoing, Hiatus e Unknown (`CATALOG_SYNC_STATUSES`); precisa do bypass do Mac, então roda no localhost.
+
 ### Os filtros da `/reading` seguem a versão LIDA
 
 **Obra `mixed` segue `read_edition` no filtro de 18+ da `/reading`; sem versão marcada, fica em Ocultar e em Só 18+.** A lista é do que a pessoa está lendo, então não copie a régua do `/ranking` para cá, nem a daqui para lá. Dono: `lib/reading/reading-filters.ts`.

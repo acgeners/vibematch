@@ -7,6 +7,7 @@ import {
   Gauge,
   Globe,
   MessageSquareText,
+  RefreshCw,
   ScanSearch,
   ShieldAlert,
   ShieldQuestion,
@@ -150,11 +151,24 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     id: "fontes",
     label: "Fontes externas",
     hint: "Comix, Mangago e AnimePlanet",
-    info: "Operação das fontes externas. Resolve o hid das obras da Comix (habilita a coleta de reviews) e testa a conexão de cada fonte — inclusive as que só passam via bypass do Cloudflare. Use quando obras novas estão sem reviews, ou quando uma fonte some.",
+    info: "Operação das fontes externas. Mantém capítulos e status do catálogo em dia, resolve o hid das obras da Comix (habilita a coleta de reviews) e testa a conexão de cada fonte — inclusive as que só passam via bypass do Cloudflare. Use quando obras novas estão sem reviews, ou quando uma fonte some.",
     icon: Globe,
     iconName: "Globe",
     accent: "amber",
     sections: [
+      {
+        id: "catalog-sync",
+        title: "Capítulos e status",
+        panelTitle: "Capítulos e status do catálogo",
+        description:
+          "Atualiza o último capítulo disponível e o status de publicação das obras em andamento, em hiato ou sem status.",
+        help: "A página Acompanhamento só verifica as obras que você está lendo; o resto do catálogo ficava com capítulos e status da época em que foi cadastrado. Este lote usa a mesma checagem (Comix, Mangago e MangaUpdates) nas obras Ongoing, Hiatus e Unknown. Concluídas e canceladas ficam de fora: o status delas nunca é desfeito, e um capítulo a mais numa obra concluída que ninguém acompanha não muda nada. Não chama IA.",
+        icon: RefreshCw,
+        chips: [
+          { kind: "cost", tier: "free", label: "Grátis" },
+          { kind: "cadence", label: "Semanal" },
+        ],
+      },
       {
         id: "comix",
         title: "Comix",
