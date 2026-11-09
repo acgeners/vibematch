@@ -1,4 +1,5 @@
 import { withTimeout } from "@/lib/external/with-timeout"
+import { pickTotalChapters } from "@/lib/external/chapter-total"
 import type { PublicationStatus } from "@/types/domain"
 import { getComixLatestChapter } from "./comix"
 import { getMangagoLatestChapter } from "./mangago"
@@ -8,7 +9,7 @@ import type { ChapterCheckInput, ChapterLookup, ChapterSourceId } from "./types"
 export type { ChapterCheckInput, ChapterLookup, ChapterSourceId } from "./types"
 
 // Cada fonte é só uma checadora de release (último cap + datas), separada do
-// pipeline de metadata/IA. O agregador pega o maior capítulo entre elas.
+// pipeline de metadata/IA. Quem escolhe entre elas é `pickTotalChapters` (Comix primeiro).
 //
 // 🔴 O **coffeemanga saiu em 2026-08-12: o site deixou de existir**. `coffeemanga.ink`
 // (e o `.com`) fazem 301 pra `bunnynovel.com`, um site de NOVELS — a busca Madara
@@ -37,7 +38,7 @@ const CHAPTER_SOURCES = CHAPTER_SOURCE_IDS.map((id) => ({ id, lookup: CHAPTER_LO
 const SOURCE_TIMEOUT_MS = 25_000
 
 export interface LatestChapterResult {
-  /** Maior capítulo entre as fontes (mais atualizado vence), ou `null` se nenhuma respondeu. */
+  /** Último capítulo disponível pela régua de `pickTotalChapters`, ou `null` se nenhuma fonte serviu. */
   latest: number | null
   /** Capítulo por fonte (`null` = falhou/sem match), pra diagnóstico na UI. */
   bySource: Partial<Record<ChapterSourceId, number | null>>
@@ -58,12 +59,16 @@ export interface LatestChapterResult {
 }
 
 /**
- * Consulta todas as fontes de capítulo em paralelo (fail-soft) e agrega o maior
- * capítulo encontrado. Uma fonte que falha/expira não derruba as demais. Os
- * metadados de data (relativa/absoluta/cadência) vêm da fonte vencedora.
+ * Consulta todas as fontes de capítulo em paralelo (fail-soft) e escolhe o último capítulo
+ * disponível pela régua de `pickTotalChapters` (Comix primeiro; o Mangago só sem ele). Uma
+ * fonte que falha/expira não derruba as demais.
+ *
+ * `opts.currentTotal` é o total já gravado — só a referência da conferência de número
+ * corrompido, nunca um valor escolhível.
  */
 export async function getLatestChapter(
   input: ChapterCheckInput,
+  opts: { currentTotal?: number | null } = {},
 ): Promise<LatestChapterResult> {
   const settled = await Promise.allSettled(
     CHAPTER_SOURCES.map((s) =>
@@ -86,20 +91,22 @@ export async function getLatestChapter(
     }
   })
 
-  // Fonte autoritativa = a de MAIOR capítulo; EMPATE → mangago, que dá a LISTA real de
-  // capítulos (contagem de verdade: cada decimal é 1 cap, sem aritmética de rótulo) e datas
-  // absolutas. ⚠️ Nunca faça a fonte da lista vencer INCONDICIONALMENTE: quando ela está
-  // ATRÁS de outra, isso SUBCONTA — se o comix já tem o cap novo (ex.: ch23) e a outra ainda
-  // não o indexou (ch22), a obra fica PRESA no total antigo e o "cap novo" nunca aparece
-  // (bug real: "My Husband Is Definitely a Paladin"). Quem tem o cap mais alto vence; o
-  // desempate só decide o que já empatou.
-  const primary = fulfilled.reduce<NonNullable<ChapterLookup> | undefined>((best, v) => {
-    if (!best || v.chapter > best.chapter) return v
-    if (v.chapter === best.chapter && v.source === "mangago" && best.source !== "mangago") {
-      return v
-    }
-    return best
-  }, undefined)
+  // O capítulo é do dono da régua (`pickTotalChapters`), o MESMO que o "Atualizar dados" usa:
+  // Comix primeiro, o Mangago só sem ele (ou com o Comix descartado como número corrompido).
+  // Até 2026-11-09 vencia o MAIOR dos dois — e um capítulo-AVISO do Mangago virava capítulo novo.
+  const pick = pickTotalChapters(
+    fulfilled.map((v) => ({ source: v.source, chapters: v.chapter })),
+    null,
+    { current: opts.currentTotal },
+  )
+  const primary = pick.source ? fulfilled.find((v) => v.source === pick.source) : undefined
+
+  // As DATAS absolutas e a LISTA real de capítulos são do Mangago, e só valem quando ele mostra o
+  // MESMO capítulo que venceu: aí a data é a desse capítulo e a lista conta exatamente o que falta
+  // ler. Com o Mangago atrás (ou à frente, num aviso), elas falariam de outro capítulo — e a data
+  // fica a relativa do Comix, como já era quando o Comix vencia pelo tamanho.
+  const mangago = fulfilled.find((v) => v.source === "mangago")
+  const datas = primary && mangago && mangago.chapter === primary.chapter ? mangago : primary
 
   // Status vem SEMPRE da comix (o mangago não fornece), independente de quem
   // venceu como fonte autoritativa do capítulo.
@@ -110,9 +117,9 @@ export async function getLatestChapter(
     bySource,
     resolvedComixHid,
     releasedLabel: primary?.releasedLabel ?? null,
-    releasedAt: primary?.releasedAt ?? null,
-    cadenceDates: primary?.cadenceDates ?? [],
-    chapterNumbers: primary?.chapterNumbers ?? null,
+    releasedAt: datas?.releasedAt ?? null,
+    cadenceDates: datas?.cadenceDates ?? [],
+    chapterNumbers: datas?.chapterNumbers ?? null,
     latestUrl: primary?.sourceUrl ?? null,
     status: comixLookup?.status ?? null,
   }

@@ -3,10 +3,11 @@ import type { PublicationStatus } from "@/types/domain"
 // As fontes de capítulo são um registro próprio (checadoras de release),
 // desacoplado do `ExternalSourceId` (gerado por DB pro pipeline de metadata/IA).
 //
-// 🔴 Esta lista é a AUTORIDADE sobre o total de capítulos de obra ainda saindo, e tem dois
-// leitores: o agregador da `/reading` (`getLatestChapter`) e o merge do "Atualizar dados"
-// (`pickTotalChapters`). Os dois gravam `works.total_chapters`; com listas próprias, um
-// desfazia o que o outro gravou. Ver `lib/external/chapter-total.ts`.
+// 🔴 Esta lista é a AUTORIDADE sobre o número de capítulos, e A ORDEM É A PREFERÊNCIA: a
+// primeira que responder vence (Comix; o Mangago só sem ele). Tem dois leitores: o agregador
+// da `/reading` (`getLatestChapter`) e o merge do "Atualizar dados" (`pickTotalChapters`). Os
+// dois gravam `works.total_chapters`; com listas próprias, um desfazia o que o outro gravou.
+// Ver `lib/external/chapter-total.ts`.
 export const CHAPTER_SOURCE_IDS = ["comix", "mangago"] as const
 export type ChapterSourceId = (typeof CHAPTER_SOURCE_IDS)[number]
 
