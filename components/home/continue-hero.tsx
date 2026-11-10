@@ -80,7 +80,11 @@ function pickHighlight(items: ContinueReadingItem[]): {
         totalChapters: i.totalChapters,
         pending: i.pending,
         lastReadAt: i.lastReadAt,
+        // Obra em andamento sem lançamento há 45+ dias está em hiato na prática e sai do
+        // destaque, como na /reading (`isPracticalHiatus`).
+        lastReleasedAt: i.lastChapterReleasedAt,
         publicationHiatus: isPublicationHiatus(i.publicationStatusId),
+        publicationOngoing: isOngoing(i.publicationStatusId),
       }) === "onpace",
   )
 

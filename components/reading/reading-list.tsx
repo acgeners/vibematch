@@ -58,6 +58,7 @@ import {
   classifyOngoing,
   daysSince,
   hiatusBand,
+  isPracticalHiatus,
   recencyDate,
 } from "@/lib/reading/pace-bands"
 import type { CompletedBand, OngoingBand, PaceInput } from "@/lib/reading/pace-bands"
@@ -211,7 +212,7 @@ type BandConfig = { label: string; hint: string; bar: string; progress: string; 
 // "30 dias" aqui deixaria a tela explicando uma regra que não é a que roda.
 type ReadingState = OngoingBand
 
-const READING_STATE_ORDER: readonly ReadingState[] = ["onpace", "uptodate", "catching", "slowing", "quiet", "behind"]
+const READING_STATE_ORDER: readonly ReadingState[] = ["onpace", "uptodate", "catching", "slowing", "behind"]
 
 const READING_STATE_CONFIG: Record<ReadingState, BandConfig> = {
   onpace: {
@@ -242,13 +243,6 @@ const READING_STATE_CONFIG: Record<ReadingState, BandConfig> = {
     progress: "bg-orange-500",
     chip: "border-orange-500/30 bg-orange-500/15 text-orange-600 dark:text-orange-400",
   },
-  quiet: {
-    label: "Sem capítulo novo",
-    hint: `você leu tudo e a obra não lança há ${SILENT_RELEASE_DAYS} dias ou mais`,
-    bar: "bg-violet-500",
-    progress: "bg-violet-500",
-    chip: "border-violet-500/30 bg-violet-500/15 text-violet-600 dark:text-violet-400",
-  },
   behind: {
     label: "Atrasado",
     hint: `faltam mais de ${NEAR_CHAPTERS} e você não lê há ${STALE_DAYS} dias ou mais`,
@@ -271,10 +265,11 @@ function paceInputOf(w: ReadingWork, result: ReadingUpdateResult | undefined): P
     lastTouchedAt: w.lastTouchedAt,
     lastReleasedAt: result?.releasedAt ?? w.lastChapterReleasedAt,
     publicationHiatus: false,
+    publicationOngoing: isOngoing(w),
   }
 }
 
-/** Grupo da seção "Em andamento". Obra em hiato de publicação mora em "Outras", por motivo. */
+/** Grupo da seção "Em andamento". Obra em hiato — oficial ou na prática — mora em "Outras". */
 function classifyReadingState(w: ReadingWork, result: ReadingUpdateResult | undefined): ReadingState {
   return classifyOngoing(paceInputOf(w, result))
 }
@@ -353,7 +348,7 @@ const PAUSE_STATE_CONFIG: Record<PauseState, BandConfig> = {
   },
   hiatus: {
     label: "Em hiato",
-    hint: "a fonte não diz se ou quando volta",
+    hint: `sem capítulo novo há ${SILENT_RELEASE_DAYS} dias ou mais, ou em hiato sem previsão de volta`,
     bar: "bg-violet-500",
     progress: "bg-violet-500",
     chip: "border-violet-500/30 bg-violet-500/15 text-violet-600 dark:text-violet-400",
@@ -383,6 +378,8 @@ const PAUSE_STATE_CONFIG: Record<PauseState, BandConfig> = {
 
 function classifyPauseState(w: ReadingWork): PauseState {
   if (isCancelledPublicationStatus(w.publicationStatusId)) return "cancelled"
+  // Em andamento e em "Outras" = hiato NA PRÁTICA (`sectionOf`): sem tipo declarado, "Em hiato".
+  if (isOngoing(w)) return "hiatus"
   if (!isHiatusPublicationStatus(w.publicationStatusId)) return "unknown"
   return hiatusBand(w.hiatusKind)
 }
@@ -435,15 +432,20 @@ function isOngoing(w: ReadingWork): boolean {
   return id != null && PUBLICATION_STATUSES_BY_ID[id]?.status === "Ongoing"
 }
 
-/** A seção sai só do status de publicação. Status ausente ou desconhecido cai em "Outras". */
-function sectionOf(w: ReadingWork): SectionKey {
-  if (isOngoing(w)) return "ongoing"
+/**
+ * A seção sai do status de publicação, com UMA exceção: obra em andamento que não lança há
+ * `SILENT_RELEASE_DAYS` dias está em hiato na prática e vai para "Outras" (`isPracticalHiatus`).
+ * A data do lançamento pode vir da checagem em voo, então a obra muda de seção na hora em que um
+ * capítulo novo aparece. Status ausente ou desconhecido cai em "Outras".
+ */
+function sectionOf(w: ReadingWork, result: ReadingUpdateResult | undefined): SectionKey {
+  if (isOngoing(w)) return isPracticalHiatus(paceInputOf(w, result)) ? "others" : "ongoing"
   return isConcludedPublicationStatus(w.publicationStatusId) ? "completed" : "others"
 }
 
 /** A banda da obra na taxonomia da seção dela. */
 function bandOf(w: ReadingWork, result: ReadingUpdateResult | undefined): string {
-  const section = sectionOf(w)
+  const section = sectionOf(w, result)
   if (section === "ongoing") return classifyReadingState(w, result)
   return section === "completed" ? classifyTriageState(w, result) : classifyPauseState(w)
 }
@@ -601,9 +603,9 @@ export function ReadingList({
 
   const worksBySection = useMemo(() => {
     const out: Record<SectionKey, ReadingWork[]> = { ongoing: [], completed: [], others: [] }
-    for (const w of displayed) out[sectionOf(w)].push(w)
+    for (const w of displayed) out[sectionOf(w, results[w.id])].push(w)
     return out
-  }, [displayed])
+  }, [displayed, results])
 
   // Default de abertura quando o usuário ainda não interagiu: a primeira seção com obra.
   const defaultOpen = SECTION_ORDER.find((key) => worksBySection[key].length > 0) ?? "ongoing"
@@ -657,7 +659,7 @@ export function ReadingList({
 
   // Chip da faixa de novidades: abre o que precisar e rola até o card.
   const jumpToWork = (work: ReadingWork) =>
-    revealInBand(sectionOf(work), bandOf(work, results[work.id]), `work-${work.id}`)
+    revealInBand(sectionOf(work, results[work.id]), bandOf(work, results[work.id]), `work-${work.id}`)
 
   // Obras com capítulo novo nesta sessão (pós "Verificar atualizações"), pra faixa do topo. Só as
   // que estão na tela: o clique da faixa rola até o card, e obra filtrada não tem card. O toast da
