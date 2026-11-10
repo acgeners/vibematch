@@ -17,7 +17,7 @@ import { differenceInCalendarDays } from "date-fns"
 
 /** Até quantos capítulos faltando ainda é "perto" (Acompanhando, Quase no fim). */
 export const NEAR_CHAPTERS = 7
-/** Dias sem ler a partir dos quais a obra em andamento esfria (Desacelerando, Atrasado). */
+/** Dias sem ler a partir dos quais a obra em andamento esfria (Parou quase em dia, Ficou para trás). */
 export const STALE_DAYS = 30
 /** Dias sem ler a partir dos quais a obra concluída ou parada conta como "Parado". */
 export const STALLED_DAYS = 45
@@ -128,11 +128,13 @@ export function isPracticalHiatus(
 /**
  * Grupo de uma obra em andamento (que não está em hiato, oficial ou na prática):
  *
- * | faltam    | leu há < 30 dias | 30+ dias      |
- * |-----------|------------------|---------------|
- * | 0         | Em dia                           |
- * | 1 a 7     | Acompanhando     | Desacelerando |
- * | 8 ou mais | Alcançando       | Atrasado      |
+ * | faltam    | leu há < 30 dias | 30+ dias           |
+ * |-----------|------------------|--------------------|
+ * | 0         | Em dia                                |
+ * | 1 a 7     | Acompanhando     | Parou quase em dia |
+ * | 8 ou mais | Alcançando       | Ficou para trás    |
+ *
+ * Gerúndio = você está lendo; passado = você parou (os rótulos moram em `reading-list.tsx`).
  *
  * Sem total conhecido não dá pra medir distância, e a obra fica em "Acompanhando" (neutro).
  */
