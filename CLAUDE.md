@@ -857,6 +857,7 @@ os 12 status de hoje.
 
 **Três seções pela publicação (Em andamento, Concluídas, Outras); Outras agrupa pelo motivo da parada.** A distância é em capítulos faltando (até 7 = perto), cruzada com 30 dias sem ler. Dona única: `lib/reading/pace-bands.ts`, que também escolhe o "Continue lendo" da home; os textos dos grupos derivam das constantes de lá.
 **Obra em andamento sem lançamento há 45 dias ou mais está em hiato NA PRÁTICA (`isPracticalHiatus`) e vai para Outras › "Em hiato", com ou sem capítulos por ler; "Sem capítulo novo" deixou de existir.** Só agrupa: não grave "Hiatus" na obra — o status é do catálogo (Nota Prevista, filtro do `/ranking`) e a checagem seguinte o desfaria pelo MangaUpdates. Obra concluída nunca conta.
+**Nome de grupo de Em andamento fala da LEITURA, nunca da publicação: gerúndio = está lendo (Acompanhando, Alcançando), passado = parou (Parou quase em dia, Ficou para trás).** "Atrasado" saiu porque no calendário da mesma página quer dizer capítulo previsto que não saiu. On-hold e Arquivar aparecem a partir de 45 dias sem ler (`STALLED_DAYS`), em Em andamento e em Outras.
 Obra sem `last_read_at` usa `user_work_state.updated_at` só para classificar, e o card diz que é estimativa; nunca grave data inventada. Quem salva capítulos lidos carimba a data por `withReadDateStamp` (`lib/reading/read-stamp.ts`), exceto importação, que não sabe quando foi lido.
 
 ### O número de capítulos é o ÚLTIMO DISPONÍVEL PARA LER, não o total do original

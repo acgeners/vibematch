@@ -218,6 +218,40 @@ describe("as regras novas na tela", () => {
   })
 })
 
+// Decidido em 2026-11-10: gerúndio = está lendo, passado = parou, e nenhum nome pode soar como fato
+// da publicação ("Atrasado" é, no calendário desta página, o capítulo previsto que não saiu).
+describe("ritmo: os nomes falam da sua leitura", () => {
+  const banda = (id: string) => within(document.getElementById(`band-ongoing-${id}`) as HTMLElement)
+  const paradas = [
+    obra("x", "Parada Perto", { chaptersRead: 10, totalChapters: 13, lastReadAt: diasAtras(40) }),
+    obra("y", "Parada Longe", { chaptersRead: 10, totalChapters: 40, lastReadAt: diasAtras(40) }),
+  ]
+
+  it("parou com poucos por ler é 'Parou quase em dia'; com muitos, 'Ficou para trás'", () => {
+    renderizar([], paradas)
+    expect(banda("slowing").getByText("Parada Perto")).toBeTruthy()
+    expect(banda("slowing").getAllByRole("button", { name: /^Parou quase em dia/ }).length).toBeGreaterThan(0)
+    expect(banda("behind").getByText("Parada Longe")).toBeTruthy()
+    expect(banda("behind").getAllByRole("button", { name: /^Ficou para trás/ }).length).toBeGreaterThan(0)
+  })
+
+  it("os nomes antigos sumiram da lista", () => {
+    renderizar([], paradas)
+    expect(screen.queryByText("Atrasado")).toBeNull()
+    expect(screen.queryByText("Desacelerando")).toBeNull()
+  })
+
+  it("On-hold e Arquivar a partir de 45 dias sem ler, a mesma régua de Outras", () => {
+    renderizar([], [
+      obra("z", "Parada Faz Tempo", { chaptersRead: 10, totalChapters: 40, lastReadAt: diasAtras(50) }),
+      ...paradas,
+    ])
+    const card = (id: string) => within(document.getElementById(`work-${id}`) as HTMLElement)
+    expect(card("z").getByRole("button", { name: /On-hold/ })).toBeTruthy()
+    expect(card("y").queryByRole("button", { name: /On-hold/ })).toBeNull()
+  })
+})
+
 // Decidido em 2026-11-09: em andamento sem lançamento há 45+ dias está em hiato NA PRÁTICA.
 describe("hiato na prática", () => {
   const grupoHiato = () => within(document.getElementById("band-others-hiatus") as HTMLElement)

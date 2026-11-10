@@ -202,9 +202,13 @@ type BandConfig = { label: string; hint: string; bar: string; progress: string; 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TAXONOMIA A — RITMO (só seção "Em andamento" / publicação Ongoing).
-// 6 bandas cruzando % lido × recência (STALE_DAYS) + hiato de publicação. O % dirige a
-// maior parte; a recência separa "lendo agora" de "esfriou". A ORDEM DE EXIBIÇÃO é o pedido
-// do usuário, não o gradiente de %.
+// Capítulos que faltam × recência (STALE_DAYS). A ORDEM DE EXIBIÇÃO é o pedido do usuário.
+//
+// 🔴 Os nomes seguem UMA regra (decisão de 2026-11-10): GERÚNDIO = você está lendo
+// (Acompanhando, Alcançando); PASSADO = você parou (Parou quase em dia, Ficou para trás). O resto
+// do nome diz a distância. E todo nome fala da LEITURA: "Atrasado" e "Desacelerando" eram lidos
+// como fato da publicação — e no calendário desta mesma página "atrasado" é o capítulo previsto
+// que não saiu.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // A régua e os limiares moram em `lib/reading/pace-bands.ts` — a home usa a MESMA pra escolher o
@@ -237,14 +241,14 @@ const READING_STATE_CONFIG: Record<ReadingState, BandConfig> = {
     chip: "border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400",
   },
   slowing: {
-    label: "Desacelerando",
+    label: "Parou quase em dia",
     hint: `faltam até ${NEAR_CHAPTERS} e você não lê há ${STALE_DAYS} dias ou mais`,
     bar: "bg-orange-500",
     progress: "bg-orange-500",
     chip: "border-orange-500/30 bg-orange-500/15 text-orange-600 dark:text-orange-400",
   },
   behind: {
-    label: "Atrasado",
+    label: "Ficou para trás",
     hint: `faltam mais de ${NEAR_CHAPTERS} e você não lê há ${STALE_DAYS} dias ou mais`,
     bar: "bg-rose-500",
     progress: "bg-rose-500",
@@ -1047,6 +1051,7 @@ export function ReadingList({
             order={READING_STATE_ORDER}
             config={READING_STATE_CONFIG}
             label={`Seu ritmo nas ${worksBySection.ongoing.length} em andamento`}
+            showActions={(w) => daysSince(recencyDate(w)) >= STALLED_DAYS}
             open={isOpen("ongoing")}
             {...sectionProps}
           />
