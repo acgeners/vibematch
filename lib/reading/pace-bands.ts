@@ -21,7 +21,10 @@ export const NEAR_CHAPTERS = 7
 export const STALE_DAYS = 30
 /** Dias sem ler a partir dos quais a obra concluída ou parada conta como "Parado". */
 export const STALLED_DAYS = 45
-/** Dias sem lançamento a partir dos quais "você leu tudo" vira "Sem capítulo novo". */
+/**
+ * Dias sem lançamento a partir dos quais uma obra em andamento está EM HIATO NA PRÁTICA, anunciado
+ * ou não (decisão de 2026-11-09). Vale para a /reading e para a home; NÃO muda o status gravado.
+ */
 export const SILENT_RELEASE_DAYS = 45
 /** Acima disto lido, a obra concluída longe do fim é "Continuar"; até isto, "Definir". */
 export const CONTINUE_PCT = 0.5
@@ -29,7 +32,7 @@ export const CONTINUE_PCT = 0.5
 export const BEHIND_PCT = 0.4
 
 /** Grupos da seção "Em andamento". */
-export type OngoingBand = "onpace" | "uptodate" | "catching" | "slowing" | "quiet" | "behind"
+export type OngoingBand = "onpace" | "uptodate" | "catching" | "slowing" | "behind"
 
 /**
  * Hiato de PUBLICAÇÃO, qualificado pela migration 183. Separa "a S4 sai em setembro" (esperar) de
@@ -58,10 +61,15 @@ export interface PaceInput {
    * também, e por isso o card diz "mexeu em", nunca "leu em".
    */
   lastTouchedAt?: string | null
-  /** Data do último capítulo lançado (ISO). Sem ela, "leu tudo" nunca vira "Sem capítulo novo". */
+  /** Data do último capítulo lançado (ISO). Sem ela, a obra nunca conta como em hiato na prática. */
   lastReleasedAt?: string | null
   /** True quando a PUBLICAÇÃO está em hiato oficial. */
   publicationHiatus: boolean
+  /**
+   * True quando a publicação está em andamento (status Ongoing). Só ela pode estar em hiato NA
+   * PRÁTICA: uma obra concluída também não lança há meses, e isso não é hiato.
+   */
+  publicationOngoing?: boolean
   /** `works.hiatus_kind` — só é lido com `publicationHiatus` true. */
   hiatusKind?: "between_seasons" | "mid_season" | null
 }
@@ -100,33 +108,47 @@ export function hiatusBand(kind: PaceInput["hiatusKind"]): HiatusBand {
 }
 
 /**
- * Grupo de uma obra em andamento:
+ * Obra em andamento que não lança há `SILENT_RELEASE_DAYS` dias ou mais: em hiato NA PRÁTICA,
+ * anunciado ou não. Ela vai para "Em hiato" mesmo com capítulos por ler — o hiato é da publicação,
+ * não da leitura, e o card continua mostrando quantos faltam. Sem data de lançamento, nunca.
+ *
+ * ⚠️ Só agrupa: o status GRAVADO continua o oficial. Gravar "Hiatus" mexeria na Nota Prevista e no
+ * filtro do `/ranking` de todo mundo, e a checagem seguinte o desfaria — o MangaUpdates segue
+ * dizendo "Ongoing" e a regra de status grava o fim do hiato (`decidePublicationStatus`).
+ */
+export function isPracticalHiatus(
+  input: Pick<PaceInput, "lastReleasedAt" | "publicationOngoing">,
+  now: Date = new Date(),
+): boolean {
+  if (!input.publicationOngoing) return false
+  const silence = daysSince(input.lastReleasedAt, now)
+  return Number.isFinite(silence) && silence >= SILENT_RELEASE_DAYS
+}
+
+/**
+ * Grupo de uma obra em andamento (que não está em hiato, oficial ou na prática):
  *
  * | faltam    | leu há < 30 dias | 30+ dias      |
  * |-----------|------------------|---------------|
- * | 0         | Em dia (ou Sem capítulo novo, se a obra não lança há 45+ dias) |
+ * | 0         | Em dia                           |
  * | 1 a 7     | Acompanhando     | Desacelerando |
  * | 8 ou mais | Alcançando       | Atrasado      |
  *
- * "Você leu tudo" não depende de quando você leu: é a publicação que pode ter parado, e quem diz
- * isso é a data do último lançamento — não a sua. Sem total conhecido não dá pra medir distância,
- * e a obra fica em "Acompanhando" (neutro).
+ * Sem total conhecido não dá pra medir distância, e a obra fica em "Acompanhando" (neutro).
  */
 export function classifyOngoing(input: PaceInput, now: Date = new Date()): OngoingBand {
   const { pending } = input
   if (pending == null || progressOf(input) == null) return "onpace"
-  if (pending <= 0) {
-    const silence = daysSince(input.lastReleasedAt, now)
-    return Number.isFinite(silence) && silence >= SILENT_RELEASE_DAYS ? "quiet" : "uptodate"
-  }
+  if (pending <= 0) return "uptodate"
   const cold = daysSince(recencyDate(input), now) >= STALE_DAYS
   if (pending <= NEAR_CHAPTERS) return cold ? "slowing" : "onpace"
   return cold ? "behind" : "catching"
 }
 
-/** O grupo de ritmo, com o hiato oficial na frente de tudo (é o que a home pergunta). */
+/** O grupo de ritmo, com o hiato — oficial ou na prática — na frente de tudo (é o que a home pergunta). */
 export function classifyPace(input: PaceInput, now: Date = new Date()): ReadingBand {
   if (input.publicationHiatus) return hiatusBand(input.hiatusKind)
+  if (isPracticalHiatus(input, now)) return "hiatus"
   return classifyOngoing(input, now)
 }
 

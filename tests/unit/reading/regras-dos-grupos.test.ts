@@ -48,12 +48,6 @@ describe("Em andamento: capítulos que faltam × quando leu", () => {
     expect(classifyOngoing(obra(40, 40, { lastReadAt: null }), NOW)).toBe("uptodate")
   })
 
-  it("leu tudo e a obra não lança há 45 dias vira Sem capítulo novo — quem diz é a publicação", () => {
-    const lancou = (dias: number) => obra(40, 40, { lastReleasedAt: diasAtras(dias) })
-    expect(classifyOngoing(lancou(SILENT_RELEASE_DAYS), NOW)).toBe("quiet")
-    expect(classifyOngoing(lancou(SILENT_RELEASE_DAYS - 1), NOW)).toBe("uptodate")
-  })
-
   it("sem total conhecido não dá pra medir distância: fica neutro", () => {
     expect(classifyOngoing(obra(5, 0, { totalChapters: null, pending: null }), NOW)).toBe("onpace")
   })
@@ -62,6 +56,40 @@ describe("Em andamento: capítulos que faltam × quando leu", () => {
     expect(classifyPace(obra(2, 3, { publicationHiatus: true, hiatusKind: "between_seasons" }), NOW)).toBe("season_break")
     expect(classifyPace(obra(2, 3, { publicationHiatus: true, hiatusKind: "mid_season" }), NOW)).toBe("interrupted")
     expect(classifyPace(obra(2, 3, { publicationHiatus: true }), NOW)).toBe("hiatus")
+  })
+})
+
+// Decidido em 2026-11-09: obra em andamento sem lançamento há 45+ dias está em hiato NA PRÁTICA,
+// anunciado ou não, e vai para "Em hiato" — com ou sem capítulos por ler.
+describe("hiato na prática", () => {
+  const emAndamento = (lidos: number, total: number, diasSemLancar: number | null) =>
+    obra(lidos, total, {
+      publicationOngoing: true,
+      lastReleasedAt: diasSemLancar == null ? null : diasAtras(diasSemLancar),
+    })
+
+  it("leu tudo e a obra não lança há 45 dias: Em hiato (era 'Sem capítulo novo')", () => {
+    expect(classifyPace(emAndamento(40, 40, SILENT_RELEASE_DAYS), NOW)).toBe("hiatus")
+    expect(classifyPace(emAndamento(40, 40, SILENT_RELEASE_DAYS - 1), NOW)).toBe("uptodate")
+  })
+
+  it("com capítulos por ler também: o hiato é da publicação, não da leitura", () => {
+    expect(classifyPace(emAndamento(28, 30, 120), NOW)).toBe("hiatus")
+    expect(classifyPace(emAndamento(10, 30, 120), NOW)).toBe("hiatus")
+  })
+
+  it("obra CONCLUÍDA não lança há meses e isso não é hiato", () => {
+    const concluida = obra(28, 30, { publicationOngoing: false, lastReleasedAt: diasAtras(300) })
+    expect(classifyPace(concluida, NOW)).toBe("onpace")
+  })
+
+  it("sem data de lançamento, nunca", () => {
+    expect(classifyPace(emAndamento(40, 40, null), NOW)).toBe("uptodate")
+  })
+
+  it("o grupo de leitura nunca mais devolve 'Sem capítulo novo'", () => {
+    const lancou = obra(40, 40, { publicationOngoing: true, lastReleasedAt: diasAtras(200) })
+    expect(classifyOngoing(lancou, NOW)).toBe("uptodate")
   })
 })
 

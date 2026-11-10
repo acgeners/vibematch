@@ -217,3 +217,31 @@ describe("as regras novas na tela", () => {
     expect(screen.getByText("faltam até 7 capítulos e você leu há menos de 30 dias")).toBeTruthy()
   })
 })
+
+// Decidido em 2026-11-09: em andamento sem lançamento há 45+ dias está em hiato NA PRÁTICA.
+describe("hiato na prática", () => {
+  const grupoHiato = () => within(document.getElementById("band-others-hiatus") as HTMLElement)
+
+  it("com capítulos por ler, sai de Em andamento e cai em Outras › Em hiato", () => {
+    renderizar([], [obra("p", "Parada sem Aviso", { chaptersRead: 10, totalChapters: 12, lastChapterReleasedAt: diasAtras(90) })])
+    expect(document.getElementById("section-ongoing")).toBeNull()
+    expect(grupoHiato().getByText("Parada sem Aviso")).toBeTruthy()
+  })
+
+  it("lida até o fim também — o grupo 'Sem capítulo novo' deixou de existir", () => {
+    renderizar([], [obra("q", "Alcançada", { chaptersRead: 12, totalChapters: 12, lastChapterReleasedAt: diasAtras(60) })])
+    expect(grupoHiato().getByText("Alcançada")).toBeTruthy()
+    expect(screen.queryByText("Sem capítulo novo")).toBeNull()
+  })
+
+  it("lançou há menos de 45 dias: segue em Em andamento", () => {
+    renderizar([], [obra("r", "Lançou Agora", { lastChapterReleasedAt: diasAtras(10) })])
+    expect(within(secao("ongoing")).getByText("Lançou Agora")).toBeTruthy()
+    expect(document.getElementById("band-others-hiatus")).toBeNull()
+  })
+
+  it("o texto do grupo diz que vale para o hiato sem anúncio, pela constante", () => {
+    renderizar([], [obra("p", "Parada sem Aviso", { lastChapterReleasedAt: diasAtras(90) })])
+    expect(screen.getByText("sem capítulo novo há 45 dias ou mais, ou em hiato sem previsão de volta")).toBeTruthy()
+  })
+})
