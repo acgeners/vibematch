@@ -61,6 +61,27 @@ describe("painel da Comix — código com 404", () => {
   })
 })
 
+describe("o botão de busca na Comix", () => {
+  it("🔴 leva o sort de relevância — sem ele a página da Comix nunca mostra resultado", () => {
+    renderizar()
+    const links = screen.getAllByRole("link", { name: "Procurar na Comix", hidden: true })
+    expect(links.length).toBeGreaterThan(0)
+    for (const link of links) {
+      const url = new URL(link.getAttribute("href") ?? "")
+      expect(url.origin + url.pathname).toBe("https://comix.to/browse")
+      expect(url.searchParams.get("sort")).toBe("relevance:desc")
+    }
+  })
+
+  it("o título vai inteiro, com apóstrofo e espaço", () => {
+    renderizar([{ id: "d1", title: "O Prêmio d'Alguém", hid: "x1", notFoundAt: "2026-11-12T03:00:00Z" }])
+    const hrefs = screen
+      .getAllByRole("link", { name: "Procurar na Comix", hidden: true })
+      .map((l) => new URL(l.getAttribute("href") ?? "").searchParams.get("q"))
+    expect(hrefs).toContain("O Prêmio d'Alguém")
+  })
+})
+
 describe("o nome da obra abre a página dela", () => {
   it("em todas as listas, em aba nova — a fila não perde o lugar", () => {
     renderizar()
