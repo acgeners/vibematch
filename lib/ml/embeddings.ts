@@ -3,8 +3,31 @@
  *
  * Modelo: text-embedding-3-small (1536 dims, $0.02/M tokens).
  * Suporta batch de até 100 inputs por request com retry exponencial em
- * erros transientes (429 / 5xx).
+ * erros transientes (429 de ritmo / 5xx). 429 de FALTA DE CRÉDITO não é transiente
+ * e não repete — ver `isOutOfCredit`.
  */
+
+import { isOutOfCredit } from "@/lib/ml/embedding-failure"
+import type { OpenAIErrorFields } from "@/lib/ml/embedding-failure"
+
+/**
+ * Erro da chamada à OpenAI com o que é preciso pra dizer o MOTIVO na tela
+ * (`classifyEmbeddingError`). Sem estes campos, só sobrava a mensagem em inglês
+ * no log do servidor.
+ */
+export class OpenAIEmbeddingsError extends Error implements OpenAIErrorFields {
+  readonly status: number | null
+  readonly type: string | null
+  readonly code: string | null
+
+  constructor(message: string, fields: OpenAIErrorFields) {
+    super(message)
+    this.name = "OpenAIEmbeddingsError"
+    this.status = fields.status
+    this.type = fields.type
+    this.code = fields.code
+  }
+}
 
 const EMBEDDING_MODEL = "text-embedding-3-small"
 const EMBEDDING_DIMENSIONS = 1536
@@ -32,8 +55,9 @@ export interface EmbeddingBatchResult {
 function getApiKey(): string {
   const key = process.env.OPENAI_API_KEY
   if (!key) {
-    throw new Error(
+    throw new OpenAIEmbeddingsError(
       "OPENAI_API_KEY não configurada — defina em .env.local pra gerar embeddings.",
+      { status: null, type: null, code: "missing_api_key" },
     )
   }
   return key
@@ -62,10 +86,17 @@ async function callOpenAIBatch(texts: string[]): Promise<EmbeddingBatchResult> {
       })
 
       if (!response.ok) {
-        // Retry em 429 (rate limit) e 5xx (server). Outros são erros do cliente.
-        const isTransient = response.status === 429 || response.status >= 500
         const body = (await response.json().catch(() => ({}))) as OpenAIErrorResponse
         const msg = body?.error?.message ?? response.statusText
+        const fields: OpenAIErrorFields = {
+          status: response.status,
+          type: body?.error?.type ?? null,
+          code: body?.error?.code ?? null,
+        }
+        // Retry em 429 de RITMO e 5xx (server). O 429 de falta de crédito usa o mesmo
+        // status e não passa sozinho: repetir só atrasava a mesma recusa em ~3s.
+        const isTransient =
+          (response.status === 429 && !isOutOfCredit(fields)) || response.status >= 500
         if (isTransient && attempt < MAX_RETRIES - 1) {
           const wait = BASE_RETRY_DELAY_MS * Math.pow(2, attempt)
           console.warn(
@@ -74,7 +105,7 @@ async function callOpenAIBatch(texts: string[]): Promise<EmbeddingBatchResult> {
           await delay(wait)
           continue
         }
-        throw new Error(`OpenAI embeddings falhou (${response.status}): ${msg}`)
+        throw new OpenAIEmbeddingsError(`OpenAI embeddings falhou (${response.status}): ${msg}`, fields)
       }
 
       const data = (await response.json()) as OpenAIEmbeddingResponse

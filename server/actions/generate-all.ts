@@ -15,6 +15,7 @@ import { markRecalcPending } from "@/server/recalc/queue"
 import { autoPredictSynopsisQuality } from "@/lib/ai-evaluation/synopsis-quality-runner"
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
 import { refreshEmbeddingForWork } from "@/server/embeddings/refresh"
+import { summarizeEmbeddingFailures } from "@/lib/ml/embedding-failure"
 import { estimateStepUsd } from "@/lib/orchestration/cost"
 import { MANUAL_DATA_INSTRUCTIONS, type ActionName } from "@/lib/orchestration/contracts"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
@@ -255,7 +256,14 @@ export async function generateAllWorkData(
       run: async () => {
         // ÚLTIMO: depende de sinopse+tags+scores+digest (o hash reflete tudo).
         const r = await refreshEmbeddingForWork(workId)
-        return r.failed ? { fatal: true, error: "falha ao gerar embedding" } : { fatal: false }
+        // O motivo vai junto: "falha ao gerar embedding" sozinho não diz se é crédito,
+        // chave ou rede, e cada um tem uma saída diferente.
+        return r.failed
+          ? {
+              fatal: true,
+              error: `falha ao gerar embedding: ${summarizeEmbeddingFailures(r.failures)}`,
+            }
+          : { fatal: false }
       },
     },
   ]

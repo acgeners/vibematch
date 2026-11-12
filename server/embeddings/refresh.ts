@@ -17,6 +17,11 @@ import {
   EMBEDDING_MODEL,
   MAX_BATCH_SIZE,
 } from "@/lib/ml/embeddings"
+import {
+  classifyEmbeddingError,
+  isAccountWideFailure,
+} from "@/lib/ml/embedding-failure"
+import type { EmbeddingFailure, EmbeddingFailureKind } from "@/lib/ml/embedding-failure"
 import { pickPrimarySynopsis } from "@/lib/work-derived"
 import { buildReviewContext } from "@/lib/tags/infer-from-text"
 import { ensureAdmin } from "@/server/queries/current-user"
@@ -40,8 +45,14 @@ export interface RefreshEmbeddingsResult {
   tokensUsed: number
   /** Estimativa de custo em USD (text-embedding-3-small: $0.02/M tokens). */
   estimatedCostUsd: number
-  /** Quantas obras falharam (erro persistido em logs). */
+  /** Quantas obras falharam. */
   failed: number
+  /**
+   * POR QUE falharam, agrupado por motivo — é o que o aviso imprime.
+   * Antes só a contagem voltava, e o aviso mandava "ver os logs do servidor",
+   * que não é um lugar do app.
+   */
+  failures: EmbeddingFailure[]
 }
 
 interface WorkForEmbedding {
@@ -259,10 +270,11 @@ export async function refreshEmbeddings(): Promise<RefreshEmbeddingsResult> {
       tokensUsed: 0,
       estimatedCostUsd: 0,
       failed: 0,
+      failures: [],
     }
   }
 
-  const { refreshed, failed, totalTokens } = await embedAndUpsert(supabase, candidates)
+  const { refreshed, failed, failures, totalTokens } = await embedAndUpsert(supabase, candidates)
 
   return {
     totalWorks,
@@ -271,6 +283,7 @@ export async function refreshEmbeddings(): Promise<RefreshEmbeddingsResult> {
     tokensUsed: totalTokens,
     estimatedCostUsd: (totalTokens / 1_000_000) * 0.02,
     failed,
+    failures,
   }
 }
 
@@ -278,14 +291,32 @@ export async function refreshEmbeddings(): Promise<RefreshEmbeddingsResult> {
  * Núcleo compartilhado: embeda os candidatos em chunks (alinhados ao batch da
  * API pra erros granulares) e faz upsert em work_embeddings (onConflict work_id).
  * Usado por refreshEmbeddings (catálogo) e refreshEmbeddingForWork (1 obra).
+ *
+ * ⚠️ Motivo que vale pra CONTA inteira (sem crédito, chave recusada, chave ausente)
+ * encerra o laço: o próximo lote receberia a mesma recusa. As obras não tentadas
+ * contam como falha pelo MESMO motivo — senão o total do aviso diria menos do que
+ * ficou sem embedding.
  */
 async function embedAndUpsert(
   supabase: ReturnType<typeof createAdminClient>,
   candidates: Candidate[],
-): Promise<{ refreshed: number; failed: number; totalTokens: number }> {
+): Promise<{
+  refreshed: number
+  failed: number
+  failures: EmbeddingFailure[]
+  totalTokens: number
+}> {
   let refreshed = 0
   let failed = 0
   let totalTokens = 0
+  const porMotivo = new Map<string, EmbeddingFailure>()
+  const registrar = (kind: EmbeddingFailureKind, detail: string, works: number) => {
+    failed += works
+    const chave = `${kind}|${detail}`
+    const atual = porMotivo.get(chave)
+    if (atual) atual.works += works
+    else porMotivo.set(chave, { kind, detail, works })
+  }
 
   for (let i = 0; i < candidates.length; i += MAX_BATCH_SIZE) {
     const chunk = candidates.slice(i, i + MAX_BATCH_SIZE)
@@ -307,20 +338,28 @@ async function embedAndUpsert(
 
       if (upsertErr) {
         console.error(`[embeddings] upsert falhou no chunk ${i}: ${upsertErr.message}`)
-        failed += chunk.length
+        registrar("gravacao", upsertErr.message, chunk.length)
       } else {
         refreshed += chunk.length
       }
     } catch (err) {
-      console.error(
-        `[embeddings] chunk ${i} (${chunk.length} obras) falhou:`,
-        err instanceof Error ? err.message : err,
-      )
-      failed += chunk.length
+      const { kind, detail } = classifyEmbeddingError(err)
+      console.error(`[embeddings] chunk ${i} (${chunk.length} obras) falhou [${kind}]:`, detail)
+      registrar(kind, detail, chunk.length)
+      if (isAccountWideFailure(kind)) {
+        const naoTentadas = candidates.length - (i + chunk.length)
+        if (naoTentadas > 0) {
+          console.error(
+            `[embeddings] ${naoTentadas} obras não foram tentadas: o motivo vale pra conta inteira`,
+          )
+          registrar(kind, detail, naoTentadas)
+        }
+        break
+      }
     }
   }
 
-  return { refreshed, failed, totalTokens }
+  return { refreshed, failed, failures: [...porMotivo.values()], totalTokens }
 }
 
 export interface RefreshEmbeddingForWorkResult {
@@ -329,6 +368,8 @@ export interface RefreshEmbeddingForWorkResult {
   tokensUsed: number
   estimatedCostUsd: number
   failed: boolean
+  /** Por que falhou (vazio quando não falhou). */
+  failures: EmbeddingFailure[]
 }
 
 /**
@@ -342,13 +383,14 @@ export async function refreshEmbeddingForWork(
   const supabase = createAdminClient()
   const { candidates } = await loadEmbeddingCandidates(workId)
   if (candidates.length === 0) {
-    return { refreshed: false, tokensUsed: 0, estimatedCostUsd: 0, failed: false }
+    return { refreshed: false, tokensUsed: 0, estimatedCostUsd: 0, failed: false, failures: [] }
   }
-  const { refreshed, failed, totalTokens } = await embedAndUpsert(supabase, candidates)
+  const { refreshed, failed, failures, totalTokens } = await embedAndUpsert(supabase, candidates)
   return {
     refreshed: refreshed > 0,
     tokensUsed: totalTokens,
     estimatedCostUsd: (totalTokens / 1_000_000) * 0.02,
     failed: failed > 0,
+    failures,
   }
 }
