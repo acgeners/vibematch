@@ -3,7 +3,8 @@ import { searchAnimePlanet, fetchAnimePlanetByTitle, fetchAnimePlanetReviews, fe
 import type { AnimePlanetDetail } from "./animeplanet"
 import { searchComicK, fetchComicKByHid, collectComicKReviews, COMICK_API_CF_ABORT_MS, COMICK_REVIEWS_BUDGET_MS } from "./comick"
 import type { ComicKReviewsCollected } from "./comick"
-import { searchComix, fetchComixById, fetchComixReviews, COMIX_CF_ABORT_MS } from "./comix"
+import { searchComix, fetchComixById, collectComixReviews, COMIX_CF_ABORT_MS } from "./comix"
+import type { SourceLinkStatus } from "./link-status"
 import { searchMangago, fetchMangagoById, fetchMangagoReviews } from "./mangago"
 import { resolveComixUrl } from "./comix-resolve"
 import { isComixRenderConfigured } from "./comix-render-client"
@@ -1061,7 +1062,16 @@ export async function collectReviewsFromCandidate(
   candidate: MergedCandidate,
   onSourceReviews?: (reviews: SourcedReview[]) => void | Promise<void>,
   onlySources?: ReadonlyArray<ExternalSourceId>,
-): Promise<{ reviews: SourcedReview[]; failedSources: ExternalSourceId[] }> {
+): Promise<{
+  reviews: SourcedReview[]
+  failedSources: ExternalSourceId[]
+  /**
+   * O que a fonte disse do código vinculado: `not_found` (404) ou `ok`. Só a Comix informa hoje.
+   * Fonte que FALHOU não aparece aqui — fora do ar não prova nada sobre o código (migration 222).
+   */
+  linkStatus: Partial<Record<ExternalSourceId, { externalId: string; status: SourceLinkStatus }>>
+}> {
+  const linkStatus: Partial<Record<ExternalSourceId, { externalId: string; status: SourceLinkStatus }>> = {}
   // Kitsu expõe "reactions" (não reviews completos), tipicamente 40-90 chars.
   // Pra outras fontes mantemos o threshold em 100 (reviews curtos demais
   // adicionam ruído). Pra Kitsu baixamos pra 30 — uma frase como "great FL,
@@ -1137,7 +1147,19 @@ export async function collectReviewsFromCandidate(
   if (animePlanetSlug) plan.push({ source: "animeplanet", timeoutMs: Math.max(TIMEOUT_REVIEWS_MS, TIMEOUT_ANIMEPLANET_PAGE_MS), run: () => fetchAnimePlanetReviews(animePlanetSlug) })
   if (mangadexId) plan.push({ source: "mangadex", timeoutMs: TIMEOUT_REVIEWS_MS, run: () => fetchMangaDexForumComments(mangadexId) })
   if (comickHid) plan.push({ source: "comick", timeoutMs: TIMEOUT_REVIEWS_COMICK_MS, run: () => collectComicKReviews(comickHid) })
-  if (comixHid) plan.push({ source: "comix", timeoutMs: TIMEOUT_REVIEWS_COMIX_MS, run: () => fetchComixReviews(comixHid) })
+  // `collectComixReviews` e não `fetchComixReviews`: é ele que ainda sabe que a página deu 404
+  // (`empty: "not_found"`). Sem isso o 404 virava "0 reviews" e o código morto passava por vivo.
+  if (comixHid) {
+    plan.push({
+      source: "comix",
+      timeoutMs: TIMEOUT_REVIEWS_COMIX_MS,
+      run: async () => {
+        const out = await collectComixReviews(comixHid)
+        linkStatus.comix = { externalId: comixHid, status: out.empty === "not_found" ? "not_found" : "ok" }
+        return out.reviews
+      },
+    })
+  }
   if (mangagoSlug) plan.push({ source: "mangago", timeoutMs: TIMEOUT_REVIEWS_MANGAGO_MS, run: () => fetchMangagoReviews(mangagoSlug) })
 
   // `onlySources` = segunda passada dirigida às fontes que falharam na primeira
@@ -1208,7 +1230,7 @@ export async function collectReviewsFromCandidate(
   const reviews = settled
     .flatMap((entry) => (entry.status === "fulfilled" && entry.value ? [entry.value] : []))
     .flatMap((group) => mapGroup(group))
-  return { reviews, failedSources }
+  return { reviews, failedSources, linkStatus }
 }
 
 /**

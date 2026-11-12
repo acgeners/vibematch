@@ -1,3 +1,4 @@
+import type { SourceLinkStatus } from "@/lib/external/link-status"
 import type { PublicationStatus } from "@/types/domain"
 import type { ExternalSearchResult } from "./types"
 import { fetchHtmlWithCfFallback, isCloudflareChallenge, isCfBypassUnavailable } from "./flaresolverr"
@@ -596,11 +597,29 @@ export async function fetchComixById(hid: string): Promise<ComixDetail | null> {
   // Token-free: o objeto completo da obra vem no <script> de hidratação SSR da página
   // /title/{hid}. O antigo endpoint /manga/{hid} passou a exigir token de assinatura.
   // Contrato do detalhe INALTERADO: qualquer desfecho que não seja a obra vira `null` (o
-  // hydrate, o resolvedor e o canário dependem disso). Só as reviews distinguem falha de ausência.
-  const page = await fetchComixDetailOutcome(hid)
-  const r = page.kind === "ok" ? page.value : null
-  if (!r || typeof r !== "object") return null
+  // hydrate, o resolvedor e o canário dependem disso). Quem precisa separar 404 de "fora do ar"
+  // usa `fetchComixByIdOutcome`.
+  return (await fetchComixByIdOutcome(hid)).detail
+}
 
+/**
+ * O detalhe da obra E o que a Comix disse sobre o código: `not_found` (404/410, a página não existe
+ * mais), `ok` (existe) ou `null` (não deu para saber — Cloudflare, timeout, rede). É o que alimenta a
+ * marca de código morto (`recordSourceLinkStatus`, migration 222). `null` nunca vira marca: uma Comix
+ * fora do ar não prova nada sobre o código.
+ */
+export async function fetchComixByIdOutcome(
+  hid: string,
+): Promise<{ detail: ComixDetail | null; linkStatus: SourceLinkStatus | null }> {
+  const page = await fetchComixDetailOutcome(hid)
+  if (page.kind === "not_found") return { detail: null, linkStatus: "not_found" }
+  const r = page.kind === "ok" ? page.value : null
+  if (!r || typeof r !== "object") return { detail: null, linkStatus: null }
+  return { detail: comixDetailFromItem(r, hid), linkStatus: "ok" }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function comixDetailFromItem(r: any, hid: string): ComixDetail {
   return {
     hid: r.hid ?? hid,
     title: r.title ?? "",

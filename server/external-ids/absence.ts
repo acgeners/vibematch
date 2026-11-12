@@ -5,6 +5,7 @@ import { ensureAdmin } from "@/server/queries/current-user"
 import { SELECTABLE_EXTERNAL_SOURCES } from "@/lib/external/source-order"
 import { sourceLabel } from "@/lib/external/source-labels"
 import type { ExternalSourceId } from "@/lib/external/types"
+import { classifySourceLink } from "@/lib/external/source-link-state"
 
 /**
  * "Esta obra não existe nesta fonte" — o marcador da migration 038
@@ -79,17 +80,19 @@ export async function markSourcesAbsent(
 
   const supabase = createAdminClient()
 
-  // A guarda: quem já tem vínculo ATIVO nesta fonte fica de fora do upsert.
+  // A guarda: quem já tem vínculo ATIVO nesta fonte fica de fora do upsert. Código MORTO (deu
+  // 404, migration 222) não é vínculo ativo: declará-lo ausente é justamente a curadoria que a
+  // lista "Código não funciona (404)" pede — e a régua é a de `classifySourceLink`, não um `if` local.
   const { data: existing, error: readError } = await supabase
     .from("work_external_ids")
-    .select("work_id, external_id, is_rejected")
+    .select("work_id, external_id, is_rejected, not_found_external_id")
     .eq("source", source)
     .in("work_id", ids)
   if (readError) return { marked: 0, skipped: 0, error: readError.message }
 
   const comVinculo = new Set(
     (existing ?? [])
-      .filter((r) => r.external_id && r.is_rejected !== true)
+      .filter((r) => classifySourceLink(r) === "linked")
       .map((r) => r.work_id as string),
   )
   const alvo = ids.filter((id) => !comVinculo.has(id))

@@ -6,7 +6,12 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }
 const ensureAdmin = vi.fn(async () => ({ ok: true as const }))
 vi.mock("@/server/queries/current-user", () => ({ ensureAdmin: () => ensureAdmin() }))
 
-let existingRows: Array<{ work_id: string; external_id: string | null; is_rejected: boolean }> = []
+let existingRows: Array<{
+  work_id: string
+  external_id: string | null
+  is_rejected: boolean
+  not_found_external_id?: string | null
+}> = []
 type UpsertRow = { work_id: string; source: string; external_id: null; is_rejected: boolean }
 const upsertSpy = vi.fn(async (_rows: UpsertRow[], _opts: { onConflict: string }) => ({ error: null }))
 vi.mock("@/lib/supabase/admin", () => ({
@@ -69,6 +74,17 @@ describe("markSourcesAbsent", () => {
     const res = await markSourcesAbsent(["w1", "w2"], "mangago")
     expect(res).toEqual({ marked: 0, skipped: 2 })
     expect(upsertSpy).not.toHaveBeenCalled()
+  })
+
+  it("🔴 código que dá 404 (migration 222) NÃO é vínculo ativo — pode ser declarado ausente", async () => {
+    existingRows = [
+      { work_id: "w1", external_id: "morto", is_rejected: false, not_found_external_id: "morto" },
+      { work_id: "w2", external_id: "vivo", is_rejected: false, not_found_external_id: "outro" },
+    ]
+    const res = await markSourcesAbsent(["w1", "w2"], "comix")
+    expect(res).toEqual({ marked: 1, skipped: 1 })
+    const [rows] = upsertSpy.mock.calls[0]
+    expect(rows.map((r) => r.work_id)).toEqual(["w1"])
   })
 
   it("uma ausência JÁ declarada não conta como vínculo — pode ser remarcada", async () => {

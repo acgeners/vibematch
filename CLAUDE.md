@@ -347,12 +347,12 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**110 arquivos, remedidos em 2026-11-05**):
+banco declara um dos dois (**111 arquivos, remedidos em 2026-11-12**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **45** | só LÊ ⇒ vai pro local, de graça |
-| `ALVO: NUVEM` no cabeçalho | **53** | GRAVA ⇒ tem que ir pra nuvem |
+| `ALVO: NUVEM` no cabeçalho | **54** | GRAVA ⇒ tem que ir pra nuvem |
 | (não tocam o banco) | 9 | fora da régua — entrou o `smoke-browser.mjs`, que só abre rota |
 
 🔴 **A régua tem DOIS rótulos e o mundo tem TRÊS casos — `smoke-logado.mjs` é o terceiro.**
@@ -4131,12 +4131,12 @@ faz `relatar()` devolver `false`. É o "declara o que esperava achar" do título
 
 ### Onde vale, e a válvula
 
-Aplicado a **14 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos`
+Aplicado a **15 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos`
 · `normalizar-titulos-alternativos` · `reverter-calibracao-auto-aplicada` ·
 `backfill-faixa-citada` · `repick-dead-covers` · `seed-art-signal` · `tag-r19-adult` ·
 `push-opening-structure` · `recalcular-vies-da-dona` · `reconciliar-inferencia-estrutural` ·
 `backup-icloud` (não corrige nada, mas o seu "nada a enviar" também prova que olhou) ·
-`limpar-sufixo-legado-mangaupdates`.
+`limpar-sufixo-legado-mangaupdates` · `conferir-links-comix`.
 
 ⚠️ **`funil.nadaAFazer("…")` substitui o `console.log` da frase**, e não é estilo: separados,
 volta a ser possível imprimir a conclusão sem a evidência, que é o estado exato que custou o
@@ -5398,6 +5398,8 @@ trabalho. Eram DUAS cópias do mesmo `if`: esta fila e o card de cobertura do Co
 `/curation/settings` (`getComixCoverageLists`) — as duas telas falando da MESMA linha, e uma podia dizer
 "pendente" enquanto a outra dizia "resolvida". ⚠️ Rejeitado COM id volta pra `gap` de
 propósito: descartar um candidato não nega a obra na fonte.
+
+**Desde a migration 222 há um 4º estado, `dead`: código vinculado que devolveu 404 (`not_found_external_id = external_id`).** Ele aparece no painel da Comix ("Código não funciona (404)", fora do "Funcionando") e na aba Fontes como "Comix (404)", e pode ser declarado ausente. A marca só vale para o código que deu 404 (colar um novo a desfaz sozinho), indisponível nunca marca, e a prontidão para avaliar não seleciona a coluna, então código morto **não** bloqueia a avaliação. Quem grava é `recordSourceLinkStatus` (`lib/external/link-status.ts`), chamado pela checagem de capítulos, pelo lote de reviews e por `scripts/conferir-links-comix.ts`.
 
 🔴 **O universo de fontes é `SELECTABLE_EXTERNAL_SOURCES`** (derivado da tabela `source`), que
 é o MESMO que o `SourceSelectionStep` desenha. Lista escrita à mão aqui faria a aba acusar

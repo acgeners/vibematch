@@ -56,6 +56,12 @@ export interface LatestChapterResult {
   latestUrl?: string | null
   /** Status de publicação declarado pela comix (só ela fornece). `null` se indisponível. */
   status?: PublicationStatus | null
+  /**
+   * URL da Comix QUANDO ELA RESPONDEU nesta checagem — a do código que de fato devolveu capítulo
+   * (o salvo, ou o achado pela busca). `null` se a Comix não respondeu. É o que o "Continuar lendo"
+   * usa: remontar pela hid salva levaria à página morta quando quem respondeu foi a busca.
+   */
+  comixUrl?: string | null
 }
 
 /**
@@ -122,5 +128,6 @@ export async function getLatestChapter(
     chapterNumbers: datas?.chapterNumbers ?? null,
     latestUrl: primary?.sourceUrl ?? null,
     status: comixLookup?.status ?? null,
+    comixUrl: comixLookup?.sourceUrl ?? null,
   }
 }

@@ -1,4 +1,4 @@
-import { searchComix, fetchComixById, comixWorkUrl } from "@/lib/external/comix"
+import { searchComix, fetchComixById, fetchComixByIdOutcome, comixWorkUrl } from "@/lib/external/comix"
 import { fetchAniListById } from "@/lib/external/anilist"
 import { bestTitleMatch } from "@/lib/external/index"
 import type { ExternalSearchResult } from "@/lib/external/types"
@@ -135,7 +135,8 @@ export async function getComixLatestChapter(
   input: ChapterCheckInput,
 ): Promise<ChapterLookup> {
   if (input.comixHid) {
-    const detail = await fetchComixById(input.comixHid)
+    const { detail, linkStatus } = await fetchComixByIdOutcome(input.comixHid)
+    if (linkStatus) input.onSavedLinkStatus?.("comix", input.comixHid, linkStatus)
     const ch = comixChapter(detail ?? {})
     if (ch != null) {
       return {

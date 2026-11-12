@@ -202,7 +202,7 @@ describe("refreshWorkReviewsLean — custo zero", () => {
       fetchExternalEvaluationContextForCandidate: fetchContext,
       collectReviewsFromCandidate: async (_c: unknown, onSource: (r: unknown[]) => Promise<void>) => {
         await onSource([{ source: "mangago", text: "review longa o bastante para contar como útil aqui" }])
-        return { reviews: [], failedSources: ["comix"] }
+        return { reviews: [], failedSources: ["comix"], linkStatus: {} }
       },
     }))
     const chain = (result: unknown): Record<string, unknown> =>

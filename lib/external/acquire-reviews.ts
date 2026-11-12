@@ -6,6 +6,7 @@ import {
   fetchExternalEvaluationContextForCandidate,
 } from "@/lib/external/index"
 import { saveWorkReviews } from "@/lib/external/persist-reviews"
+import { recordSourceLinkStatuses } from "@/lib/external/link-status"
 import type { ExternalSourceId, MergedCandidate, SourcedReview } from "@/lib/external/types"
 
 /**
@@ -168,9 +169,12 @@ export async function refreshWorkReviewsLean(workId: string): Promise<LeanReview
   try {
     const loaded = await loadAcceptedCandidate(workId)
     if (!loaded) return { attempted: false, failedSources: [] }
-    const { failedSources } = await collectReviewsFromCandidate(loaded.candidate, (reviews) =>
+    const { failedSources, linkStatus } = await collectReviewsFromCandidate(loaded.candidate, (reviews) =>
       saveWorkReviews(workId, reviews, { skipPaidEnrichment: true, accumulate: true }),
     )
+    // Código que deu 404 vira marca de código morto (painel da Comix, aba Fontes); o que respondeu
+    // limpa a própria marca. Fonte que falhou não tem status e fica como estava.
+    await recordSourceLinkStatuses(workId, linkStatus ?? {})
     return { attempted: true, failedSources }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)

@@ -429,7 +429,8 @@ async function ItemBody({
         getComixCoverageLists(),
       ])
       const comixMissing = comixLists.missing
-      const missingCount = comixMissing.length
+      // Sem código + código com 404: as duas listas que pedem ação (o mesmo número do badge).
+      const missingCount = comixMissing.length + comixLists.dead.length
       return (
         <div className="space-y-5">
           <div>
@@ -444,7 +445,7 @@ async function ItemBody({
             <ComixHealthPanel accent="amber" />
           </div>
 
-          {/* Cobertura: recolhida por padrão; abre sozinha quando há hid pendente. */}
+          {/* Cobertura: recolhida por padrão; abre sozinha quando há hid pendente ou com 404. */}
           <details open={missingCount > 0} className="group/cob border-t border-border/60 pt-4">
             <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
               <ChevronDown className="size-4 -rotate-90 text-muted-foreground transition-transform group-open/cob:rotate-0" />
@@ -461,6 +462,7 @@ async function ItemBody({
                 accent="amber"
                 initialStatus={comixStatus}
                 initialMissing={comixMissing}
+                initialDead={comixLists.dead}
                 initialAbsent={comixLists.absent}
                 catalogTotal={comixLists.total}
               />

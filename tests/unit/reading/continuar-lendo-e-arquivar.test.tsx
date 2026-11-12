@@ -31,16 +31,15 @@ const MANGAGO = "https://www.mangago.me/read-manga/obra/"
 
 describe("pickReadUrl — o link que a checagem grava", () => {
   it("a Comix, quando ela respondeu nesta checagem (a leitura preferida)", () => {
-    expect(pickReadUrl({ comixHid: "abc", comixAnswered: true, winnerUrl: MANGAGO, comixUrl })).toBe(comixUrl("abc"))
+    expect(pickReadUrl({ comixAnsweredUrl: comixUrl("abc"), winnerUrl: MANGAGO })).toBe(comixUrl("abc"))
   })
 
-  it("🔴 hid da Comix que NÃO respondeu (404) leva para a fonte que achou o capítulo", () => {
-    expect(pickReadUrl({ comixHid: "morto", comixAnswered: false, winnerUrl: MANGAGO, comixUrl })).toBe(MANGAGO)
+  it("🔴 Comix que NÃO respondeu (código com 404) leva para a fonte que achou o capítulo", () => {
+    expect(pickReadUrl({ comixAnsweredUrl: null, winnerUrl: MANGAGO })).toBe(MANGAGO)
   })
 
-  it("sem hid, a fonte que achou; sem nenhuma, nada", () => {
-    expect(pickReadUrl({ comixHid: null, comixAnswered: false, winnerUrl: MANGAGO, comixUrl })).toBe(MANGAGO)
-    expect(pickReadUrl({ comixHid: "x", comixAnswered: false, winnerUrl: null, comixUrl })).toBeNull()
+  it("sem nenhuma fonte, nada", () => {
+    expect(pickReadUrl({ comixAnsweredUrl: undefined, winnerUrl: null })).toBeNull()
   })
 })
 

@@ -322,3 +322,45 @@ describe("pipeline — a falha chega a quem decide", () => {
     expect(mergeFreshWithPersistedReviews([], [persistida])).toEqual({ merged: [persistida], recovered: 1 })
   })
 })
+
+// Migration 222: o 404 do código vira MARCA de código morto. Para isso ele precisa chegar a quem
+// grava sem ser achatado em "fora do ar" (null) nem em "0 reviews" ([]).
+describe("18 · o 404 do código chega a quem grava a marca", () => {
+  const candidato = { title: "Jinx", comixHid: HID, matchScore: 1 } as never
+
+  it("detalhe 404 → linkStatus not_found; página ok → ok; fora do ar → nenhum status", async () => {
+    origem({ detalhe: () => html("<html>404</html>", 404) })
+    let { comix } = await carregar()
+    expect(await comix.fetchComixByIdOutcome(HID)).toEqual({ detail: null, linkStatus: "not_found" })
+
+    origem()
+    ;({ comix } = await carregar())
+    const ok = await comix.fetchComixByIdOutcome(HID)
+    expect(ok.linkStatus).toBe("ok")
+    expect(ok.detail?.hid).toBe(HID)
+
+    origem({ detalhe: () => html("erro", 500) })
+    ;({ comix } = await carregar())
+    expect(await comix.fetchComixByIdOutcome(HID)).toEqual({ detail: null, linkStatus: null })
+  })
+
+  it("🔴 na coleta de reviews, o 404 sai como linkStatus — e não como 'Comix sem reviews' calado", async () => {
+    origem({ detalhe: () => html("<html>404</html>", 404) })
+    const { index: { collectReviewsFromCandidate } } = await carregar()
+    const r = await collectReviewsFromCandidate(candidato)
+    expect(r.linkStatus).toEqual({ comix: { externalId: HID, status: "not_found" } })
+    expect(r.failedSources).toEqual([])
+  })
+
+  it("página que respondeu limpa (ok); coleta que FALHOU não informa status nenhum", async () => {
+    origem()
+    let { index } = await carregar()
+    expect((await index.collectReviewsFromCandidate(candidato)).linkStatus).toEqual({ comix: { externalId: HID, status: "ok" } })
+
+    origem({ lookup: () => json({ message: "Server Error" }, 500) })
+    ;({ index } = await carregar())
+    const falhou = await index.collectReviewsFromCandidate(candidato)
+    expect(falhou.failedSources).toEqual(["comix"])
+    expect(falhou.linkStatus).toEqual({})
+  })
+})

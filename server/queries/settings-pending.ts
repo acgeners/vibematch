@@ -2,7 +2,7 @@ import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchAllRows } from "@/lib/supabase/paginate"
 import { countStaleEmbeddings } from "@/server/embeddings/refresh"
-import { getWorksMissingComixHid } from "@/server/queries/comix-coverage"
+import { countComixNeedingAttention } from "@/server/queries/comix-coverage"
 import { hasConsolidatableBlocks } from "@/lib/ai-recommendation/synopsis-consolidator"
 import { splitSynopsesFromText } from "@/lib/work-derived"
 
@@ -166,9 +166,8 @@ export const getSettingsItemPending = cache(
         countMissingEmbeddings().catch(() => 0),
         countPendingCanonicalSynopses().catch(() => 0),
         countPendingReviewSummaries().catch(() => 0),
-        getWorksMissingComixHid()
-          .then((w) => w.length)
-          .catch(() => 0),
+        // Sem código + código com 404 (migration 222): as duas listas que o card pede para resolver.
+        countComixNeedingAttention().catch(() => 0),
       ])
     return {
       // 🔴 A auditoria de critérios IA foi APOSENTADA em 2026-08-16 e não tem entrada aqui.

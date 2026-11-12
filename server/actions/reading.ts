@@ -3,8 +3,10 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getLatestChapter, type ChapterCheckInput } from "@/lib/external/chapter-sources"
 import { predictNextFromAnchor, parseRelativeAgeToDate } from "@/lib/external/chapter-sources/cadence"
-import { comixWorkUrl } from "@/lib/external/comix"
 import { pickReadUrl } from "@/lib/reading/read-url"
+import { recordSourceLinkStatus } from "@/lib/external/link-status"
+import type { SourceLinkStatus } from "@/lib/external/link-status"
+import type { ExternalSourceId } from "@/lib/external/types"
 import { fetchMangaDexChapterDates } from "@/lib/external/mangadex"
 import { fetchMangaUpdatesStatus } from "@/lib/external/mangaupdates"
 import { withTimeout } from "@/lib/external/with-timeout"
@@ -151,6 +153,9 @@ export async function checkReadingUpdates(
           return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null }
         }
 
+        // O que a Comix disse do código SALVO (404 × existe) — gravado logo abaixo como a marca de
+        // código morto (migration 222). Fora do ar não chega aqui.
+        const linkStatuses: Array<{ source: ExternalSourceId; externalId: string; status: SourceLinkStatus }> = []
         const [chapterResult, muStatus] = await Promise.all([
           getLatestChapter(
             {
@@ -160,6 +165,7 @@ export async function checkReadingUpdates(
               comixHid,
               mangagoSlug,
               crossIds,
+              onSavedLinkStatus: (source, externalId, status) => linkStatuses.push({ source, externalId, status }),
             },
             { currentTotal: w.total_chapters },
           ),
@@ -167,6 +173,7 @@ export async function checkReadingUpdates(
         ])
         const { latest, resolvedComixHid, releasedLabel, releasedAt, cadenceDates, chapterNumbers, latestUrl: winnerUrl } =
           chapterResult
+        for (const ls of linkStatuses) await recordSourceLinkStatus(w.id, ls.source, ls.externalId, ls.status)
         // Status de publicação: MangaUpdates é a fonte mais confiável → tem
         // precedência; a comix é fallback quando o MU não tem ID/dado.
         const comixStatus =
@@ -196,15 +203,9 @@ export async function checkReadingUpdates(
         }
         const nextPredictedAt = anchor ? predictNextFromAnchor(anchor, cadence) : null
 
-        const hid = comixHid ?? resolvedComixHid ?? null
-        // "Continuar lendo": a Comix só quando ela RESPONDEU agora; senão a fonte que achou o
-        // capítulo. Hid morto (404) mandava para uma página que não existe mais (`pickReadUrl`).
-        const readUrl = pickReadUrl({
-          comixHid: hid,
-          comixAnswered: chapterResult.bySource.comix != null,
-          winnerUrl,
-          comixUrl: comixWorkUrl,
-        })
+        // "Continuar lendo": a URL da Comix que RESPONDEU agora (a da própria resposta, nunca
+        // remontada pela hid salva, que pode ser a morta); senão a fonte que achou o capítulo.
+        const readUrl = pickReadUrl({ comixAnsweredUrl: chapterResult.comixUrl, winnerUrl })
 
         // Cacheia as datas e o link pra exibir já no load (sem refazer a checagem).
         if (latest != null) {

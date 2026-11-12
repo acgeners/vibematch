@@ -27,6 +27,7 @@ describe("tallySourceGaps", () => {
       linked: [ANILIST],
       absent: [],
       gaps: [KITSU, MANGADEX],
+      dead: [],
     })
     expect(t.withGapsCount).toBe(1)
   })
@@ -55,7 +56,7 @@ describe("tallySourceGaps", () => {
       rows: [row("w1", ANILIST), row("w1", KITSU, { external_id: null, is_rejected: true })],
       sources: SOURCES,
     })
-    expect(t.perWork.get("w1")).toEqual({ linked: [ANILIST], absent: [KITSU], gaps: [MANGADEX] })
+    expect(t.perWork.get("w1")).toEqual({ linked: [ANILIST], absent: [KITSU], gaps: [MANGADEX], dead: [] })
     expect(t.withGapsCount).toBe(1)
   })
 
@@ -107,5 +108,32 @@ describe("tallySourceGaps", () => {
     })
     expect(t.withGapsCount).toBe(0)
     expect(t.gapsBySource.map((g) => g.source)).toEqual([...SOURCES])
+  })
+})
+
+// Migration 222: código com 404 é lacuna (entra na fila e no "marcar ausente" em lote), rotulada.
+describe("tallySourceGaps — código com 404", () => {
+  it("🔴 vínculo MORTO conta como lacuna e chega marcado em `dead`", () => {
+    const t = tallySourceGaps({
+      workIds: ["w1"],
+      rows: [
+        row("w1", ANILIST),
+        row("w1", KITSU, { external_id: "k1", not_found_external_id: "k1" }),
+        row("w1", MANGADEX),
+      ],
+      sources: SOURCES,
+    })
+    expect(t.perWork.get("w1")).toEqual({ linked: [ANILIST, MANGADEX], absent: [], gaps: [KITSU], dead: [KITSU] })
+    expect(t.gapsBySource.find((g) => g.source === KITSU)?.missing).toBe(1)
+  })
+
+  it("marca de outro código não é lacuna: o vínculo atual está vivo", () => {
+    const t = tallySourceGaps({
+      workIds: ["w1"],
+      rows: [row("w1", ANILIST), row("w1", KITSU, { external_id: "novo", not_found_external_id: "velho" }), row("w1", MANGADEX)],
+      sources: SOURCES,
+    })
+    expect(t.perWork.get("w1")).toBeUndefined()
+    expect(t.withGapsCount).toBe(0)
   })
 })
