@@ -45,6 +45,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import type { AiEvaluation } from "@/types/domain"
+import type { AttrEvalFilter } from "@/lib/ai-evaluation/attr-eval-filters"
 
 interface PendingWork {
   id: string
@@ -64,7 +65,7 @@ interface PendingWork {
   reviewCount?: number | null
   /** Reviews úteis que entraram depois da avaliação vigente (e quantas havia). `null` = sem avaliação. */
   reviewGrowth?: ReviewGrowth | null
-  matchedFilters?: Array<"pending" | "review-pending" | "low-confidence" | "outdated-model" | "outdated-reviews">
+  matchedFilters?: AttrEvalFilter[]
   /**
    * `works.ai_eval_status`. É daqui que sai o "Revisar" — ver o comentário do
    * `WorkRow` em `app/curation/works/page.tsx`: `matchedFilters` responde "por que
@@ -881,7 +882,8 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
 
       <WorkQueueGrid>
         {sortedWorks.map((work) => {
-          const isPending = work.matchedFilters?.includes("pending")
+          // "Prontas para avaliar" é um recorte de "Sem avaliação": o mesmo chip.
+          const isPending = work.matchedFilters?.some((f) => f === "pending" || f === "ready")
           const isReview = work.matchedFilters?.includes("review-pending")
           const isLowConf = work.matchedFilters?.includes("low-confidence")
           const isOutdatedModel = work.matchedFilters?.includes("outdated-model")

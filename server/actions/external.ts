@@ -28,6 +28,7 @@ import { coverCandidates, pickPrimaryCover } from "@/lib/work-derived"
 import { isBlockedCoverUrl } from "@/lib/external/blocked-covers"
 import { ensureAdmin, ensureSignedIn, ensurePermission } from "@/server/queries/current-user"
 import { withinRateLimit } from "@/lib/rate-limit"
+import { countUsefulReviews, hasEnoughReviewsForEval } from "@/lib/ai-evaluation/eval-evidence"
 
 // Tetos da busca externa por usuário. Generosos para uso humano — cadastrar uma obra são poucas
 // buscas — e apertados para script. Ficam aqui, e não em `lib/`, porque são política desta action;
@@ -366,6 +367,11 @@ export interface CandidateAiResult {
 export interface CandidateAiNeedsReviewConfirmation {
   needsReviewConfirmation: true
   noReviewsReason: CandidateAiResult["noReviewsReason"]
+  /**
+   * Há reviews, mas menos úteis que `MIN_USEFUL_REVIEWS_FOR_EVAL`. Ausente = o caso antigo, sem
+   * review nenhuma (`noReviewsReason` diz por quê).
+   */
+  fewReviews?: { useful: number; total: number }
 }
 
 /**
@@ -467,8 +473,19 @@ export async function evaluateCandidateForCreate(input: {
 
   // Gate pré-análise: sem reviews externas, deixa o cliente decidir se segue
   // mesmo assim antes de gastar a chamada do LLM.
-  if ((contextResult.sourcedReviews?.length ?? 0) === 0 && !input.proceedWithoutReviews) {
+  const sourced = contextResult.sourcedReviews ?? []
+  if (sourced.length === 0 && !input.proceedWithoutReviews) {
     return { needsReviewConfirmation: true, noReviewsReason }
+  }
+  // Com reviews, mas poucas úteis: a mesma pergunta, com a contagem. Medido em 2026-11-12: abaixo
+  // de 4 úteis a avaliação muda ~2,5× mais quando a obra ganha reviews (`eval-evidence.ts`).
+  const usefulReviews = countUsefulReviews(sourced)
+  if (!hasEnoughReviewsForEval(usefulReviews) && !input.proceedWithoutReviews) {
+    return {
+      needsReviewConfirmation: true,
+      noReviewsReason,
+      fewReviews: { useful: usefulReviews, total: sourced.length },
+    }
   }
 
   const modelOverride =

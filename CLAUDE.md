@@ -5113,10 +5113,12 @@ Três razões, em ordem de peso:
    travadas por fonte, e resolver a fonte é o que traz reviews (medido na aba Fontes: 0 lacunas
    → 57,2 reviews úteis; 5 lacunas → 7,4).
 
-⚠️ **Se um dia houver piso para a AVALIAÇÃO, ele precisa de medição própria** — e aí esbarra
-noutra pendência: o `WorkQueueCard` tem paleta nomeada por COR (`tone: "amber"`, onde âmbar já é
-"Confiança baixa"), então ligar um chip ali é **escolher a cor**, que é o PR de decisão que este
-arquivo já registra como aberto.
+✅ **O piso para a AVALIAÇÃO foi medido em 2026-11-12: 4 reviews úteis** (`MIN_USEFUL_REVIEWS_FOR_EVAL`,
+`lib/ai-evaluation/eval-evidence.ts`, com a tabela). Abaixo dele a avaliação muda ~2,5× mais quando a
+obra ganha reviews. Ele **não** virou chip (a pendência da paleta do `WorkQueueCard` segue aberta):
+vale na CRIAÇÃO, onde a obra recém-lançada cai (21% das criadas em 60 dias) — o diálogo pergunta
+antes de pagar, com a contagem — e no filtro "Prontas para avaliar" da fila (nunca avaliadas com 4+
+úteis, contadas pelo 💬). Nenhum caminho é bloqueado: "Avaliar com IA" na obra segue sem pergunta.
 
 🔴 **O teto de exibição de 500 deixou de ser silencioso.** `getEligibleWorks` cortava em 500 e
 devolvia `totalCount` DEPOIS do corte: com 556 obras a tela dizia "500" e as 56 sumiam sem nada
