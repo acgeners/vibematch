@@ -10,17 +10,15 @@
  * o lado barato: o Mangago tem o capítulo. O contrário (insistir na Comix) é o link morto.
  */
 export function pickReadUrl(args: {
-  /** hid da Comix vinculado (ou resolvido nesta checagem). */
-  comixHid: string | null
-  /** A Comix devolveu capítulo nesta checagem (`bySource.comix != null`). */
-  comixAnswered: boolean
+  /**
+   * URL da Comix quando ela RESPONDEU nesta checagem (`getLatestChapter().comixUrl`). Vem da
+   * própria resposta, nunca remontada pela hid salva — que pode ser justamente a morta.
+   */
+  comixAnsweredUrl: string | null | undefined
   /** URL da fonte que venceu o capítulo (`getLatestChapter().latestUrl`). */
   winnerUrl: string | null | undefined
-  /** Monta a URL da Comix a partir do hid. */
-  comixUrl: (hid: string) => string
 }): string | null {
-  if (args.comixHid && args.comixAnswered) return args.comixUrl(args.comixHid)
-  return args.winnerUrl ?? null
+  return args.comixAnsweredUrl ?? args.winnerUrl ?? null
 }
 
 /**

@@ -32,6 +32,23 @@ describe("classifySourceLink", () => {
   it("undefined (linha ausente / coluna não selecionada) é lacuna, nunca vínculo", () => {
     expect(classifySourceLink({ external_id: undefined, is_rejected: undefined })).toBe("gap")
   })
+
+  // Migration 222: o código que deu 404 fica em `not_found_external_id`.
+  it("🔴 código vinculado IGUAL ao que deu 404 é vínculo MORTO", () => {
+    expect(classifySourceLink({ external_id: "rg78m", is_rejected: false, not_found_external_id: "rg78m" })).toBe("dead")
+  })
+
+  it("marca de OUTRO código (colaram um novo) não mata o vínculo atual", () => {
+    expect(classifySourceLink({ external_id: "novo1", is_rejected: false, not_found_external_id: "rg78m" })).toBe("linked")
+  })
+
+  it("ausência declarada vence a marca velha: sem código, não há o que estar morto", () => {
+    expect(classifySourceLink({ external_id: null, is_rejected: true, not_found_external_id: "rg78m" })).toBe("absent")
+  })
+
+  it("sem a coluna no select, ninguém é morto (a prontidão para avaliar não bloqueia)", () => {
+    expect(classifySourceLink({ external_id: "rg78m", is_rejected: false })).toBe("linked")
+  })
 })
 
 /**

@@ -6,12 +6,20 @@ export interface SourceStateRow {
   source: string
   external_id: string | null
   is_rejected: boolean | null
+  /** Migration 222: o código que deu 404. Sem a coluna no select, ninguém é "morto". */
+  not_found_external_id?: string | null
 }
 
 export interface WorkSourceSplit {
   linked: ExternalSourceId[]
   absent: ExternalSourceId[]
   gaps: ExternalSourceId[]
+  /**
+   * Das `gaps`, as que TÊM código mas ele dá 404 (`classifySourceLink` = "dead"). Contam como
+   * lacuna — entram na fila, no chip e no "marcar ausente" em lote — e o card as nomeia "(404)"
+   * em vez de "sem vínculo", porque o conserto é outro (colar o código novo).
+   */
+  dead: ExternalSourceId[]
 }
 
 export interface SourceGapTally {
@@ -70,12 +78,13 @@ export function tallySourceGaps({
 
   for (const id of workIds) {
     const states = stateByWork.get(id)
-    const split: WorkSourceSplit = { linked: [], absent: [], gaps: [] }
+    const split: WorkSourceSplit = { linked: [], absent: [], gaps: [], dead: [] }
     for (const s of sources) {
       const state = states?.get(s) ?? "gap"
       if (state === "linked") split.linked.push(s)
       else if (state === "absent") split.absent.push(s)
       else {
+        if (state === "dead") split.dead.push(s)
         split.gaps.push(s)
         missingBySource.set(s, (missingBySource.get(s) ?? 0) + 1)
       }

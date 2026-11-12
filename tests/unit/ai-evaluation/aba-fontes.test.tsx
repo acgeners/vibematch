@@ -58,6 +58,7 @@ function work(over: Partial<SourceGapWork> = {}): SourceGapWork {
     userScore: null,
     linked: [S2],
     absent: [],
+    dead: [],
     gaps: [S0, S1],
     usefulReviews: 12,
     tagCount: 30,

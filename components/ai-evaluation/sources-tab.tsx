@@ -295,7 +295,11 @@ function SourceGapLine({ work }: { work: SourceGapWork }) {
         {work.linked.length} vinculada(s)
       </span>
       <span className="text-muted-foreground">
-        · faltam <span className="text-foreground">{work.gaps.map(sourceLabel).join(", ")}</span>
+        · faltam{" "}
+        <span className="text-foreground">
+          {/* Código com 404 não é "falta avaliar": o conserto é colar o código novo. */}
+          {work.gaps.map((s) => (work.dead?.includes(s) ? `${sourceLabel(s)} (404)` : sourceLabel(s))).join(", ")}
+        </span>
       </span>
       {work.absent.length > 0 && (
         <span

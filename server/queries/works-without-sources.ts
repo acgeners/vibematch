@@ -31,8 +31,10 @@ export interface SourceGapWork {
   linked: ExternalSourceId[]
   /** Fontes marcadas como "não existe aqui" — decididas, não pendentes. */
   absent: ExternalSourceId[]
-  /** Fontes NUNCA avaliadas. É o que a fila existe pra fechar. */
+  /** Fontes NUNCA avaliadas, e as com código que dá 404. É o que a fila existe pra fechar. */
   gaps: ExternalSourceId[]
+  /** Das `gaps`, as que têm código com 404 (migration 222) — o card as nomeia "(404)". */
+  dead: ExternalSourceId[]
   /** Reviews ÚTEIS (≥40 chars) — o que a lacuna custa em evidência. */
   usefulReviews: number
   tagCount: number
@@ -77,6 +79,7 @@ interface ExternalIdRow {
   source: string
   external_id: string | null
   is_rejected: boolean | null
+  not_found_external_id: string | null
 }
 
 /**
@@ -144,7 +147,7 @@ export async function getSourceGapQueue(
       { orderBy: ["id"], label: "getSourceGapQueue.works" },
     ),
     fetchAllRows<ExternalIdRow>(
-      () => sb.from("work_external_ids").select("work_id, source, external_id, is_rejected"),
+      () => sb.from("work_external_ids").select("work_id, source, external_id, is_rejected, not_found_external_id"),
       // `work_id` sozinho não é único (uma linha por fonte): o UNIQUE é `(work_id, source)`.
       { orderBy: ["work_id", "source"], label: "getSourceGapQueue.externalIds" },
     ),
@@ -206,7 +209,7 @@ export async function getSourceGapQueue(
   for (const w of scopedWorks) {
     const split = tally.perWork.get(w.id)
     if (!split) continue
-    const { linked, absent, gaps } = split
+    const { linked, absent, gaps, dead } = split
 
     const c = counts?.get(w.id)
     works.push({
@@ -224,6 +227,7 @@ export async function getSourceGapQueue(
       linked,
       absent,
       gaps,
+      dead,
       usefulReviews: c?.reviewCount ?? 0,
       tagCount: c?.tagCount ?? 0,
     })

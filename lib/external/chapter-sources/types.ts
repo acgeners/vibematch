@@ -30,6 +30,12 @@ export interface ChapterCheckInput {
   mangagoSlug?: string | null
   /** IDs cross-source pra confirmação de match e fallback de sinônimos (AniList). */
   crossIds?: ChapterCrossIds
+  /**
+   * Avisa o que a fonte disse sobre o código SALVO (`comixHid`): `not_found` = a página deu 404;
+   * `ok` = existe. Fonte fora do ar não avisa nada. Quem chama grava a marca de código morto
+   * (`recordSourceLinkStatus`, migration 222) — o lookup continua devolvendo só o capítulo.
+   */
+  onSavedLinkStatus?: (source: ChapterSourceId, externalId: string, status: "ok" | "not_found") => void
 }
 
 /** Último capítulo encontrado numa fonte específica (ou `null` se nada confiável). */

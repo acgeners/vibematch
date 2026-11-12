@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useTransition } from "react"
-import { Ban, ChevronRight, ExternalLink, Info, Loader2, Play, Search, Undo2 } from "lucide-react"
+import { Ban, ChevronRight, ExternalLink, Info, Link2Off, Loader2, Play, Search, Undo2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { SaveButton } from "@/components/ui/save-button"
@@ -20,7 +20,8 @@ import {
   markComixAbsent,
   unmarkComixAbsent,
 } from "@/server/actions/comix-resolver"
-import type { WorkMissingComix } from "@/server/queries/comix-coverage"
+import type { WorkDeadComix, WorkMissingComix } from "@/server/queries/comix-coverage"
+import { formatProvenanceWhen } from "@/lib/date-utils"
 
 type Status = Awaited<ReturnType<typeof getComixResolverStatus>>
 
@@ -28,6 +29,8 @@ interface ResolveComixPanelProps {
   accent: SettingsAccent
   initialStatus: Status
   initialMissing: WorkMissingComix[]
+  /** Obras COM código que devolve 404 (migration 222) — vínculo morto, à espera de curadoria. */
+  initialDead: WorkDeadComix[]
   /** Obras já marcadas como inexistentes no Comix (lista "Ignoradas"). */
   initialAbsent: WorkMissingComix[]
   /** Total de obras ativas no catálogo — base do strip de cobertura. */
@@ -93,11 +96,13 @@ export function ResolveComixPanel({
   accent,
   initialStatus,
   initialMissing,
+  initialDead,
   initialAbsent,
   catalogTotal,
 }: ResolveComixPanelProps) {
   const [status, setStatus] = useState<Status>(initialStatus)
   const [missing, setMissing] = useState<WorkMissingComix[]>(initialMissing)
+  const [dead, setDead] = useState<WorkDeadComix[]>(initialDead)
   const [absent, setAbsent] = useState<WorkMissingComix[]>(initialAbsent)
   const [starting, startTransition] = useTransition()
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -105,11 +110,12 @@ export function ResolveComixPanel({
 
   const running = status.state === "running"
 
-  // "com hid Comix" é derivado — total menos as duas pontas — então o strip acompanha
-  // salvar/marcar/restaurar sem uma segunda ida ao servidor.
+  // "Funcionando" é derivado — total menos sem código, código com 404 e ignoradas — então o strip
+  // acompanha salvar/marcar/restaurar sem uma segunda ida ao servidor. 🔴 Até 2026-11-12 o código
+  // com 404 contava aqui como coberto: o card dizia "100%" com 12 códigos mortos.
   const ignored = absent.length
-  const withHid = Math.max(0, catalogTotal - missing.length - ignored)
-  const withHidPct = catalogTotal > 0 ? Math.round((withHid / catalogTotal) * 100) : 0
+  const working = Math.max(0, catalogTotal - missing.length - dead.length - ignored)
+  const workingPct = catalogTotal > 0 ? Math.round((working / catalogTotal) * 100) : 0
 
   // Polling do status enquanto o batch roda.
   useEffect(() => {
@@ -149,13 +155,15 @@ export function ResolveComixPanel({
   // REAL) em vez de um delta otimista: contagem errada é justamente o que queremos evitar.
   const onSaved = (workId: string) => {
     setMissing((prev) => prev.filter((w) => w.id !== workId))
+    setDead((prev) => prev.filter((w) => w.id !== workId))
     refresh()
   }
 
   // "Não existe" → move de pendente pra ignorada (ignoradas não contam no badge).
   const onMarkedAbsent = (work: WorkMissingComix) => {
     setMissing((prev) => prev.filter((w) => w.id !== work.id))
-    setAbsent((prev) => [...prev, work].sort(byTitle))
+    setDead((prev) => prev.filter((w) => w.id !== work.id))
+    setAbsent((prev) => [...prev, { id: work.id, title: work.title }].sort(byTitle))
     refresh()
   }
 
@@ -227,13 +235,10 @@ export function ResolveComixPanel({
           )}
 
           {/* Cobertura — mesmo StatCard das pipelines. */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard label="No catálogo" value={catalogTotal} hint="obras ativas" />
-            <StatCard
-              label="Com hid Comix"
-              value={withHid}
-              hint={`${withHidPct}% do catálogo`}
-            />
+            <StatCard label="Funcionando" value={working} hint={`${workingPct}% do catálogo`} />
+            <StatCard label="Código com 404" value={dead.length} hint="a página não existe mais" />
             <StatCard label="Ignoradas" value={ignored} hint="não existem na Comix" />
           </div>
 
@@ -244,6 +249,36 @@ export function ResolveComixPanel({
             </pre>
           )}
         </div>
+
+        {/* ── Código com 404 ────────────────────────────────────────── */}
+        {/* Só aparece com obra na lista. Quem descobre o 404 são os lotes de capítulos e de reviews
+            (e `scripts/conferir-links-comix.ts`): a marca vale enquanto o código salvo é o mesmo. */}
+        {dead.length > 0 && (
+          <div className="space-y-2 border-t border-border/60 pt-4">
+            <div className="flex items-center gap-2">
+              <Link2Off className="size-4 text-muted-foreground" />
+              <p className="text-sm font-semibold text-foreground">Código não funciona (404)</p>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Obras com código da Comix cuja página não existe mais. Procure a obra na comix.to e cole o
+              código novo, ou marque{" "}
+              <Ban className="inline size-3.5 align-text-bottom text-destructive" aria-label="não existe" /> se
+              ela saiu da Comix.
+            </p>
+            <div className="max-h-96 space-y-1.5 overflow-auto rounded-md border border-border p-2">
+              {dead.map((work) => (
+                <ManualRow
+                  key={work.id}
+                  work={work}
+                  accent={accent}
+                  dead={{ hid: work.hid, notFoundAt: work.notFoundAt }}
+                  onSaved={() => onSaved(work.id)}
+                  onMarkedAbsent={() => onMarkedAbsent(work)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ── Preenchimento manual ──────────────────────────────────── */}
         <div className="space-y-2 border-t border-border/60 pt-4">
@@ -316,11 +351,14 @@ export function ResolveComixPanel({
 function ManualRow({
   work,
   accent,
+  dead,
   onSaved,
   onMarkedAbsent,
 }: {
   work: WorkMissingComix
   accent: SettingsAccent
+  /** Linha da lista "Código não funciona (404)": mostra o código morto e desde quando. */
+  dead?: { hid: string; notFoundAt: string | null }
   onSaved: () => void
   onMarkedAbsent: () => void
 }) {
@@ -363,6 +401,15 @@ function ManualRow({
       <span className="min-w-0 flex-1 truncate text-sm" title={work.title}>
         {work.title}
       </span>
+
+      {dead && (
+        <span
+          className="shrink-0 rounded-full border border-rose-500/40 bg-rose-500/10 px-2 py-0.5 font-mono text-[10px] text-rose-700 dark:text-rose-300"
+          title={dead.notFoundAt ? `404 visto: ${formatProvenanceWhen(dead.notFoundAt)}` : "404"}
+        >
+          404 · {dead.hid}
+        </span>
+      )}
 
       {/* Abrir a busca da Comix pra achar o hid da obra. */}
       <Tooltip>
