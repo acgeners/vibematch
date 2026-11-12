@@ -65,6 +65,7 @@ import type { CompletedBand, OngoingBand, PaceInput } from "@/lib/reading/pace-b
 import { ptBR } from "date-fns/locale"
 import { checkReadingUpdates, type ReadingUpdateResult } from "@/server/actions/reading"
 import { setChaptersRead, setReadingStatusForWorks, archiveWork } from "@/server/actions/works"
+import { continueReadingUrl } from "@/lib/reading/read-url"
 import { ReadingCalendar, CalendarLegend } from "@/components/reading/reading-calendar"
 import {
   ReadingActiveFilters,
@@ -506,6 +507,7 @@ export function ReadingList({
   nowIso,
   initialFilterQuery = "",
   defaultCollapsedBands = [],
+  canArchive = false,
 }: {
   works: ReadingWork[]
   /** Vista inicial lida do cookie no servidor (evita divergência de hidratação). */
@@ -516,6 +518,12 @@ export function ReadingList({
   initialFilterQuery?: string
   /** Grupos recolhidos, lidos do cookie no servidor (evita divergência de hidratação). */
   defaultCollapsedBands?: readonly string[]
+  /**
+   * Quem vê o botão "Arquivar": só a CURADORIA. Arquivar tira a obra do catálogo de TODO mundo
+   * (`archiveWork`, `ensureAdmin`), e para o leitor o botão só devolvia "Não arquivou" — uma ação
+   * oferecida que o servidor recusa. On-hold é dele e continua para todos.
+   */
+  canArchive?: boolean
 }) {
   const refresh = useRefresh()
   const [results, setResults] = useState<Record<string, ReadingUpdateResult>>({})
@@ -809,6 +817,7 @@ export function ReadingList({
     onToggleBand: toggleBand,
     onJumpBand: jumpToBand,
     onCaughtUp: clearHasNew,
+    canArchive,
   }
   const filtersButton = (
     <ReadingFiltersButton
@@ -1169,6 +1178,7 @@ function BandedSection<S extends string>({
   onToggleBand,
   onJumpBand,
   onCaughtUp,
+  canArchive,
 }: {
   sectionKey: SectionKey
   works: ReadingWork[]
@@ -1186,6 +1196,7 @@ function BandedSection<S extends string>({
   onToggleBand: (key: string) => void
   onJumpBand: (section: SectionKey, band: string) => void
   onCaughtUp: (workId: string) => void
+  canArchive: boolean
 }) {
   if (works.length === 0) return null
   return (
@@ -1211,6 +1222,7 @@ function BandedSection<S extends string>({
         collapsedBands={collapsedBands}
         onToggleBand={onToggleBand}
         onCaughtUp={onCaughtUp}
+        canArchive={canArchive}
       />
     </ReadingSection>
   )
@@ -1303,6 +1315,7 @@ function BandedGrid<S extends string>({
   collapsedBands,
   onToggleBand,
   onCaughtUp,
+  canArchive,
 }: {
   works: ReadingWork[]
   results: Record<string, ReadingUpdateResult>
@@ -1318,6 +1331,7 @@ function BandedGrid<S extends string>({
   onToggleBand: (key: string) => void
   /** Chamado quando o card alcança o lançado (marcar até o X / stepper) — limpa o "hasNew". */
   onCaughtUp: (workId: string) => void
+  canArchive: boolean
 }) {
   const bands = useMemo(
     () => groupBands(works, results, classify, order),
@@ -1365,6 +1379,7 @@ function BandedGrid<S extends string>({
                   result={results[work.id]}
                   cfg={cfg}
                   showActions={showActions?.(work, state)}
+                  canArchive={canArchive}
                   filters={filters}
                   onCaughtUp={onCaughtUp}
                 />
@@ -1383,6 +1398,7 @@ function ReadingCard({
   result,
   cfg,
   showActions,
+  canArchive = false,
   filters,
   onCaughtUp,
 }: {
@@ -1390,6 +1406,8 @@ function ReadingCard({
   result: ReadingUpdateResult | undefined
   cfg: BandConfig
   showActions?: boolean
+  /** Só a curadoria arquiva (tira a obra do catálogo de todos) — ver `ReadingList`. */
+  canArchive?: boolean
   filters: ReadingFilters
   onCaughtUp: (workId: string) => void
 }) {
@@ -1475,8 +1493,14 @@ function ReadingCard({
   const fraction = lancado != null && lancado > 0 ? Math.min(1, Math.max(0, read / lancado)) : null
   const canMarkLatest = lancado != null && read < lancado
 
-  // "Continuar lendo" → fonte com o cap mais recente (pós-check); senão comix por hid (load).
-  const readUrl = result?.latestUrl ?? (work.comixHid ? comixUrlFor(work.comixHid) : null)
+  // "Continuar lendo": o link desta checagem, senão o gravado pela última (que já pula a Comix
+  // quando ela não respondeu — hid morto), senão a Comix pelo hid (obra nunca checada).
+  const readUrl = continueReadingUrl({
+    checkedUrl: result?.latestUrl,
+    savedUrl: work.latestChapterUrl,
+    comixHid: work.comixHid,
+    comixUrl: comixUrlFor,
+  })
   // Data do último cap: absoluta da fonte (mangago) ou relativa da comix pós-check;
   // senão a cacheada no DB (load).
   const releasedAge = result?.releasedAt
@@ -1718,17 +1742,19 @@ function ReadingCard({
                   )}
                   On-hold
                 </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={archive}
-                  disabled={acting}
-                  className="text-muted-foreground"
-                  title="Arquivar obra"
-                >
-                  <Archive className="mr-1.5 size-3.5" />
-                  Arquivar
-                </Button>
+                {canArchive && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={archive}
+                    disabled={acting}
+                    className="text-muted-foreground"
+                    title="Arquivar obra (sai do catálogo de todos)"
+                  >
+                    <Archive className="mr-1.5 size-3.5" />
+                    Arquivar
+                  </Button>
+                )}
               </div>
             )}
           </div>

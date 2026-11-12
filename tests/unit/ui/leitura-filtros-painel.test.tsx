@@ -48,6 +48,7 @@ const base = {
   nextChapterPredictedAt: null,
   chaptersCheckedAt: null,
   comixHid: null,
+  latestChapterUrl: null,
   hiatusKind: null,
   hiatusKindConfidence: null,
   publicationStatusNote: null,

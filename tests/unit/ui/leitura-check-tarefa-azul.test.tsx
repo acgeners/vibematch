@@ -33,6 +33,7 @@ const base = {
   nextChapterPredictedAt: null,
   chaptersCheckedAt: null,
   comixHid: null,
+  latestChapterUrl: null,
   isAdult: false,
 } as unknown as ReadingWork
 

@@ -37,6 +37,11 @@ export interface ReadingWork extends ReadingFilterFields {
   lastTouchedAt: string | null
   /** hid do comix (match exato na checagem de capítulos); `null` se não confirmado. */
   comixHid: string | null
+  /**
+   * Link do "Continuar lendo" gravado pela última checagem que achou capítulo (`pickReadUrl`,
+   * migration 221). `null` = nunca checada com sucesso — o card cai no hid da Comix.
+   */
+  latestChapterUrl: string | null
   /** Data (aprox.) do último capítulo, cacheada na última checagem. `null` até a migration 087. */
   lastChapterReleasedAt: string | null
   /** Próxima data prevista, cacheada na última checagem. `null` até a migration 087. */
@@ -53,6 +58,8 @@ export interface ReadingWork extends ReadingFilterFields {
 // Colunas da migration 087. Mantidas num select separado pra degradar fail-soft
 // quando a migration ainda não foi aplicada (não quebra a página).
 const DATE_COLUMNS = "last_chapter_released_at, next_chapter_predicted_at, chapters_checked_at"
+// Migration 221. Degrau PRÓPRIO: sem ela, cai só o link do "Continuar lendo", não as datas.
+const READ_URL_COLUMN = "latest_chapter_url"
 
 function isMissingColumnError(message: string): boolean {
   return /does not exist|42703|could not find/i.test(message)
@@ -107,7 +114,10 @@ export async function getReadingWorks(
 
   // Tenta com as colunas de data (migration 087); cai pro select-base se ainda
   // não existirem, sem quebrar a página.
-  let { data, error } = await runQuery(`${baseSelect}, ${DATE_COLUMNS}`)
+  let { data, error } = await runQuery(`${baseSelect}, ${DATE_COLUMNS}, ${READ_URL_COLUMN}`)
+  if (error && isMissingColumnError(error.message)) {
+    ({ data, error } = await runQuery(`${baseSelect}, ${DATE_COLUMNS}`))
+  }
   if (error && isMissingColumnError(error.message)) {
     ({ data, error } = await runQuery(baseSelect))
   }
@@ -126,6 +136,7 @@ export async function getReadingWorks(
     last_chapter_released_at?: string | null
     next_chapter_predicted_at?: string | null
     chapters_checked_at?: string | null
+    latest_chapter_url?: string | null
     calculated_scores?: { expected_score?: number | null; alignment_score?: number | null } | null
     category_scores?: Array<{ criterion_slug: string; score: number | null }> | null
     work_covers?: CoverRow[] | null
@@ -214,6 +225,7 @@ export async function getReadingWorks(
       lastTouchedAt: touched.get(w.id) ?? null,
       expectedScore: calc?.expected_score ?? null,
       comixHid: comix?.external_id ?? null,
+      latestChapterUrl: w.latest_chapter_url ?? null,
       lastChapterReleasedAt: w.last_chapter_released_at ?? null,
       nextChapterPredictedAt: w.next_chapter_predicted_at ?? null,
       chaptersCheckedAt: w.chapters_checked_at ?? null,

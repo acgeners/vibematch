@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { getLatestChapter, type ChapterCheckInput } from "@/lib/external/chapter-sources"
 import { predictNextFromAnchor, parseRelativeAgeToDate } from "@/lib/external/chapter-sources/cadence"
 import { comixWorkUrl } from "@/lib/external/comix"
+import { pickReadUrl } from "@/lib/reading/read-url"
 import { fetchMangaDexChapterDates } from "@/lib/external/mangadex"
 import { fetchMangaUpdatesStatus } from "@/lib/external/mangaupdates"
 import { withTimeout } from "@/lib/external/with-timeout"
@@ -195,12 +196,21 @@ export async function checkReadingUpdates(
         }
         const nextPredictedAt = anchor ? predictNextFromAnchor(anchor, cadence) : null
 
-        // Cacheia as datas pra exibir já no load (sem refazer a checagem).
+        const hid = comixHid ?? resolvedComixHid ?? null
+        // "Continuar lendo": a Comix só quando ela RESPONDEU agora; senão a fonte que achou o
+        // capítulo. Hid morto (404) mandava para uma página que não existe mais (`pickReadUrl`).
+        const readUrl = pickReadUrl({
+          comixHid: hid,
+          comixAnswered: chapterResult.bySource.comix != null,
+          winnerUrl,
+          comixUrl: comixWorkUrl,
+        })
+
+        // Cacheia as datas e o link pra exibir já no load (sem refazer a checagem).
         if (latest != null) {
-          await persistReadingDates(supabase, w.id, lastReleasedIso, nextPredictedAt)
+          await persistReadingDates(supabase, w.id, lastReleasedIso, nextPredictedAt, readUrl)
         }
 
-        const hid = comixHid ?? resolvedComixHid ?? null
         const total = w.total_chapters ?? null
         const hasNew = latest != null && (total == null || latest > total)
         const delta = latest != null && total != null ? latest - total : null
@@ -242,9 +252,7 @@ export async function checkReadingUpdates(
           failed: latest == null,
           releasedLabel: releasedLabel ?? null,
           releasedAt: lastReleasedIso,
-          // "Continuar lendo" sempre no comix quando há hid (leitura preferida); só cai
-          // na fonte que achou (mangago) quando a obra não está no comix.
-          latestUrl: hid ? comixWorkUrl(hid) : (winnerUrl ?? null),
+          latestUrl: readUrl,
           nextPredictedAt,
           statusExternal: statusExternal ?? null,
           statusApplied,
@@ -301,16 +309,23 @@ async function persistReadingDates(
   workId: string,
   lastChapterReleasedAt: string | null,
   nextChapterPredictedAt: string | null,
+  latestChapterUrl: string | null,
 ): Promise<void> {
-  const { error } = await supabase
+  const dates = {
+    last_chapter_released_at: lastChapterReleasedAt,
+    next_chapter_predicted_at: nextChapterPredictedAt,
+    chapters_checked_at: new Date().toISOString(),
+  }
+  const missingColumn = (message: string) => /does not exist|42703|could not find/i.test(message)
+  let { error } = await supabase
     .from("works")
-    .update({
-      last_chapter_released_at: lastChapterReleasedAt,
-      next_chapter_predicted_at: nextChapterPredictedAt,
-      chapters_checked_at: new Date().toISOString(),
-    })
+    .update({ ...dates, latest_chapter_url: latestChapterUrl })
     .eq("id", workId)
-  if (error && !/does not exist|42703|could not find/i.test(error.message)) {
+  // Sem a migration 221, perde-se só o link — as datas são gravadas de novo sem ele.
+  if (error && missingColumn(error.message)) {
+    ;({ error } = await supabase.from("works").update(dates).eq("id", workId))
+  }
+  if (error && !missingColumn(error.message)) {
     console.error("[persistReadingDates] failed:", error.message)
   }
 }
