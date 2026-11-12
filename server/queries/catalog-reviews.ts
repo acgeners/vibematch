@@ -17,9 +17,10 @@ import { fetchAllRows } from "@/lib/supabase/paginate"
 export const CATALOG_REVIEWS_STALE_DAYS = 30
 
 /**
- * Segundos por obra, para a estimativa do painel. ⚠️ ESTIMATIVA do backfill (o Mangago leva ~37 s
- * por obra, uma requisição por review); a busca do lote pula a hidratação das fontes e deve ficar
- * abaixo disto. Remedir na primeira execução real e trocar aqui.
+ * Segundos por obra, para a estimativa do painel. Veio do script de backfill (o Mangago leva ~37 s
+ * por obra, uma requisição por review) e foi CONFERIDO na 1ª rodada real do lote (2026-11-12): 6
+ * obras, ~35 s cada, de 6 a 51 s — as com muitas reviews no Mangago ficam perto de 50 s. Mantido:
+ * a diferença dá ~30 min em 11 h, abaixo do que 6 obras sustentam.
  */
 export const REVIEW_SECONDS_PER_WORK = 37
 
