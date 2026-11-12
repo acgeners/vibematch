@@ -17,6 +17,10 @@ import {
 import { runTask } from "@/lib/tasks-store"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import { formatUsdApprox } from "@/lib/format/money"
+import {
+  OPENAI_BILLING_URL,
+  summarizeEmbeddingFailures,
+} from "@/lib/ml/embedding-failure"
 
 const EMBEDDINGS_TASK_ID = "embeddings"
 
@@ -81,8 +85,22 @@ export function EmbeddingsPanel({ accent, initialCachedCount, pendingCount, tota
         if (result.refreshed === 0 && result.failed === 0) {
           toast.info("Tudo em dia — nenhum embedding precisava ser atualizado.")
         } else if (result.failed > 0) {
+          // 🔴 O MOTIVO vai no aviso. Era "Veja os logs do servidor", que manda pra um
+          // arquivo no Mac ou pro painel da Fly — nenhum dos dois é um lugar do app — e
+          // dizia a mesma coisa pra falta de crédito, chave errada e queda de rede.
+          const semCredito = result.failures.some((f) => f.kind === "sem_credito")
           toast.warning(
-            `${result.refreshed} embedados, ${result.failed} falharam. Veja os logs do servidor.`,
+            `${result.refreshed} embedados, ${result.failed} falharam: ${summarizeEmbeddingFailures(result.failures)}.`,
+            {
+              // Tempo pra ler uma frase de duas linhas e alcançar o botão.
+              duration: 15_000,
+              action: semCredito
+                ? {
+                    label: "Abrir cobrança da OpenAI",
+                    onClick: () => window.open(OPENAI_BILLING_URL, "_blank", "noopener,noreferrer"),
+                  }
+                : undefined,
+            },
           )
         } else {
           toast.success(
@@ -205,9 +223,26 @@ export function EmbeddingsPanel({ accent, initialCachedCount, pendingCount, tota
               <span className="font-mono text-foreground">{lastResult.refreshed}</span>
             </li>
             {lastResult.failed > 0 && (
-              <li className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
-                <AlertCircle className="h-3 w-3" /> Falharam:{" "}
-                <span className="font-mono">{lastResult.failed}</span>
+              // O aviso some em segundos; o motivo fica aqui enquanto a tela estiver aberta.
+              <li className="flex items-start gap-1 text-amber-600 dark:text-amber-400">
+                <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                <span>
+                  Falharam: <span className="font-mono">{lastResult.failed}</span> —{" "}
+                  {summarizeEmbeddingFailures(lastResult.failures)}
+                  {lastResult.failures.some((f) => f.kind === "sem_credito") && (
+                    <>
+                      {" "}
+                      <a
+                        href={OPENAI_BILLING_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline underline-offset-2"
+                      >
+                        Abrir cobrança da OpenAI
+                      </a>
+                    </>
+                  )}
+                </span>
               </li>
             )}
             <li>
