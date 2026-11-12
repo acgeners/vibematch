@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useTransition } from "react"
+import Link from "next/link"
 import { Ban, ChevronRight, ExternalLink, Info, Link2Off, Loader2, Play, Search, Undo2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -41,6 +42,28 @@ const byTitle = (a: WorkMissingComix, b: WorkMissingComix) => a.title.localeComp
 
 /** Busca da obra no site da Comix (mesma URL que o resolver usa para descobrir candidatos). */
 const comixSearchUrl = (title: string) => `https://comix.to/browse?q=${encodeURIComponent(title)}`
+
+/**
+ * O nome da obra abre a página dela, em ABA NOVA: a lista é uma fila de curadoria, e trocar de
+ * página faria perder o lugar nela (e o código digitado nas outras linhas). `/catalog/<id>` serve
+ * pelo id, e o canonical da página aponta o slug.
+ */
+function WorkTitleLink({ work, muted = false }: { work: WorkMissingComix; muted?: boolean }) {
+  return (
+    <Link
+      href={`/catalog/${work.id}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={`Abrir "${work.title}" em outra aba`}
+      className={cn(
+        "min-w-0 flex-1 truncate text-sm underline-offset-2 hover:underline",
+        muted ? "text-muted-foreground hover:text-foreground" : "text-foreground",
+      )}
+    >
+      {work.title}
+    </Link>
+  )
+}
 
 /**
  * Tooltip do "Como funciona" — renderizado ao lado do título "Cobertura" no
@@ -398,9 +421,7 @@ function ManualRow({
 
   return (
     <div className="flex items-center gap-2">
-      <span className="min-w-0 flex-1 truncate text-sm" title={work.title}>
-        {work.title}
-      </span>
+      <WorkTitleLink work={work} />
 
       {dead && (
         <span
@@ -489,9 +510,7 @@ function AbsentRow({ work, onRestored }: { work: WorkMissingComix; onRestored: (
 
   return (
     <div className="flex items-center gap-2 rounded-md bg-muted/40 px-2 py-1.5">
-      <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground" title={work.title}>
-        {work.title}
-      </span>
+      <WorkTitleLink work={work} muted />
       <span className="shrink-0 rounded-full border border-border bg-background px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
         não existe
       </span>
