@@ -73,6 +73,27 @@ export async function saveWorkReviews(
 
   const sourcesInBatch = [...new Set(reviews.map((r) => r.source))]
   const now = new Date().toISOString()
+
+  // 🔴 Review que a avaliação recém-feita LEU entra com a data DELA. O "+N reviews desde a
+  // avaliação" da fila (`work_review_growth`, migration 220) conta as reviews criadas DEPOIS da
+  // avaliação vigente — e na criação da obra (Path B) a avaliação é gravada ANTES destas reviews
+  // (o save roda em `after()`). Medido em 2026-11-12: 325 reviews entraram até 2 min depois da
+  // avaliação de criação, e a obra aparecia com "+43 desde a avaliação (tinha 0)" sem ter ganhado
+  // nada. Sem avaliação concluída, nada muda.
+  let seenByEvaluationAt: string | null = null
+  if (opts.fromFreshEval) {
+    const { data: ev } = await supabase
+      .from("ai_evaluations")
+      .select("created_at, updated_at")
+      .eq("work_id", workId)
+      .eq("status", "completed")
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const at = (ev as { created_at?: string | null; updated_at?: string | null } | null) ?? null
+    seenByEvaluationAt = at?.updated_at ?? at?.created_at ?? null
+  }
   // `pgSafeText` na FRONTEIRA de escrita: os conectores cortam a review com
   // `.slice(0, 900)`, que corta por unidade UTF-16 e pode deixar meio emoji. O
   // Postgres recusa o corpo inteiro com 400 — e como o erro abaixo só é LOGADO, o
@@ -86,6 +107,7 @@ export async function saveWorkReviews(
     user_rating: r.userRating ?? null,
     match_score: Math.round(r.matchScore * 100) / 100,
     fetched_at: now,
+    ...(seenByEvaluationAt ? { created_at: seenByEvaluationAt } : {}),
   })
 
   if (opts.accumulate && !opts.replace) {

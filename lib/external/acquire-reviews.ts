@@ -2,10 +2,56 @@ import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import {
   buildCandidateFromExternalIds,
+  collectReviewsFromCandidate,
   fetchExternalEvaluationContextForCandidate,
 } from "@/lib/external/index"
 import { saveWorkReviews } from "@/lib/external/persist-reviews"
-import type { ExternalSourceId, SourcedReview } from "@/lib/external/types"
+import type { ExternalSourceId, MergedCandidate, SourcedReview } from "@/lib/external/types"
+
+/**
+ * O candidato da obra montado SÓ pelos vínculos aceitos (`work_external_ids` não rejeitados).
+ * `null` quando a obra não existe ou não tem vínculo aceito — quem chama não faz busca por
+ * título na borda (cara e ambígua). Dono único: a aquisição completa e a busca enxuta do lote
+ * partem do MESMO candidato.
+ */
+async function loadAcceptedCandidate(
+  workId: string,
+): Promise<{ candidate: MergedCandidate; rejectedSources: string[] } | null> {
+  const supabase = createAdminClient()
+
+  const { data: work } = await supabase
+    .from("works")
+    .select("title, original_title, alternative_titles")
+    .eq("id", workId)
+    .maybeSingle()
+  if (!work?.title) return null
+
+  const { data: extIds } = await supabase
+    .from("work_external_ids")
+    .select("source, external_id, is_rejected")
+    .eq("work_id", workId)
+  const rejectedSources = (extIds ?? [])
+    .filter((row) => row.is_rejected === true)
+    .map((row) => row.source as string)
+  const acceptedExternalIds = Object.fromEntries(
+    (extIds ?? [])
+      .filter((row) => row.is_rejected !== true && row.external_id)
+      .map((row) => [row.source, String(row.external_id)]),
+  ) as Partial<Record<ExternalSourceId, string>>
+
+  // Sem IDs aceitos: não scrapeia por título na borda (custo/ambiguidade).
+  if (Object.keys(acceptedExternalIds).length === 0) return null
+
+  const candidate = buildCandidateFromExternalIds(
+    {
+      title: work.title,
+      originalTitle: work.original_title ?? undefined,
+      alternativeTitles: work.alternative_titles ?? [],
+    },
+    acceptedExternalIds,
+  )
+  return { candidate, rejectedSources }
+}
 
 /**
  * Adquire reviews externas de uma obra na BORDA (ex.: ao "atualizar dados") e as
@@ -30,39 +76,9 @@ export async function acquireAndPersistWorkReviews(
 ): Promise<number> {
   if (!workId) return 0
   try {
-    const supabase = createAdminClient()
-
-    const { data: work } = await supabase
-      .from("works")
-      .select("title, original_title, alternative_titles")
-      .eq("id", workId)
-      .maybeSingle()
-    if (!work?.title) return 0
-
-    const { data: extIds } = await supabase
-      .from("work_external_ids")
-      .select("source, external_id, is_rejected")
-      .eq("work_id", workId)
-    const rejectedSources = (extIds ?? [])
-      .filter((row) => row.is_rejected === true)
-      .map((row) => row.source as string)
-    const acceptedExternalIds = Object.fromEntries(
-      (extIds ?? [])
-        .filter((row) => row.is_rejected !== true && row.external_id)
-        .map((row) => [row.source, String(row.external_id)]),
-    ) as Partial<Record<ExternalSourceId, string>>
-
-    // Sem IDs aceitos: não scrapeia por título na borda (custo/ambiguidade).
-    if (Object.keys(acceptedExternalIds).length === 0) return 0
-
-    const candidate = buildCandidateFromExternalIds(
-      {
-        title: work.title,
-        originalTitle: work.original_title ?? undefined,
-        alternativeTitles: work.alternative_titles ?? [],
-      },
-      acceptedExternalIds,
-    )
+    const loaded = await loadAcceptedCandidate(workId)
+    if (!loaded) return 0
+    const { candidate, rejectedSources } = loaded
 
     const { allReviews, failedSources } = await fetchExternalEvaluationContextForCandidate(candidate, {
       rejectedSources,
@@ -92,7 +108,6 @@ export async function acquireAndPersistWorkReviews(
       // Chama o coletor DIRETO, sem passar pelo contexto cacheado: o cache tem TTL de
       // 5 min e a chave é a mesma da 1ª passada, então re-entrar por lá devolveria o
       // resultado parcial de novo — um retry que não retenta nada.
-      const { collectReviewsFromCandidate } = await import("@/lib/external/index")
       const retry = await collectReviewsFromCandidate(candidate, undefined, failedSources)
       recovered = retry.reviews
       console.info(
@@ -122,5 +137,44 @@ export async function acquireAndPersistWorkReviews(
       err instanceof Error ? err.message : err,
     )
     return 0
+  }
+}
+
+export interface LeanReviewRefresh {
+  /** `false` quando a obra não tem vínculo aceito — nada foi buscado. */
+  attempted: boolean
+  /** Fontes tentadas que FALHARAM (timeout/erro), diferente de "respondeu sem nada". */
+  failedSources: ExternalSourceId[]
+  /** Exceção fora das fontes (leitura do banco, etc.). Conta como falha: a obra não foi verificada. */
+  error?: string
+}
+
+/**
+ * Busca de novo SÓ as reviews de uma obra, pelas fontes já vinculadas — o passo do lote "Reviews
+ * do catálogo" (`refreshReviewsForWorks`). Custo de IA ZERO.
+ *
+ * Diferente de `acquireAndPersistWorkReviews` em duas coisas, as duas de propósito:
+ *   · vai DIRETO ao coletor (`collectReviewsFromCandidate`, o mesmo da 2ª passada de lá), sem
+ *     hidratar as fontes nem buscar obras parecidas. O vínculo já foi aceito; re-hidratar é
+ *     scraping a mais por obra num lote de horas (o script de backfill também não hidrata);
+ *   · não gera resumo nem digest (`skipPaidEnrichment`). O digest é regerado quando a obra é
+ *     reavaliada ("Preparar e avaliar"), que é quando ele serve a alguém.
+ *
+ * A gravação é a de sempre (por fonte, acumulativa): muda `reviews_hash`, a marca "Reviews novas"
+ * e o sinal de arte. Não lança: uma exceção volta em `error`, e quem chama a trata como falha.
+ */
+export async function refreshWorkReviewsLean(workId: string): Promise<LeanReviewRefresh> {
+  if (!workId) return { attempted: false, failedSources: [] }
+  try {
+    const loaded = await loadAcceptedCandidate(workId)
+    if (!loaded) return { attempted: false, failedSources: [] }
+    const { failedSources } = await collectReviewsFromCandidate(loaded.candidate, (reviews) =>
+      saveWorkReviews(workId, reviews, { skipPaidEnrichment: true, accumulate: true }),
+    )
+    return { attempted: true, failedSources }
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err)
+    console.error("[refreshWorkReviewsLean] falha:", error)
+    return { attempted: true, failedSources: [], error }
   }
 }

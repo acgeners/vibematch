@@ -29,7 +29,9 @@ import type { ExternalSourceId } from "@/lib/external/types"
 import type { TagsReviewsWork } from "@/components/ai-evaluation/tags-reviews-tab"
 import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
 import { getWorksWithoutTags } from "@/server/queries/works-without-tags"
-import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
+import { getReviewGrowthNewUseful, getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
+import { rankForDisplay, toReviewGrowth } from "@/lib/reviews/review-growth"
+import type { ReviewGrowth } from "@/lib/reviews/review-growth"
 import { fetchAdultScoreFlags } from "@/server/queries/adult-score-flags"
 import { getReadAckSets, getEvalReadSummary } from "@/server/queries/ai-eval-read"
 import type { ReadQueue } from "@/server/queries/ai-eval-read"
@@ -72,6 +74,11 @@ interface EligibleWork {
   /** Hidratados só na aba ativa (cards) — ausentes no caminho do cache de contagens. */
   tagCount?: number | null
   reviewCount?: number | null
+  /**
+   * Reviews úteis que entraram depois da avaliação vigente (e quantas havia antes). Hidratado só
+   * na aba ativa; `null` quando a obra não tem avaliação concluída.
+   */
+  reviewGrowth?: ReviewGrowth | null
   /** Razões pelas quais a obra apareceu (intersecção com os filtros ativos). */
   matchedFilters: EvaluationFilter[]
   /** Estado REAL da obra (works.ai_eval_status) — é ele que libera o "Revisar". */
@@ -199,7 +206,13 @@ async function getEligibleWorks(
   pubStatusIds: number[],
   personalStatusIds: number[],
   synopsisQualities: string[],
-  toleranceOverride: number | null
+  toleranceOverride: number | null,
+  /**
+   * `rankByReviewGrowth`: só na aba ATIVA. Conta o 💬 e o crescimento de TODAS as obras casadas
+   * para ordenar antes do teto de exibição. Fica fora do caminho cacheado das contagens das abas,
+   * que não desenha card e não precisa pagar essas duas leituras.
+   */
+  opts: { rankByReviewGrowth?: boolean } = {},
 ) {
   const supabase = createAdminClient()
 
@@ -404,19 +417,28 @@ async function getEligibleWorks(
   })
   if (worksResult.error) throw new Error(String((worksResult.error as { message?: string }).message ?? worksResult.error))
 
-  // Ordena por título em JS e limita aos 500 que serão exibidos.
+  // Ordena e limita aos 500 que serão exibidos — nesta ordem, SEMPRE (`rankForDisplay`).
   //
-  // ⚠️ O corte é REAL e passou a morder quando `outdated-reviews` entrou no default:
-  // são 556 obras na nuvem contra o teto de 500. Antes desta linha o `totalCount` saía
-  // DEPOIS do slice, então a tela dizia "500" e as 56 restantes sumiam sem nada acusar —
-  // um teto silencioso, que é exatamente o que o resto deste arquivo combate. Agora o
-  // tamanho real vai junto (`matchedCount`) e a UI o imprime.
+  // ⚠️ O corte é REAL e morde em uso normal: com `outdated-reviews` no default a fila passou de
+  // 556 para 770 obras na nuvem (11/11) contra o teto de 500. Antes, o `totalCount` saía DEPOIS do
+  // slice e a tela dizia "500" com o resto sumindo sem nada acusar; hoje o tamanho real vai junto
+  // (`matchedCount`) e a UI o imprime.
+  //
+  // 🔴 Na aba ativa as que ganharam reviews depois da avaliação vêm PRIMEIRO (proporção N ÷ M) e
+  // só então o corte: cortando por título, as que mais cresceram podiam ficar de fora — e são
+  // justamente as que a fila existe para mostrar. Sem a opção, a ordem segue por título.
   const MAX_DISPLAYED = 500
-  const sortedWorks = worksResult.data
-    .slice()
-    .sort((a, b) => String(a.title ?? "").localeCompare(String(b.title ?? "")))
-  const matchedCount = sortedWorks.length
-  const displayedWorks = sortedWorks.slice(0, MAX_DISPLAYED)
+  const matchedIds = worksResult.data.map((w) => w.id)
+  const [countsById, newUsefulById] = opts.rankByReviewGrowth
+    ? await Promise.all([getWorkTagReviewCounts(matchedIds), getReviewGrowthNewUseful(matchedIds)])
+    : [null, null]
+  const growthById = new Map<string, ReviewGrowth | null>()
+  if (countsById && newUsefulById) {
+    for (const id of matchedIds) {
+      growthById.set(id, toReviewGrowth(countsById.get(id)?.reviewCount ?? 0, newUsefulById.get(id)))
+    }
+  }
+  const { displayed: displayedWorks, matchedCount } = rankForDisplay(worksResult.data, growthById, MAX_DISPLAYED)
   const displayedIds = displayedWorks.map((w) => w.id)
 
   // Hidrata covers + calculated_scores + última aval em chunks, tudo em paralelo
@@ -509,6 +531,13 @@ async function getEligibleWorks(
       matchedFilters: matchedByWork.get(row.id) ?? [],
       aiEvalStatus: row.ai_eval_status ?? null,
       evaluation: evalByWork.get(row.id) ?? null,
+      ...(countsById
+        ? {
+            tagCount: countsById.get(row.id)?.tagCount ?? 0,
+            reviewCount: countsById.get(row.id)?.reviewCount ?? 0,
+            reviewGrowth: growthById.get(row.id) ?? null,
+          }
+        : {}),
     } as EligibleWork
   })
 
@@ -572,7 +601,8 @@ function IaAttributesTab({
           isto imprime em uso normal, não em caso de borda. */}
       {hiddenByCap > 0 && (
         <p className="text-xs text-muted-foreground">
-          Mostrando as {works.length} primeiras (por título) — <strong>{hiddenByCap}</strong>{" "}
+          Mostrando as {works.length} primeiras (as que mais ganharam reviews desde a avaliação, depois por
+          título) — <strong>{hiddenByCap}</strong>{" "}
           {hiddenByCap === 1 ? "obra casa os filtros e não coube" : "obras casam os filtros e não couberam"}
           . Processe estas e recarregue.
         </p>
@@ -974,15 +1004,17 @@ export default async function CuradoriaDaObraPage({
   } else {
     // Interesse (manual + Previsão da IA) filtrado uniformemente pós-fetch (não no
     // getEligibleWorks) — cobre ♥/none/unknown + previsão em todas as abas.
-    const attrResult = await getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds, [], toleranceOverride)
+    // O 💬, o crescimento de reviews e a ordem já vêm do `getEligibleWorks` (contados ANTES do
+    // teto de exibição, sobre todas as casadas) — contar de novo aqui seria uma 2ª régua para
+    // o mesmo número.
+    const attrResult = await getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds, [], toleranceOverride, {
+      rankByReviewGrowth: true,
+    })
     const keep = await filterWorkIdsByInterest(attrResult.works.map((w) => w.id), synopsisQualities, predictionQualities)
     const members = attrResult.works.filter((w) => keep.has(w.id))
-    const counts = await getWorkTagReviewCounts(members.map((w) => w.id))
     const prep = await loadEvalPrep(members.map((w) => w.id))
     const works = members.map((w) => ({
       ...w,
-      tagCount: counts.get(w.id)?.tagCount ?? 0,
-      reviewCount: counts.get(w.id)?.reviewCount ?? 0,
       prep: prep.get(w.id) ?? null,
     }))
     const readIds = readIdsFor("attr", works)

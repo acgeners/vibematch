@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { CalendarDays, ClipboardCheck, Cpu, ExternalLink, Gauge, ListChecks, Loader2, Sparkles, SkipForward, X } from "lucide-react"
+import { CalendarDays, ClipboardCheck, Cpu, ExternalLink, Gauge, ListChecks, Loader2, MessageSquarePlus, Sparkles, SkipForward, X } from "lucide-react"
 import { toast } from "sonner"
 import {
   triggerAiEvaluation,
@@ -21,6 +21,8 @@ import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
 import { AiEvaluationReviewForm } from "./ai-evaluation-review-form"
 import type { CurrentEvaluationMeta } from "./ai-evaluation-review-form"
 import { confidenceTextClass } from "@/lib/ai-evaluation/confidence-tone"
+import { describeReviewGrowth, reviewGrowthRatio } from "@/lib/reviews/review-growth"
+import type { ReviewGrowth } from "@/lib/reviews/review-growth"
 import { AiEvaluationCompare } from "./ai-evaluation-compare"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -60,6 +62,8 @@ interface PendingWork {
   user_score?: number | null
   tagCount?: number | null
   reviewCount?: number | null
+  /** Reviews úteis que entraram depois da avaliação vigente (e quantas havia). `null` = sem avaliação. */
+  reviewGrowth?: ReviewGrowth | null
   matchedFilters?: Array<"pending" | "review-pending" | "low-confidence" | "outdated-model" | "outdated-reviews">
   /**
    * `works.ai_eval_status`. É daqui que sai o "Revisar" — ver o comentário do
@@ -230,7 +234,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
   }
 
   // Sort
-  type SortField = "default" | "expected_score" | "confidence" | "evaluatedAt" | "modelName"
+  type SortField = "default" | "expected_score" | "confidence" | "evaluatedAt" | "modelName" | "reviewGrowth"
   const [sortField, setSortField] = useState<SortField>("default")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
   const [sortField2, setSortField2] = useState<SortField>("default")
@@ -253,6 +257,10 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
         }
         case "modelName":
           return w.evaluation?.modelName ?? null
+        // A MESMA proporção que ordena o servidor antes do teto (`rankForDisplay`). Sem review
+        // nova é nulo — vai para o fim, em vez de empatar em zero com quem ganhou pouco.
+        case "reviewGrowth":
+          return w.reviewGrowth && w.reviewGrowth.newUseful > 0 ? reviewGrowthRatio(w.reviewGrowth) : null
       }
     }
 
@@ -800,6 +808,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
                   { value: "confidence", label: "Confiança IA" },
                   { value: "evaluatedAt", label: "Data avaliação" },
                   { value: "modelName", label: "Modelo" },
+                  { value: "reviewGrowth", label: "Reviews novas (proporção)" },
                 ]}
                 dir={sortDir}
                 onToggleDir={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
@@ -817,6 +826,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
                     { value: "confidence", label: "Confiança IA", disabled: sortField === "confidence" },
                     { value: "evaluatedAt", label: "Data avaliação", disabled: sortField === "evaluatedAt" },
                     { value: "modelName", label: "Modelo", disabled: sortField === "modelName" },
+                    { value: "reviewGrowth", label: "Reviews novas (proporção)", disabled: sortField === "reviewGrowth" },
                   ]}
                   dir={sortDir2}
                   onToggleDir={() => setSortDir2((d) => (d === "asc" ? "desc" : "asc"))}
@@ -904,6 +914,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
                     ? { label: "Nunca avaliada pela IA", tone: "slate" }
                     : null
 
+          const growthText = describeReviewGrowth(work.reviewGrowth)
           const details = work.evaluation ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground mt-1">
               <span className="inline-flex items-center gap-1">
@@ -933,6 +944,18 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
                 >
                   <Gauge className="h-3 w-3" />
                   {Math.round(work.evaluation.confidence * 100)}%
+                </span>
+              )}
+              {/* Quanto a evidência mudou desde ESTA avaliação — a data dela está duas linhas
+                  acima, por isso o texto diz só "desde a avaliação". O "tinha M" é o 💬 de agora
+                  menos o N (`toReviewGrowth`), então a conta fecha com o número do card. */}
+              {growthText && (
+                <span
+                  className="inline-flex items-center gap-1"
+                  title="Reviews úteis (40+ caracteres) que entraram depois desta avaliação, e quantas havia quando ela foi feita"
+                >
+                  <MessageSquarePlus className="h-3 w-3" />
+                  {growthText}
                 </span>
               )}
             </div>

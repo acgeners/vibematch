@@ -1697,7 +1697,11 @@ export async function createWorksBatch(
       if (!saveWorkReviewsFn) {
         saveWorkReviewsFn = (await import("@/lib/external/persist-reviews")).saveWorkReviews
       }
-      await saveWorkReviewsFn(result.workId, externalReviews)
+      // `fromFreshEval`: estas reviews vieram da MESMA busca que avaliou a obra. Sem ele, a obra
+      // recém-criada (`done`) já nascia na fila "Reviews novas", e as reviews entravam com data
+      // posterior à avaliação — contando como "+N desde a avaliação" sem ter entrado nada novo.
+      // Sem avaliação concluída, as duas coisas não fazem nada.
+      await saveWorkReviewsFn(result.workId, externalReviews, { fromFreshEval: true })
     } else {
       needEdgeReviews.push(result.workId)
     }

@@ -22,6 +22,29 @@ export interface WorkCardCounts {
 type AdminClient = ReturnType<typeof createAdminClient>
 
 /**
+ * Quantas reviews ÚTEIS cada obra ganhou depois da avaliação vigente — RPC
+ * `work_review_growth` (migration 220), que usa a MESMA régua de `work_card_counts` (o 💬).
+ * Obra sem avaliação concluída fica FORA do mapa (não há "desde" para medir).
+ *
+ * 🔴 Lança em vez de devolver vazio: um mapa vazio por erro faria a fila "Reviews novas"
+ * parecer sem crescimento nenhum e ordenar por título — o resultado plausível e errado que a
+ * função existe para evitar. Ordem de deploy: migration 220 antes do código.
+ */
+export async function getReviewGrowthNewUseful(ids: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  if (ids.length === 0) return out
+  const sb = createAdminClient()
+  for (const c of chunk(ids, CHUNK)) {
+    const { data, error } = await sb.rpc("work_review_growth", { work_ids: c })
+    if (error) throw new Error(`work_review_growth: ${error.message}`)
+    for (const r of (data ?? []) as Array<{ work_id: string; new_useful: number | null }>) {
+      out.set(r.work_id, Number(r.new_useful) || 0)
+    }
+  }
+  return out
+}
+
+/**
  * Contagens por obra via RPC agregada `work_card_counts` (migration 122): 1 linha por
  * obra (GROUP BY em SQL) em vez de varrer work_tags (~30k) / work_reviews (~10k) e
  * contar em JS. `ids=null` = TODAS as obras. Retorna `null` se a função não existir
