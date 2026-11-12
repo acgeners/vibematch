@@ -5481,12 +5481,16 @@ propósito; ali o caminho é o diálogo por obra.
 
 ⚠️ **O pior caso esteve coberto, medido em 08/2026:** 1ª obra de cada janela de 15min paga a sonda (13,2s) + solve frio do FlareSolverr (12,4s) = 25,8s ⇒ estoura a 1ª passada, e a **2ª passada dirigida recuperava em 4,2s** (`acquire-reviews.ts`). 🔴 **Essa recuperação dependia da sessão nomeada `comix`, removida em 06/10/2026:** o solve abandonado aquecia o Chrome da sessão, e a 2ª passada o reaproveitava. Hoje nenhuma fonte usa sessão — cada chamada abre e fecha o próprio Chrome, numa fila de uma página por vez por processo. Medido em 06/10, a Comix não mostrou desafio (local nem Fly); se voltar a mostrar, a 2ª passada paga o solve de novo e a cadeia estoura — o gatilho para trazer a sessão de volta (com 2 GB) está em `lib/external/comix.ts`.
 
-🔴 **A DESCOBERTA DE HID está morta nos TRÊS caminhos — e só o acervo atual salva.** Medido em
-2026-08-11: `searchComix` (API) gateada por token · `/resolve` do sidecar `no_xhr` (a SPA não
-monta) · `scripts/resolve-comix-hids.mjs`, que é **Chrome REAL com perfil persistente**, cego em
-headful E headless ("input de busca não encontrado"). Impacto hoje é **zero — 981/981 obras já
-têm hid** —, então isso só morde obra NOVA, e a saída é `setComixHidManually`. Reviews e detalhe
-de quem já tem hid seguem funcionando: são token-free e passam pelo FlareSolverr.
+🔴 **A descoberta de hid de obra NOVA é o `/resolve` do sidecar, por cross-ID — e ele FUNCIONA**
+(este parágrafo o deu por morto, com o `no_xhr` de 2026-08-11). Em 12/11 foram 8 buscas, todas
+com a obra certa em 1º lugar. O que deixava obra nova sem Comix era o CASAMENTO: a Comix liga o
+MangaUpdates pelo código da URL (`s5pb9ht`, base 36) e o app guarda o número (`61294752209`), e
+obra nova ainda não tem AniList nem MAL na Comix. `linksFromItem` converte (`mangaUpdatesSlugToId`).
+Os outros dois caminhos seguem mortos: `searchComix` (API gateada por token) e
+`scripts/resolve-comix-hids.mjs` (Chrome real, cego, e ausente de `.next/standalone`; por isso o
+pós-lote `resolveComixHidsPending` tenta o sidecar obra por obra antes dele). Quando nem o cross-ID
+casa, o campo de colar o hid aparece SEMPRE, na criação e no "Atualizar dados", e hid colado sem
+"Validar e adicionar" trava o botão de seguir em vez de sumir.
 
 ⚠️ **O que foi corrigido não foi a descoberta, foi a MENTIRA.** O resolvedor imprimia
 `matched=0 noMatch=N error=0` e saía com código 0 — indistinguível de "essas obras não estão na

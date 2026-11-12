@@ -172,16 +172,6 @@ export async function getComixHealthStatus() {
 }
 
 /**
- * True quando a descoberta automática do hid da Comix está disponível (sidecar
- * `COMIX_RENDER_URL` configurado). O fluxo de criação usa isto pra ESCONDER o
- * campo de hid manual: com o auto ligado, a Comix é resolvida por cross-ID sozinha;
- * sem ele (ex.: prod ainda sem deploy do sidecar), o campo manual continua visível.
- */
-export async function isComixAutoResolveAvailable(): Promise<boolean> {
-  return isComixRenderConfigured()
-}
-
-/**
  * Status leve da resolução do Comix de uma obra (pro watcher da página atualizar
  * sozinha quando o resolver de background termina). `resolved` = a obra já tem um
  * hid do Comix aceito.
@@ -494,8 +484,22 @@ export async function resolveComixHidForWork(workId: string): Promise<void> {
 export async function resolveComixHidsPending(workIds?: string[]): Promise<void> {
   console.log("[resolveComixHidsPending] disparado (mop-up pós-lote)")
   try {
-    const code = await runResolverScript([])
-    if (code !== 0) return
+    // 🔴 Sidecar PRIMEIRO, obra por obra — a mesma via do `createWork`. Até 2026-11-12 o lote
+    // só chamava o script de Chrome, que (1) está cego desde 08/2026 e (2) nem existe dentro de
+    // `.next/standalone`, onde a 3000 roda: falhava com MODULE_NOT_FOUND em todo lote, sem
+    // ninguém ver. O script fica só para o que o sidecar não resolveu (em dev, onde ele existe).
+    const pending: string[] = []
+    for (const id of workIds ?? []) {
+      const hasHid = (await getComixResolutionStatus(id)).resolved || (await tryResolveComixViaSidecar(id))
+      if (!hasHid) pending.push(id)
+    }
+    if (workIds) {
+      console.log(
+        `[resolveComixHidsPending] ${workIds.length} obras: ${workIds.length - pending.length} com hid, ${pending.length} sem`,
+      )
+    }
+    // A falha do script não impede o enrich abaixo: ele só age em obra que já tem hid.
+    if (!workIds || pending.length > 0) await runResolverScript([])
     // Enriquece rating/sinopse/capa do Comix das obras do lote (as recém-criadas são as
     // que o mop-up acabou de resolver) e recalcula só as que ganharam rating.
     // 🔴 UMA marcação depois do laço, nunca uma por obra. Aqui estava o pior caso do

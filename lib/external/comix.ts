@@ -472,7 +472,11 @@ export interface ComixDetail {
   tags: string[]
   /** Data (relativa, pré-formatada pela comix, ex.: "8mos ago") do último capítulo. */
   lastChapterAt?: string
-  /** Cross-source IDs exposed by comix.to (anilist, mangaupdates, myanimelist, mangadex). */
+  /**
+   * Cross-source IDs exposed by comix.to (anilist, mangaupdates, myanimelist, mangadex).
+   * `mu` sai em DECIMAL — o formato de `work_external_ids` e da API do MangaUpdates —, e não
+   * o código da URL (ver `mangaUpdatesSlugToId`).
+   */
   links?: { anilist?: string; mu?: string; mal?: string; md?: string }
 }
 
@@ -539,6 +543,26 @@ function extractIdFromUrl(value: unknown, regex: RegExp): string | undefined {
   return m?.[1]
 }
 
+/**
+ * O código da URL nova do MangaUpdates (`/series/s5pb9ht`) é o MESMO id numérico da API
+ * (`61294752209`), escrito em base 36. O app guarda o decimal: as 1.077 linhas de
+ * `work_external_ids` com fonte MangaUpdates são todas numéricas (conferido em 2026-11-12).
+ *
+ * Sem esta conversão, o casamento por MangaUpdates da Comix NUNCA batia — e nas obras novas é o
+ * único elo: a Comix ainda não traz AniList nem MAL delas. As 3 obras criadas sem a Comix em
+ * 12/11 estavam todas em 1º lugar na busca, com o link do MangaUpdates certo, e caíram por isso.
+ *
+ * BigInt para não perder precisão quando o código crescer (8+ caracteres passam de 2^53 na
+ * conta, embora hoje caibam). Código fora de [0-9a-z] devolve undefined.
+ */
+export function mangaUpdatesSlugToId(slug: string | undefined): string | undefined {
+  const s = slug?.trim().toLowerCase()
+  if (!s || !/^[0-9a-z]+$/.test(s)) return undefined
+  let n = BigInt(0)
+  for (const ch of s) n = n * BigInt(36) + BigInt(parseInt(ch, 36))
+  return n.toString()
+}
+
 export function linksFromItem(links: unknown): ComixDetail["links"] {
   if (!links || typeof links !== "object") return undefined
   const l = links as Record<string, unknown>
@@ -546,7 +570,7 @@ export function linksFromItem(links: unknown): ComixDetail["links"] {
   const out: NonNullable<ComixDetail["links"]> = {
     anilist: extractIdFromUrl(l.al, /anilist\.co\/manga\/(\d+)/i),
     mal: extractIdFromUrl(l.mal, /myanimelist\.net\/manga\/(\d+)/i),
-    mu: extractIdFromUrl(l.mu, /mangaupdates\.com\/series\/([a-z0-9]+)/i),
+    mu: mangaUpdatesSlugToId(extractIdFromUrl(l.mu, /mangaupdates\.com\/series\/([a-z0-9]+)/i)),
     md: extractIdFromUrl(l.md, /mangadex\.org\/title\/([0-9a-f-]+)/i),
   }
   const cleaned: NonNullable<ComixDetail["links"]> = {}

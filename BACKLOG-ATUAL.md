@@ -75,8 +75,11 @@ Existem, mas não justificam frente agora. Corrigir quando o código for tocado 
 - **`contentRatings` sem coluna própria:** o valor só fica no `raw_response` das avaliações que o registraram; mudança em `CONTENT_RATING_BOUNDS` não tem backfill pronto.
 - **Migrations não reconstroem o banco** (sem `CREATE TABLE` de `criteria` etc.; dois `132_*`).
   Mitigado pelo `schema.sql.gz` do backup semanal.
-- **Comix sem descoberta automática de hid:** obra nova precisa de hid manual ou ausência declarada
-  (aba Fontes), senão "Preparar e avaliar" bloqueia.
+- **Comix só se descobre por cross-ID:** [fato] o `/resolve` do sidecar acha a obra (8 de 8 em
+  12/11, todas em 1º lugar) e o app casa por AniList, MAL ou MangaUpdates — este último só desde
+  12/11, quando o código da URL passou a ser convertido em número. Obra que a Comix não liga a
+  nenhum dos três segue precisando do hid colado (campo sempre visível na criação e no "Atualizar
+  dados") ou de ausência declarada (aba Fontes), senão "Preparar e avaliar" bloqueia.
 - **Tamanho do banco no plano free:** [fato] 227,5 MB de 500 (≈45%) com 1.065 obras ativas — igual a
   22/08. Teto estimado em ~2.500 obras.
 - **Dados só-locais (P4 da auditoria de 23/09):** `ai_api_calls` de experimento já sincronizado;
