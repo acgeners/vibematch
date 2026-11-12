@@ -17,6 +17,10 @@
 
 export const ATTR_EVAL_FILTERS = [
   "pending",
+  // "Prontas para avaliar": nunca avaliadas E com reviews úteis suficientes
+  // (`MIN_USEFUL_REVIEWS_FOR_EVAL`). É o recorte de "já dá pra avaliar" dentro de `pending` —
+  // obra recém-lançada entra em `pending` e só passa para cá quando o lote de reviews a encorpa.
+  "ready",
   "review-pending",
   "low-confidence",
   "outdated-model",

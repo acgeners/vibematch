@@ -46,6 +46,7 @@ import type { EvalPrep } from "@/lib/ai-evaluation/eval-readiness"
 // (`ai-evaluation-filters.tsx`) — ver o cabeçalho de `attr-eval-filters.ts`.
 import { parseAttrEvalFilters } from "@/lib/ai-evaluation/attr-eval-filters"
 import type { AttrEvalFilter } from "@/lib/ai-evaluation/attr-eval-filters"
+import { selectReadyToEvaluate } from "@/lib/ai-evaluation/eval-evidence"
 import { DECISION_QUEUES, decisionHint } from "@/lib/curation/decision-queues"
 import { isMixedEditionState } from "@/lib/editions/mixed-edition"
 
@@ -262,10 +263,10 @@ async function getEligibleWorks(
   // índices óbvios). Em paralelo.
   const queries: Promise<{ ids: Set<string>; filter: EvaluationFilter }>[] = []
 
-  if (filters.includes("pending")) {
-    queries.push(
-      (async () => {
-        const data = await fetchAllRows<{ id: string }>(
+  // `pending` e `ready` partem do MESMO conjunto (nunca avaliadas): uma leitura só.
+  const pendingIdsPromise =
+    filters.includes("pending") || filters.includes("ready")
+      ? fetchAllRows<{ id: string }>(
           () =>
             supabase
               .from("works")
@@ -273,8 +274,24 @@ async function getEligibleWorks(
               .eq("ai_eval_status", "pending")
               .eq("is_archived", false),
           { orderBy: ["id"], label: "curadoria.pendingIds" },
-        )
-        return { filter: "pending" as const, ids: new Set(data.map((w) => w.id)) }
+        ).then((data) => data.map((w) => w.id))
+      : null
+
+  if (filters.includes("pending")) {
+    queries.push(
+      (async () => ({ filter: "pending" as const, ids: new Set(await pendingIdsPromise!) }))()
+    )
+  }
+
+  if (filters.includes("ready")) {
+    queries.push(
+      (async () => {
+        // Reviews úteis pelo MESMO número do 💬 do card (`work_card_counts`), para o filtro e o
+        // card nunca discordarem sobre a mesma obra.
+        const pendingIds = await pendingIdsPromise!
+        const counts = await getWorkTagReviewCounts(pendingIds)
+        const useful = new Map([...counts].map(([id, c]) => [id, c.reviewCount]))
+        return { filter: "ready" as const, ids: new Set(selectReadyToEvaluate(pendingIds, useful)) }
       })()
     )
   }

@@ -21,6 +21,7 @@ import { searchExternalTitles, fetchExternalData, upsertExternalTags, checkExist
 import { validateComixHid } from "@/server/actions/comix-resolver"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { NO_REVIEWS_REASON_LABEL } from "@/lib/ai-evaluation/no-reviews"
+import { MIN_USEFUL_REVIEWS_FOR_EVAL, describeFewReviews } from "@/lib/ai-evaluation/eval-evidence"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import { fetchComicKClient, fetchAnimePlanetClient } from "@/lib/external/client-fetches"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
@@ -530,6 +531,8 @@ export function ExternalSearch({
   // Gate "sem reviews externas": resolve a Promise quando o usuário decide.
   const [noReviewGate, setNoReviewGate] = useState<{
     noReviewsReason: NoReviewsReason | null
+    /** Há reviews, mas menos de 4 úteis (`eval-evidence.ts`). Ausente = nenhuma review. */
+    fewReviews?: { useful: number; total: number }
     resolve: (proceed: boolean) => void
   } | null>(null)
 
@@ -700,15 +703,20 @@ export function ExternalSearch({
         }
         let aiResult = await evaluateCandidateForCreate(baseInput)
 
-        // Gate: sem reviews externas, pergunta antes de seguir com a IA.
+        // Gate: sem reviews externas — ou com menos de 4 úteis — pergunta antes de seguir com a IA.
         if ("needsReviewConfirmation" in aiResult && aiResult.needsReviewConfirmation) {
           const reason = aiResult.noReviewsReason
+          const fewReviews = aiResult.fewReviews
           const proceed = await new Promise<boolean>((resolve) => {
-            setNoReviewGate({ noReviewsReason: reason, resolve })
+            setNoReviewGate({ noReviewsReason: reason, fewReviews, resolve })
           })
           setNoReviewGate(null)
           if (proceed) {
             aiResult = await evaluateCandidateForCreate({ ...baseInput, proceedWithoutReviews: true })
+          } else if (fewReviews) {
+            toast.info(
+              `Avaliação IA adiada: ${fewReviews.useful} de ${MIN_USEFUL_REVIEWS_FOR_EVAL} reviews úteis. A obra será criada sem notas — ela aparece em "Prontas para avaliar" (/curation/works) quando tiver reviews suficientes.`,
+            )
           } else {
             toast.info('Avaliação IA pulada (sem reviews externas). A obra será criada sem notas — use "Reavaliar IA" no detalhe depois.')
           }
@@ -1999,18 +2007,22 @@ export function ExternalSearch({
         </SheetContent>
       </Sheet>
 
-      {/* Gate: sem reviews externas, confirma antes de chamar o LLM. */}
+      {/* Gate: sem reviews externas (ou com menos de 4 úteis), confirma antes de chamar o LLM. */}
       <ConfirmDialog
         open={noReviewGate != null}
         onOpenChange={(open) => {
           if (!open && noReviewGate) noReviewGate.resolve(false)
         }}
-        title="Sem reviews externas"
-        description={`Não foram encontradas reviews externas para esta obra${
-          noReviewGate?.noReviewsReason ? ` (${NO_REVIEWS_REASON_LABEL[noReviewGate.noReviewsReason]})` : ""
-        }. A avaliação IA vai usar só sinopse, tags e gêneros. Avaliar mesmo assim?`}
+        title={noReviewGate?.fewReviews ? "Poucas reviews para avaliar" : "Sem reviews externas"}
+        description={
+          noReviewGate?.fewReviews
+            ? `${describeFewReviews(noReviewGate.fewReviews.useful, noReviewGate.fewReviews.total)} Avaliar agora mesmo assim, ou deixar para depois?`
+            : `Não foram encontradas reviews externas para esta obra${
+                noReviewGate?.noReviewsReason ? ` (${NO_REVIEWS_REASON_LABEL[noReviewGate.noReviewsReason]})` : ""
+              }. A avaliação IA vai usar só sinopse, tags e gêneros. Avaliar mesmo assim?`
+        }
         confirmText="Avaliar mesmo assim"
-        cancelText="Pular IA"
+        cancelText={noReviewGate?.fewReviews ? "Deixar para depois" : "Pular IA"}
         onConfirm={() => noReviewGate?.resolve(true)}
       />
     </>

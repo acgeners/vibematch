@@ -26,6 +26,7 @@ import { getPersonalStatusDescription } from "@/lib/constants/personal-status-de
 import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 import { CollapseIconTrigger, CollapseTitleTrigger } from "@/components/ui/collapse-trigger"
 import { DEFAULT_ATTR_EVAL_FILTERS, isDefaultAttrEvalFilterSet } from "@/lib/ai-evaluation/attr-eval-filters"
+import { MIN_USEFUL_REVIEWS_FOR_EVAL } from "@/lib/ai-evaluation/eval-evidence"
 import type { AttrEvalFilter } from "@/lib/ai-evaluation/attr-eval-filters"
 
 // 🔴 O default vem da MESMA constante que a página usa pra ler a URL. Até 2026-10-09 este
@@ -366,6 +367,11 @@ export function AiEvaluationFilters({
       id: "pending",
       label: "Sem avaliação",
       tooltip: "Obras com ai_eval_status = pending",
+    },
+    {
+      id: "ready",
+      label: "Prontas para avaliar",
+      tooltip: `Sem avaliação e com pelo menos ${MIN_USEFUL_REVIEWS_FOR_EVAL} reviews úteis (o 💬 do card). Abaixo disso a avaliação muda ~2,5× mais quando a obra ganha reviews (medido em 12/11/2026).`,
     },
     {
       id: "review-pending",
