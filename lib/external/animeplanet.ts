@@ -211,10 +211,17 @@ async function findSlug(title: string): Promise<string | null> {
   return direct?.id.split(":")[1] ?? null
 }
 
+/**
+ * 🔴 Falha LANÇA; `[]` quer dizer "busquei e não achei". Até 2026-11-12 as três falhas abaixo
+ * voltavam `[]`, e a busca multi-fonte (`searchAllSources`) só põe em `failedSources` quem lança:
+ * com o bypass sobrecarregado, o diálogo de criação dizia "Nenhum match nesta fonte" e a obra
+ * nascia sem o Anime-Planet (2 das 18 obras de 30 dias). Lançando, a fonte vai para
+ * `failedSources`, o diálogo avisa e a confirmação busca de novo (`retrySearchSources`).
+ */
 export async function searchAnimePlanet(search: string): Promise<ExternalSearchResult[]> {
-  // anime-planet.com é Cloudflare-gated; sem FlareSolverr (circuito aberto) os
-  // fetches só voltam o desafio CF (~5s à toa, 0 resultado). Pula rápido.
-  if (isCfBypassUnavailable()) return []
+  // anime-planet.com é Cloudflare-gated; sem bypass (circuito aberto) os fetches só voltam o
+  // desafio CF (~5s à toa). Pula rápido — mas avisando que NÃO buscou.
+  if (isCfBypassUnavailable()) throw new Error("animeplanet: bypass do Cloudflare indisponível")
   try {
     const result = await fetchHtmlWithCfFallback(
       `${AP_BASE}/manga/all?name=${encodeURIComponent(search)}`,
@@ -222,8 +229,11 @@ export async function searchAnimePlanet(search: string): Promise<ExternalSearchR
       ANIMEPLANET_CF_ABORT_MS,
     )
     if (!result) {
+      // A página de busca não abriu. O slug direto ainda pode achar a obra; sem ele, isto é
+      // falha da busca — não "a fonte não tem a obra".
       const direct = await fetchDirectSearchResult(search)
-      return direct ? [direct] : []
+      if (direct) return [direct]
+      throw new Error("animeplanet: a página de busca não abriu")
     }
     const html = result.html
 
@@ -282,8 +292,8 @@ export async function searchAnimePlanet(search: string): Promise<ExternalSearchR
 
     const direct = await fetchDirectSearchResult(search)
     return direct ? [direct] : []
-  } catch {
-    return []
+  } catch (err) {
+    throw err instanceof Error ? err : new Error(`animeplanet: ${String(err)}`)
   }
 }
 

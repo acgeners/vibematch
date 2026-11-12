@@ -97,6 +97,13 @@ export interface MergedCandidate {
   sourceCandidates?: ExternalSourceCandidateOption[]
   /** Sources whose IDs came from another source's canonical cross-link (e.g. MangaDex `attributes.links`). At hydrate time we skip the title/synopsis acceptance filter for these — the cross-link is the trust signal. */
   trustedSources?: ExternalSourceId[]
+  /**
+   * Fontes cuja BUSCA falhou (Cloudflare, timeout) e que a pessoa não decidiu no passo de fontes.
+   * A busca de dados da obra (`fetchMultiSourceDetails`) as procura de novo antes de hidratar —
+   * é o que torna verdadeiro o "Será re-tentada ao confirmar" do diálogo. Só um PEDIDO: o servidor
+   * filtra para fontes buscáveis e ainda ausentes, e o achado passa pelo filtro de aceitação de sempre.
+   */
+  retrySearchSources?: ExternalSourceId[]
 }
 
 export interface MultiSourceResult {

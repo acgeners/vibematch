@@ -649,6 +649,14 @@ export function ExternalSearch({
     if (!pendingCandidate || comixHidPending) return
     const selectedCandidate = buildCandidateFromSourceSelection(pendingCandidate, sourceSelection)
     if (!selectedCandidate) return
+    // Fonte cuja BUSCA falhou e que ficou sem escolha: o servidor busca de novo ao confirmar — é
+    // o que o aviso "Será re-tentada ao confirmar" do passo promete. Escolha explícita (um match,
+    // ou "ignorar") vence: nada a buscar.
+    const retry = failedSearchSources.filter((source) => {
+      const value = sourceSelection[source]
+      return !value || value === "none"
+    })
+    if (retry.length > 0) selectedCandidate.retrySearchSources = retry
     await startCandidateImport(selectedCandidate)
   }
 
@@ -1409,12 +1417,14 @@ export function ExternalSearch({
                     {/* Fonte sem nenhuma opção: em vez de sumir da lista (era o que
                         acontecia), diz em que pé está.
                         ⚠️ O texto do caso vazio é DELIBERADAMENTE neutro ("sem match"),
-                        não "a fonte não tem a obra": 7 dos 9 conectores de busca engolem
-                        o próprio erro e devolvem `[]`, então um 400/500 interno chega aqui
-                        indistinguível de uma resposta vazia. Só timeout e exceção entram em
-                        `failedSources`. Afirmar que a fonte respondeu seria mentira nos
-                        casos que ela nem respondeu. (O fluxo de "Atualizar dados" resolve
-                        isso lendo `external_source_health` — ver source-selection-step.tsx.) */}
+                        não "a fonte não tem a obra": vários conectores de busca ainda engolem
+                        o próprio erro e devolvem `[]` (o Anime-Planet deixou de engolir em
+                        2026-11-12), então um 400/500 interno chega aqui indistinguível de uma
+                        resposta vazia. Só timeout e exceção entram em `failedSources` — e essas
+                        a confirmação busca de novo (`retrySearchSources`). Afirmar que a fonte
+                        respondeu seria mentira nos casos que ela nem respondeu. (O fluxo de
+                        "Atualizar dados" resolve isso lendo `external_source_health` — ver
+                        source-selection-step.tsx.) */}
                     {group.options.length === 0 && group.source !== "comix" && (
                       group.state === "failed" ? (
                         <p className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-[11px] text-muted-foreground dark:border-amber-800 dark:bg-amber-950/30">
