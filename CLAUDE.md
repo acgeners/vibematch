@@ -6814,6 +6814,7 @@ O import deixou de ser `ensureAdmin`-only: o gate é `ensureReadingStateWriter` 
 > plataforma — e ele costuma ser a fonte com **mais votos** de todas.
 
 `lib/external/index.ts` is the multi-source orchestration layer:
+- 🔴 **Conector de busca: falha LANÇA; `[]` quer dizer "busquei e não achei".** Só quem lança entra em `failedSources`, e só fonte em `failedSources` é buscada de novo ao confirmar o passo de fontes da criação (`retrySearchSources` → `retryFailedSearchSources`, mesmo refino e mesmo filtro de aceitação). O Anime-Planet engolia a falha até 2026-11-12, e a obra nascia sem ele com o diálogo dizendo "Nenhum match".
 - `searchAllSources(query)` — parallel search across AniList, MangaUpdates, ComicK, Kitsu, MyAnimeList, MangaDex, AnimePlanet, Mangago **e Comix**; merges by title similarity (threshold 0.65 for grouping, 0.72 for accepted)
   - ⚠️ **A Comix ESTÁ em `SEARCH_CONNECTORS`** (esta linha dizia o contrário até 2026-08-04) — mas
     hoje volta sempre VAZIA: `/manga*` exige o token de assinatura `_=` e responde `Missing token`.

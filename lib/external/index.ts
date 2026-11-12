@@ -834,6 +834,7 @@ async function refineWithAlternativeTitles(
   originalQuery: string,
   maxCandidates = 3,
   maxVariantsPerCandidate = 6,
+  opts: { onlySources?: readonly ExternalSourceId[] } = {},
 ): Promise<MergedCandidate[]> {
   const normalizedOriginal = normalizeText(originalQuery)
   const slice = candidates.slice(0, maxCandidates)
@@ -865,6 +866,7 @@ async function refineWithAlternativeTitles(
         .filter((n) => n.length > 0)
     )
     const connectorsToTry = SEARCH_CONNECTORS.filter((c) => {
+      if (opts.onlySources && !opts.onlySources.includes(c.source)) return false
       if (!candidate.sources.includes(c.source)) return true
       const existingResults = candidate.sourceResults?.filter((r) => r.source === c.source) ?? []
       if (existingResults.length === 0) return true
@@ -2072,7 +2074,38 @@ async function rankCoversByMeasuredQuality(data: ExternalWorkData): Promise<void
   data.coverUrl = data.multiCovers[0]?.url ?? data.coverUrl
 }
 
+/**
+ * Busca de novo as fontes cuja busca FALHOU no "Buscar dados" (`candidate.retrySearchSources`),
+ * usando o mesmo refino da busca, restrito a elas. O que achar entra como fonte comum e passa pelo
+ * filtro de aceitação da hidratação — não há critério novo aqui.
+ *
+ * Por que existe: o refino da busca já procura as fontes ausentes, mas no MESMO instante da falha
+ * (bypass sobrecarregado ⇒ falha de novo). Sem isto, a fonte só aparecia no "Atualizar dados"
+ * depois da criação. Só 2 variantes (título primeiro): o bypass abre uma página por vez, e o
+ * leque de 6 do refino é justamente o que estoura a fila dele.
+ *
+ * ComicK fica de fora: tem nova tentativa própria no cliente (etapa "comick-failed").
+ */
+export async function retryFailedSearchSources(candidate: MergedCandidate): Promise<ExternalSourceId[]> {
+  const searchable = new Set<ExternalSourceId>(SEARCH_CONNECTORS.map((c) => c.source))
+  const retry = [...new Set(candidate.retrySearchSources ?? [])].filter(
+    (s) => searchable.has(s) && s !== "comick" && !candidate.sources.includes(s),
+  )
+  if (retry.length === 0) return []
+  const before = new Set(candidate.sources)
+  await refineWithAlternativeTitles([candidate], "", 1, 2, { onlySources: retry })
+  const found = retry.filter((s) => candidate.sources.includes(s) && !before.has(s))
+  for (const s of retry) {
+    console.log(`[retryFailedSearch] source=${s} ${found.includes(s) ? "achou" : "não achou"} candidate="${candidate.title}"`)
+  }
+  return found
+}
+
 export async function fetchMultiSourceDetails(candidate: MergedCandidate): Promise<MultiSourceResult> {
+  // Fontes cuja busca falhou no "Buscar dados": nova tentativa antes de hidratar.
+  // O que ela achar segue o caminho de qualquer fonte: hidratação + filtro de aceitação, e só
+  // então entra nos vínculos.
+  await retryFailedSearchSources(candidate)
   // Comix/Mangago: descobre os IDs por cross-ID ANTES de hidratar, pra o rating/
   // capa/sinopse dessas fontes entrarem já na criação (sem "Atualizar dados" depois).
   await resolveGatedSourceIds(candidate)

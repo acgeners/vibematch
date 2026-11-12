@@ -37,7 +37,9 @@ describe("AnimePlanet — orçamento do bypass", () => {
     ["reviews", () => fetchAnimePlanetReviews("solo-leveling")],
     ["recomendações", () => fetchAnimePlanetRecommendations("solo-leveling")],
   ])("%s: toda chamada ao bypass leva o orçamento do AnimePlanet", async (_nome, run) => {
-    await run()
+    // O bypass falso devolve `null` (falhou): a busca LANÇA desde 2026-11-12, as demais devolvem
+    // vazio. O que este teste confere é o orçamento de cada chamada, não o desfecho.
+    await (run() as Promise<unknown>).catch(() => undefined)
     expect(fetchHtml).toHaveBeenCalled()
     for (const call of fetchHtml.mock.calls) expect(call[2]).toBe(ANIMEPLANET_CF_ABORT_MS)
   })
