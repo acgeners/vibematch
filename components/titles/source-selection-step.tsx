@@ -10,7 +10,7 @@ import {
   type SourceCandidateOption,
   type SourceSelectionInput,
 } from "@/server/actions/external"
-import { setComixHidManually, isComixAutoResolveAvailable } from "@/server/actions/comix-resolver"
+import { setComixHidManually } from "@/server/actions/comix-resolver"
 import type { SourceHealthRow } from "@/lib/external/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -37,7 +37,7 @@ interface SourceSelectionStepProps {
  * "Atualizar dados" unificado (1º passo) e pelo dialog avulso de revalidação. Carrega
  * candidatos por fonte via `revalidateWorkSources` (que já resolve Comix/Mangago por
  * cross-ID), deixa o usuário confirmar/trocar/rejeitar cada match e persiste em
- * `work_external_ids`. Com o auto-resolve da Comix ligado, esconde o campo de hid manual.
+ * `work_external_ids`. O campo de hid manual da Comix aparece SEMPRE — ver o comentário dele.
  */
 export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel = "Continuar", onQueriesResolved }: SourceSelectionStepProps) {
   const [loading, setLoading] = useState(true)
@@ -51,16 +51,6 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
   const [brokenCovers, setBrokenCovers] = useState<Set<string>>(new Set())
   const [manualHid, setManualHid] = useState("")
   const [savingManual, setSavingManual] = useState(false)
-  // Auto-resolve da Comix disponível (sidecar)? Com ele ligado, a Comix já vem
-  // resolvida por cross-ID → escondemos o campo de hid manual.
-  const [comixAutoResolve, setComixAutoResolve] = useState(false)
-
-  useEffect(() => {
-    isComixAutoResolveAvailable()
-      .then(setComixAutoResolve)
-      .catch(() => setComixAutoResolve(false))
-  }, [])
-
   useEffect(() => {
     let active = true
     void (async () => {
@@ -127,8 +117,8 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
     }
   }
 
-  // Preenchimento manual da Comix (fallback quando o auto-resolve está desligado):
-  // valida via SSR token-free e injeta como candidato selecionado.
+  // Preenchimento manual da Comix: valida via SSR token-free, grava o vínculo (substituindo
+  // um hid antigo, inclusive morto) e injeta como candidato selecionado.
   const handleManualComix = async () => {
     const hidOrUrl = manualHid.trim()
     if (!hidOrUrl) return
@@ -337,7 +327,12 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
               </>
             )}
 
-            {source === "comix" && !comixAutoResolve && (
+            {/* 🔴 SEMPRE visível. Até 2026-11-12 ele sumia quando o sidecar estava configurado
+                (`isComixAutoResolveAvailable`), na premissa de que a Comix "já vinha resolvida".
+                A descoberta de hid está morta nos três caminhos (busca gateada por token), então no
+                localhost:3000 — onde o sidecar existe — não havia como trocar um hid que dá 404:
+                12 obras assim no lote de 11/11. */}
+            {source === "comix" && (
               <div className="mt-1 space-y-1.5 rounded-md border border-dashed border-border p-2">
                 <p className="text-[11px] text-muted-foreground">
                   Não achou? Cole o hid (ex.: <span className="font-mono">003kd</span>) ou a URL da comix.to.
