@@ -3,6 +3,7 @@ import { BookMarked } from "lucide-react"
 import { Header } from "@/components/layout/header"
 import { ReadingList } from "@/components/reading/reading-list"
 import { getReadingWorks } from "@/server/queries/reading"
+import { isCurrentUserAdmin } from "@/server/queries/current-user"
 import { personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
 import {
   READING_COLLAPSED_BANDS_COOKIE,
@@ -24,12 +25,16 @@ export default async function ReadingPage({
   // que importa na tela é por status de PUBLICAÇÃO (em andamento · concluídas · outras),
   // feita no cliente — por slug, pra estourar se um status sumir do Supabase em vez de
   // vir vazio em silêncio.
-  const works = await getReadingWorks({
-    statuses: [
-      personalStatusNameBySlugOrThrow("reading"),
-      personalStatusNameBySlugOrThrow("hiatus"),
-    ],
-  })
+  const [works, canArchive] = await Promise.all([
+    getReadingWorks({
+      statuses: [
+        personalStatusNameBySlugOrThrow("reading"),
+        personalStatusNameBySlugOrThrow("hiatus"),
+      ],
+    }),
+    // Arquivar tira a obra do catálogo de todos: só a curadoria vê o botão (o servidor já recusava).
+    isCurrentUserAdmin(),
+  ])
 
   // Vista inicial (lista × calendário) do cookie → o servidor já renderiza a vista final,
   // sem divergir da hidratação. `nowIso` ancora o mês/hoje do calendário nos dois lados.
@@ -59,6 +64,7 @@ export default async function ReadingPage({
         nowIso={nowIso}
         initialFilterQuery={query.toString()}
         defaultCollapsedBands={defaultCollapsedBands}
+        canArchive={canArchive}
       />
     </div>
   )
