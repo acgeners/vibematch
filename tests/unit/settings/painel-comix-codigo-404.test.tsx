@@ -60,3 +60,14 @@ describe("painel da Comix — código com 404", () => {
     expect(within(cartao("Funcionando")).getByText("98")).toBeTruthy()
   })
 })
+
+describe("o nome da obra abre a página dela", () => {
+  it("em todas as listas, em aba nova — a fila não perde o lugar", () => {
+    renderizar()
+    for (const [titulo, id] of [["Obra Morta", "d1"], ["Obra Sem Código", "m1"], ["Obra Ausente", "a1"]] as const) {
+      const link = screen.getByRole("link", { name: titulo, hidden: true })
+      expect(link.getAttribute("href")).toBe(`/catalog/${id}`)
+      expect(link.getAttribute("target")).toBe("_blank")
+    }
+  })
+})
