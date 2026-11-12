@@ -12,6 +12,7 @@ import type {
   ComixRenderClient,
   ComixResolveInput,
 } from "@/lib/external/comix-resolve"
+import { linksFromItem, mangaUpdatesSlugToId } from "@/lib/external/comix"
 import fixture from "@/tests/fixtures/comix-render/browse-relevance-i-adopted.json"
 
 const ITEMS = fixture.items as ComixSidecarItem[]
@@ -47,10 +48,24 @@ describe("matchComixCandidate — precedência de cross-ID", () => {
     expect(m?.resolved.hid).toBe("3ezr0")
   })
 
-  it("casa por MangaUpdates ID (case-insensitive)", () => {
-    const m = matchComixCandidate(ITEMS, { title: "qualquer", mangaUpdatesId: "IWQX86G" })
+  it("🔴 casa por MangaUpdates pelo id NUMÉRICO que o app guarda — a Comix linka pelo código da URL", () => {
+    // A Comix traz `mangaupdates.com/series/iwqx86g/`; o app guarda 41162219944 (o mesmo id em
+    // base 10). Antes este teste mandava o código ("IWQX86G") — premissa que o banco desmente: as
+    // 1.077 linhas de MangaUpdates são numéricas, e o casamento nunca batia.
+    const m = matchComixCandidate(ITEMS, { title: "qualquer", mangaUpdatesId: "41162219944" })
     expect(m?.method).toBe("mangaupdates")
     expect(m?.resolved.hid).toBe("3ezr0")
+  })
+
+  it("obra nova sem AniList nem MAL na Comix casa só pelo MangaUpdates", () => {
+    // Forma real das 3 obras criadas sem a Comix em 2026-11-12 (al/mal nulos, só mu e mb).
+    const novas: ComixSidecarItem[] = [
+      { hid: "outra", url: "/title/outra", title: "Outra obra", links: { al: null, mal: null, mu: "https://www.mangaupdates.com/series/zzzz999" } },
+      { hid: "alvo1", url: "/title/alvo1", title: "Obra nova", links: { al: null, mal: null, mu: "https://www.mangaupdates.com/series/s5pb9ht", md: null } },
+    ]
+    const m = matchComixCandidate(novas, { title: "Obra nova", mangaUpdatesId: "61294752209" })
+    expect(m?.method).toBe("mangaupdates")
+    expect(m?.resolved.hid).toBe("alvo1")
   })
 
   it("AniList vence MAL quando ambos apontam obras diferentes (ordem determinística)", () => {
@@ -265,5 +280,28 @@ describe("comixCreateResolveInput — gate injeta-antes-de-buscar (create)", () 
   it("id numérico inválido (0/negativo/vazio) é ignorado", () => {
     expect(comixCreateResolveInput("T", { anilist: "0", myanimelist: "-3" })).toBeNull()
     expect(comixCreateResolveInput("T", { anilist: "", mangaupdates: "" })).toBeNull()
+  })
+})
+
+describe("mangaUpdatesSlugToId — o código da URL do MangaUpdates é o id em base 36", () => {
+  it("converte para o decimal que o app guarda (pares reais do banco, 2026-11-12)", () => {
+    expect(mangaUpdatesSlugToId("s5pb9ht")).toBe("61294752209")
+    expect(mangaUpdatesSlugToId("pmb6ekf")).toBe("55768588863")
+    expect(mangaUpdatesSlugToId("eyxwdws")).toBe("32587741036")
+    expect(mangaUpdatesSlugToId("EYXWDWS")).toBe("32587741036")
+  })
+
+  it("código inválido ou vazio não vira id", () => {
+    expect(mangaUpdatesSlugToId(undefined)).toBeUndefined()
+    expect(mangaUpdatesSlugToId("")).toBeUndefined()
+    expect(mangaUpdatesSlugToId("abc-123")).toBeUndefined()
+  })
+
+  it("código longo não perde precisão", () => {
+    expect(mangaUpdatesSlugToId("zzzzzzzzzzzz")).toBe((BigInt(36) ** BigInt(12) - BigInt(1)).toString())
+  })
+
+  it("linksFromItem devolve o mu em decimal", () => {
+    expect(linksFromItem({ mu: "https://www.mangaupdates.com/series/s5pb9ht/titulo" })?.mu).toBe("61294752209")
   })
 })

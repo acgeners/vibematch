@@ -327,11 +327,11 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
               </>
             )}
 
-            {/* 🔴 SEMPRE visível. Até 2026-11-12 ele sumia quando o sidecar estava configurado
-                (`isComixAutoResolveAvailable`), na premissa de que a Comix "já vinha resolvida".
-                A descoberta de hid está morta nos três caminhos (busca gateada por token), então no
-                localhost:3000 — onde o sidecar existe — não havia como trocar um hid que dá 404:
-                12 obras assim no lote de 11/11. */}
+            {/* 🔴 SEMPRE visível. Até 2026-11-12 ele sumia quando o sidecar estava configurado,
+                na premissa de que a Comix "já vinha resolvida". A descoberta só resolve por
+                cross-ID e não troca um hid que já existe, então no localhost:3000 — onde o sidecar
+                existe — não havia como trocar um hid que dá 404: 12 obras assim no lote de 11/11.
+                O diálogo de CRIAÇÃO (`external-search.tsx`) segue a mesma regra. */}
             {source === "comix" && (
               <div className="mt-1 space-y-1.5 rounded-md border border-dashed border-border p-2">
                 <p className="text-[11px] text-muted-foreground">
@@ -366,13 +366,27 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
 
       {/* Grudada no rodapé da rolagem do diálogo que hospeda este passo: a lista de
           fontes cresce com a obra e empurrava o "Continuar" pra fora da tela. */}
-      <div className="sticky bottom-0 z-10 flex justify-end gap-2 border-t bg-background pt-3 pb-2">
-        <Button variant="outline" onClick={onCancel} disabled={saving}>
-          Cancelar
-        </Button>
-        <Button onClick={() => void handleConfirm()} disabled={loading || saving}>
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : confirmLabel}
-        </Button>
+      {/* 🔴 Hid colado e não adicionado: seguir o descartaria sem aviso (só "Validar e adicionar"
+          grava). Mesma trava do diálogo de criação (`external-search.tsx`). */}
+      <div className="sticky bottom-0 z-10 border-t bg-background pt-3 pb-2">
+        {(savingManual || manualHid.trim().length > 0) && (
+          <p className="mb-2 text-right text-[11px] text-amber-700 dark:text-amber-400">
+            {savingManual
+              ? "Validando o hid da Comix — espere terminar."
+              : "Há um hid da Comix colado: clique em “Validar e adicionar” (ou apague o campo) antes de continuar."}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onCancel} disabled={saving}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={() => void handleConfirm()}
+            disabled={loading || saving || savingManual || manualHid.trim().length > 0}
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : confirmLabel}
+          </Button>
+        </div>
       </div>
     </div>
   )

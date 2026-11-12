@@ -11,11 +11,9 @@ vi.mock("@/components/titles/external-search", () => ({ ExternalSearch: () => nu
 
 const revalidateWorkSources = vi.fn()
 const saveWorkSourceSelections = vi.fn()
-const isComixAutoResolveAvailable = vi.fn(async () => true)
 vi.mock("@/server/actions/external", () => ({
   revalidateWorkSources: (...a: unknown[]) => revalidateWorkSources(...a),
   saveWorkSourceSelections: (...a: unknown[]) => saveWorkSourceSelections(...a),
-  isComixAutoResolveAvailable: () => isComixAutoResolveAvailable(),
   setComixHidManually: vi.fn(),
 }))
 

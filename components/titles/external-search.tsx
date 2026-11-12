@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, type Ref } from "react"
+import { useRef, useState, type Ref } from "react"
 import Image from "next/image"
 import { toast } from "sonner"
 import { Search, Loader2, Sparkles, Trash2, Plus, AlertTriangle, ExternalLink } from "lucide-react"
@@ -18,7 +18,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Separator } from "@/components/ui/separator"
 import { searchExternalTitles, fetchExternalData, upsertExternalTags, checkExistingWorkInDb, evaluateCandidateForCreate, type ExistingWorkMatch } from "@/server/actions/external"
-import { validateComixHid, isComixAutoResolveAvailable } from "@/server/actions/comix-resolver"
+import { validateComixHid } from "@/server/actions/comix-resolver"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { NO_REVIEWS_REASON_LABEL } from "@/lib/ai-evaluation/no-reviews"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
@@ -513,15 +513,6 @@ export function ExternalSearch({
   const [sourceSelection, setSourceSelection] = useState<Partial<Record<ExternalSourceId, SourceSelectionValue>>>({})
   const [manualComixHid, setManualComixHid] = useState("")
   const [validatingComix, setValidatingComix] = useState(false)
-  // Descoberta automática do hid da Comix disponível (sidecar COMIX_RENDER_URL)?
-  // Com ela ligada, escondemos o campo de hid manual — a Comix é resolvida por
-  // cross-ID sozinha. Sem ela (ex.: prod sem o sidecar), o manual segue visível.
-  const [comixAutoResolve, setComixAutoResolve] = useState(false)
-  useEffect(() => {
-    isComixAutoResolveAvailable()
-      .then(setComixAutoResolve)
-      .catch(() => setComixAutoResolve(false))
-  }, [])
   // Etapa de falha do ComicK (FlareSolverr/Cloudflare): guarda o que já foi
   // mesclado pra continuar após um retry ou ao seguir sem a fonte.
   const [comickManualHid, setComickManualHid] = useState("")
@@ -649,8 +640,13 @@ export function ExternalSearch({
     await proceedWithCandidate(candidate)
   }
 
+  // 🔴 Hid da Comix colado e ainda NÃO adicionado (ou validando): seguir agora montaria o
+  // candidato sem ele, e a obra nasceria sem a Comix sem nada avisar — a validação só põe o hid
+  // no candidato quando termina. O botão de seguir fica travado e a tela diz o que falta.
+  const comixHidPending = validatingComix || manualComixHid.trim().length > 0
+
   const handleConfirmSourceSelection = async () => {
-    if (!pendingCandidate) return
+    if (!pendingCandidate || comixHidPending) return
     const selectedCandidate = buildCandidateFromSourceSelection(pendingCandidate, sourceSelection)
     if (!selectedCandidate) return
     await startCandidateImport(selectedCandidate)
@@ -1164,14 +1160,12 @@ export function ExternalSearch({
   const sourceMatchGroups = pendingCandidate
     ? getSourceMatchGroups(pendingCandidate, failedSearchSources)
     : []
-  // Comix na confirmação: a busca dela é gateada (token) e nunca vem em
-  // sourceCandidates. Com o auto-resolve LIGADO (sidecar), a Comix é descoberta por
-  // cross-ID sozinha → escondemos o group (e o bloco de hid manual). Sem o sidecar
-  // (ex.: prod), ela agora já vem da lista canônica com o bloco de hid manual — o
-  // group sintético que existia aqui virou desnecessário.
-  const displayGroups = comixAutoResolve
-    ? sourceMatchGroups.filter((g) => g.source !== "comix")
-    : sourceMatchGroups
+  // 🔴 A Comix (com o campo de colar o hid) aparece SEMPRE. Até 2026-11-12 o grupo sumia
+  // quando o sidecar estava configurado — o localhost:3000 —, na premissa de que a Comix
+  // seria descoberta por cross-ID sozinha. Quando o cross-ID não casa (a Comix sem link
+  // nenhum, ou o sidecar fora), não havia como vinculá-la na criação: 3 obras de 12/11
+  // nasceram sem ela. Quem resolveu sozinho não perde nada: o campo é opcional.
+  const displayGroups = sourceMatchGroups
   const hasSelectedSource = sourceMatchGroups.some((group) => {
     const value = sourceSelection[group.source]
     return Boolean(value && value !== "rejected" && value !== "none")
@@ -1512,11 +1506,22 @@ export function ExternalSearch({
               })}
 
               <Separator />
+              {comixHidPending && (
+                <p className="text-right text-[11px] text-amber-700 dark:text-amber-400">
+                  {validatingComix
+                    ? "Validando o hid da Comix — espere terminar para buscar."
+                    : "Há um hid da Comix colado: clique em “Validar e adicionar” (ou apague o campo) antes de buscar."}
+                </p>
+              )}
               <div className="flex gap-2 justify-end pb-2">
                 <Button type="button" variant="outline" onClick={() => setPhase("results")}>
                   Voltar
                 </Button>
-                <Button type="button" onClick={handleConfirmSourceSelection} disabled={!hasSelectedSource}>
+                <Button
+                  type="button"
+                  onClick={handleConfirmSourceSelection}
+                  disabled={!hasSelectedSource || comixHidPending}
+                >
                   Buscar dados dessas fontes
                 </Button>
               </div>

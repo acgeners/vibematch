@@ -25,10 +25,6 @@ export async function getComixHealthStatus() {
   return impl.getComixHealthStatus()
 }
 
-export async function isComixAutoResolveAvailable() {
-  return impl.isComixAutoResolveAvailable()
-}
-
 export async function getComixResolutionStatus(workId: string) {
   return impl.getComixResolutionStatus(workId)
 }

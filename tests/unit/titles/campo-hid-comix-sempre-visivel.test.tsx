@@ -1,5 +1,5 @@
 import { vi, describe, it, expect } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 
 vi.mock("next/image", () => ({ default: () => null }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -15,10 +15,8 @@ vi.mock("@/server/actions/external", () => ({
     },
   })),
 }))
-// O caso que escondia o campo: sidecar configurado (`COMIX_RENDER_URL`), como no localhost:3000.
 vi.mock("@/server/actions/comix-resolver", () => ({
   setComixHidManually: vi.fn(),
-  isComixAutoResolveAvailable: vi.fn(async () => true),
 }))
 
 import { SourceSelectionStep } from "@/components/titles/source-selection-step"
@@ -36,5 +34,17 @@ describe("o campo de hid manual da Comix", () => {
     render(<SourceSelectionStep workId="w1" onConfirm={vi.fn()} onCancel={vi.fn()} />)
     expect(await screen.findByPlaceholderText("hid ou URL da comix.to")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Validar e adicionar" })).toBeTruthy()
+  })
+})
+
+describe("Atualizar dados — hid colado e não adicionado", () => {
+  it("🔴 trava o Continuar até validar ou apagar", async () => {
+    render(<SourceSelectionStep workId="w1" onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    const campo = await screen.findByPlaceholderText("hid ou URL da comix.to")
+    const continuar = () => screen.getByRole("button", { name: "Continuar" })
+    expect(continuar()).toHaveProperty("disabled", false)
+    fireEvent.change(campo, { target: { value: "abc12" } })
+    expect(continuar()).toHaveProperty("disabled", true)
+    expect(screen.getByText(/Há um hid da Comix colado/)).toBeTruthy()
   })
 })
