@@ -29,6 +29,12 @@ import { ComixHealthPanel } from "@/components/settings/comix-health-panel"
 import { ProtectedSourcesHealthPanel } from "@/components/settings/protected-sources-health-panel"
 import { CatalogSyncPanel } from "@/components/settings/catalog-sync-panel"
 import { CATALOG_SYNC_STALE_DAYS, getCatalogSyncOverview } from "@/server/queries/catalog-sync"
+import { CatalogReviewsPanel } from "@/components/settings/catalog-reviews-panel"
+import {
+  CATALOG_REVIEWS_STALE_DAYS,
+  REVIEW_SECONDS_PER_WORK,
+  getCatalogReviewsOverview,
+} from "@/server/queries/catalog-reviews"
 import { AiEvalOnCreateToggle } from "@/components/settings/ai-eval-on-create-toggle"
 import { SynopsisCanonicalOnCreateToggle } from "@/components/settings/synopsis-canonical-on-create-toggle"
 import { ReviewSummaryEnabledToggle } from "@/components/settings/review-summary-enabled-toggle"
@@ -385,6 +391,18 @@ async function ItemBody({
     case "catalog-sync": {
       const overview = await getCatalogSyncOverview()
       return <CatalogSyncPanel accent="amber" overview={overview} staleDays={CATALOG_SYNC_STALE_DAYS} />
+    }
+
+    case "catalog-reviews": {
+      const overview = await getCatalogReviewsOverview()
+      return (
+        <CatalogReviewsPanel
+          accent="amber"
+          overview={overview}
+          staleDays={CATALOG_REVIEWS_STALE_DAYS}
+          secondsPerWork={REVIEW_SECONDS_PER_WORK}
+        />
+      )
     }
 
     case "cloudflare-sources": {

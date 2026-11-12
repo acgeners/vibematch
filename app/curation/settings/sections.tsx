@@ -6,6 +6,7 @@ import {
   FileText,
   Gauge,
   Globe,
+  MessageSquarePlus,
   MessageSquareText,
   RefreshCw,
   ScanSearch,
@@ -151,7 +152,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     id: "fontes",
     label: "Fontes externas",
     hint: "Comix, Mangago e AnimePlanet",
-    info: "Operação das fontes externas. Mantém capítulos e status do catálogo em dia, resolve o hid das obras da Comix (habilita a coleta de reviews) e testa a conexão de cada fonte — inclusive as que só passam via bypass do Cloudflare. Use quando obras novas estão sem reviews, ou quando uma fonte some.",
+    info: "Operação das fontes externas. Mantém capítulos, status e reviews do catálogo em dia, resolve o hid das obras da Comix (habilita a coleta de reviews) e testa a conexão de cada fonte — inclusive as que só passam via bypass do Cloudflare. Use quando obras novas estão sem reviews, ou quando uma fonte some.",
     icon: Globe,
     iconName: "Globe",
     accent: "amber",
@@ -167,6 +168,19 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         chips: [
           { kind: "cost", tier: "free", label: "Grátis" },
           { kind: "cadence", label: "Semanal" },
+        ],
+      },
+      {
+        id: "catalog-reviews",
+        title: "Reviews do catálogo",
+        panelTitle: "Reviews do catálogo",
+        description:
+          "Busca de novo as reviews de todas as obras ativas, pelas fontes já vinculadas, e mostra quais ganharam mais.",
+        help: "Reviews novas aparecem com o tempo, e a avaliação da IA só viu as que existiam quando foi feita. Este lote busca de novo as reviews de todas as obras ativas (não só as em andamento: concluídas ganham tanto quanto) sem chamar IA. As que ganharam mais em proporção ao que a avaliação viu sobem para o topo da fila “Reviews novas” em Curadoria da Obra. É lento (~37 s por obra, por causa do Mangago) e precisa do Docker ligado; dá para parar e continuar depois.",
+        icon: MessageSquarePlus,
+        chips: [
+          { kind: "cost", tier: "free", label: "Grátis" },
+          { kind: "cadence", label: "Mensal" },
         ],
       },
       {

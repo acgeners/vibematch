@@ -63,6 +63,7 @@ const hoisted = vi.hoisted(() => {
       eq: (c: string, v: unknown) => (q.filters.push(["eq", c, v]), api),
       in: (c: string, v: unknown) => (q.filters.push(["in", c, v]), api),
       order: () => api,
+      limit: () => api,
       maybeSingle: () => ((q.single = true), api),
       then: (res: (v: unknown) => unknown, rej: (e: unknown) => unknown) =>
         Promise.resolve().then(() => run(table, q)).then(res, rej),
@@ -391,5 +392,33 @@ describe("a avaliação IA grava em modo acumulativo", () => {
       expect(args).toMatch(/accumulate:\s*true/)
       expect(args).not.toMatch(/replace/)
     }
+  })
+})
+
+// "+N reviews desde a avaliação" (migration 220) conta as reviews criadas DEPOIS da avaliação
+// vigente. Na criação da obra (Path B) a avaliação é gravada ANTES e as reviews que ela leu entram
+// depois, num `after()` — sem o carimbo, a obra nascia com "+43 desde a avaliação (tinha 0)".
+describe("fromFreshEval: as reviews lidas pela avaliação entram com a data DELA", () => {
+  it("o created_at da linha é o da avaliação concluída mais recente", async () => {
+    rowsOf("ai_evaluations").push({
+      work_id: W,
+      status: "completed",
+      created_at: "2026-11-01T10:00:00Z",
+      updated_at: "2026-11-01T10:00:05Z",
+    })
+    await saveWorkReviews(W, [review("comix", texto("lida", 1))], { fromFreshEval: true, skipPaidEnrichment: true })
+    expect(reviewsNoBanco("comix")).toHaveLength(1)
+    expect(reviewsNoBanco("comix")[0].created_at).toBe("2026-11-01T10:00:05Z")
+  })
+
+  it("sem fromFreshEval, a linha fica com a data do banco (nada é carimbado)", async () => {
+    rowsOf("ai_evaluations").push({ work_id: W, status: "completed", created_at: "2026-11-01T10:00:00Z", updated_at: null })
+    await saveWorkReviews(W, [review("comix", texto("nova", 1))], { accumulate: true, skipPaidEnrichment: true })
+    expect(reviewsNoBanco("comix")[0]).not.toHaveProperty("created_at")
+  })
+
+  it("sem avaliação concluída, fromFreshEval não inventa data", async () => {
+    await saveWorkReviews(W, [review("comix", texto("sem aval", 1))], { fromFreshEval: true, skipPaidEnrichment: true })
+    expect(reviewsNoBanco("comix")[0]).not.toHaveProperty("created_at")
   })
 })

@@ -870,6 +870,11 @@ Dono: `pickTotalChapters` (`lib/external/chapter-total.ts`), usado pela checagem
 **Sem humano escolhendo, o status sai de `decidePublicationStatus` (`lib/external/publication-status-sync.ts`): o MangaUpdates decide, o Comix só sem ele; nunca tira uma obra de Completed ou Cancelled; "Ongoing" só pelo MangaUpdates, sobre obra em Hiatus ou sem status.** Vale para a checagem da `/reading`, o lote do catálogo e o "Atualizar automático"; o "Atualizar dados" do curador segue mostrando o conflito. Não trate discordância entre fontes como conflito aqui: elas discordam quase sempre, e era isso que fazia o "Atualizar automático" nunca gravar status.
 O lote do catálogo (`/curation/settings?g=fontes`, "Capítulos e status") roda a checagem da `/reading` nas obras Ongoing, Hiatus e Unknown (`CATALOG_SYNC_STATUSES`); precisa do bypass do Mac, então roda no localhost.
 
+### Reviews do catálogo: lote próprio, e o "+N desde a avaliação" é DERIVADO
+
+**Reviews não entram no lote de capítulos: lá são ~0,6 s por obra, a busca de reviews leva ~37 s (Mangago) e exige o Docker.** O lote "Reviews do catálogo" (mesma página) percorre TODAS as obras ativas, não só as em andamento: na recoleta do MangaUpdates de 06/11, concluídas ganharam tanto quanto (1,59 × 1,30 por obra) e as de 2024+ ganharam menos (0,74 × 4,08 das até 2020). Custo de IA zero (`refreshWorkReviewsLean`); `works.reviews_checked_at` só é gravado quando nenhuma fonte falhou, para a obra com fonte em falha voltar primeiro.
+**O "+N reviews desde a avaliação (tinha M)" da fila "Reviews novas" sai de `work_review_growth` (migration 220): reviews úteis com `created_at` depois da avaliação vigente, mesma régua do 💬.** Por isso toda gravação de review é acumulativa ou é a da criação, e a da criação (`fromFreshEval`) grava a data da avaliação que a leu; regravar linha depois da avaliação inflaria o N (guardado por `tests/unit/reviews/crescimento-desde-avaliacao.test.ts`). A fila ordena por proporção (N ÷ M) ANTES do teto de 500.
+
 ### Os filtros da `/reading` seguem a versão LIDA
 
 **Obra `mixed` segue `read_edition` no filtro de 18+ da `/reading`; sem versão marcada, fica em Ocultar e em Só 18+.** A lista é do que a pessoa está lendo, então não copie a régua do `/ranking` para cá, nem a daqui para lá. Dono: `lib/reading/reading-filters.ts`.

@@ -23,6 +23,11 @@ import { ensureAdmin } from "@/server/queries/current-user"
  */
 
 interface SourceHealthCheck {
+  /**
+   * Quem foi testado, para código. O lote "Reviews do catálogo" decide se pode começar pelo
+   * FlareSolverr e pelo Mangago — pela chave, nunca pelo `label`, que é texto de tela.
+   */
+  key: "flaresolverr" | "sidecar" | "mangago" | "animeplanet"
   ok: boolean
   /** Nome curto do que foi testado (ex.: "Mangago", "Bypass (FlareSolverr)"). */
   label: string
@@ -71,6 +76,7 @@ export async function checkProtectedSourcesHealth(): Promise<SourcesHealthResult
     ? await flareSolverrHealth()
     : { ok: false, error: "FLARESOLVERR_URL não configurada" as string | undefined }
   checks.push({
+    key: "flaresolverr",
     ok: fs.ok,
     label: "Bypass (FlareSolverr)",
     detail: fs.ok
@@ -86,6 +92,7 @@ export async function checkProtectedSourcesHealth(): Promise<SourcesHealthResult
   //    que esta linha serve pra lembrar. Nunca reprova: a ausência dele é o estado normal.
   const sidecarUrl = process.env.COMIX_RENDER_URL?.trim() || ""
   checks.push({
+    key: "sidecar",
     ok: true,
     informational: true,
     label: "Sidecar (camada 1)",
@@ -115,6 +122,7 @@ export async function checkProtectedSourcesHealth(): Promise<SourcesHealthResult
   ])
 
   checks.push({
+    key: "mangago",
     ok: Boolean(mangago.detail?.title),
     label: "Mangago",
     detail: mangago.detail?.title
@@ -129,6 +137,7 @@ export async function checkProtectedSourcesHealth(): Promise<SourcesHealthResult
   // estoura e devolve null. Testar por outro caminho daria um verde que o app não teria.
   const ap = animeplanet.detail
   checks.push({
+    key: "animeplanet",
     ok: ap?.rating != null,
     label: "AnimePlanet",
     detail:
