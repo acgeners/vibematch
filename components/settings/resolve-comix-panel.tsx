@@ -40,8 +40,14 @@ interface ResolveComixPanelProps {
 
 const byTitle = (a: WorkMissingComix, b: WorkMissingComix) => a.title.localeCompare(b.title)
 
-/** Busca da obra no site da Comix (mesma URL que o resolver usa para descobrir candidatos). */
-const comixSearchUrl = (title: string) => `https://comix.to/browse?q=${encodeURIComponent(title)}`
+/**
+ * Busca da obra no site da Comix. O `sort` é obrigatório: sem ele a página de busca da Comix abre
+ * com o termo e nunca mostra resultado (relatado em 2026-11-12). É a mesma URL que o sidecar usa
+ * para descobrir candidatos (`services/comix-render/src/resolve.ts`) e a que o próprio site monta
+ * quando a busca é feita à mão.
+ */
+const comixSearchUrl = (title: string) =>
+  `https://comix.to/browse?q=${encodeURIComponent(title)}&sort=${encodeURIComponent("relevance:desc")}`
 
 /**
  * O nome da obra abre a página dela, em ABA NOVA: a lista é uma fila de curadoria, e trocar de
