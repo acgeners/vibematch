@@ -14,7 +14,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 vi.mock("server-only", () => ({}))
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn(), unstable_cache: (fn: unknown) => fn }))
 
 const markRecalcPending = vi.fn(async () => {})
 const recalculateScoresNow = vi.fn(async () => ({ status: "ok" as const }))
