@@ -31,6 +31,7 @@ import {
 import { ContentWarningsPanel } from "@/components/titles/content-warnings"
 import type { AxisGroup, RatingBin } from "@/lib/reviews/digest-view"
 import type { WorkReviewsSnapshot } from "@/server/queries/work-reviews"
+import { reviewsSynthesisLabel } from "@/lib/ui/work-action-labels"
 import { formatUsdApprox } from "@/lib/format/money"
 
 interface WorkReviewsCardProps {
@@ -607,7 +608,7 @@ export function WorkReviewsCard({ snapshot, workId, provenance, editionView }: W
                   title="Destila as reviews em consenso, traços e avisos (custo Sonnet ~$0,02–0,05)"
                 >
                   {generating ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-                  {snapshot.summary ? "Destilar" : "Sintetizar reviews"}
+                  {reviewsSynthesisLabel(Boolean(snapshot.summary))}
                 </Button>
               </div>
             )}

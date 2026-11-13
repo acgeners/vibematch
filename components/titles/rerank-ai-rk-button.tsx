@@ -4,6 +4,7 @@ import { Loader2, RotateCw, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useRerankSingleWork } from "@/components/ranking/use-rerank-single-work"
+import { WORK_ACTION_LABELS } from "@/lib/ui/work-action-labels"
 import { GenerationGate } from "@/components/generation/generation-gate"
 import type { UiReadiness } from "@/lib/orchestration/ui-readiness"
 
@@ -53,7 +54,7 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true, icon = "spar
         title="Re-rank por IA é uma feature do plano Pago."
       >
         <Icon className="h-3.5 w-3.5" />
-        Calcular
+        {WORK_ACTION_LABELS.calculateVerdict}
         <span className="ml-1 rounded bg-muted px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           Pago
         </span>
@@ -68,7 +69,7 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true, icon = "spar
       ) : (
         <Icon className="h-3.5 w-3.5" />
       )}
-      {isPending ? "Calculando…" : hasScore ? "Recalcular" : "Calcular"}
+      {isPending ? "Calculando…" : hasScore ? "Recalcular" : WORK_ACTION_LABELS.calculateVerdict}
     </Button>
   )
 

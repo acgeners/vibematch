@@ -1,6 +1,7 @@
 "use client"
 
 import { Sparkles } from "lucide-react"
+import { WORK_ACTION_LABELS } from "@/lib/ui/work-action-labels"
 import { TaskButton } from "@/components/ai-evaluation/task-button"
 import { regenerateCanonicalSynopsis, type RegenerateSynopsisResult } from "@/server/actions/ai-eval-maintenance"
 
@@ -23,7 +24,7 @@ import { regenerateCanonicalSynopsis, type RegenerateSynopsisResult } from "@/se
 export function RegenerateSynopsisAction({
   workId,
   variant = "ghost",
-  label = "Regerar",
+  label = WORK_ACTION_LABELS.regenerateSynopsis,
   size = "sm",
   className,
 }: {

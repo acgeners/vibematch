@@ -2417,6 +2417,14 @@ Prevista fica em Notas, mesmo os dois sendo "nota".
 cards deles. **Exceção única: "Gerar tudo"** fica no topo da Visão Geral — ele não pertence a
 nenhum resultado, porque cria todos.
 
+**Obra com nota vê "Refazer tudo", discreto; só a obra sem nota vê o botão cheio.** Dono:
+`describeGenerateAll` (`lib/generate-all/work-pieces.ts`), régua "tem nota" (`hasCriteriaScores`).
+O cartão do hover aponta o botão da peça que falta pelo nome de `lib/ui/work-action-labels.ts`:
+renomear um desses botões sem passar por lá faz o cartão citar um botão que não existe.
+A pergunta da cascata (custo, fontes) não é gravada em `works.cascade_status`: a fase grátis devolve
+o estado de antes (`restingCascadeStatus`), e cancelar volta a ele — gravá-la prendia a obra em
+"aguardando autorização".
+
 ⚠️ **Resultado medido depois:** Notas **3.496 → 650px**, Visão Geral 906 → 982px (o painel de
 estado entrou, o card do Resumo saiu), e a **aba nova nasceu com 2.949px**. Mover é metade do
 trabalho: o scroll mudou de endereço.
