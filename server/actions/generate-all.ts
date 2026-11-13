@@ -18,7 +18,8 @@ import { autoPredictSynopsisQuality } from "@/lib/ai-evaluation/synopsis-quality
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
 import { refreshEmbeddingForWork } from "@/server/embeddings/refresh"
 import { summarizeEmbeddingFailures } from "@/lib/ml/embedding-failure"
-import { estimateStepUsd } from "@/lib/orchestration/cost"
+import { estimateCascadeUsd } from "@/lib/generate-all/cost"
+import { restingCascadeStatus } from "@/lib/generate-all/status"
 import { MANUAL_DATA_INSTRUCTIONS, type ActionName } from "@/lib/orchestration/contracts"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import type {
@@ -32,6 +33,16 @@ import { ensureAdmin } from "@/server/queries/current-user"
 // ---- Estado por-obra (works.cascade_status) --------------------------------
 
 /** Update tolerante a coluna ausente (pré-migration 130) — nunca quebra o fluxo. */
+async function getCascadeStatus(workId: string): Promise<CascadeStatus | null> {
+  try {
+    const supabase = createAdminClient()
+    const { data } = await supabase.from("works").select("cascade_status").eq("id", workId).maybeSingle()
+    return ((data as { cascade_status?: CascadeStatus | null } | null)?.cascade_status ?? null)
+  } catch {
+    return null
+  }
+}
+
 async function setCascadeStatus(workId: string, status: CascadeStatus): Promise<void> {
   try {
     const supabase = createAdminClient()
@@ -82,22 +93,6 @@ async function deriveNoReviewsReason(workId: string): Promise<NoReviewsReason> {
   return "sources_returned_empty"
 }
 
-// Passos PAGOS da cascata (pra somar o custo estimado do checkpoint). Embedding é
-// free (OpenAI ~$0). `enrich_tags` é proxy de custo da inferência de tags (Haiku).
-const CASCADE_PAID_ACTIONS: ActionName[] = [
-  "consolidate_synopsis",
-  "enrich_tags",
-  "generate_review_summary",
-  "generate_review_digest",
-  "run_ai_evaluation",
-  "predict_interest_potential",
-  "run_alignment",
-]
-
-function estimateCascadeUsd(): number {
-  return CASCADE_PAID_ACTIONS.reduce((sum, a) => sum + estimateStepUsd(a, 1), 0)
-}
-
 interface StepResult {
   fatal: boolean
   error?: string
@@ -124,13 +119,17 @@ export async function generateAllWorkData(
 
   // ---------------- FASE 0 (grátis) — checkpoint antes de gastar ----------------
   if (!opts.proceed) {
+    // A pergunta da cascata (custo, fontes) vive no diálogo, não no banco: nas duas paradas
+    // abaixo a obra volta ao estado de antes. Gravar "aguardando autorização" deixava a obra
+    // presa nele quando a pessoa cancelava ou fechava a aba (lib/generate-all/status.ts).
+    const resting = restingCascadeStatus(await getCascadeStatus(workId))
     await setCascadeStatus(workId, "verifying_sources")
 
     let sources: SourcesHealth | null = null
     if (!opts.ignoreSourceGate) {
       sources = await ensureReviewSourcesReady()
       if (!sources.confirmed) {
-        await setCascadeStatus(workId, "needs_authorization")
+        await setCascadeStatus(workId, resting)
         return {
           status: "needs_authorization",
           reason: "sources_unconfirmed",
@@ -164,7 +163,7 @@ export async function generateAllWorkData(
       reviews > 0 && !hasEnoughReviewsForEval(useful)
         ? { useful, total: Math.max(reviews, useful) }
         : undefined
-    await setCascadeStatus(workId, "needs_authorization")
+    await setCascadeStatus(workId, resting)
     return {
       status: "needs_authorization",
       reason: reviews === 0 ? "no_reviews" : "cost",

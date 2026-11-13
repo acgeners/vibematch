@@ -16,6 +16,7 @@ import {
 } from "@/server/actions/embeddings"
 import { runTask } from "@/lib/tasks-store"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
+import { WORK_ACTION_LABELS } from "@/lib/ui/work-action-labels"
 import { formatUsdApprox } from "@/lib/format/money"
 import {
   OPENAI_BILLING_URL,
@@ -179,7 +180,7 @@ export function EmbeddingsPanel({ accent, initialCachedCount, pendingCount, tota
             ) : (
               <Brain className="mr-1 h-4 w-4" />
             )}
-            {isPending ? "Embedando…" : "Atualizar embeddings"}
+            {isPending ? "Embedando…" : WORK_ACTION_LABELS.updateEmbeddings}
           </Button>
           <LastRunHint iso={lastRun} label="Última atualização" />
         </div>

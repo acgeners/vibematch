@@ -14,6 +14,10 @@ import { generateAllWorkData } from "@/server/actions/generate-all"
 import type { CascadeStatus, GenerateAllResult, GenerateAllOpts } from "@/lib/generate-all/types"
 import { formatUsdApprox } from "@/lib/format/money"
 import { describeFewReviews } from "@/lib/ai-evaluation/eval-evidence"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
+import { GenerateAllCard } from "@/components/titles/generate-all-card"
+import { describeGenerateAll, type GenerateAllWorkState } from "@/lib/generate-all/work-pieces"
+import { restingCascadeStatus } from "@/lib/generate-all/status"
 
 // Reaproveita os tipos do dialog de "Atualizar dados" (interfaces internas não
 // exportadas) — o passo de escolha de fontes+capas do "Gerar tudo" é o mesmo dialog.
@@ -45,6 +49,7 @@ export function GenerateAllBanner({
   currentCovers,
   archivedCovers,
   currentSynopses,
+  workState,
   compact = false,
 }: {
   workId: string
@@ -56,6 +61,12 @@ export function GenerateAllBanner({
   currentCovers?: UpdateDataProps["currentCovers"]
   archivedCovers?: UpdateDataProps["archivedCovers"]
   currentSynopses?: UpdateDataProps["currentSynopses"]
+  /**
+   * O que a obra já tem (`lib/generate-all/work-pieces.ts`). Com ele o botão vira
+   * "Refazer tudo", discreto, quando a obra já tem notas, e abre o cartão com o que falta.
+   * Sem ele (dado não carregado), o botão fica como sempre foi.
+   */
+  workState?: GenerateAllWorkState | null
   /** Modo botão inline (linha de ações da aba Geral) em vez do banner cheio. */
   compact?: boolean
 }) {
@@ -67,6 +78,9 @@ export function GenerateAllBanner({
   const canCurateAi = useCan("curate_ai")
 
   const [status, setStatus] = useState<CascadeStatus>(initialStatus)
+  // Para onde o botão volta se a pergunta da cascata ficar sem resposta. O servidor já não
+  // grava "aguardando autorização" (lib/generate-all/status.ts); aqui é a mesma régua na tela.
+  const [resting, setResting] = useState<CascadeStatus>(() => restingCascadeStatus(initialStatus))
   const [dialog, setDialog] = useState<Dialog>(null)
   // Passo de escolha de fontes+capas (UpdateDataDialog) que precede a cascata.
   const [selectOpen, setSelectOpen] = useState(false)
@@ -125,7 +139,18 @@ export function GenerateAllBanner({
 
   // Abre o passo de escolha (fontes → sinopse → capas → conflitos). Ao salvar,
   // `onSaved` emenda a cascata (Fase 0). Cancelar/fechar não gera nada.
-  const startFlow = () => setSelectOpen(true)
+  const startFlow = () => {
+    setResting(restingCascadeStatus(status))
+    setSelectOpen(true)
+  }
+
+  // Cancelar ou fechar a pergunta devolve o estado de antes. Confirmar também fecha o diálogo
+  // (o Radix chama `onOpenChange(false)` depois do clique), mas o `kickoff` já trocou o estado
+  // para "verificando"/"gerando" — por isso a troca só vale se ainda estiver aguardando.
+  const closeDialog = () => {
+    setDialog(null)
+    setStatus((s) => (s === "needs_authorization" ? resting : s))
+  }
 
   const dialogs = (
     <>
@@ -147,7 +172,7 @@ export function GenerateAllBanner({
       {/* Checkpoint de custo + sem-review + poucas reviews (mesma régua da criação) */}
       <ConfirmDialog
         open={dialog?.kind === "cost"}
-        onOpenChange={(o) => !o && setDialog(null)}
+        onOpenChange={(o) => !o && closeDialog()}
         title={dialog?.kind === "cost" && dialog.fewReviews ? "Poucas reviews para gerar tudo" : "Gerar todos os dados"}
         description={
           dialog?.kind === "cost"
@@ -178,7 +203,7 @@ export function GenerateAllBanner({
       {/* Fontes não confirmadas (FlareSolverr/Comix/ComicK) */}
       <ConfirmDialog
         open={dialog?.kind === "sources"}
-        onOpenChange={(o) => !o && setDialog(null)}
+        onOpenChange={(o) => !o && closeDialog()}
         title="Fontes não confirmadas"
         description="Não consegui confirmar Comix/ComicK (pode ser o FlareSolverr fora). Pode ser infra ou a obra realmente não existe nessas fontes. Seguir mesmo assim gera com o que as outras fontes derem."
         confirmText="Seguir mesmo assim"
@@ -192,19 +217,50 @@ export function GenerateAllBanner({
   if (!canCurateAi) return null
 
   if (compact) {
+    const view = workState ? describeGenerateAll(workState) : null
+    // Obra que já tem notas: o botão sai do primeiro plano (sem contorno, ícone cinza) e
+    // diz o que faria. Só em repouso — verificando, gerando ou parado numa pergunta, o
+    // estado da cascata é o que importa e o botão volta ao normal.
+    const quiet = view?.mode === "redo" && (status === "idle" || status === "done")
+    const button = (
+      <Button
+        type="button"
+        variant={quiet ? "ghost" : "outline"}
+        size="sm"
+        disabled={running}
+        onClick={startFlow}
+        className={quiet ? "text-muted-foreground" : undefined}
+        title={
+          view
+            ? undefined
+            : "Escolha fontes e capas; depois gera todos os dados da obra em ordem (fontes → sinopse → tags → atributos IA → notas → embedding)."
+        }
+      >
+        <Sparkles className={cn("size-4", quiet ? "text-muted-foreground" : "text-emerald-500")} />
+        {quiet ? view.label : ctaLabel(status)}
+      </Button>
+    )
     return (
       <>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={running}
-          onClick={startFlow}
-          title="Escolha fontes e capas; depois gera todos os dados da obra em ordem (fontes → sinopse → tags → atributos IA → notas → embedding)."
-        >
-          <Sparkles className="size-4 text-emerald-500" />
-          {ctaLabel(status)}
-        </Button>
+        {view ? (
+          <HoverCard openDelay={250} closeDelay={120}>
+            <HoverCardTrigger asChild>{button}</HoverCardTrigger>
+            {/* Ao LADO do botão, não embaixo: o cartão tem ~520px e o botão fica no meio da tela,
+                então embaixo ele não cabia e, virado pra cima, saía cortado no topo (medido a
+                900px de altura). De lado, o Radix o desliza na vertical até caber; o teto de
+                altura é a rede para tela baixa. */}
+            <HoverCardContent
+              side="right"
+              align="start"
+              collisionPadding={12}
+              className="w-[22rem] max-w-[calc(100vw-2rem)] max-h-(--radix-hover-card-content-available-height) overflow-y-auto"
+            >
+              <GenerateAllCard view={view} />
+            </HoverCardContent>
+          </HoverCard>
+        ) : (
+          button
+        )}
         {status === "blocked_manual" && (
           <Button
             type="button"

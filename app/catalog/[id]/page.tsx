@@ -35,6 +35,10 @@ import { SynopsisQualitySuggestion } from "@/components/titles/synopsis-quality-
 import { QuickStatusCell, QuickChaptersCell, QuickInterestCell } from "@/components/titles/quick-personal-controls"
 import { WorkStatusGateProvider } from "@/components/titles/work-status-gate"
 import { GenerateAllBanner } from "@/components/titles/generate-all-banner"
+import { estimateCascadeUsd } from "@/lib/generate-all/cost"
+import type { GenerateAllWorkState } from "@/lib/generate-all/work-pieces"
+import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
+import { WORK_ACTION_LABELS } from "@/lib/ui/work-action-labels"
 import type { CascadeStatus } from "@/lib/generate-all/types"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
 import { getTasteCriteria, getTasteScoresForWork } from "@/server/queries/pilot-taste"
@@ -905,6 +909,27 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
     ? await getArtEvidenceForWork(work.id as string, await getOwnerUserId())
     : null
 
+  // O que o "Gerar tudo" encontraria nesta obra (lib/generate-all/work-pieces.ts). Só pra
+  // quem cura — o botão não existe para o leitor —, e o único dado novo é a contagem de
+  // reviews úteis, a MESMA do 💬 e da pergunta da criação (`work_card_counts`).
+  const generateAllState: GenerateAllWorkState | null = isAdmin
+    ? {
+        pieces: {
+          synopsis: Boolean(work.canonical_synopsis),
+          summary: reviewsSnapshot.summary != null,
+          digest: reviewsSnapshot.digest != null,
+          tags: tagsInferenceRan,
+          scores: hasCriteriaScores,
+          interest: synopsisPrediction != null,
+          verdict: alignPresent,
+          embedding: embeddingProvenance != null,
+        },
+        reviewPending: work.ai_eval_status === "review_pending",
+        usefulReviews: (await getWorkTagReviewCounts([work.id as string])).get(work.id as string)?.reviewCount ?? null,
+        estimatedUsd: estimateCascadeUsd(),
+      }
+    : null
+
   const statusInitial: WorkStatusValues = {
     personal_status:
       personalStatusNameOrDefault(work.personal_status_id) as PersonalStatus,
@@ -1296,6 +1321,7 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
                   workId={work.id}
                   workTitle={work.title}
                   initialStatus={(work as { cascade_status?: CascadeStatus }).cascade_status ?? "idle"}
+                  workState={generateAllState}
                   currentWork={{
                     title: work.title,
                     originalTitle: work.original_title,
@@ -2366,7 +2392,7 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
                     {tagsInferenceRan ? (
                       <TagRowAction workId={work.id} variant="ghost" label="Re-inferir" className="h-6 gap-1 px-2 text-[11px]" />
                     ) : (
-                      <TagRowAction workId={work.id} label="Inferir tags" className="h-6 gap-1 px-2 text-[11px]" />
+                      <TagRowAction workId={work.id} label={WORK_ACTION_LABELS.inferTags} className="h-6 gap-1 px-2 text-[11px]" />
                     )}
                   </div>
                 </div>

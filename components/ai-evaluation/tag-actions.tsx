@@ -8,6 +8,7 @@ import {
   type InferTagsResult,
   type InferTagsBatchResult,
 } from "@/server/actions/ai-eval-maintenance"
+import { WORK_ACTION_LABELS } from "@/lib/ui/work-action-labels"
 import { GenerationGate } from "@/components/generation/generation-gate"
 import type { UiReadiness } from "@/lib/orchestration/ui-readiness"
 
@@ -18,7 +19,7 @@ const BATCH_CAP = 25
 export function TagRowAction({
   workId,
   variant = "default",
-  label = "Inferir tags",
+  label = WORK_ACTION_LABELS.inferTags,
   busyLabel = "Inferindo…",
   size = "sm",
   className,

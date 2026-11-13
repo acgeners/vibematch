@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/dialog"
 import { NO_REVIEWS_REASON_LABEL } from "@/lib/ai-evaluation/no-reviews"
 import { SHOW_HAIKU_AB } from "@/lib/ai-evaluation/ab-config"
+import { WORK_ACTION_LABELS } from "@/lib/ui/work-action-labels"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import type { AiEvaluation } from "@/types/domain"
 
@@ -274,7 +275,7 @@ export function AiEvaluationButton({
   const label = busy
     ? "Avaliando..."
     : hasCriteriaScores
-    ? "Reavaliar com IA"
+    ? WORK_ACTION_LABELS.reevaluate
     : "Avaliar com IA"
 
   if (!isAdmin) return null
