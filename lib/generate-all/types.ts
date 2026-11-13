@@ -29,6 +29,12 @@ export type GenerateAllResult =
       estimatedUsd: number
       noReviewsReason: NoReviewsReason | null
       sources: SourcesHealth | null
+      /**
+       * Há reviews, mas menos úteis que `MIN_USEFUL_REVIEWS_FOR_EVAL` (medido em 2026-11-12: a
+       * avaliação muda ~2,5× mais quando a obra ganha reviews — e a cascata ACEITA as notas sem
+       * revisão). Ausente = material suficiente, ou nenhuma review (aí vale `noReviewsReason`).
+       */
+      fewReviews?: { useful: number; total: number }
     }
   | { status: "generating"; ran: string[] }
   | { status: "ready"; ran: string[] }

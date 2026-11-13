@@ -13,6 +13,7 @@ import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
 import { generateAllWorkData } from "@/server/actions/generate-all"
 import type { CascadeStatus, GenerateAllResult, GenerateAllOpts } from "@/lib/generate-all/types"
 import { formatUsdApprox } from "@/lib/format/money"
+import { describeFewReviews } from "@/lib/ai-evaluation/eval-evidence"
 
 // Reaproveita os tipos do dialog de "Atualizar dados" (interfaces internas não
 // exportadas) — o passo de escolha de fontes+capas do "Gerar tudo" é o mesmo dialog.
@@ -26,7 +27,13 @@ const NO_REVIEWS_HINT: Record<string, string> = {
 }
 
 type Dialog =
-  | { kind: "cost"; estimatedUsd: number; noReviewsReason: string | null }
+  | {
+      kind: "cost"
+      estimatedUsd: number
+      noReviewsReason: string | null
+      /** Menos de 4 reviews úteis: a confirmação vira a pergunta das poucas reviews. */
+      fewReviews?: { useful: number; total: number }
+    }
   | { kind: "sources"; estimatedUsd: number }
   | null
 
@@ -71,7 +78,12 @@ export function GenerateAllBanner({
         if (r.reason === "sources_unconfirmed") {
           setDialog({ kind: "sources", estimatedUsd: r.estimatedUsd })
         } else {
-          setDialog({ kind: "cost", estimatedUsd: r.estimatedUsd, noReviewsReason: r.noReviewsReason })
+          setDialog({
+            kind: "cost",
+            estimatedUsd: r.estimatedUsd,
+            noReviewsReason: r.noReviewsReason,
+            fewReviews: r.fewReviews,
+          })
         }
         break
       case "blocked_manual":
@@ -132,21 +144,24 @@ export function GenerateAllBanner({
         onSaved={() => kickoff({}, `Verificando fontes: ${workTitle}`, "verifying_sources")}
       />
 
-      {/* Checkpoint de custo + sem-review (mesmo padrão do ai-eval) */}
+      {/* Checkpoint de custo + sem-review + poucas reviews (mesma régua da criação) */}
       <ConfirmDialog
         open={dialog?.kind === "cost"}
         onOpenChange={(o) => !o && setDialog(null)}
-        title="Gerar todos os dados"
+        title={dialog?.kind === "cost" && dialog.fewReviews ? "Poucas reviews para gerar tudo" : "Gerar todos os dados"}
         description={
           dialog?.kind === "cost"
             ? `Vai gerar tudo em ordem (${formatUsdApprox(dialog.estimatedUsd)}).` +
               (dialog.noReviewsReason
                 ? ` ⚠️ Sem reviews: ${NO_REVIEWS_HINT[dialog.noReviewsReason] ?? "a obra não tem reviews"}. Os atributos ficam mais fracos.`
+                : "") +
+              (dialog.fewReviews
+                ? ` ⚠️ ${describeFewReviews(dialog.fewReviews.useful, dialog.fewReviews.total)} Aqui as notas são aceitas sem revisão, e Interesse, Veredito e embedding saem em cima delas.`
                 : "")
             : undefined
         }
-        confirmText="Autorizar e gerar"
-        cancelText="Cancelar"
+        confirmText={dialog?.kind === "cost" && dialog.fewReviews ? "Gerar mesmo assim" : "Autorizar e gerar"}
+        cancelText={dialog?.kind === "cost" && dialog.fewReviews ? "Deixar para depois" : "Cancelar"}
         onConfirm={() =>
           kickoff(
             {

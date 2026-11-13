@@ -6,6 +6,8 @@ import { ensureComixReady, resolveComixDataResilient } from "@/server/comix/reso
 import { ensureComicKReady } from "@/lib/external/comick-health"
 import { acquireAndPersistWorkReviews } from "@/lib/external/acquire-reviews"
 import { countWorkReviews } from "@/server/queries/work-reviews"
+import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
+import { hasEnoughReviewsForEval } from "@/lib/ai-evaluation/eval-evidence"
 import { consolidateSynopsisForWork } from "@/lib/ai-recommendation/consolidate-for-work"
 import { ensureReviewSummary } from "@/lib/orchestration/integrations/reviews"
 import { generateWorkReviewDigest } from "@/server/actions/review-digest"
@@ -154,6 +156,14 @@ export async function generateAllWorkData(
     await acquireAndPersistWorkReviews(workId)
 
     const reviews = await countWorkReviews(workId)
+    // Reviews úteis pelo MESMO número do 💬 (`work_card_counts`) — o da pergunta da criação e do
+    // filtro "Prontas para avaliar". Com poucas, a confirmação avisa: a cascata avalia E aceita as
+    // notas sem revisão, e Interesse/Veredito/embedding saem em cima delas.
+    const useful = (await getWorkTagReviewCounts([workId])).get(workId)?.reviewCount ?? 0
+    const fewReviews =
+      reviews > 0 && !hasEnoughReviewsForEval(useful)
+        ? { useful, total: Math.max(reviews, useful) }
+        : undefined
     await setCascadeStatus(workId, "needs_authorization")
     return {
       status: "needs_authorization",
@@ -161,6 +171,7 @@ export async function generateAllWorkData(
       estimatedUsd: estimateCascadeUsd(),
       noReviewsReason: reviews === 0 ? await deriveNoReviewsReason(workId) : null,
       sources,
+      ...(fewReviews ? { fewReviews } : {}),
     }
   }
 

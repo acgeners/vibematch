@@ -5118,7 +5118,9 @@ Três razões, em ordem de peso:
 obra ganha reviews. Ele **não** virou chip (a pendência da paleta do `WorkQueueCard` segue aberta):
 vale na CRIAÇÃO, onde a obra recém-lançada cai (21% das criadas em 60 dias) — o diálogo pergunta
 antes de pagar, com a contagem — e no filtro "Prontas para avaliar" da fila (nunca avaliadas com 4+
-úteis, contadas pelo 💬). Nenhum caminho é bloqueado: "Avaliar com IA" na obra segue sem pergunta.
+úteis, contadas pelo 💬) e na confirmação de custo do "Gerar tudo" (que aceita as notas sem revisão
+e calcula Interesse/Veredito/embedding em cima delas). Nenhum caminho é bloqueado: "Avaliar com IA"
+na obra segue sem pergunta.
 
 🔴 **O teto de exibição de 500 deixou de ser silencioso.** `getEligibleWorks` cortava em 500 e
 devolvia `totalCount` DEPOIS do corte: com 556 obras a tela dizia "500" e as 56 sumiam sem nada
