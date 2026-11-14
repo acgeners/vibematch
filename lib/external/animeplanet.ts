@@ -1,6 +1,6 @@
 import type { PublicationStatus } from "@/types/domain"
 import type { ExternalSearchResult } from "./types"
-import { fetchHtmlWithCfFallback, isCfBypassUnavailable } from "./flaresolverr"
+import { fetchHtmlWithCfFallback, isCfBypassUnavailable, isCloudflareChallenge } from "./flaresolverr"
 
 const AP_BASE = "https://www.anime-planet.com"
 
@@ -454,53 +454,51 @@ export function parseAnimePlanetDetailHtml(html: string): AnimePlanetDetail | nu
  * extractUserRating() no pipeline de coleta possa parsear.
  *
  * CF protege — caímos no FlareSolverr quando o fetch direto for bloqueado.
+ *
+ * 🔴 Falha LANÇA; `[]` quer dizer "a obra não tem review" (ou o slug não existe: medido em
+ * 14/11/2026, slug morto redireciona para a busca e chega com 0 `reviewBody`). Até então
+ * bypass fora do ar, resposta nula e erro viravam `[]`: o AnimePlanet não entrava em
+ * `failedSources` e o lote marcava a obra como conferida. Com o serviço de bypass caído no
+ * meio de um lote, TODAS as obras restantes saíam assim.
  */
 export async function fetchAnimePlanetReviews(slug: string, limit = Infinity): Promise<string[]> {
-  if (isCfBypassUnavailable()) return []
-  try {
-    const url = `${AP_BASE}/manga/${slug}/reviews`
-    const result = await fetchHtmlWithCfFallback(url, HEADERS, ANIMEPLANET_CF_ABORT_MS)
-    if (!result) {
-      console.warn(`[fetchAnimePlanetReviews] AP slug="${slug}": fetch falhou (CF/FlareSolverr não resolveu) ${url}`)
-      return []
-    }
+  if (isCfBypassUnavailable()) throw new Error(`animeplanet reviews slug="${slug}": nenhum bypass de Cloudflare disponível`)
+  const url = `${AP_BASE}/manga/${slug}/reviews`
+  const result = await fetchHtmlWithCfFallback(url, HEADERS, ANIMEPLANET_CF_ABORT_MS)
+  if (!result) throw new Error(`animeplanet reviews slug="${slug}": bypass não resolveu ${url}`)
+  if (isCloudflareChallenge(result.html)) throw new Error(`animeplanet reviews slug="${slug}": chegou a página de desafio do Cloudflare`)
+  const html = result.html
+  const bodyRegex = /<div[^>]+itemprop="reviewBody"[^>]*>([\s\S]*?)<\/div>/gi
+  const reviews: string[] = []
 
-    const html = result.html
-    const bodyRegex = /<div[^>]+itemprop="reviewBody"[^>]*>([\s\S]*?)<\/div>/gi
-    const reviews: string[] = []
+  for (const match of html.matchAll(bodyRegex)) {
+    if (reviews.length >= limit) break
+    const text = cleanHtml(match[1])
+    if (!text || text.length < 100) continue
 
-    for (const match of html.matchAll(bodyRegex)) {
-      if (reviews.length >= limit) break
-      const text = cleanHtml(match[1])
-      if (!text || text.length < 100) continue
+    // Olha 2000 chars antes deste bloco para encontrar o rating da review
+    const lookback = html.slice(Math.max(0, (match.index ?? 0) - 2000), match.index ?? 0)
+    const ratingValueMatch = lookback.match(/itemprop="ratingValue"[^>]*content="([0-9.]+)"/)
+    const starsFull = (lookback.match(/iconStarFull/g) ?? []).length
 
-      // Olha 2000 chars antes deste bloco para encontrar o rating da review
-      const lookback = html.slice(Math.max(0, (match.index ?? 0) - 2000), match.index ?? 0)
-      const ratingValueMatch = lookback.match(/itemprop="ratingValue"[^>]*content="([0-9.]+)"/)
-      const starsFull = (lookback.match(/iconStarFull/g) ?? []).length
-
-      let prefix = ""
-      if (ratingValueMatch) {
-        const raw = parseFloat(ratingValueMatch[1])
-        if (Number.isFinite(raw) && raw >= 0.5 && raw <= 5) {
-          prefix = `Nota do usuário: ${Math.round(raw * 2 * 10) / 10}/10\n`
-        }
-      } else if (starsFull >= 1 && starsFull <= 5) {
-        prefix = `Nota do usuário: ${starsFull * 2}/10\n`
+    let prefix = ""
+    if (ratingValueMatch) {
+      const raw = parseFloat(ratingValueMatch[1])
+      if (Number.isFinite(raw) && raw >= 0.5 && raw <= 5) {
+        prefix = `Nota do usuário: ${Math.round(raw * 2 * 10) / 10}/10\n`
       }
-
-      reviews.push(`${prefix}${text}`)
+    } else if (starsFull >= 1 && starsFull <= 5) {
+      prefix = `Nota do usuário: ${starsFull * 2}/10\n`
     }
 
-    if (reviews.length === 0) {
-      const blocks = (html.match(/itemprop="reviewBody"/g) ?? []).length
-      console.warn(`[fetchAnimePlanetReviews] AP slug="${slug}": 0 reviews extraídas (reviewBody encontrados=${blocks}, HTML ${html.length} chars)`)
-    }
-    return reviews
-  } catch (err) {
-    console.warn(`[fetchAnimePlanetReviews] AP slug="${slug}" falhou:`, err instanceof Error ? err.message : err)
-    return []
+    reviews.push(`${prefix}${text}`)
   }
+
+  if (reviews.length === 0) {
+    const blocks = (html.match(/itemprop="reviewBody"/g) ?? []).length
+    console.warn(`[fetchAnimePlanetReviews] AP slug="${slug}": 0 reviews extraídas (reviewBody encontrados=${blocks}, HTML ${html.length} chars)`)
+  }
+  return reviews
 }
 
 /**

@@ -117,13 +117,17 @@ function parseMedia(m: any) {
   }
 }
 
-async function anilistRequest(query: string, variables: Record<string, unknown>, label = "anilist") {
-  const res = await fetch(ANILIST_URL, {
+function postAniList(query: string, variables: Record<string, unknown>) {
+  return fetch(ANILIST_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ query, variables }),
     cache: "no-store",
   })
+}
+
+async function anilistRequest(query: string, variables: Record<string, unknown>, label = "anilist") {
+  const res = await postAniList(query, variables)
   if (!res.ok) {
     console.warn(`[anilist:${label}] request falhou: HTTP ${res.status}`)
     return null
@@ -309,29 +313,40 @@ export async function fetchAniListRecommendations(anilistId: number): Promise<An
   }
 }
 
+/**
+ * Reviews de uma obra no AniList.
+ *
+ * 🔴 Falha LANÇA; `[]` quer dizer "a obra não tem review" ou "o id não existe como mangá".
+ * Até 14/11/2026 qualquer erro (429, 5xx, rede) virava `[]`: a coleta não punha o AniList em
+ * `failedSources`, o lote marcava a obra como conferida e ela ia para o fim da fila sem as
+ * reviews. Medido no mesmo dia: id inexistente responde HTTP 404 com `data.Media = null`.
+ */
 export async function fetchAniListReviews(anilistId: number): Promise<string[]> {
-  try {
-    const json = await anilistRequest(REVIEWS_QUERY, { id: anilistId }, "reviews")
-    if (json && json?.data?.Media == null) {
-      console.warn(`[fetchAniListReviews] AniList id=${anilistId}: Media null (possível id de ANIME — a query usa type: MANGA)`)
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const nodes: any[] = json?.data?.Media?.reviews?.nodes ?? []
-    return nodes
-      .map((r) => {
-        const summary = r.summary?.trim()
-        const body = r.body?.replace(/<[^>]+>/g, "").trim()
-        const text = [summary, body].filter(Boolean).join("\n").slice(0, 900)
-        if (!text) return ""
-        // score 0-100 → prefixo "Nota do usuário: X/10\n" para extractUserRating()
-        const score10 = typeof r.score === "number" && r.score > 0
-          ? Math.round(r.score / 10 * 10) / 10
-          : null
-        return score10 !== null ? `Nota do usuário: ${score10}/10\n${text}` : text
-      })
-      .filter(Boolean)
-  } catch (err) {
-    console.warn(`[fetchAniListReviews] AniList id=${anilistId} falhou:`, err instanceof Error ? err.message : err)
+  const res = await postAniList(REVIEWS_QUERY, { id: anilistId })
+  if (res.status === 404) {
+    console.warn(`[fetchAniListReviews] AniList id=${anilistId}: Media inexistente (possível id de ANIME — a query usa type: MANGA)`)
     return []
   }
+  if (!res.ok) throw new Error(`anilist reviews id=${anilistId}: HTTP ${res.status}`)
+  const json = await res.json()
+  const media = json?.data?.Media
+  if (media == null) {
+    const motivo = Array.isArray(json?.errors) ? json.errors.map((e: { message?: string }) => e?.message).join("; ") : "sem data.Media"
+    throw new Error(`anilist reviews id=${anilistId}: ${motivo}`)
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nodes: any[] = media.reviews?.nodes ?? []
+  return nodes
+    .map((r) => {
+      const summary = r.summary?.trim()
+      const body = r.body?.replace(/<[^>]+>/g, "").trim()
+      const text = [summary, body].filter(Boolean).join("\n").slice(0, 900)
+      if (!text) return ""
+      // score 0-100 → prefixo "Nota do usuário: X/10\n" para extractUserRating()
+      const score10 = typeof r.score === "number" && r.score > 0
+        ? Math.round(r.score / 10 * 10) / 10
+        : null
+      return score10 !== null ? `Nota do usuário: ${score10}/10\n${text}` : text
+    })
+    .filter(Boolean)
 }

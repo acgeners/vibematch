@@ -97,7 +97,9 @@ export function parseMalReviewsHtml(html: string): MalReview[] {
     .filter((r): r is MalReview => r !== null)
 }
 
-async function fetchPage(malId: number, page: number): Promise<string | null> {
+type PageOutcome = { html: string } | { notFound: true } | { failure: string }
+
+async function fetchPage(malId: number, page: number): Promise<PageOutcome> {
   const url =
     `${MAL_BASE}/manga/${malId}/${SLUG_PLACEHOLDER}/reviews?${FILTERS}` +
     (page > 1 ? `&p=${page}` : "")
@@ -106,21 +108,22 @@ async function fetchPage(malId: number, page: number): Promise<string | null> {
     // 404 = a página não existe, ou seja, as reviews acabaram. É o caso NORMAL de toda
     // obra com menos de 20 reviews — que é a maioria do catálogo. Logar isso como falha
     // encheria o log de ruído e faria o comportamento esperado parecer problema.
-    if (res.status === 404) return null
-    if (!res.ok) {
-      console.warn(`[mal-reviews] id=${malId} page=${page}: HTTP ${res.status}`)
-      return null
-    }
-    return await res.text()
+    // Na página 1 é o id que não existe (medido em 14/11/2026: 404 "Not Found").
+    if (res.status === 404) return { notFound: true }
+    if (!res.ok) return { failure: `HTTP ${res.status}` }
+    return { html: await res.text() }
   } catch (err) {
-    console.warn(`[mal-reviews] id=${malId} page=${page} falhou:`, err instanceof Error ? err.message : err)
-    return null
+    return { failure: err instanceof Error ? err.message : String(err) }
   }
 }
 
 /**
  * Reviews de uma obra no MyAnimeList, no mesmo contrato que o resto do app espera:
  * strings prontas pro prompt, com a nota do usuário como cabeçalho quando existir.
+ *
+ * 🔴 Se a PÁGINA 1 falha, LANÇA. Até 14/11/2026 a falha virava `[]`: a coleta não punha o MAL
+ * em `failedSources` e o lote marcava a obra como conferida. Falha só na página 2 devolve o
+ * que a 1 trouxe — a coleta acumula, então nada se perde.
  */
 export async function fetchMalReviews(malId: number): Promise<string[]> {
   const out: MalReview[] = []
@@ -129,8 +132,14 @@ export async function fetchMalReviews(malId: number): Promise<string[]> {
   // por obra, num backfill de centenas de obras, é o tipo de coisa que faz um site
   // legítimo te bloquear. O custo é ~400ms por obra — barato pelo que evita.
   for (let page = 1; page <= PAGES; page += 1) {
-    const html = await fetchPage(malId, page)
-    if (!html) break
+    const outcome = await fetchPage(malId, page)
+    if ("failure" in outcome) {
+      if (page === 1) throw new Error(`mal reviews id=${malId}: ${outcome.failure}`)
+      console.warn(`[mal-reviews] id=${malId} page=${page} falhou (${outcome.failure}); fica com a página 1`)
+      break
+    }
+    if ("notFound" in outcome) break
+    const { html } = outcome
 
     const reviews = parseMalReviewsHtml(html)
     if (reviews.length === 0) break // página vazia = acabaram as reviews
