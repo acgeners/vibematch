@@ -1,4 +1,5 @@
 import type { PublicationStatus } from "@/types/domain"
+import { mangaUpdatesSlugToId } from "./mangaupdates-id"
 
 const MD_BASE = "https://api.mangadex.org"
 const COVER_BASE = "https://uploads.mangadex.org/covers"
@@ -13,7 +14,10 @@ export interface MangaDexResult {
   chapters?: number
   /** "safe" | "suggestive" | "erotica" | "pornographic". */
   contentRating?: string
-  /** Cross-platform IDs from MangaDex `attributes.links`: al=AniList, mu=MangaUpdates, mal=MyAnimeList, kt=Kitsu, ap=AnimePlanet. */
+  /**
+   * Cross-platform IDs from MangaDex `attributes.links`: al=AniList, mu=MangaUpdates, mal=MyAnimeList, kt=Kitsu, ap=AnimePlanet.
+   * `mu` já vem CONVERTIDO para o id numérico que o app guarda (ver `extractLinks`).
+   */
   links?: { al?: string; mu?: string; mal?: string; kt?: string; ap?: string }
 }
 
@@ -102,7 +106,21 @@ function tagsFromAttributes(attrs: Record<string, unknown>): string[] {
   return out
 }
 
-function extractLinks(raw: unknown): MangaDexResult["links"] | undefined {
+/**
+ * O MangaDex entrega o MangaUpdates como o CÓDIGO da URL nova (`sw6yr8u`), não como o id numérico
+ * que o app guarda: 91 de 91 obras do catálogo com o link, conferido em 2026-11-14. Cru, ele virava
+ * NaN em `hoistCrossSourceIds` e o vínculo era descartado sem aviso.
+ *
+ * Código de 1 a 6 DÍGITOS é o id ANTIGO do MangaUpdates (antes da migração para códigos de 7
+ * caracteres), e não tem conversão: lido em base 36, viraria outro número e o app gravaria um
+ * vínculo para a obra errada. Nenhum apareceu na amostra; a guarda existe para o dia em que aparecer.
+ */
+export function mangaUpdatesIdFromMangaDex(code: string | undefined): string | undefined {
+  if (!code || /^\d{1,6}$/.test(code.trim())) return undefined
+  return mangaUpdatesSlugToId(code)
+}
+
+export function extractLinks(raw: unknown): MangaDexResult["links"] | undefined {
   if (!raw || typeof raw !== "object") return undefined
   const src = raw as Record<string, unknown>
   const pick = (key: string): string | undefined => {
@@ -113,7 +131,7 @@ function extractLinks(raw: unknown): MangaDexResult["links"] | undefined {
   }
   const out = {
     al: pick("al"),
-    mu: pick("mu"),
+    mu: mangaUpdatesIdFromMangaDex(pick("mu")),
     mal: pick("mal"),
     kt: pick("kt"),
     ap: pick("ap"),
@@ -182,80 +200,112 @@ export async function searchMangaDex(title: string): Promise<MangaDexResult[]> {
  * "can't wait"). Filtramos por tamanho (>=200 chars depois de strip de HTML)
  * pra ficar com os comentários substantivos. Pagamos custo de scraping em
  * troca de cobertura — MangaDex tem 1000+ posts em obras populares.
+ *
+ * 🔴 O fórum NÃO aceita cabeçalho de navegador. Desde ~23/10/2026 o MangaDex manda quem se diz
+ * navegador para um desafio anti-robô (`/edge/challenge`, 403) — "if this isn't a browser, don't
+ * send a browser UA". Medido em 2026-11-14 em 10 obras: com `User-Agent: Mozilla/5.0`, 403 nas 10;
+ * sem ele, 200 com posts nas 10. Este fetch mandava o `Mozilla/5.0`, e por isso as 774 obras com
+ * MangaDex pararam de receber review sem nada acusar.
+ *
+ * Falha ≠ vazio. Fórum que não respondeu (desafio, erro HTTP, rede) LANÇA
+ * `MangaDexForumUnavailableError`: a coleta põe a fonte em `failedSources`, e o lote de reviews não
+ * marca a obra como buscada. `[]` só sai quando o MangaDex respondeu e não há o que ler (obra sem
+ * tópico no fórum, ou só posts curtos). Página que falhou junto de página que respondeu devolve o
+ * parcial.
  */
+export class MangaDexForumUnavailableError extends Error {
+  constructor(
+    readonly reason: string,
+    readonly url: string,
+  ) {
+    super(`mangadex ${reason}: ${url}`)
+    this.name = "MangaDexForumUnavailableError"
+  }
+}
+
 export async function fetchMangaDexForumComments(mangadexId: string): Promise<string[]> {
-  try {
-    // 1. Resolve threadId + total de replies via statistics endpoint.
-    const statsRes = await fetch(`${MD_BASE}/statistics/manga/${mangadexId}`, { cache: "no-store" })
-    if (!statsRes.ok) return []
-    const statsJson = await statsRes.json()
-    const stat = statsJson?.statistics?.[mangadexId] as { comments?: { threadId?: number; repliesCount?: number } } | undefined
-    const threadId = stat?.comments?.threadId
-    if (!threadId) return []
-    const repliesCount = stat?.comments?.repliesCount ?? 0
-
-    // 2. XenForo pagina 20 posts/página. As páginas iniciais costumam ser
-    // reações curtas ("OMG release!"); o meio/fim do thread concentra
-    // discussão substantiva. Em vez de pegar só 1-2, samplamos 5 páginas
-    // distribuídas pelo thread inteiro.
-    const totalPages = Math.max(1, Math.ceil(repliesCount / 20))
-    const pagesToFetch: number[] = totalPages <= 5
-      ? Array.from({ length: totalPages }, (_, i) => i + 1)
-      : [
-          1,
-          Math.max(2, Math.ceil(totalPages * 0.25)),
-          Math.max(3, Math.ceil(totalPages * 0.5)),
-          Math.max(4, Math.ceil(totalPages * 0.75)),
-          totalPages,
-        ]
-    const uniquePages = Array.from(new Set(pagesToFetch))
-
-    const fetchPage = async (page: number): Promise<string> => {
-      try {
-        const url = `https://forums.mangadex.org/threads/${threadId}/page-${page}`
-        const res = await fetch(url, {
-          cache: "no-store",
-          redirect: "follow",
-          headers: { "User-Agent": "Mozilla/5.0" },
-        })
-        if (!res.ok) return ""
-        return await res.text()
-      } catch {
-        return ""
-      }
+  // 1. Resolve threadId + total de replies via statistics endpoint.
+  const statsUrl = `${MD_BASE}/statistics/manga/${mangadexId}`
+  const statsRes = await fetch(statsUrl, { cache: "no-store" })
+  if (!statsRes.ok) {
+    // 429 e 5xx = a API não respondeu agora. 4xx restante = id que a API não conhece: nada a ler.
+    if (statsRes.status === 429 || statsRes.status >= 500) {
+      throw new MangaDexForumUnavailableError(`statistics ${statsRes.status}`, statsUrl)
     }
-
-    const htmls = await Promise.all(uniquePages.map(fetchPage))
-    const combined = htmls.join("")
-
-    // 3. Extrai bodies dos posts (XenForo: <div class="bbWrapper">...</div>),
-    // filtra por tamanho (>=150 chars) e dedup por prefixo pra evitar quote-spam.
-    const bodyRegex = /<div class="bbWrapper">([\s\S]*?)<\/div>\s*\n/g
-    const posts: string[] = []
-    const seenPrefixes = new Set<string>()
-    let match: RegExpExecArray | null
-    while ((match = bodyRegex.exec(combined)) !== null) {
-      const raw = match[1]
-      const noHtml = raw.replace(/<[^>]+>/g, " ")
-      const decoded = noHtml
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&#039;/g, "'")
-        .replace(/&nbsp;/g, " ")
-      const cleaned = decoded.replace(/\s+/g, " ").trim()
-      if (cleaned.length < 150) continue
-      const prefix = cleaned.slice(0, 80).toLowerCase()
-      if (seenPrefixes.has(prefix)) continue
-      seenPrefixes.add(prefix)
-      posts.push(cleaned.slice(0, 900))
-    }
-
-    return posts
-  } catch {
     return []
   }
+  const statsJson = await statsRes.json()
+  const stat = statsJson?.statistics?.[mangadexId] as { comments?: { threadId?: number; repliesCount?: number } } | undefined
+  const threadId = stat?.comments?.threadId
+  if (!threadId) return []
+  const repliesCount = stat?.comments?.repliesCount ?? 0
+
+  // 2. XenForo pagina 20 posts/página. As páginas iniciais costumam ser
+  // reações curtas ("OMG release!"); o meio/fim do thread concentra
+  // discussão substantiva. Em vez de pegar só 1-2, samplamos 5 páginas
+  // distribuídas pelo thread inteiro.
+  const totalPages = Math.max(1, Math.ceil(repliesCount / 20))
+  const pagesToFetch: number[] = totalPages <= 5
+    ? Array.from({ length: totalPages }, (_, i) => i + 1)
+    : [
+        1,
+        Math.max(2, Math.ceil(totalPages * 0.25)),
+        Math.max(3, Math.ceil(totalPages * 0.5)),
+        Math.max(4, Math.ceil(totalPages * 0.75)),
+        totalPages,
+      ]
+  const uniquePages = Array.from(new Set(pagesToFetch))
+
+  // SEM `User-Agent` de navegador — ver o 🔴 no cabeçalho desta função.
+  const fetchPage = async (page: number): Promise<{ html: string } | { failure: string }> => {
+    const url = `https://forums.mangadex.org/threads/${threadId}/page-${page}`
+    try {
+      const res = await fetch(url, { cache: "no-store", redirect: "follow" })
+      if (!res.ok) return { failure: `forum ${res.status}` }
+      // O desafio também pode chegar como 200 depois do redirect.
+      if (res.url.includes("/edge/challenge")) return { failure: "forum challenge" }
+      return { html: await res.text() }
+    } catch (err) {
+      return { failure: `forum ${err instanceof Error ? err.message : String(err)}` }
+    }
+  }
+
+  const pages = await Promise.all(uniquePages.map(fetchPage))
+  const answered = pages.flatMap((p) => ("html" in p ? [p.html] : []))
+  if (answered.length === 0) {
+    const reasons = [...new Set(pages.map((p) => ("failure" in p ? p.failure : "")))].join(", ")
+    throw new MangaDexForumUnavailableError(
+      reasons,
+      `https://forums.mangadex.org/threads/${threadId}`,
+    )
+  }
+  const combined = answered.join("")
+
+  // 3. Extrai bodies dos posts (XenForo: <div class="bbWrapper">...</div>),
+  // filtra por tamanho (>=150 chars) e dedup por prefixo pra evitar quote-spam.
+  const bodyRegex = /<div class="bbWrapper">([\s\S]*?)<\/div>\s*\n/g
+  const posts: string[] = []
+  const seenPrefixes = new Set<string>()
+  let match: RegExpExecArray | null
+  while ((match = bodyRegex.exec(combined)) !== null) {
+    const raw = match[1]
+    const noHtml = raw.replace(/<[^>]+>/g, " ")
+    const decoded = noHtml
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#039;/g, "'")
+      .replace(/&nbsp;/g, " ")
+    const cleaned = decoded.replace(/\s+/g, " ").trim()
+    if (cleaned.length < 150) continue
+    const prefix = cleaned.slice(0, 80).toLowerCase()
+    if (seenPrefixes.has(prefix)) continue
+    seenPrefixes.add(prefix)
+    posts.push(cleaned.slice(0, 900))
+  }
+
+  return posts
 }
 
 export async function fetchMangaDexById(id: string): Promise<MangaDexDetail | null> {
