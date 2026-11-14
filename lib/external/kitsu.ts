@@ -212,50 +212,62 @@ export async function fetchKitsuMangaById(id: string): Promise<KitsuMangaDetail 
   }
 }
 
+/**
+ * Reações (mini-reviews) de uma obra no Kitsu.
+ *
+ * 🔴 Falha LANÇA quando NENHUMA das duas páginas responde; `[]` quer dizer "não tem reação".
+ * Até 14/11/2026 qualquer erro virava `[]`, o Kitsu não entrava em `failedSources` e o lote
+ * marcava a obra como conferida. Medido no mesmo dia: id inexistente responde 200 com
+ * `data: []` — o filtro não distingue obra sem reação de obra inexistente, e não precisa.
+ * Uma página só falhando devolve a outra (a coleta acumula, nada se perde).
+ */
 export async function fetchKitsuReactions(mangaId: string): Promise<string[]> {
   // Kitsu limita 20/página. Pegamos 2 páginas em paralelo pra chegar a 40
   // reações; a API aceita `page[offset]` pra paginação.
   async function fetchPage(offset: number): Promise<unknown[]> {
-    try {
-      // Não usamos `fields[mediaReactions]=reaction,upVotesCount,likesCount` —
-      // URLSearchParams codifica as vírgulas como %2C e Kitsu interpreta o
-      // valor inteiro como um único nome de campo, retornando data:[]. O
-      // response sem `fields` traz mais campos mas continua pequeno.
-      const url = new URL(`${KITSU_BASE}/media-reactions`)
-      url.searchParams.set("filter[mangaId]", mangaId)
-      url.searchParams.set("sort", "-upVotesCount")
-      url.searchParams.set("page[limit]", "20")
-      if (offset > 0) url.searchParams.set("page[offset]", String(offset))
+    // Não usamos `fields[mediaReactions]=reaction,upVotesCount,likesCount` —
+    // URLSearchParams codifica as vírgulas como %2C e Kitsu interpreta o
+    // valor inteiro como um único nome de campo, retornando data:[]. O
+    // response sem `fields` traz mais campos mas continua pequeno.
+    const url = new URL(`${KITSU_BASE}/media-reactions`)
+    url.searchParams.set("filter[mangaId]", mangaId)
+    url.searchParams.set("sort", "-upVotesCount")
+    url.searchParams.set("page[limit]", "20")
+    if (offset > 0) url.searchParams.set("page[offset]", String(offset))
 
-      const res = await fetch(url, { cache: "no-store", headers: KITSU_HEADERS })
-      if (!res.ok) return []
-      const json = await res.json()
-      return Array.isArray(json?.data) ? json.data : []
-    } catch {
-      return []
-    }
+    const res = await fetch(url, { cache: "no-store", headers: KITSU_HEADERS })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const json = await res.json()
+    if (!Array.isArray(json?.data)) throw new Error("resposta sem data[]")
+    return json.data
   }
 
-  try {
-    const [page1, page2] = await Promise.all([fetchPage(0), fetchPage(20)])
-    return [...page1, ...page2]
-      .map((item) => {
-        const attributes = (item as { attributes?: Record<string, unknown> }).attributes ?? {}
-        const reaction = cleanText(attributes.reaction)
-        if (!reaction) return ""
-
-        const upVotes = attributes.upVotesCount
-        const likes = attributes.likesCount
-        const meta = [
-          typeof upVotes === "number" ? `upvotes: ${upVotes}` : null,
-          typeof likes === "number" ? `likes: ${likes}` : null,
-        ].filter(Boolean).join(", ")
-
-        return meta ? `${reaction}\n(${meta})` : reaction
-      })
-      .filter(Boolean)
-      .map((reaction) => reaction.slice(0, 900))
-  } catch {
-    return []
+  const settled = await Promise.allSettled([fetchPage(0), fetchPage(20)])
+  const motivos = settled.flatMap((s) =>
+    s.status === "rejected" ? [s.reason instanceof Error ? s.reason.message : String(s.reason)] : [],
+  )
+  if (motivos.length === settled.length) {
+    throw new Error(`kitsu reactions id=${mangaId}: ${motivos.join("; ")}`)
   }
+  if (motivos.length > 0) {
+    console.warn(`[kitsu-reactions] id=${mangaId}: uma página falhou (${motivos.join("; ")}); fica com a outra`)
+  }
+  return settled
+    .flatMap((s) => (s.status === "fulfilled" ? s.value : []))
+    .map((item) => {
+      const attributes = (item as { attributes?: Record<string, unknown> }).attributes ?? {}
+      const reaction = cleanText(attributes.reaction)
+      if (!reaction) return ""
+
+      const upVotes = attributes.upVotesCount
+      const likes = attributes.likesCount
+      const meta = [
+        typeof upVotes === "number" ? `upvotes: ${upVotes}` : null,
+        typeof likes === "number" ? `likes: ${likes}` : null,
+      ].filter(Boolean).join(", ")
+
+      return meta ? `${reaction}\n(${meta})` : reaction
+    })
+    .filter(Boolean)
+    .map((reaction) => reaction.slice(0, 900))
 }

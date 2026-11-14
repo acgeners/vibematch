@@ -80,10 +80,37 @@ describe("fetchMalReviews — a URL", () => {
     expect(reviews.every((r) => r.length <= 900)).toBe(true)
   })
 
-  it("HTTP de erro não quebra o caller — a obra só fica sem review do MAL", async () => {
+  // 🔴 Até 14/11/2026 este caso afirmava o contrário ("HTTP de erro não quebra o caller"): a
+  // falha virava `[]`, o MAL não entrava em `failedSources` e o lote marcava a obra como
+  // conferida. Falha LANÇA; `[]` é só "não tem".
+  it("página 1 com HTTP de erro LANÇA — falha não pode virar '0 reviews'", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503, text: async () => "" }))
 
+    await expect(fetchMalReviews(121496)).rejects.toThrow(/HTTP 503/)
+  })
+
+  it("página 1 com erro de rede também LANÇA", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("fetch failed")))
+
+    await expect(fetchMalReviews(121496)).rejects.toThrow(/fetch failed/)
+  })
+
+  it("página 1 em 404 é 'id inexistente': devolve vazio sem lançar", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404, text: async () => "" }))
+
     await expect(fetchMalReviews(121496)).resolves.toEqual([])
+  })
+
+  it("falha só na página 2 devolve o que a página 1 trouxe", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce({ ok: true, status: 200, text: async () => FIXTURE })
+        .mockResolvedValueOnce({ ok: false, status: 503, text: async () => "" })
+    )
+
+    const reviews = await fetchMalReviews(121496)
+    expect(reviews.length).toBe(parseMalReviewsHtml(FIXTURE).length)
   })
 
   it("busca as páginas em SEQUÊNCIA, não em paralelo (educação com o site)", async () => {

@@ -6827,7 +6827,8 @@ O import deixou de ser `ensureAdmin`-only: o gate é `ensureReadingStateWriter` 
 
 `lib/external/index.ts` is the multi-source orchestration layer:
 - 🔴 **Conector de busca: falha LANÇA; `[]` quer dizer "busquei e não achei".** Só quem lança entra em `failedSources`, e só fonte em `failedSources` é buscada de novo ao confirmar o passo de fontes da criação (`retrySearchSources` → `retryFailedSearchSources`, mesmo refino e mesmo filtro de aceitação). O Anime-Planet engolia a falha até 2026-11-12, e a obra nascia sem ele com o diálogo dizendo "Nenhum match".
-- 🔴 **`User-Agent` de navegador não é neutro: meça antes de copiá-lo para uma fonte.** O fórum do MangaDex recusa qualquer um (403, desafio anti-robô, desde ~23/10/2026) e o fetch dele vai sem o cabeçalho; o MangaUpdates recusa o Chrome antigo. Coletor de reviews também LANÇA na falha (`MangaDexForumUnavailableError`), senão a recusa vira "0 reviews".
+- 🔴 **`User-Agent` de navegador não é neutro: meça antes de copiá-lo para uma fonte.** O fórum do MangaDex recusa qualquer um (403, desafio anti-robô, desde ~23/10/2026) e o fetch dele vai sem o cabeçalho; o MangaUpdates recusa o Chrome antigo.
+- 🔴 **Coletor de review: falha LANÇA; `[]` é só "não tem".** A coleta só põe em `failedSources` quem lança, e só fonte em `failedSources` impede o lote de marcar a obra como conferida. Desde 14/11/2026 vale para todas as fontes; o que é "não tem" em cada uma (404, `data: []`, slug que vira busca) está medido no docstring do coletor.
 - `searchAllSources(query)` — parallel search across AniList, MangaUpdates, ComicK, Kitsu, MyAnimeList, MangaDex, AnimePlanet, Mangago **e Comix**; merges by title similarity (threshold 0.65 for grouping, 0.72 for accepted)
   - ⚠️ **A Comix ESTÁ em `SEARCH_CONNECTORS`** (esta linha dizia o contrário até 2026-08-04) — mas
     hoje volta sempre VAZIA: `/manga*` exige o token de assinatura `_=` e responde `Missing token`.
