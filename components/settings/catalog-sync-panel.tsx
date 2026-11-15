@@ -65,10 +65,13 @@ export function CatalogSyncPanel({
   accent,
   overview,
   staleDays,
+  available,
 }: {
   accent: SettingsAccent
   overview: CatalogSyncOverview
   staleDays: number
+  /** Este servidor tem o contorno do Cloudflare (`hasCfBypassConfigured`)? Sem ele o botão fica desabilitado. */
+  available: boolean
 }) {
   const { targets, neverChecked, checkedLongAgo } = overview
   const tasks = useAppTasks()
@@ -133,10 +136,19 @@ export function CatalogSyncPanel({
             alguns minutos (~1,5 s por obra); pode navegar enquanto roda. As obras checadas há mais tempo vão primeiro.
           </p>
         </div>
-        <Button onClick={handleRun} disabled={isRunning || targets.length === 0} className={`shrink-0 ${ACCENT_BUTTON[accent]}`}>
-          {isRunning ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1 h-4 w-4" />}
-          {isRunning ? "Verificando…" : "Verificar capítulos e status"}
-        </Button>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <Button
+            onClick={handleRun}
+            disabled={isRunning || targets.length === 0 || !available}
+            className={ACCENT_BUTTON[accent]}
+          >
+            {isRunning ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1 h-4 w-4" />}
+            {isRunning ? "Verificando…" : "Verificar capítulos e status"}
+          </Button>
+          {!available && (
+            <span className="text-[11px] text-muted-foreground">Indisponível neste servidor.</span>
+          )}
+        </div>
       </div>
 
       <RunningStrip accent={accent} label="Verificando capítulos e status do catálogo" running={isRunning} />

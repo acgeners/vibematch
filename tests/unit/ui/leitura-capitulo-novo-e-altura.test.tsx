@@ -54,7 +54,7 @@ async function renderWithNewChapter() {
     { workId: "w2", hasNew: false, latestExternal: 62 },
   ])
   const utils = render(
-    <ReadingList works={WORKS} defaultView="list" nowIso="2026-08-08T12:00:00.000Z" />,
+    <ReadingList chapterCheckAvailable works={WORKS} defaultView="list" nowIso="2026-08-08T12:00:00.000Z" />,
   )
   await act(async () => {
     utils.getByText("Verificar atualizações").click()

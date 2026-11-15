@@ -84,7 +84,7 @@ const WORKS: ReadingWork[] = [
 const titulos = () => ["Obra Leve", "Obra Pesada", "Obra Adulta", "Obra R19"].filter((t) => screen.queryByText(t))
 const abrir = () => fireEvent.click(screen.getByRole("button", { name: /^Filtros/ }))
 const renderizar = (query = "") =>
-  render(<ReadingList works={WORKS} defaultView="list" nowIso={NOW} initialFilterQuery={query} />)
+  render(<ReadingList chapterCheckAvailable works={WORKS} defaultView="list" nowIso={NOW} initialFilterQuery={query} />)
 
 beforeEach(() => window.history.replaceState(null, "", "/reading"))
 afterEach(() => {
@@ -146,7 +146,7 @@ describe("filtrar", () => {
     expect(screen.getByText(texto)).toBeTruthy()
     cleanup()
 
-    render(<ReadingList works={WORKS.filter((w) => !w.isMixed)} defaultView="list" nowIso={NOW} />)
+    render(<ReadingList chapterCheckAvailable works={WORKS.filter((w) => !w.isMixed)} defaultView="list" nowIso={NOW} />)
     abrir()
     expect(screen.queryByRole("button", { name: "Como as obras R19 entram neste filtro" })).toBeNull()
   })
@@ -226,7 +226,7 @@ describe("o que continua olhando a lista inteira, e o que não", () => {
       lastChapterReleasedAt: `2026-11-0${i + 3}T12:00:00.000Z`,
     }))
     const { container } = render(
-      <ReadingList works={comData} defaultView="calendar" nowIso={NOW} initialFilterQuery="adult=hide" />,
+      <ReadingList chapterCheckAvailable works={comData} defaultView="calendar" nowIso={NOW} initialFilterQuery="adult=hide" />,
     )
     expect(container.textContent).toContain("2 de 4")
     expect(container.innerHTML).toContain("Obra Leve")

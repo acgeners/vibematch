@@ -75,7 +75,7 @@ const secao = (id: string) => document.getElementById(`section-${id}`) as HTMLEl
 // A pílula vem antes do cabeçalho da seção, que tem o mesmo nome.
 const pilula = (nome: RegExp) => screen.getAllByRole("button", { name: nome })[0]!
 const renderizar = (collapsed: string[] = [], works = WORKS) =>
-  render(<ReadingList works={works} defaultView="list" nowIso={hoje.toISOString()} defaultCollapsedBands={collapsed} />)
+  render(<ReadingList chapterCheckAvailable works={works} defaultView="list" nowIso={hoje.toISOString()} defaultCollapsedBands={collapsed} />)
 
 beforeEach(() => {
   document.cookie = `${READING_COLLAPSED_BANDS_COOKIE}=; max-age=0; path=/`
