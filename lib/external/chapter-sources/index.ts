@@ -77,11 +77,8 @@ export interface LatestChapterResult {
   comixUrl?: string | null
 }
 
-/** `comix: limite de pedidos · mangago: tempo esgotado`, na ordem das fontes de capítulo. */
-export function describeSourceFailures(failures: Partial<Record<ChapterSourceId, string>>): string {
-  const parts = CHAPTER_SOURCE_IDS.flatMap((id) => (failures[id] ? [`${id}: ${failures[id]}`] : []))
-  return parts.length > 0 ? parts.join(" · ") : "nenhuma fonte devolveu capítulo"
-}
+// O texto do motivo mora no módulo puro (a tela também o lê); reexportado por compatibilidade.
+export { describeSourceFailures } from "@/lib/reading/check-failures"
 
 /**
  * Consulta todas as fontes de capítulo em paralelo (fail-soft) e escolhe o último capítulo

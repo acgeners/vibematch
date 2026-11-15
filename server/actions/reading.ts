@@ -1,7 +1,9 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
-import { describeSourceFailures, getLatestChapter, type ChapterCheckInput } from "@/lib/external/chapter-sources"
+import { getLatestChapter, type ChapterCheckInput } from "@/lib/external/chapter-sources"
+import { describeCheckFailure } from "@/lib/reading/check-failures"
+import type { ChapterCheckFailure } from "@/lib/reading/check-failures"
 import { predictNextFromAnchor, parseRelativeAgeToDate } from "@/lib/external/chapter-sources/cadence"
 import { pickReadUrl } from "@/lib/reading/read-url"
 import { recordSourceLinkStatus } from "@/lib/external/link-status"
@@ -93,6 +95,11 @@ export interface ReadingUpdateResult {
   statusExternal: string | null
   /** Novo status GRAVADO nesta checagem (Completed/Hiatus/Cancelled), ou `null` se nada mudou. */
   statusApplied: string | null
+  /**
+   * Por que a obra ficou "não verificada" (só com `failed`): o MESMO objeto que gera a linha
+   * `[reading-check]` do log, para a tela e o log nunca discordarem.
+   */
+  failure?: ChapterCheckFailure | null
 }
 
 /**
@@ -150,8 +157,8 @@ export async function checkReadingUpdates(
         // Respeita rejeição explícita do comix: não busca nem persiste. (Nota: por ora
         // isto também pula o mangago da obra — comix-rejeitada é caso raro.)
         if (comixRejected && !comixHid) {
-          logChapterCheckFailure(w, "Comix marcada como ausente: checagem pulada (o Mangago também)")
-          return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null }
+          const failure = logChapterCheckFailure(w, { kind: "whole", reason: "Comix marcada como ausente: checagem pulada (o Mangago também)" })
+          return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null, failure }
         }
 
         // O que a Comix disse do código SALVO (404 × existe) — gravado logo abaixo como a marca de
@@ -174,13 +181,14 @@ export async function checkReadingUpdates(
         ])
         const { latest, resolvedComixHid, releasedLabel, releasedAt, cadenceDates, chapterNumbers, latestUrl: winnerUrl } =
           chapterResult
+        let failure: ChapterCheckFailure | null = null
         if (latest == null) {
           // O 404 do código salvo é mais preciso que "respondeu sem capítulo": diz que o código morreu.
-          const failures = { ...chapterResult.failures }
+          const sources = { ...chapterResult.failures }
           for (const ls of linkStatuses) {
-            if (ls.status === "not_found" && ls.source === "comix") failures.comix = `código ${ls.externalId} não existe (404)`
+            if (ls.status === "not_found" && ls.source === "comix") sources.comix = `código ${ls.externalId} não existe (404)`
           }
-          logChapterCheckFailure(w, describeSourceFailures(failures))
+          failure = logChapterCheckFailure(w, { kind: "sources", sources })
         }
         for (const ls of linkStatuses) await recordSourceLinkStatus(w.id, ls.source, ls.externalId, ls.status)
         // Status de publicação: MangaUpdates é a fonte mais confiável → tem
@@ -266,10 +274,11 @@ export async function checkReadingUpdates(
           nextPredictedAt,
           statusExternal: statusExternal ?? null,
           statusApplied,
+          failure,
         }
       } catch (err) {
-        logChapterCheckFailure(w, `erro: ${err instanceof Error ? err.message : String(err)}`)
-        return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null }
+        const failure = logChapterCheckFailure(w, { kind: "whole", reason: `erro: ${err instanceof Error ? err.message : String(err)}` })
+        return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null, failure }
       }
     },
   )
@@ -280,9 +289,11 @@ export async function checkReadingUpdates(
  * catálogo), com o motivo. 🔴 Até 14/11/2026 o motivo se perdia: o `catch` era vazio e o
  * `allSettled` de `getLatestChapter` descartava a rejeição de cada fonte — 53 de 55 obras falharam
  * numa rodada sem nenhuma linha de log. Local: `~/Library/Logs/satoria-npm-start.log`; Fly: `fly logs`.
+ * Devolve o mesmo motivo para o resultado: é ele que a tela mostra (`CheckFailuresList`).
  */
-function logChapterCheckFailure(w: { id: string; title: string }, reason: string): void {
-  console.warn(`[reading-check] não verificada · "${w.title}" (${w.id}) · ${reason}`)
+function logChapterCheckFailure(w: { id: string; title: string }, failure: ChapterCheckFailure): ChapterCheckFailure {
+  console.warn(`[reading-check] não verificada · "${w.title}" (${w.id}) · ${describeCheckFailure(failure)}`)
+  return failure
 }
 
 /** Status de publicação do MangaUpdates por ID (fail-soft, com timeout). `null` se sem ID/dado. */

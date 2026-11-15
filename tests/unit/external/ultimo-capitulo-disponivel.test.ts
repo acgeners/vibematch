@@ -120,6 +120,7 @@ vi.mock("@/lib/external/mangadex", () => ({ fetchMangaDexChapterDates: vi.fn(asy
 
 import { checkReadingUpdates } from "@/server/actions/reading"
 import { getPublicationStatusIdByName } from "@/lib/constants/status-lookups"
+import { describeCheckFailure } from "@/lib/reading/check-failures"
 
 describe("checkReadingUpdates — obra concluída no original com a tradução atrasada", () => {
   beforeEach(() => {
@@ -315,6 +316,15 @@ describe("checkReadingUpdates — a obra não verificada deixa uma linha no log"
       '[reading-check] não verificada · "Obra Teste" (w1) · comix: comix indisponível (rate_limited) · ' +
         "mangago: mangago fetch_failed: https://www.mangago.me/read-manga/obra_teste/",
     ])
+    // O MESMO motivo volta no resultado — é ele que a tela mostra.
+    expect(r.failure).toEqual({
+      kind: "sources",
+      sources: {
+        comix: "comix indisponível (rate_limited)",
+        mangago: "mangago fetch_failed: https://www.mangago.me/read-manga/obra_teste/",
+      },
+    })
+    expect(avisos()[0]).toBe(`[reading-check] não verificada · "Obra Teste" (w1) · ${describeCheckFailure(r.failure!)}`)
   })
 
   it("exceção no meio da checagem não some mais: vira linha de log com a mensagem", async () => {
@@ -327,6 +337,7 @@ describe("checkReadingUpdates — a obra não verificada deixa uma linha no log"
 
     expect(r.failed).toBe(true)
     expect(avisos()).toEqual(['[reading-check] não verificada · "Obra Teste" (w1) · erro: falha ao gravar o código'])
+    expect(r.failure).toEqual({ kind: "whole", reason: "erro: falha ao gravar o código" })
   })
 
   it("Comix marcada como ausente (e sem código): a obra é pulada, e o log diz por quê", async () => {
@@ -336,6 +347,7 @@ describe("checkReadingUpdates — a obra não verificada deixa uma linha no log"
     expect(r.failed).toBe(true)
     expect(lookups.comix).not.toHaveBeenCalled()
     expect(avisos()[0]).toMatch(/Comix marcada como ausente/)
+    expect(r.failure).toMatchObject({ kind: "whole", reason: expect.stringMatching(/Comix marcada como ausente/) })
   })
 
   it("código da Comix morto (404): a linha diz isso, e não 'respondeu sem capítulo'", async () => {
@@ -358,5 +370,6 @@ describe("checkReadingUpdates — a obra não verificada deixa uma linha no log"
 
     expect(r.failed).toBe(false)
     expect(avisos()).toEqual([])
+    expect(r.failure ?? null).toBeNull()
   })
 })

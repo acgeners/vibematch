@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useTransition, useEffect, useRef } from "react"
 import { useRefresh } from "@/lib/use-refresh"
+import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { runTask, setTaskProgress } from "@/lib/tasks-store"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
@@ -30,6 +31,9 @@ import {
   Sparkles,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { CheckFailuresList } from "@/components/reading/check-failures-list"
+import { setCheckFailuresOpen, setLastReadingCheck, useLastReadingCheck } from "@/lib/reading/last-check-store"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { CoverImage } from "@/components/ui/cover-image"
@@ -549,12 +553,15 @@ export function ReadingList({
     window.history.replaceState(null, "", query ? `${window.location.pathname}?${query}` : window.location.pathname)
   }
   const clearFilters = () => updateFilterParams(clearedReadingFilterParams())
-  // Otimista: marca "agora" assim que a checagem termina (antes do refresh trazer o persistido).
-  const [justCheckedAt, setJustCheckedAt] = useState<string | null>(null)
-  // Vermelho no "Última verificação" quando a última checagem DESTA sessão deu erro (obra
-  // sem retorno ou falha total). A falha não é persistida no banco, então um reload limpa
-  // o sinal — ele reflete só a checagem que o usuário acabou de disparar.
-  const [lastCheckFailed, setLastCheckFailed] = useState(false)
+  // A última checagem DESTA aba (store de módulo: sobrevive à navegação, morre no reload). Dela
+  // saem o "agora" otimista da última verificação, o vermelho e a lista de obras não verificadas,
+  // com o motivo de cada fonte (`CheckFailuresList`). Nada disso vai para o banco: o motivo
+  // também fica na linha `[reading-check]` do log do servidor.
+  const { last: lastCheck, open: failuresOpen } = useLastReadingCheck()
+  const justCheckedAt = lastCheck?.checkedAt ?? null
+  const checkFailures = lastCheck?.failures ?? []
+  const lastCheckFailed = !!lastCheck && (lastCheck.aborted === true || checkFailures.length > 0)
+  const router = useRouter()
 
   // Vista (lista × calendário) — persistida em cookie pra o servidor renderizar a
   // vista final e a hidratação não divergir. Mês do calendário ancorado no "agora" do
@@ -752,9 +759,16 @@ export function ReadingList({
         return all
       },
       onDone: (res) => {
-        setJustCheckedAt(new Date().toISOString())
         const failedWorks = res.filter((r) => r.failed)
-        setLastCheckFailed(failedWorks.length > 0)
+        setLastReadingCheck({
+          checkedAt: new Date().toISOString(),
+          total: res.length,
+          failures: failedWorks.map((r) => ({
+            workId: r.workId,
+            title: titleById.get(r.workId) ?? r.workId,
+            failure: r.failure ?? { kind: "whole", reason: "sem motivo registrado" },
+          })),
+        })
 
         const newWorks = res.filter((r) => r.hasNew)
         const news = newWorks.length
@@ -779,15 +793,29 @@ export function ReadingList({
           news > 0
             ? `${news} obra${news !== 1 ? "s" : ""} com capítulo novo`
             : "Nenhuma novidade encontrada",
-          descParts.length > 0 ? { description: descParts.join(" · ") } : undefined,
+          {
+            ...(descParts.length > 0 ? { description: descParts.join(" · ") } : {}),
+            // A checagem roda ~1 min e a pessoa pode ter mudado de página: o botão volta à
+            // /reading (sem apagar os filtros quando já está nela) e abre a lista.
+            ...(failedWorks.length > 0
+              ? {
+                  action: {
+                    label: "Ver motivos",
+                    onClick: () => {
+                      setCheckFailuresOpen(true)
+                      if (window.location.pathname !== "/reading") router.push("/reading")
+                    },
+                  },
+                }
+              : {}),
+          },
         )
         refresh() // traz hids recém-persistidos pra próxima carga
       },
       onError: () => {
         // Falha no meio: marca "agora" como a última tentativa e pinta de vermelho — foi
         // uma verificação, e ela deu erro. As fatias que passaram já estão persistidas.
-        setJustCheckedAt(new Date().toISOString())
-        setLastCheckFailed(true)
+        setLastReadingCheck({ checkedAt: new Date().toISOString(), total, failures: [], aborted: true })
         refresh()
       },
       // ⚠️ O desfecho tem TRÊS tons (novidade / nada / parcial com falhas) e o toast padrão
@@ -848,6 +876,35 @@ export function ReadingList({
 
   return (
     <div className="space-y-4">
+      {/* Obras não verificadas na última checagem, com o motivo de cada fonte. Abre pelo link da
+          "Última verificação" ou pelo "Ver motivos" do aviso do fim da checagem. */}
+      <Dialog open={failuresOpen && checkFailures.length > 0} onOpenChange={setCheckFailuresOpen}>
+        <DialogContent className="sm:max-w-[min(42rem,calc(100vw-4rem))]">
+          <DialogHeader>
+            <DialogTitle>
+              {checkFailures.length} obra{checkFailures.length !== 1 ? "s" : ""} não verificada{checkFailures.length !== 1 ? "s" : ""}
+            </DialogTitle>
+            <DialogDescription>
+              {lastCheck ? `Checagem de ${formatRelativeDateTime(lastCheck.checkedAt)}` : "Última checagem"}: nenhuma fonte de
+              capítulo respondeu por elas.
+              {lastCheck && lastCheck.total > checkFailures.length
+                ? ` As outras ${lastCheck.total - checkFailures.length} foram verificadas.`
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto pr-1">
+            <CheckFailuresList items={checkFailures} />
+          </div>
+          <DialogFooter className="items-center gap-2 sm:justify-between">
+            <p className="text-xs text-muted-foreground">
+              O motivo também fica no log do servidor: <code className="whitespace-nowrap rounded bg-muted px-1">[reading-check]</code>
+            </p>
+            <DialogClose asChild>
+              <Button variant="outline">Fechar</Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {/* Barra de controles em painel. Linha 1 (modo + ação) = nível superior, em destaque;
           Linha 2 (navegar/filtrar) = prateleira rebaixada e discreta. Hierarquia por FORMA
           (segmented preenchido + botão em gradiente na L1 × chips planos na prateleira). */}
@@ -875,7 +932,20 @@ export function ReadingList({
                 )}
               >
                 {lastCheckFailed && <AlertCircle className="size-3 shrink-0" />}
-                Última verificação: {formatRelativeDateTime(lastChecked)}
+                {checkFailures.length > 0 ? (
+                  <>
+                    {formatRelativeDateTime(lastChecked)} ·{" "}
+                    <button
+                      type="button"
+                      onClick={() => setCheckFailuresOpen(true)}
+                      className="underline underline-offset-2 hover:no-underline"
+                    >
+                      {checkFailures.length} não verificada{checkFailures.length !== 1 ? "s" : ""} · ver motivos
+                    </button>
+                  </>
+                ) : (
+                  <>Última verificação: {formatRelativeDateTime(lastChecked)}</>
+                )}
               </span>
             )}
           </div>
