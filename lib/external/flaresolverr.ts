@@ -88,6 +88,20 @@ export function isCfBypassUnavailable(): boolean {
 }
 
 /**
+ * Este SERVIDOR tem alguma camada de contorno do Cloudflare configurada (sidecar ou FlareSolverr)?
+ * Pergunta de CONFIGURAÇÃO, estável durante o processo — não de saúde (essa é `isCfBypassUnavailable`).
+ *
+ * Decide se uma ação que depende do contorno é OFERECIDA: a checagem de capítulos (Comix + Mangago),
+ * na `/reading` e no lote "Capítulos e status". Medido em 15/11/2026: produção (Fly) não tem nenhum
+ * dos dois, e a checagem rodada lá falhou em 53 de 55 obras (Comix bloqueia o servidor do Fly com 403;
+ * Mangago exige o contorno). Pergunta pelo que a ação precisa, não por "estou no Fly": se produção
+ * ganhar o contorno, o botão volta sozinho.
+ */
+export function hasCfBypassConfigured(): boolean {
+  return isComixRenderConfigured() || isFlareSolverrEnabled()
+}
+
+/**
  * O HTML é uma página de DESAFIO do Cloudflare (bloqueio), ou só uma página
  * protegida por ele?
  *

@@ -90,7 +90,7 @@ describe("/reading: a checagem de capítulos é tarefa durável (azul) com conta
       })
 
     const { getByText } = render(
-      <ReadingList works={WORKS} defaultView="list" nowIso="2026-08-08T12:00:00.000Z" />,
+      <ReadingList chapterCheckAvailable works={WORKS} defaultView="list" nowIso="2026-08-08T12:00:00.000Z" />,
     )
     await act(async () => {
       getByText("Verificar atualizações").click()
@@ -132,7 +132,7 @@ describe("/reading: a checagem de capítulos é tarefa durável (azul) com conta
     checkReadingUpdates.mockResolvedValue([])
 
     const { getByText } = render(
-      <ReadingList works={WORKS} defaultView="list" nowIso="2026-08-08T12:00:00.000Z" />,
+      <ReadingList chapterCheckAvailable works={WORKS} defaultView="list" nowIso="2026-08-08T12:00:00.000Z" />,
     )
     await act(async () => {
       getByText("Verificar atualizações").click()

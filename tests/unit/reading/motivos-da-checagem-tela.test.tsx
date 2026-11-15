@@ -118,7 +118,7 @@ describe("/reading — a checagem com falhas leva aos motivos", () => {
       },
       { workId: "w3", hasNew: false, latestExternal: null, failed: true, failure: { kind: "whole", reason: "erro: falha ao gravar" } },
     ])
-    const view = render(<ReadingList works={WORKS} defaultView="list" nowIso="2026-08-08T12:00:00.000Z" />)
+    const view = render(<ReadingList chapterCheckAvailable works={WORKS} defaultView="list" nowIso="2026-08-08T12:00:00.000Z" />)
     await act(async () => {
       view.getByText("Verificar atualizações").click()
       for (let i = 0; i < 6; i++) await Promise.resolve()
@@ -163,7 +163,7 @@ describe("/reading — a checagem com falhas leva aos motivos", () => {
         failure: { kind: "sources", sources: { comix: "comix indisponível (blocked)", mangago: "mangago bypass_unavailable: x" } },
       })),
     )
-    const view = render(<ReadingList works={WORKS} defaultView="list" nowIso="2026-08-08T12:00:00.000Z" />)
+    const view = render(<ReadingList chapterCheckAvailable works={WORKS} defaultView="list" nowIso="2026-08-08T12:00:00.000Z" />)
     await act(async () => {
       view.getByText("Verificar atualizações").click()
       for (let i = 0; i < 6; i++) await Promise.resolve()
@@ -177,7 +177,7 @@ describe("/reading — a checagem com falhas leva aos motivos", () => {
 
   it("sem falhas, nada de link nem de 'Ver motivos'", async () => {
     checkReadingUpdates.mockResolvedValue(WORKS.map((w) => ({ workId: w.id, hasNew: false, latestExternal: 11, failed: false })))
-    const view = render(<ReadingList works={WORKS} defaultView="list" nowIso="2026-08-08T12:00:00.000Z" />)
+    const view = render(<ReadingList chapterCheckAvailable works={WORKS} defaultView="list" nowIso="2026-08-08T12:00:00.000Z" />)
     await act(async () => {
       view.getByText("Verificar atualizações").click()
       for (let i = 0; i < 6; i++) await Promise.resolve()
@@ -215,6 +215,7 @@ describe("painel 'Capítulos e status' do catálogo — a mesma lista, com motiv
         accent="cyan"
         overview={{ targets: [{ id: "c1", title: "Catálogo Um" }, { id: "c2", title: "Catálogo Dois" }] as never, neverChecked: 2, checkedLongAgo: 0 }}
         staleDays={7}
+        available
       />,
     )
     await act(async () => {

@@ -94,24 +94,24 @@ afterEach(cleanup)
 
 describe("o card da /reading", () => {
   it("🔴 abre o link GRAVADO pela checagem, não a página da Comix pelo hid", () => {
-    render(<ReadingList works={[obra({})]} defaultView="list" nowIso={hoje.toISOString()} />)
+    render(<ReadingList chapterCheckAvailable works={[obra({})]} defaultView="list" nowIso={hoje.toISOString()} />)
     const link = card().getByRole("link", { name: /Continuar lendo/ })
     expect(link.getAttribute("href")).toBe(MANGAGO)
   })
 
   it("obra nunca checada (sem link gravado) segue na Comix pelo hid, como antes", () => {
-    render(<ReadingList works={[obra({ latestChapterUrl: null })]} defaultView="list" nowIso={hoje.toISOString()} />)
+    render(<ReadingList chapterCheckAvailable works={[obra({ latestChapterUrl: null })]} defaultView="list" nowIso={hoje.toISOString()} />)
     expect(card().getByRole("link", { name: /Continuar lendo/ }).getAttribute("href")).toBe(comixUrl("morto"))
   })
 
   it("🔴 o leitor vê On-hold, mas não Arquivar", () => {
-    render(<ReadingList works={[obra({})]} defaultView="list" nowIso={hoje.toISOString()} />)
+    render(<ReadingList chapterCheckAvailable works={[obra({})]} defaultView="list" nowIso={hoje.toISOString()} />)
     expect(card().getByRole("button", { name: /On-hold/ })).toBeTruthy()
     expect(card().queryByRole("button", { name: /Arquivar/ })).toBeNull()
   })
 
   it("a curadoria vê os dois", () => {
-    render(<ReadingList works={[obra({})]} defaultView="list" nowIso={hoje.toISOString()} canArchive />)
+    render(<ReadingList chapterCheckAvailable works={[obra({})]} defaultView="list" nowIso={hoje.toISOString()} canArchive />)
     expect(card().getByRole("button", { name: /On-hold/ })).toBeTruthy()
     expect(card().getByRole("button", { name: /Arquivar/ })).toBeTruthy()
   })

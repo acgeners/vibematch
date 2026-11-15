@@ -4,6 +4,7 @@ import { Header } from "@/components/layout/header"
 import { ReadingList } from "@/components/reading/reading-list"
 import { getReadingWorks } from "@/server/queries/reading"
 import { isCurrentUserAdmin } from "@/server/queries/current-user"
+import { hasCfBypassConfigured } from "@/lib/external/flaresolverr"
 import { personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
 import {
   READING_COLLAPSED_BANDS_COOKIE,
@@ -65,6 +66,8 @@ export default async function ReadingPage({
         initialFilterQuery={query.toString()}
         defaultCollapsedBands={defaultCollapsedBands}
         canArchive={canArchive}
+        // A checagem de capítulos precisa do contorno do Cloudflare (Comix e Mangago); produção não tem.
+        chapterCheckAvailable={hasCfBypassConfigured()}
       />
     </div>
   )

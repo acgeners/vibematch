@@ -86,6 +86,7 @@ import {
 } from "@/app/curation/settings/sections"
 import type { SettingsSection } from "@/app/curation/settings/sections"
 import { cn } from "@/lib/utils"
+import { hasCfBypassConfigured } from "@/lib/external/flaresolverr"
 
 async function getSyncConstantsMtime(): Promise<string | null> {
   try {
@@ -397,7 +398,14 @@ async function ItemBody({
 
     case "catalog-sync": {
       const overview = await getCatalogSyncOverview()
-      return <CatalogSyncPanel accent="amber" overview={overview} staleDays={CATALOG_SYNC_STALE_DAYS} />
+      return (
+        <CatalogSyncPanel
+          accent="amber"
+          overview={overview}
+          staleDays={CATALOG_SYNC_STALE_DAYS}
+          available={hasCfBypassConfigured()}
+        />
+      )
     }
 
     case "catalog-reviews": {

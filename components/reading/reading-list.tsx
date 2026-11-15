@@ -513,6 +513,7 @@ export function ReadingList({
   initialFilterQuery = "",
   defaultCollapsedBands = [],
   canArchive = false,
+  chapterCheckAvailable,
 }: {
   works: ReadingWork[]
   /** Vista inicial lida do cookie no servidor (evita divergência de hidratação). */
@@ -529,6 +530,13 @@ export function ReadingList({
    * oferecida que o servidor recusa. On-hold é dele e continua para todos.
    */
   canArchive?: boolean
+  /**
+   * Este servidor consegue checar capítulos? (`hasCfBypassConfigured`, lido na página.) Sem o contorno
+   * do Cloudflare a checagem falha quase inteira (Comix e Mangago), então o botão fica desabilitado e
+   * o texto diz onde ela roda. OBRIGATÓRIA de propósito: um padrão `true` voltaria a oferecer o botão
+   * em produção no primeiro lugar que esquecesse de passar.
+   */
+  chapterCheckAvailable: boolean
 }) {
   const refresh = useRefresh()
   const [results, setResults] = useState<Record<string, ReadingUpdateResult>>({})
@@ -915,7 +923,7 @@ export function ReadingList({
             <ViewToggleButton active={view === "calendar"} onClick={() => changeView("calendar")} icon={<CalendarDays className="size-4" />} label="Calendário" />
           </div>
           <div className="flex flex-col items-end gap-1">
-            <Button onClick={handleCheckAll} disabled={checking}>
+            <Button onClick={handleCheckAll} disabled={checking || !chapterCheckAvailable}>
               {checking ? (
                 <Loader2 className="mr-2 size-4 animate-spin" />
               ) : (
@@ -923,6 +931,12 @@ export function ReadingList({
               )}
               Verificar atualizações
             </Button>
+            {/* Texto VISÍVEL, não `title=`: botão desabilitado sai do tab order (mesma régua do GoogleButton). */}
+            {!chapterCheckAvailable && (
+              <span className="max-w-[17rem] text-right text-[11px] text-muted-foreground">
+                Indisponível neste servidor: a Comix e o Mangago só respondem pelo Mac (localhost:3000).
+              </span>
+            )}
             {lastChecked && (
               <span
                 className={cn(
