@@ -679,18 +679,26 @@ export function parseMangagoChapters(html: string): MangagoChapters | null {
 }
 
 /**
- * Último capítulo no Mangago por slug (match exato). CF-gated como o resto do
- * módulo: sem FlareSolverr (circuito aberto) volta `null`.
+ * Último capítulo no Mangago por slug (match exato). CF-gated como o resto do módulo.
+ *
+ * 🔴 Falha LANÇA `MangagoUnavailableError` (bypass indisponível, bypass sem resposta, página de
+ * bloqueio); `null` é só "não tem": slug morto (404) ou página sem tabela de capítulos. Até
+ * 14/11/2026 as duas coisas viravam `null`, e a checagem de
+ * capítulos não tinha como dizer por que uma obra ficou "não verificada" (53 de 55 numa rodada,
+ * sem nenhuma linha de log). O único consumidor é `getMangagoLatestChapter`, que roda dentro de
+ * um `Promise.allSettled`: a rejeição vira o motivo registrado.
  */
 export async function fetchMangagoChapters(slug: string): Promise<MangagoChapters | null> {
-  if (isCfBypassUnavailable()) return null
-  try {
-    const result = await fetchHtmlWithCfFallback(`${BASE}/read-manga/${slug}/`, HEADERS, CF_ABORT_MS)
-    if (!result) return null
-    return parseMangagoChapters(result.html)
-  } catch {
-    return null
-  }
+  const url = `${BASE}/read-manga/${slug}/`
+  assertBypassAvailable(url)
+  const result = await fetchHtmlWithCfFallback(url, HEADERS, CF_ABORT_MS)
+  if (!result) throw new MangagoUnavailableError("fetch_failed", url)
+  // A recusa chega como HTTP 200 (página de bloqueio de 107 B): sem classificar, ela passava por
+  // "página sem capítulo". O 404 verdadeiro é o slug morto — "não tem", não falha.
+  const kind = classifyMangagoPage(result.html)
+  if (kind === "blocked") throw new MangagoUnavailableError("blocked", url)
+  if (kind === "not_found") return null
+  return parseMangagoChapters(result.html)
 }
 
 // Descrição genérica do rodapé do site (aparece no meta de tópicos vazios) — não é opinião.
