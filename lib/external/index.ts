@@ -5,7 +5,7 @@ import { searchComicK, fetchComicKByHid, collectComicKReviews, COMICK_API_CF_ABO
 import type { ComicKReviewsCollected } from "./comick"
 import { searchComix, fetchComixById, collectComixReviews, COMIX_CF_ABORT_MS } from "./comix"
 import type { SourceLinkStatus } from "./link-status"
-import { searchMangago, fetchMangagoById, fetchMangagoReviews } from "./mangago"
+import { searchMangago, fetchMangagoById, collectMangagoReviews, MANGAGO_REVIEWS_BUDGET_MS } from "./mangago"
 import { resolveComixUrl } from "./comix-resolve"
 import { isComixRenderConfigured } from "./comix-render-client"
 import { recordComixFailure } from "./comix-gate"
@@ -98,10 +98,13 @@ const TIMEOUT_REVIEWS_COMICK_MS = COMICK_REVIEWS_BUDGET_MS + 2 * CF_DIRECT_FETCH
 // 5,4 + 3,0 + 3,0 s sem desafio de Cloudflare. 25s cobre isso com folga. ⚠️ Se a Comix voltar
 // a desafiar, cada chamada pagaria o solve (~11 s) e a cadeia estouraria — ver comix.ts.
 const TIMEOUT_REVIEWS_COMIX_MS = 25000
-// Mangago faz multi-hop pelo FlareSolverr (lista paginada + até 40 tópicos, 1 fetch
-// cada); ~40 corpos cabem em ~60s.
-// mangago vira o gargalo da fase de reviews (roda em paralelo com as outras).
-const TIMEOUT_REVIEWS_MANGAGO_MS = 60000
+// Mangago faz multi-hop (lista paginada + até 40 tópicos, uma página por vez). A coleta respeita o
+// próprio orçamento (`MANGAGO_REVIEWS_BUDGET_MS`, 50 s) e devolve o parcial quando os tópicos não
+// cabem; este teto é só a rede de segurança acima dele (= os 60 s de antes, então a avaliação não
+// fica mais lenta). Antes de 14/11/2026 o "~40 corpos cabem em ~60s" daqui estava errado: medido
+// 1,58 s por página, ~70 s para 40 tópicos, e o estouro descartava todas as reviews da obra.
+const MANGAGO_LAST_PAGE_SLACK_MS = 10_000
+const TIMEOUT_REVIEWS_MANGAGO_MS = MANGAGO_REVIEWS_BUDGET_MS + MANGAGO_LAST_PAGE_SLACK_MS
 // O hydrate do mangago é um scrape via FlareSolverr (não uma API), e a MESMA
 // página de detalhe traz rating + sinopse + gêneros. Com o default de 8s um
 // solve frio de CF (~11s) estourava e a obra perdia TODO o metadado do mangago
@@ -1133,7 +1136,7 @@ export async function collectReviewsFromCandidate(
   //
   // Desestruturar antes estreita os tipos: dentro do `if` o id é não-nulo, sem cast.
   const { muId, anilistId, malId, kitsuId, animePlanetSlug, mangadexId, comickHid, comixHid, mangagoSlug } = candidate
-  // `run` devolve as reviews — ou, quando a fonte entrega só parte (ComicK), as reviews mais o
+  // `run` devolve as reviews — ou, quando a fonte entrega só parte (ComicK, Mangago), as reviews mais o
   // motivo do que faltou. Parcial NÃO entra em `failedSources`: lá a fonte seria re-buscada na
   // 2ª passada, que devolveria as mesmas reviews já gravadas e forçaria o resumo/digest PAGOS
   // sem nada novo. Ele aparece no log como `fonte=N(parcial: …)`.
@@ -1162,7 +1165,7 @@ export async function collectReviewsFromCandidate(
       },
     })
   }
-  if (mangagoSlug) plan.push({ source: "mangago", timeoutMs: TIMEOUT_REVIEWS_MANGAGO_MS, run: () => fetchMangagoReviews(mangagoSlug) })
+  if (mangagoSlug) plan.push({ source: "mangago", timeoutMs: TIMEOUT_REVIEWS_MANGAGO_MS, run: () => collectMangagoReviews(mangagoSlug) })
 
   // `onlySources` = segunda passada dirigida às fontes que falharam na primeira
   // (ver `acquireAndPersistWorkReviews`). Sem ele, roda o plano inteiro.
