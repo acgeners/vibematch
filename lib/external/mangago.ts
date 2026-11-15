@@ -98,7 +98,7 @@ export function classifyMangagoPage(html: string): MangagoPageKind {
  */
 export class MangagoUnavailableError extends Error {
   constructor(
-    readonly reason: "blocked" | "bypass_unavailable" | "fetch_failed",
+    readonly reason: "blocked" | "bypass_unavailable" | "fetch_failed" | "timeout",
     readonly url: string,
   ) {
     super(`mangago ${reason}: ${url}`)
@@ -750,18 +750,72 @@ function extractTopics(html: string, seen: Set<string>, out: Array<{ id: string;
  * também lança — "0 reviews" ali afirmaria que a obra não tem opinião.
  */
 export async function fetchMangagoReviews(slug: string, limit = 40): Promise<string[]> {
+  return (await collectMangagoReviewsCore(slug, limit, null, Date.now)).reviews
+}
+
+/**
+ * Orçamento da coleta de reviews do Mangago na ORQUESTRAÇÃO (`collectMangagoReviews`). Medido em
+ * 14/11/2026 sobre 2.893 páginas de tópico pelo sidecar, uma de cada vez: mediana **1,58 s**, p90
+ * **1,74 s**. 40 tópicos + 4 páginas de lista ≈ 70 s, contra o teto de 60 s da orquestração: o
+ * Mangago estourou em **91 de 152** obras do lote "Reviews do catálogo", o `withTimeout` descartava
+ * TODAS as reviews dele, a obra não era marcada como conferida, e o sidecar seguia renderizando
+ * páginas que ninguém esperava mais, atrasando a obra seguinte. Com o orçamento a coleta para
+ * sozinha e devolve o que já buscou (~27 tópicos, os MAIS RECENTES: a lista vem do mais novo para
+ * o mais antigo, e os antigos já foram guardados por coletas anteriores, que só acrescentam).
+ */
+export const MANGAGO_REVIEWS_BUDGET_MS = 50_000
+
+export interface MangagoReviewsCollected {
+  reviews: string[]
+  /** Presente quando a coleta parou antes do fim (tempo ou falha) e devolveu o que já tinha. */
+  partialFailure?: string
+}
+
+/**
+ * A coleta de `fetchMangagoReviews` com ORÇAMENTO de tempo, para a orquestração das reviews. Mesmo
+ * contrato de falha (lança quando nada veio), mais o parcial: tempo esgotado ou falha no meio
+ * devolvem as reviews já obtidas com `partialFailure`, que a orquestração registra e NÃO trata como
+ * fonte em falha (mesma regra do ComicK: re-buscar traria as mesmas reviews). `now` é só para teste.
+ */
+export async function collectMangagoReviews(
+  slug: string,
+  opts: { budgetMs?: number; limit?: number; now?: () => number } = {},
+): Promise<MangagoReviewsCollected> {
+  const now = opts.now ?? Date.now
+  return collectMangagoReviewsCore(slug, opts.limit ?? 40, now() + (opts.budgetMs ?? MANGAGO_REVIEWS_BUDGET_MS), now)
+}
+
+async function collectMangagoReviewsCore(
+  slug: string,
+  limit: number,
+  deadline: number | null,
+  now: () => number,
+): Promise<MangagoReviewsCollected> {
+  // Cada página leva no máximo o que SOBRA do orçamento (o padrão é `CF_ABORT_MS`): sem isso, a
+  // última página podia passar do teto da orquestração e levar a coleta inteira junto.
+  const pageBudget = (): number | null => {
+    if (deadline == null) return CF_ABORT_MS
+    const left = deadline - now()
+    return left > 0 ? Math.min(CF_ABORT_MS, left) : null
+  }
   // 1) Junta ids de tópico paginando a lista até ter `limit` (ou esgotar páginas).
   const topics: Array<{ id: string; title: string }> = []
   const seen = new Set<string>()
+  let outOfTime = false
   for (let page = 1; page <= MANGAGO_REVIEW_LIST_PAGES && topics.length < limit; page++) {
     const url =
       page === 1
         ? `${BASE}/home/manga/discussion/${slug}/`
         : `${BASE}/home/manga/discussion/${slug}/?page=${page}&sort=date`
+    const budget = page === 1 ? (pageBudget() ?? CF_ABORT_MS) : pageBudget()
+    if (budget == null) {
+      outOfTime = true
+      break
+    }
     let list: Awaited<ReturnType<typeof fetchMangagoPage>>
     try {
       assertBypassAvailable(url)
-      list = await fetchMangagoPage(url)
+      list = await fetchMangagoPage(url, budget)
     } catch (err) {
       if (page === 1) throw err // nada veio: a fonte falhou
       break // páginas seguintes: fica com os tópicos já juntados
@@ -770,17 +824,24 @@ export async function fetchMangagoReviews(slug: string, limit = 40): Promise<str
     const added = extractTopics(list.html, seen, topics, limit)
     if (added === 0) break // página sem tópicos novos → acabou
   }
-  if (topics.length === 0) return []
+  if (topics.length === 0) return { reviews: [] }
 
   // 2) Busca o corpo de cada tópico (parte cara: 1 fetch por review).
   const reviews: string[] = []
   let failure: unknown = null
+  let opened = 0
   for (const { id, title } of topics) {
     const url = `${BASE}/home/mangatopic/${id}/`
+    const budget = pageBudget()
+    if (budget == null) {
+      outOfTime = true
+      break
+    }
+    opened++
     let topic: Awaited<ReturnType<typeof fetchMangagoPage>>
     try {
       assertBypassAvailable(url)
-      topic = await fetchMangagoPage(url)
+      topic = await fetchMangagoPage(url, budget)
     } catch (err) {
       failure = err
       // Bloqueio ou bypass fora valem para os próximos tópicos também: insistir é latência.
@@ -796,5 +857,12 @@ export async function fetchMangagoReviews(slug: string, limit = 40): Promise<str
     reviews.push(text.length > 900 ? `${text.slice(0, 900)}…` : text)
   }
   if (reviews.length === 0 && failure) throw failure
-  return reviews
+  // Tempo acabou sem nenhuma review: é falha (a fonte não entregou nada), não "a obra não tem opinião".
+  if (reviews.length === 0 && outOfTime) throw new MangagoUnavailableError("timeout", `${BASE}/home/manga/discussion/${slug}/`)
+  if (outOfTime) return { reviews, partialFailure: `tempo esgotado: ${opened} de ${topics.length} tópicos abertos` }
+  if (failure) {
+    const motivo = failure instanceof Error ? failure.message : String(failure)
+    return { reviews, partialFailure: `falha depois de ${reviews.length} reviews (${motivo})` }
+  }
+  return { reviews }
 }

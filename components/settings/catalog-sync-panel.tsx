@@ -14,6 +14,8 @@ import { useRefresh } from "@/lib/use-refresh"
 import { checkReadingUpdates } from "@/server/actions/reading"
 import type { ReadingUpdateResult } from "@/server/actions/reading"
 import type { CatalogSyncOverview } from "@/server/queries/catalog-sync"
+import { CheckFailuresList } from "@/components/reading/check-failures-list"
+import type { CheckFailureItem } from "@/lib/reading/last-check-store"
 
 const TASK_ID = "catalog-sync"
 /** Múltiplo do `CHECK_CONCURRENCY = 3` do servidor — o mesmo passo da `/reading`. */
@@ -28,7 +30,8 @@ interface RunSummary {
   checked: number
   newChapters: number
   statusChanges: StatusChange[]
-  failed: string[]
+  /** Obras "não verificadas", com o motivo de cada fonte (a mesma lista da `/reading`). */
+  failed: CheckFailureItem[]
 }
 
 function summarize(results: ReadingUpdateResult[], titleById: Map<string, string>): RunSummary {
@@ -39,7 +42,13 @@ function summarize(results: ReadingUpdateResult[], titleById: Map<string, string
     statusChanges: results
       .filter((r) => r.statusApplied)
       .map((r) => ({ title: title(r.workId), status: r.statusApplied as string })),
-    failed: results.filter((r) => r.failed).map((r) => title(r.workId)),
+    failed: results
+      .filter((r) => r.failed)
+      .map((r) => ({
+        workId: r.workId,
+        title: title(r.workId),
+        failure: r.failure ?? { kind: "whole" as const, reason: "sem motivo registrado" },
+      })),
   }
 }
 
@@ -155,10 +164,10 @@ export function CatalogSyncPanel({
             </ul>
           )}
           {summary.failed.length > 0 && (
-            <p className="text-muted-foreground">
-              Não verificadas (nenhuma fonte de capítulo respondeu): {summary.failed.slice(0, 10).join(", ")}
-              {summary.failed.length > 10 ? ` e mais ${summary.failed.length - 10}` : ""}
-            </p>
+            <div className="space-y-2">
+              <p className="text-muted-foreground">Não verificadas (nenhuma fonte de capítulo respondeu):</p>
+              <CheckFailuresList items={summary.failed} limit={10} />
+            </div>
           )}
         </div>
       )}
