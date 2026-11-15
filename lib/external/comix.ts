@@ -518,11 +518,32 @@ export function comixChapterCount(item: { latestChapter?: unknown } | null | und
   return typeof latest === "number" && Number.isFinite(latest) && latest > 0 ? latest : undefined
 }
 
-function coverFromPoster(poster: unknown): string | undefined {
+/** Domínio contra o qual a capa RELATIVA da Comix é resolvida (as imagens moram nele, não no da API). */
+const COMIX_SITE_ORIGIN = "https://comix.to"
+
+/**
+ * A URL da capa a partir do `poster` da Comix, sempre ABSOLUTA.
+ *
+ * 🔴 Até ~11/2026 o `poster` vinha absoluto (`https://static.comix.to/…`); desde então vem como
+ * caminho (`/images/covers/…`), servido por `comix.to` (o mesmo caminho em `static.comix.to` dá 404).
+ * Repassado cru, o caminho virava capa gravada em `work_covers` que o navegador buscava no domínio
+ * do APP (5 obras entre 12 e 14/11) e derrubava a checagem de imagem do canário
+ * ("Failed to parse URL"). URL absoluta passa intacta.
+ */
+export function comixCoverUrl(poster: unknown): string | undefined {
   if (!poster || typeof poster !== "object") return undefined
-  const p = poster as { large?: string; medium?: string }
-  return p.large ?? p.medium ?? undefined
+  const p = poster as { large?: unknown; medium?: unknown }
+  const raw = [p.large, p.medium].find((v): v is string => typeof v === "string" && v.trim() !== "")
+  if (!raw) return undefined
+  try {
+    const url = new URL(raw.trim(), COMIX_SITE_ORIGIN)
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : undefined
+  } catch {
+    return undefined
+  }
 }
+
+const coverFromPoster = comixCoverUrl
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function tagsFromItem(item: any): string[] {

@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest"
 import {
+  checkOutcomeHeadline,
   describeCheckFailure,
   failureReasons,
   groupByReason,
@@ -87,5 +88,41 @@ describe("groupByReason — o resumo do topo da lista", () => {
       { key: "Mangago · tempo esgotado (25 s)", tone: "failed", count: 2 },
       { key: "Comix · limite de pedidos", tone: "failed", count: 1 },
     ])
+  })
+})
+
+describe("checkOutcomeHeadline — 'nenhuma novidade' só sobre o que foi olhado", () => {
+  it("o caso de 15/11: 53 de 55 não verificadas não é 'nenhuma novidade encontrada'", () => {
+    expect(checkOutcomeHeadline({ total: 55, failed: 53, news: 0 })).toEqual({
+      title: "Nenhuma novidade nas 2 obras verificadas",
+      tone: "warning",
+    })
+  })
+
+  it("nenhuma verificada é falha da checagem, não ausência de novidade", () => {
+    expect(checkOutcomeHeadline({ total: 55, failed: 55, news: 0 })).toEqual({
+      title: "Nenhuma obra foi verificada",
+      tone: "error",
+    })
+    expect(checkOutcomeHeadline({ total: 1, failed: 1, news: 0 }).title).toBe("A obra não foi verificada")
+  })
+
+  it("uma só verificada usa o singular", () => {
+    expect(checkOutcomeHeadline({ total: 3, failed: 2, news: 0 }).title).toBe("Nenhuma novidade na única obra verificada")
+  })
+
+  it("tudo verificado e nada novo segue verde", () => {
+    expect(checkOutcomeHeadline({ total: 55, failed: 0, news: 0 })).toEqual({
+      title: "Nenhuma novidade encontrada",
+      tone: "success",
+    })
+  })
+
+  it("com novidade, o título é a novidade (as falhas vão na descrição)", () => {
+    expect(checkOutcomeHeadline({ total: 55, failed: 10, news: 2 })).toEqual({
+      title: "2 obras com capítulo novo",
+      tone: "success",
+    })
+    expect(checkOutcomeHeadline({ total: 5, failed: 0, news: 1 }).title).toBe("1 obra com capítulo novo")
   })
 })
