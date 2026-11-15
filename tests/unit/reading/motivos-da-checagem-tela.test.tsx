@@ -94,6 +94,8 @@ describe("/reading — a checagem com falhas leva aos motivos", () => {
   beforeEach(() => {
     checkReadingUpdates.mockReset()
     toast.warning.mockReset()
+    toast.error.mockReset()
+    toast.success.mockReset()
     push.mockReset()
     resetLastReadingCheck()
     for (const t of readTasks()) dismissTask(t.id)
@@ -143,6 +145,34 @@ describe("/reading — a checagem com falhas leva aos motivos", () => {
 
     act(() => opts.action!.onClick())
     expect(readLastReadingCheck().open).toBe(true)
+  })
+
+  it("o título do aviso só diz 'nenhuma novidade' sobre as obras verificadas", async () => {
+    await checar()
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(toast.warning.mock.calls.at(-1)![0]).toBe("Nenhuma novidade na única obra verificada")
+  })
+
+  it("com todas não verificadas, o aviso é de falha (vermelho), não 'nenhuma novidade'", async () => {
+    checkReadingUpdates.mockResolvedValue(
+      WORKS.map((w) => ({
+        workId: w.id,
+        hasNew: false,
+        latestExternal: null,
+        failed: true,
+        failure: { kind: "sources", sources: { comix: "comix indisponível (blocked)", mangago: "mangago bypass_unavailable: x" } },
+      })),
+    )
+    const view = render(<ReadingList works={WORKS} defaultView="list" nowIso="2026-08-08T12:00:00.000Z" />)
+    await act(async () => {
+      view.getByText("Verificar atualizações").click()
+      for (let i = 0; i < 6; i++) await Promise.resolve()
+    })
+    expect(toast.warning).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+    const [title, opts] = toast.error.mock.calls.at(-1)! as [string, { action?: { label: string } }]
+    expect(title).toBe("Nenhuma obra foi verificada")
+    expect(opts.action?.label).toBe("Ver motivos")
   })
 
   it("sem falhas, nada de link nem de 'Ver motivos'", async () => {

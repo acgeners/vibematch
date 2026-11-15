@@ -659,7 +659,7 @@ interface ComixHealthResult {
 /**
  * Diagnóstico da Comix SEM precisar testar numa obra: roda um canário (hid fixo) por
  * todas as superfícies que a app usa — detalhe (SSR), reviews (cadeia de threads) e
- * imagem (CDN static.comix.to).
+ * imagem (a capa do canário).
  *
  * O FlareSolverr entra só como linha INFORMATIVA: a Comix responde em texto puro
  * (o detector de Cloudflare dava falso positivo em `challenge-platform`, que é script
@@ -729,8 +729,8 @@ export async function checkComixHealth(): Promise<ComixHealthResult> {
     })
   }
 
-  // 4. Imagem (CDN static.comix.to) — host próprio, fora do FlareSolverr. Testa o
-  // cover do detalhe direto; 403 = CF re-bloqueou (app usa fallback cross-source).
+  // 4. Imagem — fora do FlareSolverr. Testa o cover do detalhe direto (desde ~11/2026 em
+  // `comix.to/images/…`; as capas antigas seguem em `static.comix.to`). 403 = CF bloqueou.
   const coverUrl = detail?.coverUrl ?? null
   if (!coverUrl) {
     checks.push({ ok: false, label: "Imagem (CDN)", detail: "sem cover no detalhe pra testar" })

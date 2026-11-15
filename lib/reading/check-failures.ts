@@ -111,3 +111,29 @@ export function groupByReason(items: ReadonlyArray<{ failure: ChapterCheckFailur
   }
   return [...groups.values()].sort((a, b) => b.count - a.count || a.key.localeCompare(b.key, "pt-BR"))
 }
+
+/**
+ * O título do aviso do fim da checagem. 🔴 "Nenhuma novidade" só vale para o que foi OLHADO:
+ * até 15/11/2026 o aviso dizia "Nenhuma novidade encontrada" com 53 de 55 obras não verificadas
+ * (a checagem rodou em produção, onde a Comix bloqueia o servidor e o Mangago não tem o contorno
+ * do Cloudflare). "Não achei" e "não consegui olhar" são afirmações diferentes.
+ *
+ * O tom segue a régua: verde quando houve novidade ou tudo foi verificado; âmbar quando parte
+ * falhou; vermelho quando nenhuma obra foi verificada.
+ */
+export function checkOutcomeHeadline(counts: { total: number; failed: number; news: number }): {
+  title: string
+  tone: "success" | "warning" | "error"
+} {
+  const { total, failed, news } = counts
+  if (news > 0) return { title: `${news} obra${news !== 1 ? "s" : ""} com capítulo novo`, tone: "success" }
+  if (failed === 0) return { title: "Nenhuma novidade encontrada", tone: "success" }
+  const checked = total - failed
+  if (checked <= 0) {
+    return { title: total === 1 ? "A obra não foi verificada" : "Nenhuma obra foi verificada", tone: "error" }
+  }
+  return {
+    title: `Nenhuma novidade ${checked === 1 ? "na única obra verificada" : `nas ${checked} obras verificadas`}`,
+    tone: "warning",
+  }
+}

@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { CheckFailuresList } from "@/components/reading/check-failures-list"
 import { setCheckFailuresOpen, setLastReadingCheck, useLastReadingCheck } from "@/lib/reading/last-check-store"
+import { checkOutcomeHeadline } from "@/lib/reading/check-failures"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { CoverImage } from "@/components/ui/cover-image"
@@ -787,12 +788,10 @@ export function ReadingList({
           )
         }
 
-        // Verde só quando houve novidade; cai em aviso quando o único destaque é falha.
-        const notify = news === 0 && failedWorks.length > 0 ? toast.warning : toast.success
-        notify(
-          news > 0
-            ? `${news} obra${news !== 1 ? "s" : ""} com capítulo novo`
-            : "Nenhuma novidade encontrada",
+        // O título só afirma "nenhuma novidade" sobre o que foi verificado (`checkOutcomeHeadline`).
+        const headline = checkOutcomeHeadline({ total: res.length, failed: failedWorks.length, news })
+        toast[headline.tone](
+          headline.title,
           {
             ...(descParts.length > 0 ? { description: descParts.join(" · ") } : {}),
             // A checagem roda ~1 min e a pessoa pode ter mudado de página: o botão volta à
