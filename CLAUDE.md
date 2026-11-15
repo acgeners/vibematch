@@ -164,7 +164,7 @@ apagada (`.incompleto`/`.sem-schema` são a família `backup-parcial`, nunca pod
 exige `BACKUP_PODAR=1` — e só ligue isso quando a cópia externa estiver conferida: o iCloud guarda
 só as 5 mais recentes, então a cópia local mais antiga pode ser a única. Custo de não podar: ~50 MB/semana.
 
-⚠️ **São 18 hoje**, e esta linha já disse **7**, **11** e **17** — a lista de envs acima cobre 6 delas.
+⚠️ **São 19 hoje**, e esta linha já disse **7**, **11** e **17** — a lista de envs acima cobre 6 delas.
 Contagem em prosa não acusa a própria defasagem: **não a repita aqui, leia o `FAMILIAS`.**
 
 🔴 **E essa frase não bastou: a linha defasou de 11 para 14 com o aviso escrito nela mesma.** É a
@@ -347,12 +347,12 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**111 arquivos, remedidos em 2026-11-12**):
+banco declara um dos dois (**112 arquivos, remedidos em 2026-11-15**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **45** | só LÊ ⇒ vai pro local, de graça |
-| `ALVO: NUVEM` no cabeçalho | **54** | GRAVA ⇒ tem que ir pra nuvem |
+| `ALVO: NUVEM` no cabeçalho | **55** | GRAVA ⇒ tem que ir pra nuvem |
 | (não tocam o banco) | 9 | fora da régua — entrou o `smoke-browser.mjs`, que só abre rota |
 
 🔴 **A régua tem DOIS rótulos e o mundo tem TRÊS casos — `smoke-logado.mjs` é o terceiro.**
@@ -4141,12 +4141,12 @@ faz `relatar()` devolver `false`. É o "declara o que esperava achar" do título
 
 ### Onde vale, e a válvula
 
-Aplicado a **15 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos`
+Aplicado a **16 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos`
 · `normalizar-titulos-alternativos` · `reverter-calibracao-auto-aplicada` ·
 `backfill-faixa-citada` · `repick-dead-covers` · `seed-art-signal` · `tag-r19-adult` ·
 `push-opening-structure` · `recalcular-vies-da-dona` · `reconciliar-inferencia-estrutural` ·
 `backup-icloud` (não corrige nada, mas o seu "nada a enviar" também prova que olhou) ·
-`limpar-sufixo-legado-mangaupdates` · `conferir-links-comix`.
+`limpar-sufixo-legado-mangaupdates` · `conferir-links-comix` · `carregar-classificacao-etaria`.
 
 ⚠️ **`funil.nadaAFazer("…")` substitui o `console.log` da frase**, e não é estilo: separados,
 volta a ser possível imprimir a conclusão sem a evidência, que é o estado exato que custou o
@@ -5788,6 +5788,13 @@ política: `lib/editions/structural-inference.ts`; executor: `server/editions/st
   como está, para a curadoria. `scripts/reconciliar-inferencia-estrutural.ts` segue para diagnóstico e
   reconciliação controlada (ensaio por padrão; `--execute --edicao=normal|r18`, de checkout canônico).
   Desligar a constante é o interruptor de emergência.
+
+## Classificação etária: Livre a 14 · 16 · 18, e "ocultar 18+" esconde idade E explícito
+
+**A faixa é por versão, em `work_age_rating` (mig 223): linha `obra` (não-mixed) ou `normal` (versão normal da mixed); sem linha = "Sem classificação", nunca uma faixa inventada.** Vem da classificação oficial dos produtos (Naver, Kakao, RIDI, Bomtoon, KMAS, editoras EN) arredondada para cima (15→16, 19→18). Regra de exibição: `ageRatingFor` (`lib/age-rating/age-rating.ts`).
+🔴 **Versão com conteúdo explícito é 18 sempre** (o `is_adult` vence a linha), e **faixa 18 na linha `obra` liga o 18+** por `decideAdultAuto` (`adult_reason = 'official_rating'`), então todo consumidor do gate segue lendo só `is_adult`. O override manual vence; a linha `normal` não liga nada (mixed é decidida pela estrutura).
+**Faixa oficial baixa com sinal adulto forte não vira faixa: vira conflito** (fila "Conflitos de classificação" em `/curation/settings`; a curadoria resolve com `resolveAgeRatingConflict`). Linha decidida pela curadoria nunca é sobrescrita pela carga (`scripts/carregar-classificacao-etaria.ts`, ALVO: NUVEM).
+⚠️ Erro ao ler a tabela LANÇA (`planAdultAuto`): tratá-lo como "sem faixa" desligaria o 18+ de quem está nele pela classificação.
 
 ## A RAZÃO do limite 18+ tem dono — e quem a estava escrevendo era o modelo
 

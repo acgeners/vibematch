@@ -24,6 +24,9 @@ import {
 import type { EditionScoreRow } from "@/lib/editions/mixed-edition"
 import { mentionsExplicitSexualContent, tagsForEdition, warningsForEdition } from "@/lib/editions/edition-content"
 import { reviewsForEdition } from "@/lib/editions/edition-reviews"
+import { getAgeRatingForWork } from "@/server/queries/age-rating"
+import { ageRatingExplanation, ageRatingFor } from "@/lib/age-rating/age-rating"
+import { AgeRatingBadge } from "@/components/titles/age-rating-badge"
 import { fetchTagEditionFlags, getEditionScoresForWork, getMixedEditionSettings, getR18ExtrasWorkIds, withTagFlags } from "@/server/queries/edition-scores"
 import type { TagEditionFlags } from "@/server/queries/edition-scores"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
@@ -434,7 +437,7 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
 
   // Obra `mixed` (fase 2): UMA obra com DUAS edições. Só ela tem seletor e nota por edição.
   const isMixedWork = isMixedEditionState(work.edition_state)
-  const [editionRows, editionSettings, r18ExtrasWorkIds, tagEditionFlags] = await Promise.all([
+  const [editionRows, editionSettings, r18ExtrasWorkIds, tagEditionFlags, ageRatingRows] = await Promise.all([
     isMixedWork ? getEditionScoresForWork(work.id as string) : Promise.resolve([] as EditionScoreRow[]),
     isMixedWork ? getMixedEditionSettings() : Promise.resolve(null),
     isMixedWork ? getR18ExtrasWorkIds() : Promise.resolve(null),
@@ -445,6 +448,7 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
           ((work.tags ?? []) as Array<{ id?: unknown }>).map((t) => (typeof t?.id === "string" ? t.id : "")),
         )
       : Promise.resolve(new Map<string, TagEditionFlags>()),
+    getAgeRatingForWork(work.id as string),
   ])
 
   const configClient = createAdminClient()
@@ -694,6 +698,9 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
       : rawTags
   // Os dois selos de conteúdo saem de UMA decisão, pela estrutura editorial — não pela versão aberta.
   const contentBadge = workContentBadge({ isMixed: isMixedWork, isAdult })
+  // Classificação etária da versão aberta (`ageRatingFor`). Obra 18+ sem versão leve já tem o selo
+  // "🔞 18+", que É a classificação dela — o selo de idade só aparece fora desse caso.
+  const ageRating = ageRatingFor({ isMixed: isMixedWork, isAdult, activeEdition, rows: ageRatingRows })
   // Avisos de conteúdo do digest de reviews — o MESMO dado e a MESMA régua do card de reviews
   // (`displayableContentWarnings`). Zero query: `getWorkReviews` já trouxe o digest acima.
   // Na versão normal, sai o aviso que descreve só a R18 (sexo explícito); violência sexual, violência
@@ -1065,12 +1072,13 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
           {contentBadge === "adult" && (
             <span
               className="inline-flex items-center gap-2 rounded-full border border-red-500/40 bg-red-50 px-3.5 py-1.5 text-base font-bold text-red-800 dark:bg-red-950/40 dark:text-red-200"
-              title="Conteúdo adulto (18+) — nota de conteúdo adulto ≥ 7"
+              title={ageRatingExplanation(ageRating)}
             >
               🔞 18+
             </span>
           )}
           {contentBadge === "r19_edition" && <EditionNoteBadge className="px-3.5 py-1.5 text-base font-bold" />}
+          {contentBadge !== "adult" && <AgeRatingBadge view={ageRating} />}
         </div>
       </header>
 
