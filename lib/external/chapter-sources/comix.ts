@@ -130,12 +130,18 @@ async function resolveBySearch(
  *
  * `resolvedHid` é preenchido quando o match veio da busca (não do input), pra
  * que o chamador persista o hid e as próximas checagens virem exatas.
+ *
+ * 🔴 Se a página do código salvo FALHOU (limite de pedidos, bloqueio, rede) e a busca não achou nada,
+ * LANÇA com o motivo, em vez de devolver `null`: dentro do `Promise.allSettled` de `getLatestChapter`
+ * a rejeição vira o motivo registrado da obra "não verificada". `null` fica para "não tem".
  */
 export async function getComixLatestChapter(
   input: ChapterCheckInput,
 ): Promise<ChapterLookup> {
+  let detailFailure: string | null = null
   if (input.comixHid) {
-    const { detail, linkStatus } = await fetchComixByIdOutcome(input.comixHid)
+    const { detail, linkStatus, unavailable } = await fetchComixByIdOutcome(input.comixHid)
+    detailFailure = unavailable ?? null
     if (linkStatus) input.onSavedLinkStatus?.("comix", input.comixHid, linkStatus)
     const ch = comixChapter(detail ?? {})
     if (ch != null) {
@@ -165,7 +171,10 @@ export async function getComixLatestChapter(
     }
   }
 
-  if (!match) return null
+  if (!match) {
+    if (detailFailure) throw new Error(`comix indisponível (${detailFailure})`)
+    return null
+  }
   return {
     chapter: match.chapter,
     source: "comix",

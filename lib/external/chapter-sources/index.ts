@@ -37,11 +37,24 @@ const CHAPTER_SOURCES = CHAPTER_SOURCE_IDS.map((id) => ({ id, lookup: CHAPTER_LO
 // transforma a fonte lenta numa rejeição fail-soft sem somar dezenas de segundos.
 const SOURCE_TIMEOUT_MS = 25_000
 
+/** Motivo quando a obra não tem vínculo com a fonte (`null` = tem): aí "não deu capítulo" não é falha. */
+const NO_LINK_NOTE: Record<ChapterSourceId, (input: ChapterCheckInput) => string | null> = {
+  comix: (input) => (input.comixHid ? null : "sem código, e a busca não achou"),
+  mangago: (input) => (input.mangagoSlug ? null : "sem vínculo"),
+}
+
 export interface LatestChapterResult {
   /** Último capítulo disponível pela régua de `pickTotalChapters`, ou `null` se nenhuma fonte serviu. */
   latest: number | null
   /** Capítulo por fonte (`null` = falhou/sem match), pra diagnóstico na UI. */
   bySource: Partial<Record<ChapterSourceId, number | null>>
+  /**
+   * Por que cada fonte NÃO deu o capítulo: a mensagem da falha (tempo esgotado, bloqueio, limite
+   * de pedidos), "sem vínculo", "respondeu sem capítulo" ou o número descartado pela régua. É o
+   * que a checagem registra no log quando a obra fica "não verificada" — antes de 14/11/2026 o
+   * `allSettled` descartava o motivo, e 53 de 55 obras falharam numa rodada sem nenhuma linha de log.
+   */
+  failures: Partial<Record<ChapterSourceId, string>>
   /** hid do comix resolvido via busca (quando não havia hid salvo) — pra persistir. */
   resolvedComixHid?: string | null
   /** Data relativa do último capítulo (string pré-formatada da fonte, ex.: "8mos ago"). */
@@ -64,6 +77,12 @@ export interface LatestChapterResult {
   comixUrl?: string | null
 }
 
+/** `comix: limite de pedidos · mangago: tempo esgotado`, na ordem das fontes de capítulo. */
+export function describeSourceFailures(failures: Partial<Record<ChapterSourceId, string>>): string {
+  const parts = CHAPTER_SOURCE_IDS.flatMap((id) => (failures[id] ? [`${id}: ${failures[id]}`] : []))
+  return parts.length > 0 ? parts.join(" · ") : "nenhuma fonte devolveu capítulo"
+}
+
 /**
  * Consulta todas as fontes de capítulo em paralelo (fail-soft) e escolhe o último capítulo
  * disponível pela régua de `pickTotalChapters` (Comix primeiro; o Mangago só sem ele). Uma
@@ -83,6 +102,7 @@ export async function getLatestChapter(
   )
 
   const bySource: Partial<Record<ChapterSourceId, number | null>> = {}
+  const failures: Partial<Record<ChapterSourceId, string>> = {}
   let resolvedComixHid: string | null = null
 
   const fulfilled: NonNullable<ChapterLookup>[] = []
@@ -94,6 +114,10 @@ export async function getLatestChapter(
       if (id === "comix" && res.value.resolvedHid) resolvedComixHid = res.value.resolvedHid
     } else {
       bySource[id] = null
+      failures[id] =
+        res.status === "rejected"
+          ? res.reason instanceof Error ? res.reason.message : String(res.reason)
+          : NO_LINK_NOTE[id](input) ?? "respondeu sem capítulo"
     }
   })
 
@@ -106,6 +130,8 @@ export async function getLatestChapter(
     { current: opts.currentTotal },
   )
   const primary = pick.source ? fulfilled.find((v) => v.source === pick.source) : undefined
+  // Fonte que respondeu mas perdeu na régua (número corrompido) também precisa de motivo no log.
+  if (!primary) for (const v of fulfilled) failures[v.source] = `número descartado pela régua (${v.chapter})`
 
   // As DATAS absolutas e a LISTA real de capítulos são do Mangago, e só valem quando ele mostra o
   // MESMO capítulo que venceu: aí a data é a desse capítulo e a lista conta exatamente o que falta
@@ -121,6 +147,7 @@ export async function getLatestChapter(
   return {
     latest: primary?.chapter ?? null,
     bySource,
+    failures,
     resolvedComixHid,
     releasedLabel: primary?.releasedLabel ?? null,
     releasedAt: datas?.releasedAt ?? null,

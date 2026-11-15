@@ -621,10 +621,16 @@ export async function fetchComixById(hid: string): Promise<ComixDetail | null> {
  */
 export async function fetchComixByIdOutcome(
   hid: string,
-): Promise<{ detail: ComixDetail | null; linkStatus: SourceLinkStatus | null }> {
+): Promise<{
+  detail: ComixDetail | null
+  linkStatus: SourceLinkStatus | null
+  /** Por que a página não veio, quando ela não veio por FALHA (nunca para o 404). */
+  unavailable?: ComixUnavailableReason
+}> {
   const page = await fetchComixDetailOutcome(hid)
   if (page.kind === "not_found") return { detail: null, linkStatus: "not_found" }
-  const r = page.kind === "ok" ? page.value : null
+  if (page.kind === "unavailable") return { detail: null, linkStatus: null, unavailable: page.reason }
+  const r = page.value
   if (!r || typeof r !== "object") return { detail: null, linkStatus: null }
   return { detail: comixDetailFromItem(r, hid), linkStatus: "ok" }
 }

@@ -339,9 +339,11 @@ describe("18 · o 404 do código chega a quem grava a marca", () => {
     expect(ok.linkStatus).toBe("ok")
     expect(ok.detail?.hid).toBe(HID)
 
+    // Fora do ar não marca o código (nenhum linkStatus). Desde 14/11/2026 ele traz o MOTIVO, que a
+    // checagem de capítulos registra no log da obra "não verificada".
     origem({ detalhe: () => html("erro", 500) })
     ;({ comix } = await carregar())
-    expect(await comix.fetchComixByIdOutcome(HID)).toEqual({ detail: null, linkStatus: null })
+    expect(await comix.fetchComixByIdOutcome(HID)).toEqual({ detail: null, linkStatus: null, unavailable: "server_error" })
   })
 
   it("🔴 na coleta de reviews, o 404 sai como linkStatus — e não como 'Comix sem reviews' calado", async () => {

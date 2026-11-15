@@ -865,6 +865,7 @@ Obra sem `last_read_at` usa `user_work_state.updated_at` só para classificar, e
 
 **`works.total_chapters` = último capítulo disponível: Comix (`latestChapter`) primeiro, o Mangago só sem ele, as demais fontes só sem os dois — em obra em andamento E concluída.** O total do original fazia a `/reading` cobrar capítulos que não existem traduzidos. Nunca "o maior entre as fontes" (um capítulo-aviso do Mangago vira capítulo novo) nem o `finalChapter` do Comix (é cadastro, não o postado); e o status do Comix não separa tradução completa de incompleta (diz "releasing" quase sempre).
 Dono: `pickTotalChapters` (`lib/external/chapter-total.ts`), usado pela checagem da `/reading` e pelo "Atualizar dados"; a conferência de número corrompido (`isImplausibleChapter`) só descarta erro de ordem de grandeza, nunca fonte mais baixa.
+**Obra "não verificada" na checagem de capítulos deixa uma linha `[reading-check]` no log com o motivo de cada fonte** (local: `~/Library/Logs/satoria-npm-start.log`; Fly: `fly logs`). Por isso as fontes de capítulo LANÇAM na falha e `getLatestChapter` devolve `failures`: não volte a trocar falha por `null` nem a esvaziar o `catch`.
 
 ### O status de publicação tem UMA regra, e o MangaUpdates decide
 

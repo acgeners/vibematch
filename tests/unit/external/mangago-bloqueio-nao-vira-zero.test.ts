@@ -28,6 +28,7 @@ import {
   fetchMangagoById,
   fetchMangagoChapters,
   fetchMangagoReviews,
+  MangagoUnavailableError,
   parseMangagoDetailHtml,
   searchMangago,
 } from "@/lib/external/mangago"
@@ -184,13 +185,23 @@ describe("capítulos — bloqueio HTTP 200 nunca vira 'zero capítulos'", () => 
   // uma recusa do Mangago passa a afirmar que a obra tem 0 capítulos.
   const entrada = { mangagoSlug: "solo_leveling" } as ChapterCheckInput
 
-  it.each([
-    ["página de bloqueio (HTTP 200)", BLOQUEIO],
-    ["404 verdadeiro", NAO_ACHADO],
-  ])("%s → null em toda a cadeia, nunca um capítulo 0", async (_nome, html) => {
-    fetchHtml.mockResolvedValue(pagina(html))
+  // Desde 14/11/2026 o bloqueio LANÇA (é falha, e o motivo vai para o log da checagem de capítulos);
+  // o 404 verdadeiro segue `null` (slug morto = "não tem"). Nos dois casos, nunca um capítulo 0.
+  it("página de bloqueio (HTTP 200) → LANÇA em toda a cadeia, nunca um capítulo 0", async () => {
+    fetchHtml.mockResolvedValue(pagina(BLOQUEIO))
+    await expect(fetchMangagoChapters("solo_leveling")).rejects.toBeInstanceOf(MangagoUnavailableError)
+    await expect(getMangagoLatestChapter(entrada)).rejects.toBeInstanceOf(MangagoUnavailableError)
+  })
+
+  it("404 verdadeiro → null em toda a cadeia, nunca um capítulo 0", async () => {
+    fetchHtml.mockResolvedValue(pagina(NAO_ACHADO))
     await expect(fetchMangagoChapters("solo_leveling")).resolves.toBeNull()
     await expect(getMangagoLatestChapter(entrada)).resolves.toBeNull()
+  })
+
+  it("bypass sem resposta → LANÇA (falha, não 'sem capítulo')", async () => {
+    fetchHtml.mockResolvedValue(null)
+    await expect(fetchMangagoChapters("solo_leveling")).rejects.toBeInstanceOf(MangagoUnavailableError)
   })
 
   it("contraprova: página com a tabela de capítulos → o capítulo chega", async () => {

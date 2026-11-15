@@ -215,3 +215,148 @@ describe("checkReadingUpdates — status de publicação", () => {
     expect(banco.updates.some((u) => "publication_status_id" in u)).toBe(false)
   })
 })
+
+// ── Obra "não verificada" deixa o MOTIVO no log ─────────────────────────────────────────────
+//
+// 🔴 Em 14/11/2026 uma rodada da /reading deu 53 de 55 obras "não verificadas" e não deixou nenhuma
+// linha de log: o `allSettled` de `getLatestChapter` descartava a rejeição de cada fonte e o `catch`
+// da checagem era vazio. Estes casos travam o motivo nas duas pontas.
+
+describe("getLatestChapter — por que cada fonte não deu capítulo", () => {
+  beforeEach(() => {
+    lookups.comix.mockReset()
+    lookups.mangago.mockReset()
+  })
+
+  it("falha da fonte vira a mensagem dela; fonte vinculada sem capítulo vira 'respondeu sem capítulo'", async () => {
+    lookups.comix.mockRejectedValue(new Error("comix indisponível (rate_limited)"))
+    lookups.mangago.mockResolvedValue(null)
+    const r = await getLatestChapter(entrada)
+
+    expect(r.latest).toBeNull()
+    expect(r.failures).toEqual({ comix: "comix indisponível (rate_limited)", mangago: "respondeu sem capítulo" })
+  })
+
+  it("tempo esgotado também é motivo, com o nome da fonte", async () => {
+    vi.useFakeTimers()
+    try {
+      lookups.comix.mockReturnValue(new Promise(() => {}))
+      mangagoResponde(16)
+      const pendente = getLatestChapter(entrada)
+      await vi.advanceTimersByTimeAsync(25_000)
+      const r = await pendente
+
+      expect(r.latest).toBe(16)
+      expect(r.failures.comix).toMatch(/chapter:comix.*25000/)
+      expect(r.failures.mangago).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("sem vínculo não é falha da fonte, e o texto diz isso", async () => {
+    lookups.comix.mockResolvedValue(null)
+    lookups.mangago.mockResolvedValue(null)
+    const r = await getLatestChapter({ title: "Obra Teste" })
+
+    expect(r.failures).toEqual({ comix: "sem código, e a busca não achou", mangago: "sem vínculo" })
+  })
+
+  it("número descartado pela régua também deixa motivo", async () => {
+    comixResponde(815)
+    lookups.mangago.mockResolvedValue(null)
+    const r = await getLatestChapter(entrada, { currentTotal: 81 })
+
+    expect(r.latest).toBeNull()
+    expect(r.failures.comix).toBe("número descartado pela régua (815)")
+  })
+
+  it("com capítulo, nenhuma falha é inventada", async () => {
+    comixResponde(22)
+    mangagoResponde(22)
+    await expect(getLatestChapter(entrada)).resolves.toMatchObject({ latest: 22, failures: {} })
+  })
+})
+
+describe("checkReadingUpdates — a obra não verificada deixa uma linha no log", () => {
+  const avisos = () =>
+    (console.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .map((c) => String(c[0]))
+      .filter((l) => l.startsWith("[reading-check]"))
+
+  beforeEach(() => {
+    lookups.comix.mockReset()
+    lookups.mangago.mockReset()
+    banco.updates = []
+    mu.status = null
+    banco.obra = {
+      id: "w1",
+      title: "Obra Teste",
+      original_title: null,
+      alternative_titles: [],
+      total_chapters: 10,
+      chapters_read: 5,
+      publication_status_id: getPublicationStatusIdByName("Ongoing"),
+      work_external_ids: [
+        { source: "comix", external_id: "abc12", is_rejected: false },
+        { source: "mangago", external_id: "obra_teste", is_rejected: false },
+      ],
+    }
+    vi.spyOn(console, "warn").mockImplementation(() => {}).mockClear()
+  })
+
+  it("nenhuma fonte deu capítulo: registra obra, id e o motivo de cada fonte", async () => {
+    lookups.comix.mockRejectedValue(new Error("comix indisponível (rate_limited)"))
+    lookups.mangago.mockRejectedValue(new Error("mangago fetch_failed: https://www.mangago.me/read-manga/obra_teste/"))
+    const [r] = await checkReadingUpdates(["w1"])
+
+    expect(r.failed).toBe(true)
+    expect(avisos()).toEqual([
+      '[reading-check] não verificada · "Obra Teste" (w1) · comix: comix indisponível (rate_limited) · ' +
+        "mangago: mangago fetch_failed: https://www.mangago.me/read-manga/obra_teste/",
+    ])
+  })
+
+  it("exceção no meio da checagem não some mais: vira linha de log com a mensagem", async () => {
+    const { persistComixHid } = await import("@/server/actions/comix-hid")
+    vi.mocked(persistComixHid).mockRejectedValueOnce(new Error("falha ao gravar o código"))
+    banco.obra = { ...banco.obra, work_external_ids: [] }
+    lookups.comix.mockResolvedValue({ chapter: 12, source: "comix", sourceUrl: "https://comix.to/title/novo1", resolvedHid: "novo1" })
+    lookups.mangago.mockResolvedValue(null)
+    const [r] = await checkReadingUpdates(["w1"])
+
+    expect(r.failed).toBe(true)
+    expect(avisos()).toEqual(['[reading-check] não verificada · "Obra Teste" (w1) · erro: falha ao gravar o código'])
+  })
+
+  it("Comix marcada como ausente (e sem código): a obra é pulada, e o log diz por quê", async () => {
+    banco.obra = { ...banco.obra, work_external_ids: [{ source: "comix", external_id: null, is_rejected: true }] }
+    const [r] = await checkReadingUpdates(["w1"])
+
+    expect(r.failed).toBe(true)
+    expect(lookups.comix).not.toHaveBeenCalled()
+    expect(avisos()[0]).toMatch(/Comix marcada como ausente/)
+  })
+
+  it("código da Comix morto (404): a linha diz isso, e não 'respondeu sem capítulo'", async () => {
+    lookups.comix.mockImplementation(async (input: { onSavedLinkStatus?: (s: string, id: string, st: string) => void }) => {
+      input.onSavedLinkStatus?.("comix", "abc12", "not_found")
+      return null
+    })
+    lookups.mangago.mockResolvedValue(null)
+    await checkReadingUpdates(["w1"])
+
+    expect(avisos()).toEqual([
+      '[reading-check] não verificada · "Obra Teste" (w1) · comix: código abc12 não existe (404) · mangago: respondeu sem capítulo',
+    ])
+  })
+
+  it("obra verificada não gera linha nenhuma", async () => {
+    comixResponde(11)
+    mangagoResponde(11)
+    const [r] = await checkReadingUpdates(["w1"])
+
+    expect(r.failed).toBe(false)
+    expect(avisos()).toEqual([])
+  })
+})
