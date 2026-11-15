@@ -866,6 +866,7 @@ Obra sem `last_read_at` usa `user_work_state.updated_at` só para classificar, e
 **`works.total_chapters` = último capítulo disponível: Comix (`latestChapter`) primeiro, o Mangago só sem ele, as demais fontes só sem os dois — em obra em andamento E concluída.** O total do original fazia a `/reading` cobrar capítulos que não existem traduzidos. Nunca "o maior entre as fontes" (um capítulo-aviso do Mangago vira capítulo novo) nem o `finalChapter` do Comix (é cadastro, não o postado); e o status do Comix não separa tradução completa de incompleta (diz "releasing" quase sempre).
 Dono: `pickTotalChapters` (`lib/external/chapter-total.ts`), usado pela checagem da `/reading` e pelo "Atualizar dados"; a conferência de número corrompido (`isImplausibleChapter`) só descarta erro de ordem de grandeza, nunca fonte mais baixa.
 **Obra "não verificada" na checagem de capítulos deixa o motivo de cada fonte na tela e no log, a partir do MESMO objeto (`ChapterCheckFailure`, `lib/reading/check-failures.ts`):** na `/reading`, o link "N não verificadas · ver motivos" e o "Ver motivos" do aviso; no painel "Capítulos e status", a mesma lista; no log, a linha `[reading-check]` (local: `~/Library/Logs/satoria-npm-start.log`; Fly: `fly logs`). Nada vai para o banco: recarregar a aba apaga a lista. Por isso as fontes de capítulo LANÇAM na falha e `getLatestChapter` devolve `failures`: não volte a trocar falha por `null` nem a esvaziar o `catch`.
+**O aviso do fim só diz "nenhuma novidade" sobre as obras verificadas** (`checkOutcomeHeadline`, mesmo arquivo): com parte em falha, "Nenhuma novidade nas N obras verificadas"; com todas, "Nenhuma obra foi verificada". **Sem o desvio do Cloudflare (produção), o botão fica desabilitado com o motivo visível**, aqui e no lote "Capítulos e status" (`hasCfBypassConfigured`, prop obrigatória nos dois componentes).
 
 ### O status de publicação tem UMA regra, e o MangaUpdates decide
 
@@ -5487,13 +5488,13 @@ Comix o gesto é outro — marcar ausência SOBRE um vínculo existente, que a g
 propósito; ali o caminho é o diálogo por obra.
 `triggerAiEvaluation(workId)` → `fetchExternalEvaluationContextForWork()` → `requestAiEvaluation()`
 - Uses saved work data (**ALL persisted synopses**, genres, grouped tags, cover). The primary synopsis is the prompt's main reference; every other persisted synopsis enters as `[S1]…[Sn]` blocks (`splitSynopsesForEvaluation` in `lib/work-derived.ts`), with `source = "manual"` ones labeled as user-written/high-authority. Fresh external `[C]` blocks that duplicate a persisted synopsis are filtered out (`isSameSynopsis`) — but only when additional synopses exist, so single-synopsis works keep a byte-identical input and preserve the eval cache `input_hash` (the `additionalSynopses` field is omitted from both hash versions when empty). If the work has accepted `work_external_ids`, reviews/context are fetched from those confirmed source IDs; otherwise it falls back to title search.
-- Review sources (each only when the candidate has that source's ID): MangaUpdates + AniList + MyAnimeList + Kitsu (reactions) + AnimePlanet + MangaDex (forum comments) + ComicK (curated reviews + comments) + Comix (per-work comment thread, mini-reviews). Comix has no formal reviews API; `fetchComixReviews(hid)` walks detail `id` → `threads/lookup?page_identifier=manga{id}&page_url=/title/{hid}` → `threads/{threadId}/comments` (cursor-paginated). ⚠️ Este caminho é **TOKEN-FREE**: usa `fetchComixDetailRaw`/`fetchComixThreadJson`, **não** o `fetchComixJson` — então o circuito de auth aberto pela busca gateada **não** o bloqueia (medido 2026-08-04: circuito aberto e, na sequência, 52 e 57 reviews normais em ~1,3s). 🔴 **A previsão que estava escrita aqui — "se a Comix voltar a desafiar, ~30% do acervo de reviews passa a depender do bypass da noite pro dia" — SE REALIZOU em 2026-08-11.** O plain fetch morreu: `https://comix.to/` e o SSR de `/title/{hid}` respondem **403 + `cf-mitigated: challenge`**. Toda a cadeia (4 chamadas) passou a depender de bypass, e o **FlareSolverr é hoje a única camada que atravessa** — o sidecar não passa na Comix desde 29/07 (medido no log: **1.168 tentativas, ZERO sucessos**), embora siga atravessando mangago/anime-planet/comick em ~1s.
+- Review sources (each only when the candidate has that source's ID): MangaUpdates + AniList + MyAnimeList + Kitsu (reactions) + AnimePlanet + MangaDex (forum comments) + ComicK (curated reviews + comments) + Comix (per-work comment thread, mini-reviews). Comix has no formal reviews API; `fetchComixReviews(hid)` walks detail `id` → `threads/lookup?page_identifier=manga{id}&page_url=/title/{hid}` → `threads/{threadId}/comments` (cursor-paginated). ⚠️ Este caminho é **TOKEN-FREE**: usa `fetchComixDetailRaw`/`fetchComixThreadJson`, **não** o `fetchComixJson` — então o circuito de auth aberto pela busca gateada **não** o bloqueia (medido 2026-08-04: circuito aberto e, na sequência, 52 e 57 reviews normais em ~1,3s). 🔴 **Quem a Comix bloqueia depende do endereço de quem acessa, não da camada.** Do Mac o acesso direto atravessa a cadeia inteira sem desvio; do Fly, `/title/{hid}` responde 403. Quando ela desafia o Mac também (aconteceu em 08/2026), a cadeia toda depende de desvio e **só o FlareSolverr atravessa**: o sidecar não passa na Comix, embora atravesse mangago/anime-planet/comick em ~1s. Coleta e checagem da Comix, portanto, rodam do localhost.
 
 ⚠️ **A falha não foi a Comix desafiar — foi o CUSTO de descobrir isso.** O sidecar é a camada PRIMÁRIA e desiste em ~13,2s (espera do interstitial). Com 4 chamadas na cadeia, eram ~55s contra o teto de 25s (`TIMEOUT_REVIEWS_COMIX_MS`): a fonte vinha **vazia em toda obra**, enquanto o FlareSolverr resolvia a mesma cadeia em **2,4s**. Corrigido por um **circuito POR HOST** em `renderHtmlViaSidecar` (`comix-render-client.ts`) — `upstream_blocked` marca o host por 15min em vez de repagar a espera a cada chamada. Guardado por `tests/unit/external/comix-render-host-circuit.test.ts`.
 
 🔴 **Duas falhas latentes se somaram, e cada uma escondia a outra.** O sidecar quebrou em 29/07 e ninguém soube, porque o plain fetch ainda funcionava; quando o plain fetch caiu, o sidecar quebrado virou o caminho. **Camada de fallback que ninguém exercita apodrece em silêncio** — o log do sidecar tinha a resposta há 13 dias.
 
-⚠️ **O pior caso esteve coberto, medido em 08/2026:** 1ª obra de cada janela de 15min paga a sonda (13,2s) + solve frio do FlareSolverr (12,4s) = 25,8s ⇒ estoura a 1ª passada, e a **2ª passada dirigida recuperava em 4,2s** (`acquire-reviews.ts`). 🔴 **Essa recuperação dependia da sessão nomeada `comix`, removida em 06/10/2026:** o solve abandonado aquecia o Chrome da sessão, e a 2ª passada o reaproveitava. Hoje nenhuma fonte usa sessão — cada chamada abre e fecha o próprio Chrome, numa fila de uma página por vez por processo. Medido em 06/10, a Comix não mostrou desafio (local nem Fly); se voltar a mostrar, a 2ª passada paga o solve de novo e a cadeia estoura — o gatilho para trazer a sessão de volta (com 2 GB) está em `lib/external/comix.ts`.
+⚠️ **O pior caso esteve coberto, medido em 08/2026:** 1ª obra de cada janela de 15min paga a sonda (13,2s) + solve frio do FlareSolverr (12,4s) = 25,8s ⇒ estoura a 1ª passada, e a **2ª passada dirigida recuperava em 4,2s** (`acquire-reviews.ts`). 🔴 **Essa recuperação dependia da sessão nomeada `comix`, removida em 06/10/2026:** o solve abandonado aquecia o Chrome da sessão, e a 2ª passada o reaproveitava. Hoje nenhuma fonte usa sessão — cada chamada abre e fecha o próprio Chrome, numa fila de uma página por vez por processo. Hoje a Comix não desafia o Mac e barra o Fly com 403; se voltar a desafiar o Mac, a 2ª passada paga o solve de novo e a cadeia estoura — o gatilho para trazer a sessão de volta (com 2 GB) está em `lib/external/comix.ts`.
 
 🔴 **A descoberta de hid de obra NOVA é o `/resolve` do sidecar, por cross-ID — e ele FUNCIONA**
 (este parágrafo o deu por morto, com o `no_xhr` de 2026-08-11). Em 12/11 foram 8 buscas, todas
@@ -6820,12 +6821,21 @@ O import deixou de ser `ensureAdmin`-only: o gate é `ensureReadingStateWriter` 
 > `fetchHtmlWithCfFallback`). Regra prática: dia a dia pode fechar o Docker; deixe aberto só em
 > aquisição pesada (import em massa / backfill), pela redundância.
 >
-> 🔴 **Isso deixou de valer para a COMIX em 2026-08-11 — lá o FlareSolverr é OBRIGATÓRIO.** O
-> sidecar não atravessa a Comix desde 29/07 (1.168 tentativas, zero sucessos) e o plain fetch
-> morreu quando ela voltou a desafiar. Com o Docker fechado, a Comix entrega **zero reviews** — e
-> não é o sidecar que está fora, é ele respondendo `upstream_blocked`. Para mangago/anime-planet/
-> comick a regra acima segue valendo (`render_ok` em ~1s, medido no mesmo dia). ⚠️ A assimetria é o
-> ponto: "o sidecar é a camada primária" é verdade **por host**, não em bloco.
+> 🔴 **A COMIX é a exceção: o sidecar não a atravessa, e quem decide é o endereço de quem acessa.**
+> Do Mac o acesso direto passa sem desvio; do Fly ela responde 403. Se ela voltar a desafiar o Mac,
+> só o FlareSolverr atravessa: com o Docker fechado ela entrega **zero reviews**, com o sidecar
+> respondendo `upstream_blocked`. "O sidecar é a camada primária" vale **por host**, não em bloco.
+>
+> **Produção não tem desvio nenhum** (sem `COMIX_RENDER_URL` nem `FLARESOLVERR_URL`). Ação que depende
+> dele só é oferecida onde `hasCfBypassConfigured()` (`lib/external/flaresolverr.ts`) é verdadeiro:
+> hoje a checagem de capítulos da `/reading` e o lote "Capítulos e status". Ela pergunta pela
+> configuração, não por "estou no Fly".
+>
+> **A capa da Comix (`poster`) vem como caminho (`/images/covers/…`), servido por `comix.to`** (o
+> mesmo caminho em `static.comix.to` dá 404). Dono: `comixCoverUrl` (`lib/external/comix.ts`), que
+> devolve sempre URL absoluta. Repassado cru, o caminho vira capa gravada que o navegador busca no
+> domínio do app, e a checagem de imagem do "Testar agora" reprova. O host não bloqueia referer, então
+> não passa pelo image-proxy.
 >
 > **MyAnimeList**: metadados vêm da **API oficial v2** (`lib/external/myanimelist.ts`, header
 > `X-MAL-CLIENT-ID` ← `MAL_CLIENT_ID` no env; OAuth só serve pra dados de usuário logado). Reviews
