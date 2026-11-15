@@ -231,6 +231,18 @@ export const FAMILIAS = [
     env: "NORMALIZAR_ALT_TITULOS_KEEP",
   },
   {
+    id: "classificacao-etaria",
+    dono: "carregar-classificacao-etaria.ts",
+    // Datado, um diretório por --execute com as linhas de work_age_rating que a carga sobrescreveu e
+    // o adult_auto/adult_reason das obras cujo gate 18+ mudou (dezenas de KB). É o que desfaz a carga.
+    oQueE: "classificação etária e gate 18+ antes da carga da auditoria",
+    casa: (n) => /^classificacao-etaria-\d{4}/.test(n),
+    exemplo: "classificacao-etaria-2026-11-15T20-11-22-333Z",
+    copiaLocal: true, // estado anterior: a única forma de desfazer
+    keepPadrao: 10,
+    env: "CLASSIFICACAO_ETARIA_KEEP",
+  },
+  {
     id: "limpar-sufixo-mu",
     dono: "limpar-sufixo-legado-mangaupdates.mjs",
     // Datado, um diretório por execução com o texto ANTES e DEPOIS de cada review tocada

@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  IdCard,
   Brain,
   ChartNoAxesCombined,
   Database,
@@ -252,6 +253,17 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
           "Revise as obras que a 2ª opinião da IA não conseguiu confirmar — decida e o override vira verdade.",
         help: "As obras de sinal fraco (só tag genérica ou só nota, sem evidência de cena explícita nas reviews) que a 2ª opinião marcou como incertas. Aqui você confirma se cada uma é 18+ ou não; a escolha vira o override humano, que vence a classificação automática (migração 161). Some da lista assim que decidida.",
         icon: ShieldAlert,
+        chips: [{ kind: "nature", label: "Curadoria" }],
+        collapsible: true,
+      },
+      {
+        id: "age-rating-conflicts",
+        title: "Conflitos de classificação",
+        panelTitle: "Conflitos de classificação etária",
+        description:
+          "Obras em que a classificação etária oficial diverge dos sinais da obra — defina a faixa ou deixe sem classificação.",
+        help: "A classificação etária (Livre a 14 · 16 · 18) vem das plataformas de origem e é arredondada para cima. Entram aqui as obras em que ela não fecha com o resto: faixa oficial baixa com sinal adulto forte, produto normal E adulto sem a obra estar registrada como duas versões, decisão manual de 18+ contrária à faixa oficial. Enquanto o conflito está aberto, a obra fica sem faixa (ou com a provisória mostrada) e marcada \"em revisão\". Faixa 18 liga o 18+; versão com conteúdo explícito é 18 de qualquer jeito.",
+        icon: IdCard,
         chips: [{ kind: "nature", label: "Curadoria" }],
         collapsible: true,
       },

@@ -17,6 +17,8 @@ import { EmbeddingsPanel } from "@/components/settings/embeddings-panel"
 import { AdultAuditTool } from "@/components/settings/adult-audit-tool"
 import { getAdultAuditQueue } from "@/server/queries/adult-audit"
 import { AdultScoreTierTool } from "@/components/settings/adult-score-tier-tool"
+import { AgeRatingConflictsTool } from "@/components/settings/age-rating-conflicts-tool"
+import { getAgeRatingConflicts } from "@/server/queries/age-rating"
 import { listAdultScoreTierBacklog } from "@/server/actions/tag-review"
 import { AdultBoundsDriftTool } from "@/components/settings/adult-bounds-drift-tool"
 import { getAdultBoundsDriftQueue } from "@/server/queries/adult-audit"
@@ -323,6 +325,11 @@ async function ItemBody({
     case "adult-audit": {
       const queue = await getAdultAuditQueue()
       return <AdultAuditTool initialQueue={queue} />
+    }
+
+    case "age-rating-conflicts": {
+      const queue = await getAgeRatingConflicts()
+      return <AgeRatingConflictsTool initialQueue={queue} />
     }
 
     case "adult-score-tier": {

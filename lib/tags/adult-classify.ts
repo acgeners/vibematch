@@ -17,6 +17,11 @@ type Admin = ReturnType<typeof createAdminClient>
  *     pisos que a inflam. Tag fraca segue existindo como sinal de auditoria/revisão;
  *   · a nota sozinha (nunca ligou).
  *
+ * 🔴 Segundo motivo desde 2026-11-15: **classificação etária 18 da obra** (`work_age_rating`, linha
+ * `obra`, `faixa = 18`; migration 223) liga com `adult_reason = 'official_rating'`. "Ocultar 18+"
+ * esconde idade 18 E conteúdo explícito por esta MESMA coluna — nenhum consumidor do gate muda. A tag
+ * forte tem precedência no motivo (é a evidência mais específica).
+ *
  * Quem a regra NÃO toca:
  *   · motivo `ai_review` (2ª opinião de IA com evidência explícita nas reviews) — evidência
  *     independente das tags; só um humano (override) desfaz;
@@ -25,44 +30,74 @@ type Admin = ReturnType<typeof createAdminClient>
  */
 export type AdultAutoDecision = { adult_auto: boolean; adult_reason: string | null } | null
 
-export function decideAdultAuto(atual: { adult_auto: boolean; adult_reason: string | null }, temForte: boolean): AdultAutoDecision {
+/** Motivos que ESTA régua liga — e portanto desliga quando o sinal some. `ai_review` não está aqui. */
+const MOTIVOS_DA_REGUA = new Set(["tag_explicit", "tag_soft_score", "official_rating"])
+
+export function decideAdultAuto(
+  atual: { adult_auto: boolean; adult_reason: string | null },
+  temForte: boolean,
+  temClassificacao18 = false,
+): AdultAutoDecision {
   if (atual.adult_reason === "ai_review") return null
   if (temForte) {
     return atual.adult_auto && atual.adult_reason === "tag_explicit" ? null : { adult_auto: true, adult_reason: "tag_explicit" }
   }
-  // Sem tag forte: desliga o que a régua de TAGS tinha ligado (inclusive o legado 'tag_soft_score').
-  if (atual.adult_auto && (atual.adult_reason === "tag_explicit" || atual.adult_reason === "tag_soft_score")) {
+  if (temClassificacao18) {
+    return atual.adult_auto && atual.adult_reason === "official_rating" ? null : { adult_auto: true, adult_reason: "official_rating" }
+  }
+  // Sem sinal: desliga o que esta régua tinha ligado (inclusive o legado 'tag_soft_score').
+  if (atual.adult_auto && atual.adult_reason != null && MOTIVOS_DA_REGUA.has(atual.adult_reason)) {
     return { adult_auto: false, adult_reason: null }
   }
   return null
 }
 
 /**
- * Aplica `decideAdultAuto` a UMA obra, lendo as tags atuais. Chame depois de MUDAR A COMPOSIÇÃO DE
- * TAGS da obra (formulário, "Atualizar dados", inferência, tag nova enriquecida, flag de tag
- * alterada). A nota não entra: mudar a nota não muda o gate.
+ * Lê o estado atual e as duas entradas da régua (tag forte, classificação 18) e devolve a decisão.
+ * LANÇA em erro de leitura — sem isso uma falha transitória viraria "sem sinal" e desligaria o gate.
+ */
+export async function planAdultAuto(supabase: Admin, workId: string): Promise<AdultAutoDecision> {
+  const { data: work, error: wErr } = await supabase
+    .from("works")
+    .select("adult_auto, adult_reason")
+    .eq("id", workId)
+    .maybeSingle()
+  if (wErr) throw new Error(`works: ${wErr.message}`)
+  if (!work) return null
+
+  const { data: wtRows, error: tErr } = await supabase
+    .from("work_tags")
+    .select("tags(adult_indicator_strong)")
+    .eq("work_id", workId)
+  if (tErr) throw new Error(`work_tags: ${tErr.message}`)
+  const temForte = ((wtRows ?? []) as unknown as Array<{ tags: { adult_indicator_strong: boolean } | null }>)
+    .some((r) => r.tags?.adult_indicator_strong === true)
+
+  const { data: rating, error: rErr } = await supabase
+    .from("work_age_rating")
+    .select("faixa")
+    .eq("work_id", workId)
+    .eq("versao", "obra")
+    .maybeSingle()
+  if (rErr) throw new Error(`work_age_rating: ${rErr.message}`)
+  const temClassificacao18 = Number((rating as { faixa?: unknown } | null)?.faixa) === 18
+
+  return decideAdultAuto(work as { adult_auto: boolean; adult_reason: string | null }, temForte, temClassificacao18)
+}
+
+/**
+ * Aplica `decideAdultAuto` a UMA obra. Chame depois de MUDAR A COMPOSIÇÃO DE TAGS da obra
+ * (formulário, "Atualizar dados", inferência, tag nova enriquecida, flag de tag alterada) ou a
+ * classificação etária dela. A nota não entra: mudar a nota não muda o gate.
  *
- * Best-effort: loga e volta em silêncio se algo falhar — nunca quebra o fluxo de salvar tags.
+ * Best-effort: loga e volta sem gravar se algo falhar — nunca quebra o fluxo de salvar tags.
  */
 export async function recomputeAdultAuto(supabase: Admin, workId: string): Promise<void> {
   try {
-    const { data: work } = await supabase
-      .from("works")
-      .select("adult_auto, adult_reason")
-      .eq("id", workId)
-      .maybeSingle()
-    if (!work) return
-
-    const { data: wtRows } = await supabase
-      .from("work_tags")
-      .select("tags(adult_indicator_strong)")
-      .eq("work_id", workId)
-    const temForte = ((wtRows ?? []) as unknown as Array<{ tags: { adult_indicator_strong: boolean } | null }>)
-      .some((r) => r.tags?.adult_indicator_strong === true)
-
-    const d = decideAdultAuto(work as { adult_auto: boolean; adult_reason: string | null }, temForte)
+    const d = await planAdultAuto(supabase, workId)
     if (!d) return
-    await supabase.from("works").update(d).eq("id", workId)
+    const { error } = await supabase.from("works").update(d).eq("id", workId)
+    if (error) throw new Error(error.message)
   } catch (err) {
     console.warn("[recomputeAdultAuto] falhou:", err instanceof Error ? err.message : err)
   }

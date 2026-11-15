@@ -325,6 +325,7 @@ const FORMAS = {
   "synopsis_quality_predictions→works_owner": "OBJETO",
   "tag_subgroup_assignment→tag_subgroup": "OBJETO",
   "user_work_state→works": "OBJETO",
+  "work_age_rating→works": "OBJETO",
   "work_external_ids→works": "OBJETO",
   "work_genres→genres": "OBJETO",
   "work_tags→tags": "OBJETO",
