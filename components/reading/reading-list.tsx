@@ -181,16 +181,20 @@ function newChapterCount(result: ReadingUpdateResult | undefined): number {
 
 /**
  * Quantos capítulos lançados ainda não foram lidos. Preferência: contagem EXATA da
- * lista real (mangago, pós-check), mas só enquanto `read` for o valor salvo — depois
- * de uma edição in-loco ela fica velha e recomputamos por `lançado − lido`. `null` quando
- * não dá pra saber.
+ * lista real (mangago, pós-check), mas só enquanto `read` for o lido COM QUE ELA FOI
+ * CONTADA (`unreadCountReadBase`) — depois de marcar capítulos ela fica velha e recomputamos
+ * por `lançado − lido`. `null` quando não dá pra saber.
+ *
+ * 🔴 Comparar com o lido SALVO (`w.chaptersRead`) não basta: salvar recarrega a página, o salvo
+ * passa a ser o novo lido, e a contagem velha voltava a valer — a obra lida até o fim ficava com
+ * "1 pra ler" e presa em "Acompanhando", que é decidido por este mesmo número.
  */
 function pendingOf(
   w: ReadingWork,
   result: ReadingUpdateResult | undefined,
   read: number,
 ): number | null {
-  if (result?.unreadCount != null && read === (w.chaptersRead ?? 0)) return result.unreadCount
+  if (result?.unreadCount != null && result.unreadCountReadBase === read) return result.unreadCount
   const lancado = latestOf(w, result)
   if (lancado == null) return null
   return wholeChapters(lancado - read)
