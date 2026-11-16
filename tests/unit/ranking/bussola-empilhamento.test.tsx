@@ -1,106 +1,124 @@
-import { vi, describe, it, expect } from "vitest"
+import { vi, describe, it, expect, beforeEach } from "vitest"
 
 vi.mock("server-only", () => ({}))
+vi.mock("@/server/actions/bussola", () => ({ getBussolaLinks: vi.fn(async () => null) }))
 
 import { render } from "@testing-library/react"
 import { BussolaPlane } from "@/components/ranking/bussola-plane"
 import type { BussolaDatum } from "@/components/ranking/bussola-plane"
+import { separateCovers, type CoverPoint } from "@/lib/ranking/bussola-map"
 
 /**
- * Obras EMPILHADAS no plano.
+ * Capas que caem no MESMO lugar.
  *
- * `computeWorkForces` arredonda as duas forças pra inteiro (chance =
- * `round(chance_score)`, avaliação = `round(platform_avg × 10)`) antes do
- * percentil, então obras com valores diferentes caem na MESMA coordenada.
- * Medido em 2026-08-08 nas 40 obras do topo do acervo: dois pares assim.
- *
- * Empilhados sem tratamento, os dois desenhavam um anel — a mesma imagem do
- * ponto ACESO, que foi lida como estado — e o menor podia sumir inteiro atrás do
- * maior, sem hover e sem rastro. Duas defesas, testadas aqui:
- *   1. os empatados se afastam num círculo pequeno em volta do ponto real
- *   2. a pintura vai do maior pro menor, então o pequeno nunca fica escondido
+ * A nota da crítica tem poucos valores distintos e a chance é inteira, então obras diferentes
+ * caem no mesmo ponto (medido em 2026-08-08: dois pares nas 40 do topo). Empilhadas, uma capa
+ * some atrás da outra. A separação:
+ *   1. afasta até a sobreposição ficar em no máximo METADE da capa (pedido da Ana: separar por
+ *      inteiro espalhava os grupos e apagava a diferença entre eles);
+ *   2. nunca cruza a mediana — o canto (no par principal, o tipo de aposta) não muda;
+ *   3. mantém a capa inteira dentro da área do mapa;
+ *   4. é determinística.
  */
 
-const dotsOf = (container: HTMLElement) =>
-  [...container.querySelectorAll<HTMLElement>("a[aria-label*='alcance']")]
+const W = 800
+const H = 440
+const SIZE = 42
 
-const posOf = (el: HTMLElement) => ({ left: parseFloat(el.style.left), bottom: parseFloat(el.style.bottom) })
+/** Sobreposição relativa de dois quadrados de lado `s` com centros a (dx, dy). */
+const overlapFrac = (dx: number, dy: number, s: number) =>
+  (Math.max(0, s - Math.abs(dx)) * Math.max(0, s - Math.abs(dy))) / (s * s)
 
-/** Duas obras que caem no MESMO ponto: 68,0/68,4 → 68 e 8,50/8,54 → 85. */
-const EMPATE: BussolaDatum[] = [
-  { workId: "grande", title: "Empatada com muitos votos", coverUrls: [], isAdult: false, isMixed: false, year: 2021, chanceScore: 68.0, platformAvg: 8.5, totalVotes: 30000, expectedScore: 8.5 },
-  { workId: "pequena", title: "Empatada com poucos votos", coverUrls: [], isAdult: false, isMixed: false, year: 2022, chanceScore: 68.4, platformAvg: 8.54, totalVotes: 900, expectedScore: 8.4 },
-  { workId: "outra", title: "Sozinha", coverUrls: [], isAdult: false, isMixed: false, year: 2020, chanceScore: 30, platformAvg: 7.2, totalVotes: 5000, expectedScore: 7.0 },
-]
-
-describe("BussolaPlane — obras empilhadas", () => {
-  it("separa duas obras que caem no mesmo ponto", () => {
-    const { container, unmount } = render(<BussolaPlane entries={EMPATE} />)
-    const [a, b] = ["grande", "pequena"].map(
-      (id) => dotsOf(container).find((el) => (el.getAttribute("aria-label") ?? "").startsWith(id === "grande" ? "Empatada com muitos" : "Empatada com poucos"))!,
-    )
-    const pa = posOf(a)
-    const pb = posOf(b)
-    expect(pa.left).not.toBe(pb.left)
-    expect(pa.bottom).not.toBe(pb.bottom)
-    unmount()
-  })
-
-  it("afasta no MÁXIMO 40% de um passo de percentil — o empate se resolve dentro da célula dele", () => {
-    // Passo de percentil = 100/n. Afastar mais que isso empurraria o par pra
-    // dentro da vizinhança, e aí a posição passaria a mentir sobre o valor.
-    const { container, unmount } = render(<BussolaPlane entries={EMPATE} />)
-    const passo = 100 / EMPATE.length
-    const [a, b] = dotsOf(container)
-      .filter((el) => (el.getAttribute("aria-label") ?? "").startsWith("Empatada"))
-      .map(posOf)
-    const dist = Math.hypot(a.left - b.left, a.bottom - b.bottom)
-    expect(dist).toBeGreaterThan(0)
-    expect(dist).toBeLessThanOrEqual(passo * 0.8 + 1e-9) // 2 × raio máximo
-    unmount()
-  })
-
-  it("nunca atravessa a mediana — o quadrante dá a COR, e cor e posição não podem discordar", () => {
-    // 20/55/55/90: o par empatado cai EXATAMENTE em 50% (midrank), em cima da
-    // cruz. É o único caso em que o afastamento poderia jogar um ponto pro
-    // quadrante errado — com a cor do quadrante certo.
-    const naMediana: BussolaDatum[] = [
-      { workId: "1", title: "Baixa", coverUrls: [], isAdult: false, isMixed: false, year: 2020, chanceScore: 20, platformAvg: 6.0, totalVotes: 100, expectedScore: 6 },
-      { workId: "2", title: "Empate A", coverUrls: [], isAdult: false, isMixed: false, year: 2021, chanceScore: 55, platformAvg: 8.0, totalVotes: 9000, expectedScore: 8 },
-      { workId: "3", title: "Empate B", coverUrls: [], isAdult: false, isMixed: false, year: 2022, chanceScore: 55, platformAvg: 8.0, totalVotes: 300, expectedScore: 8 },
-      { workId: "4", title: "Alta", coverUrls: [], isAdult: false, isMixed: false, year: 2023, chanceScore: 90, platformAvg: 9.2, totalVotes: 40000, expectedScore: 9 },
+describe("separateCovers", () => {
+  it("afasta obras empatadas até a sobreposição ficar em no máximo metade", () => {
+    const pts: CoverPoint[] = [
+      { id: "a", x: 70, y: 70 },
+      { id: "b", x: 70, y: 70 },
+      { id: "c", x: 70, y: 70 },
     ]
-    const { container, unmount } = render(<BussolaPlane entries={naMediana} />)
-    const empatados = dotsOf(container).filter((el) => (el.getAttribute("aria-label") ?? "").startsWith("Empate"))
-    expect(empatados).toHaveLength(2)
-    for (const el of empatados) {
-      const { left, bottom } = posOf(el)
-      // `classifyArchetypeByPercentile` usa >= 50 pros dois eixos: quem estava em
-      // 50 é "safe", e tem que CONTINUAR do lado direito e de cima.
-      expect(left).toBeGreaterThanOrEqual(50)
-      expect(bottom).toBeGreaterThanOrEqual(50)
+    const out = separateCovers(pts, W, H, SIZE)
+    const ids = ["a", "b", "c"]
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const A = out.get(ids[i])!
+        const B = out.get(ids[j])!
+        expect(overlapFrac(B.x - A.x, B.y - A.y, SIZE)).toBeLessThanOrEqual(0.5 + 0.005)
+      }
     }
-    unmount()
   })
 
-  it("pinta do maior pro menor, pra ponto pequeno nunca sumir atrás de ponto grande", () => {
-    const { container, unmount } = render(<BussolaPlane entries={EMPATE} />)
-    const larguras = dotsOf(container).map((el) => parseFloat(el.style.width))
-    expect(larguras).toEqual([...larguras].sort((a, b) => b - a))
-    unmount()
+  it("NÃO separa por inteiro: capas empatadas continuam encostadas (o grupo fica junto)", () => {
+    const out = separateCovers([{ id: "a", x: 70, y: 70 }, { id: "b", x: 70, y: 70 }], W, H, SIZE)
+    const A = out.get("a")!
+    const B = out.get("b")!
+    expect(Math.hypot(B.x - A.x, B.y - A.y)).toBeLessThan(SIZE)
   })
 
-  it("não mexe em nada quando não há empate", () => {
-    const semEmpate: BussolaDatum[] = [
-      { workId: "a", title: "A", coverUrls: [], isAdult: false, isMixed: false, year: 2020, chanceScore: 20, platformAvg: 7.0, totalVotes: 100, expectedScore: 7 },
-      { workId: "b", title: "B", coverUrls: [], isAdult: false, isMixed: false, year: 2021, chanceScore: 50, platformAvg: 8.0, totalVotes: 200, expectedScore: 8 },
-      { workId: "c", title: "C", coverUrls: [], isAdult: false, isMixed: false, year: 2022, chanceScore: 80, platformAvg: 9.0, totalVotes: 300, expectedScore: 9 },
+  it("nunca cruza a mediana, nem com um aglomerado em cima da cruz", () => {
+    const pts: CoverPoint[] = Array.from({ length: 12 }, (_, i) => ({
+      id: `p${i}`,
+      x: i % 2 ? 50 : 49,
+      y: i % 3 ? 50 : 49.5,
+    }))
+    const out = separateCovers(pts, W, H, SIZE)
+    for (const p of pts) {
+      const q = out.get(p.id)!
+      if (p.x >= 50) expect(q.x).toBeGreaterThanOrEqual(W / 2)
+      else expect(q.x).toBeLessThanOrEqual(W / 2)
+      // y cresce para baixo: em cima da mediana (percentil ≥ 50) = y ≤ H/2
+      if (p.y >= 50) expect(q.y).toBeLessThanOrEqual(H / 2)
+      else expect(q.y).toBeGreaterThanOrEqual(H / 2)
+    }
+  })
+
+  it("mantém a capa inteira dentro da área, inclusive nos extremos", () => {
+    const out = separateCovers([{ id: "a", x: 0, y: 0 }, { id: "b", x: 100, y: 100 }], W, H, SIZE)
+    for (const q of out.values()) {
+      expect(q.x).toBeGreaterThanOrEqual(SIZE / 2)
+      expect(q.x).toBeLessThanOrEqual(W - SIZE / 2)
+      expect(q.y).toBeGreaterThanOrEqual(SIZE / 2)
+      expect(q.y).toBeLessThanOrEqual(H - SIZE / 2)
+    }
+  })
+
+  it("quem não encosta em ninguém fica no lugar real", () => {
+    const out = separateCovers([{ id: "a", x: 20, y: 30 }, { id: "b", x: 80, y: 75 }], W, H, SIZE)
+    for (const q of out.values()) {
+      expect(Math.abs(q.x - q.ox)).toBeLessThan(0.1)
+      expect(Math.abs(q.y - q.oy)).toBeLessThan(0.1)
+    }
+  })
+
+  it("é determinística: o mesmo conjunto dá o mesmo desenho", () => {
+    const pts: CoverPoint[] = Array.from({ length: 20 }, (_, i) => ({ id: `p${i}`, x: 60 + (i % 3), y: 60 + (i % 2) }))
+    const a = separateCovers(pts, W, H, SIZE)
+    const b = separateCovers(pts, W, H, SIZE)
+    expect([...a.entries()]).toEqual([...b.entries()])
+  })
+})
+
+beforeEach(() => window.localStorage.clear())
+
+describe("Bússola do /ranking — empate desenhado", () => {
+  it("duas obras que caem no mesmo ponto saem em lugares diferentes, do mesmo lado da mediana", () => {
+    // 68,0/68,4 → 68% e 8,50/8,54 → 8,5: mesmo ponto na tela.
+    const EMPATE: BussolaDatum[] = [
+      { workId: "grande", title: "Empatada A", coverUrls: [], isAdult: false, isMixed: false, year: 2021, chanceScore: 68.0, platformAvg: 8.5, totalVotes: 30000, expectedScore: 8.5 },
+      { workId: "pequena", title: "Empatada B", coverUrls: [], isAdult: false, isMixed: false, year: 2022, chanceScore: 68.4, platformAvg: 8.54, totalVotes: 900, expectedScore: 8.4 },
+      { workId: "outra", title: "Sozinha", coverUrls: [], isAdult: false, isMixed: false, year: 2020, chanceScore: 30, platformAvg: 7.2, totalVotes: 5000, expectedScore: 7.0 },
     ]
-    const { container, unmount } = render(<BussolaPlane entries={semEmpate} />)
-    // percentis de 3 obras distintas: 16,67 / 50 / 83,33 — redondos, sem sobra
-    // de deslocamento nenhum.
-    const lefts = dotsOf(container).map((el) => parseFloat(el.style.left)).sort((a, b) => a - b)
-    expect(lefts.map((v) => Number(v.toFixed(4)))).toEqual([16.6667, 50, 83.3333])
+    const { container, unmount } = render(<BussolaPlane entries={EMPATE} />)
+    const pos = (id: string) => {
+      const el = container.querySelector<HTMLElement>(`[data-point="${id}"]`)!
+      return { left: parseFloat(el.style.left), top: parseFloat(el.style.top) }
+    }
+    const a = pos("grande")
+    const b = pos("pequena")
+    expect(a.left !== b.left || a.top !== b.top).toBe(true)
+    for (const p of [a, b]) {
+      expect(p.left).toBeGreaterThanOrEqual(50)
+      expect(p.top).toBeLessThanOrEqual(50)
+    }
     unmount()
   })
 })

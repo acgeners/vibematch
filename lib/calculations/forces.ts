@@ -1,3 +1,5 @@
+import { roundToDisplayScore } from "@/lib/score-rounding"
+
 /**
  * As 3 forças da Bússola de Leitura (0–100) — ver PLANO-BUSSOLA-3-FORCAS.md.
  *
@@ -97,9 +99,12 @@ export function computeWorkForces(input: {
 }): WorkForces {
   const chance = displayChance(input.chanceScore)
 
+  // A nota que a tela imprime (`toFixed(1)`), ×10. `Math.round(x * 10)` diverge dela em ~4% dos
+  // valores de 2 casas (8,35 virava 84 com a tela dizendo 8,3), e a Bússola posiciona a obra pela
+  // nota impressa: com as duas réguas, o canto e o tipo de aposta podiam discordar.
   const avaliacao =
     input.platformAvg != null && Number.isFinite(input.platformAvg)
-      ? Math.round(clamp(input.platformAvg * 10, 0, 100))
+      ? Math.round(clamp(roundToDisplayScore(input.platformAvg) * 10, 0, 100))
       : null
 
   const votes = input.totalVotes ?? 0
