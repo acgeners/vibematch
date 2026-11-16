@@ -92,13 +92,29 @@ describe("buildAutoRefreshPlan — status pela regra única", () => {
     expect(skippedConflicts).not.toContain("publicationStatus")
   })
 
-  it("nunca tira uma obra de Completed, mesmo sem conflito", () => {
+  it("só o MangaUpdates tira uma obra de Completed", () => {
     const voltou = {
       ...base,
       publicationStatus: "Ongoing",
       fieldProvenance: { publicationStatus: [{ value: "Ongoing", sources: ["mangaupdates", "anilist"] }] },
     } as ExternalWorkData
-    expect(buildAutoRefreshPlan(voltou, [], "Completed").updates.publicationStatus).toBeUndefined()
+    expect(buildAutoRefreshPlan(voltou, [], "Completed").updates.publicationStatus).toBe("Ongoing")
+    const soComix = {
+      ...base,
+      fieldProvenance: { publicationStatus: [{ value: "Hiatus", sources: ["comix"] }] },
+    } as ExternalWorkData
+    expect(buildAutoRefreshPlan(soComix, [], "Completed").updates.publicationStatus).toBeUndefined()
+  })
+
+  it("o status é o da tradução: total do original (MangaUpdates) contra o último disponível", () => {
+    const atrasada = {
+      ...base,
+      totalChapters: 29,
+      mangaUpdatesStatusText: "78 Chapters (Complete)",
+      fieldProvenance: { publicationStatus: [{ value: "Completed", sources: ["mangaupdates"] }] },
+    } as ExternalWorkData
+    expect(buildAutoRefreshPlan(atrasada, [], "Ongoing").updates.publicationStatus).toBeUndefined()
+    expect(buildAutoRefreshPlan(atrasada, [], "Completed").updates.publicationStatus).toBe("Ongoing")
   })
 
   it("status só de outra fonte (sem MangaUpdates nem Comix) não é gravado", () => {

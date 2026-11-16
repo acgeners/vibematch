@@ -1,5 +1,6 @@
 import type { ConflictField, ExternalWorkData } from "./types"
 import { decidePublicationStatus, statusBySource } from "./publication-status-sync"
+import { originalChaptersFromStatus } from "./mangaupdates"
 
 /**
  * Campos que a atualização AUTOMÁTICA (Assinante) pode gravar.
@@ -94,9 +95,15 @@ export function buildAutoRefreshPlan(
 
   for (const field of AUTO_REFRESHABLE) {
     if (field === "publicationStatus") {
+      // Status da TRADUÇÃO: o total do original (cabeçalho do status do MangaUpdates) contra o
+      // último disponível, que é o `totalChapters` do merge (`pickTotalChapters`).
       const decision = decidePublicationStatus(
         currentStatus,
         statusBySource(data.fieldProvenance?.publicationStatus),
+        {
+          originalChapters: originalChaptersFromStatus(data.mangaUpdatesStatusText),
+          availableChapters: data.totalChapters ?? null,
+        },
       )
       if (decision) updates.publicationStatus = decision.status
       continue

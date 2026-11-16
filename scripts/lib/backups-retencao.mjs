@@ -214,6 +214,18 @@ export const FAMILIAS = [
     env: "NORMALIZAR_TITULOS_KEEP",
   },
   {
+    id: "status-pela-traducao",
+    dono: "status-pela-traducao.ts",
+    // Datado, um diretório por execução com o status anterior de cada obra tocada. Alguns KB.
+    // É a única forma de desfazer — o banco não tem PITR.
+    oQueE: "status de publicação anterior das obras reclassificadas pela tradução",
+    casa: (n) => /^status-pela-traducao-\d{4}/.test(n),
+    exemplo: "status-pela-traducao-2026-11-16T05-00-00-000Z",
+    copiaLocal: true, // estado anterior: a única forma de desfazer
+    keepPadrao: 10,
+    env: "STATUS_PELA_TRADUCAO_KEEP",
+  },
+  {
     id: "normalizar-titulos-alternativos",
     dono: "normalizar-titulos-alternativos.ts",
     // Datado, um diretório por execução com a lista ANTES e DEPOIS de cada obra tocada.
