@@ -4,6 +4,9 @@ import { useState } from "react"
 import { toast } from "sonner"
 import { Loader2, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { BatchSizeInput } from "@/components/settings/batch-size-input"
+import { LastRunHint } from "@/components/settings/last-run-hint"
+import { firstN, latestCheck } from "@/lib/catalog/batch-targets"
 import { RunningStrip } from "@/components/settings/running-strip"
 import { StatCard } from "@/components/settings/stat-card"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
@@ -77,10 +80,12 @@ export function CatalogSyncPanel({
   const tasks = useAppTasks()
   const isRunning = tasks.some((t) => t.id === TASK_ID && t.status === "running")
   const [summary, setSummary] = useState<RunSummary | null>(null)
+  const [limit, setLimit] = useState<number | null>(null)
   const refresh = useRefresh()
 
   const handleRun = () => {
-    const ids = targets.map((t) => t.id)
+    // As N primeiras = as checadas há mais tempo (a lista chega nessa ordem).
+    const ids = firstN(targets, limit).map((t) => t.id)
     const total = ids.length
     if (total === 0) return
     const titleById = new Map(targets.map((t) => [t.id, t.title]))
@@ -137,6 +142,7 @@ export function CatalogSyncPanel({
           </p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
+          <BatchSizeInput value={limit} onChange={setLimit} total={targets.length} disabled={isRunning} />
           <Button
             onClick={handleRun}
             disabled={isRunning || targets.length === 0 || !available}
@@ -148,6 +154,9 @@ export function CatalogSyncPanel({
           {!available && (
             <span className="text-[11px] text-muted-foreground">Indisponível neste servidor.</span>
           )}
+          {/* A checagem mais recente entre as obras do lote (pedido de 16/11/2026). Também conta a
+              checagem da /reading, que é a mesma: as duas gravam `chapters_checked_at`. */}
+          <LastRunHint iso={latestCheck(targets)} label="Última checagem" showDateTime />
         </div>
       </div>
 

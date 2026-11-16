@@ -5,6 +5,7 @@ import { Activity, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { LastRunHint } from "@/components/settings/last-run-hint"
+import { useLastTest } from "@/components/settings/use-last-test"
 import { ACCENT_BUTTON } from "@/lib/settings-accent"
 import type { SettingsAccent } from "@/lib/settings-accent"
 import { cn } from "@/lib/utils"
@@ -26,6 +27,7 @@ function formatMs(ms: number): string {
 export function ProtectedSourcesHealthPanel({ accent }: { accent: SettingsAccent }) {
   const [result, setResult] = useState<SourcesHealthResult | null>(null)
   const [pending, startTransition] = useTransition()
+  const { last, remember } = useLastTest("satoria:last-test:cloudflare-sources")
 
   const run = () => {
     startTransition(async () => {
@@ -34,6 +36,7 @@ export function ProtectedSourcesHealthPanel({ accent }: { accent: SettingsAccent
         setResult(res)
         // Linhas informativas (o sidecar) não entram no veredito — só o desfecho das fontes.
         const decisive = res.checks.filter((c) => !c.informational)
+        remember(res.checkedAt, decisive.every((c) => c.ok))
         if (decisive.every((c) => c.ok)) {
           toast.success("Mangago e AnimePlanet estão puxando dados.")
         } else {
@@ -59,7 +62,9 @@ export function ProtectedSourcesHealthPanel({ accent }: { accent: SettingsAccent
             {pending ? <Loader2 className="animate-spin" /> : <Activity />}
             {pending ? "Testando…" : "Testar agora"}
           </Button>
-          {result && <LastRunHint iso={result.checkedAt} label="Último teste" />}
+          {last && (
+            <LastRunHint iso={last.checkedAt} label={`Último teste (${last.ok ? "OK" : "com problemas"})`} showDateTime />
+          )}
         </div>
       </div>
 

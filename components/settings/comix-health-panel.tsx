@@ -5,6 +5,7 @@ import { Activity, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { LastRunHint } from "@/components/settings/last-run-hint"
+import { useLastTest } from "@/components/settings/use-last-test"
 import { ACCENT_BUTTON } from "@/lib/settings-accent"
 import type { SettingsAccent } from "@/lib/settings-accent"
 import { cn } from "@/lib/utils"
@@ -47,6 +48,7 @@ export function ComixHealthPanel({
 }) {
   const [result, setResult] = useState<ComixHealthResult | null>(null)
   const [pending, startTransition] = useTransition()
+  const { last, remember } = useLastTest("satoria:last-test:comix")
 
   const run = () => {
     startTransition(async () => {
@@ -57,6 +59,7 @@ export function ComixHealthPanel({
         // Re-busca o chrome pra o indicador "Comix fora" na sidebar refletir já.
         refreshChrome()
         const failed = res.checks.filter((c) => !c.ok)
+        remember(res.checkedAt, failed.length === 0)
         if (failed.length === 0) {
           toast.success("Comix OK — todas as chamadas funcionando.")
         } else {
@@ -89,7 +92,9 @@ export function ComixHealthPanel({
           {!available && (
             <span className="text-[11px] text-muted-foreground">Indisponível neste servidor: rode no localhost.</span>
           )}
-          {result && <LastRunHint iso={result.checkedAt} label="Último teste" />}
+          {last && (
+            <LastRunHint iso={last.checkedAt} label={`Último teste (${last.ok ? "OK" : "com problemas"})`} showDateTime />
+          )}
         </div>
       </div>
 
