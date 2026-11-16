@@ -42,22 +42,20 @@ export async function planReadEditionsForWrite(
   if (!touchesEvaluation(patch) && context.kind !== "explicit") return { plans, error: null }
 
   const catalog = deps.catalogClient ?? createAdminClient()
-  const mixed = new Map<string, { extras: boolean }>()
+  const mixed = new Set<string>()
   for (let i = 0; i < workIds.length; i += LOTE) {
     const lote = workIds.slice(i, i + LOTE)
     const { data, error } = await catalog
       .from("work_edition_state")
-      .select("work_id, r18_extra_chapters")
+      .select("work_id")
       .eq("state", "mixed")
       .in("work_id", lote)
     if (error) return { plans, error: `Falha lendo as versões da obra: ${error.message}` }
-    for (const r of (data ?? []) as Array<{ work_id: string; r18_extra_chapters: boolean | null }>) {
-      mixed.set(r.work_id, { extras: r.r18_extra_chapters === true })
-    }
+    for (const r of (data ?? []) as Array<{ work_id: string }>) mixed.add(r.work_id)
   }
   if (mixed.size === 0) return { plans, error: null }
 
-  const mixedIds = [...mixed.keys()]
+  const mixedIds = [...mixed]
   const current = new Map<string, CurrentEvaluationRow>()
   for (let i = 0; i < mixedIds.length; i += LOTE) {
     const lote = mixedIds.slice(i, i + LOTE)
@@ -76,14 +74,14 @@ export async function planReadEditionsForWrite(
 
   // A preferência só é lida se alguma avaliação NOVA precisar da padrão da conta.
   let hideAdult: boolean | null = null
-  const padraoDa = async (workId: string): Promise<MixedEdition | null> => {
+  const padraoDa = async (): Promise<MixedEdition | null> => {
     if (context.kind !== "default") return null
     if (hideAdult == null) {
       hideAdult = deps.loadHideAdult
         ? await deps.loadHideAdult(userId)
         : (await loadMixedEditionSettingsFor(userId, catalog)).hideAdult
     }
-    return defaultMixedEdition({ hideAdult, signedIn: true, r18OnlyInExtras: mixed.get(workId)?.extras === true })
+    return defaultMixedEdition({ hideAdult, signedIn: true })
   }
 
   try {
@@ -96,7 +94,7 @@ export async function planReadEditionsForWrite(
         current: atual,
         patch,
         context,
-        defaultEdition: novaSemTela ? await padraoDa(workId) : null,
+        defaultEdition: novaSemTela ? await padraoDa() : null,
       })
       if (plan) plans.set(workId, plan)
     }

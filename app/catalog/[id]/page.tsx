@@ -560,7 +560,7 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
   /**
    * 🔴 EDIÇÃO ATIVA (obra mixed, fase 2). A precedência é a de `resolveMixedEdition`: ocultar 18+
    * força a normal (a R18 só abre com `?edition=r18` e confirmação), `?adult=only` força a R18, depois
-   * a URL; sem nada disso, R18 só nos extras ⇒ normal, conta logada ⇒ R18, anônimo ⇒ normal. O
+   * a URL; sem nada disso, conta logada ⇒ R18, anônimo ⇒ normal (R18 só nos extras não muda isso). O
    * `adult_content` de `category_scores` é a nota MISTURADA das duas edições — na página ele é TROCADO pela nota da edição ativa, ou some
    * ("não avaliado para esta edição"). Nunca a da outra edição.
    */
@@ -568,7 +568,6 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
     ? resolveMixedEdition({
         hideAdult: editionSettings?.hideAdult ?? false,
         signedIn: editionSettings?.signedIn ?? false,
-        r18OnlyInExtras: r18ExtrasWorkIds?.has(work.id as string) ?? false,
         adultFilter: sp.adult === "hide" || sp.adult === "only" ? sp.adult : null,
         urlEdition: parseMixedEdition(sp.edition),
       })
@@ -1094,7 +1093,13 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
       {/* Obra mixed: UMA obra, DUAS edições. O seletor fica antes das abas porque vale para a página
           inteira (nota, tags, avisos, reviews, Nota Prevista). Só mixed — single, r18_only e unknown
           têm uma edição só. */}
-      {editionResolution && <EditionSelector basePath={`/catalog/${id}`} resolution={editionResolution} />}
+      {editionResolution && (
+        <EditionSelector
+          basePath={`/catalog/${id}`}
+          resolution={editionResolution}
+          r18OnlyInExtras={r18ExtrasWorkIds?.has(work.id as string) ?? false}
+        />
+      )}
 
       <Tabs defaultValue="overview" className="w-full">
         {/* Tabs navbar (full width, 5 abas com wrap responsivo) */}

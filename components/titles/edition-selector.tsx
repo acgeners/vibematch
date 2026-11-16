@@ -3,8 +3,17 @@ import { cn } from "@/lib/utils"
 import { EDITION_LABEL, MIXED_EDITIONS } from "@/lib/editions/mixed-edition"
 import type { EditionResolution, MixedEdition } from "@/lib/editions/mixed-edition"
 
-/** A frase ao lado do seletor: POR QUE esta versão está aberta. Exportada para o teste. */
-export function editionSelectorNote(resolution: EditionResolution): string | null {
+/**
+ * A frase ao lado do seletor: POR QUE esta versão está aberta e, quando a parte R18 da obra está só
+ * nos capítulos extras, esse fato. Ele não muda o padrão (desde 2026-11-15), mas diz a quem escolhe
+ * que a história principal é a mesma nas duas versões. Exportada para o teste.
+ */
+export function editionSelectorNote(resolution: EditionResolution, r18OnlyInExtras = false): string | null {
+  const extras = r18OnlyInExtras ? "A parte R18 desta obra está só nos capítulos extras." : null
+  return [motivoDaVersao(resolution), extras].filter(Boolean).join(" ") || null
+}
+
+function motivoDaVersao(resolution: EditionResolution): string | null {
   switch (resolution.source) {
     case "hide_adult":
       return "Você oculta conteúdo 18+: a versão R18 pede confirmação e sua preferência não muda."
@@ -14,8 +23,6 @@ export function editionSelectorNote(resolution: EditionResolution): string | nul
       return "O filtro da lista mostra só 18+."
     case "account":
       return "Você vê conteúdo 18+, então a versão R18 é a padrão."
-    case "extras_only":
-      return "A versão R18 desta obra está só nos extras; a normal é a padrão."
     case "anonymous":
       return "Esta obra tem duas versões; a normal é a padrão."
     case "url":
@@ -35,11 +42,14 @@ export function editionSelectorNote(resolution: EditionResolution): string | nul
 export function EditionSelector({
   basePath,
   resolution,
+  r18OnlyInExtras = false,
 }: {
   basePath: string
   resolution: EditionResolution
+  /** `work_edition_state.r18_extra_chapters`: só informa, não escolhe a versão. */
+  r18OnlyInExtras?: boolean
 }) {
-  const nota = editionSelectorNote(resolution)
+  const nota = editionSelectorNote(resolution, r18OnlyInExtras)
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5" data-slot="edition-selector">
       <div role="group" aria-label="Versão da obra" className="inline-flex rounded-lg border bg-muted/40 p-0.5">

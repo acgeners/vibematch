@@ -155,7 +155,7 @@ describe(`SCORING_CONTRACT ${SCORING_CONTRACT} descreve o scoring que o código 
       work_id: "m1", edition, criterion_slug: "adult_content", score, source: "ai_evaluated", status: "rated", confidence: "alta",
     })
     const w = buildWork(raw, {} as Parameters<typeof buildWork>[1], {
-      hideAdult: false, r18ExtrasWorkIds: new Set(), rowsByWork: groupEditionRows([linha("normal", 4), linha("r18", 9.5)]),
+      hideAdult: false, rowsByWork: groupEditionRows([linha("normal", 4), linha("r18", 9.5)]),
     })
     expect(w.trainCategoryScores.adult_content, bump).toBe(d.treino === "versao-lida" ? 9.5 : 8)
   })

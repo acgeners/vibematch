@@ -30,7 +30,6 @@ export type EditionChoiceSource =
   | "adult_filter_hide" // o filtro da lista pediu "esconder 18+" ⇒ normal
   | "adult_filter_only" // o filtro da lista pediu "só 18+" ⇒ R18
   | "url" //               ?edition= na página
-  | "extras_only" //       a R18 desta obra está só nos extras ⇒ normal
   | "account" //           conta logada que não oculta 18+ ⇒ R18
   | "anonymous" //         visitante sem conta ⇒ normal
 
@@ -49,11 +48,6 @@ export interface EditionContext {
   hideAdult: boolean
   /** Há sessão. O visitante anônimo não declarou interesse em 18+ ⇒ normal. */
   signedIn: boolean
-  /**
-   * A R18 DESTA obra está só nos extras/side stories (`work_edition_state.r18_extra_chapters`): a
-   * história principal é normal, então a versão padrão é a normal mesmo para quem vê 18+.
-   */
-  r18OnlyInExtras?: boolean
   /** `?adult=` das listas (`hide` | `only`). */
   adultFilter?: "hide" | "only" | null
   /** `?edition=` da página da obra. */
@@ -66,9 +60,11 @@ export interface EditionContext {
  *   1. ocultar 18+ (conta ou `?adult=hide`) ⇒ normal — a R18 só abre com `?edition=r18` E confirmação;
  *   2. `?adult=only` ⇒ R18;
  *   3. `?edition=` ⇒ a escolhida;
- *   4. R18 só nos extras ⇒ normal;
- *   5. conta logada (que não oculta 18+) ⇒ R18;
- *   6. anônimo ⇒ normal.
+ *   4. conta logada (que não oculta 18+) ⇒ R18;
+ *   5. anônimo ⇒ normal.
+ * ⚠️ A R18 só nos extras (`work_edition_state.r18_extra_chapters`) NÃO muda o padrão, desde
+ * 2026-11-15 (decisão da Ana): até então essas obras abriam na normal mesmo para quem vê 18+, e o
+ * padrão contradizia a versão que a própria avaliação registra como lida (`read_edition = r18`).
  * ⚠️ `user_settings.preferred_mixed_edition` NÃO entra mais: duas preferências globais podiam se
  * contradizer, e a de 18+ é a que decide. A coluna fica no banco, sem leitor.
  */
@@ -80,18 +76,17 @@ export function resolveMixedEdition(ctx: EditionContext): EditionResolution {
   }
   if (ctx.adultFilter === "only") return { edition: "r18", source: "adult_filter_only", requiresConfirmation: false }
   if (url) return { edition: url, source: "url", requiresConfirmation: false }
-  if (ctx.r18OnlyInExtras) return { edition: "normal", source: "extras_only", requiresConfirmation: false }
   if (ctx.signedIn) return { edition: "r18", source: "account", requiresConfirmation: false }
   return { edition: "normal", source: "anonymous", requiresConfirmation: false }
 }
 
 /**
  * A edição PADRÃO de uma pessoa NUMA OBRA — a que o recálculo usa na Nota Prevista/Chance das obras
- * `mixed` (não há URL nem filtro em background). Mesma régua da página, sem os dois parâmetros. É por
- * obra porque a R18 só nos extras muda o padrão daquela obra.
+ * `mixed` (não há URL nem filtro em background). Mesma régua da página, sem os dois parâmetros. É a
+ * mesma para todas as obras mixed de uma pessoa: depende só da conta.
  */
-export function defaultMixedEdition(ctx: Pick<EditionContext, "hideAdult" | "signedIn" | "r18OnlyInExtras">): MixedEdition {
-  return resolveMixedEdition({ hideAdult: ctx.hideAdult, signedIn: ctx.signedIn, r18OnlyInExtras: ctx.r18OnlyInExtras }).edition
+export function defaultMixedEdition(ctx: Pick<EditionContext, "hideAdult" | "signedIn">): MixedEdition {
+  return resolveMixedEdition({ hideAdult: ctx.hideAdult, signedIn: ctx.signedIn }).edition
 }
 
 /** O selo de conteúdo ao lado do título: "Versão R19 disponível", "18+" ou nenhum. */

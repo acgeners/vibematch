@@ -5729,8 +5729,11 @@ uma mixed usa o `adult_content` dessa versão, e sem nota nela fica sem o atribu
 conhecida, o legado. Avaliação de obra não-mixed não tem versão.
 
 **Edição ativa** (`resolveMixedEdition`): ocultar 18+ ⇒ normal (a R18 só com `?edition=r18` + confirmação,
-sem mudar preferência) · `?adult=only` ⇒ R18 · `?edition=` · R18 só nos extras ⇒ normal · logado ⇒ R18 · anônimo
-⇒ normal. `preferred_mixed_edition` não é lida (coluna legada).
+sem mudar preferência) · `?adult=only` ⇒ R18 · `?edition=` · logado ⇒ R18 · anônimo ⇒ normal.
+`preferred_mixed_edition` não é lida (coluna legada).
+**R18 só nos extras não muda a versão padrão** (decisão da Ana, 15/11/2026): até então essas obras abriam na
+normal para quem vê 18+, contra a `read_edition = r18` gravada nas avaliações dela. Hoje o dado só vira uma
+frase no seletor de versão.
 Anônimo nunca herda a preferência do dono (`getCurrentUserSettingsRow` é só da sessão).
 
 **Na normal saem** tags `r18` e `desconhecida` (classe pelas FLAGS do banco, sem lista de slug —

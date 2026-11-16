@@ -115,11 +115,11 @@ describe("writeReadingState grava a versão de uma avaliação nova", () => {
     expect(de("mixA")).toMatchObject({ read_edition: "normal", read_edition_source: "active_version" })
   })
 
-  it("sem tela (padrão da conta): vê 18+ ⇒ r18; oculta 18+ ⇒ normal; R18 só nos extras ⇒ normal", async () => {
+  it("sem tela (padrão da conta): vê 18+ ⇒ r18, inclusive com R18 só nos extras; oculta 18+ ⇒ normal", async () => {
     const { writeReadingState } = await import("@/server/queries/user-work-state")
     await writeReadingState(U, ["mixA", "mixExtras"], { quick_score: 7 })
     expect(de("mixA")?.read_edition).toBe("r18")
-    expect(de("mixExtras")?.read_edition).toBe("normal")
+    expect(de("mixExtras")?.read_edition).toBe("r18")
     db.user_settings = [{ current_user_id: U, hide_adult_content: true }]
     await writeReadingState(U, ["mixB"], { quick_score: 7 })
     expect(de("mixB")?.read_edition).toBe("normal")

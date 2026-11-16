@@ -343,7 +343,7 @@ export async function setHideAdultContent(enabled: boolean) {
   if (error) return { error: error.message }
 
   // Fase 2 de mixed: ocultar 18+ É a preferência que escolhe a versão padrão das obras mixed (oculto ⇒
-  // normal; visível ⇒ R18, salvo R18 só nos extras). Ela entra na previsão, então recalcula. Sem
+  // normal; visível ⇒ R18). Ela entra na previsão, então recalcula. Sem
   // recalc, a Nota Prevista delas fica escondida (calculada para a outra versão) até o próximo.
   const userId = await getSessionUserId()
   if (userId && (await scheduleUserPredictionRecalc(userId, "setHideAdultContent"))) {

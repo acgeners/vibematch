@@ -33,6 +33,17 @@ describe("seletor de edição", () => {
     expect(screen.getByRole("link", { name: "Versão normal" }).getAttribute("aria-current")).toBe("page")
     expect(screen.getByText(/a versão R18 pede confirmação e sua preferência não muda/)).toBeTruthy()
   })
+  it("R18 só nos extras: abre na R18 para quem vê 18+, e a frase conta o fato dos extras ao lado do motivo", () => {
+    render(
+      <EditionSelector
+        basePath="/catalog/obra"
+        resolution={resolveMixedEdition({ hideAdult: false, signedIn: true })}
+        r18OnlyInExtras
+      />,
+    )
+    expect(screen.getByRole("link", { name: "Versão R18" }).getAttribute("aria-current")).toBe("page")
+    expect(screen.getByText(/Você vê conteúdo 18\+, então a versão R18 é a padrão\. A parte R18 desta obra está só nos capítulos extras\./)).toBeTruthy()
+  })
   it("trocar de edição é navegar: o seletor não chama action nenhuma (a preferência não muda)", () => {
     const src = ler("components/titles/edition-selector.tsx")
     expect(src).not.toMatch(/server\/actions/)
@@ -46,7 +57,7 @@ describe("página da obra — fiação por edição (lida do source)", () => {
   it("o seletor só existe em obra mixed (a resolução só nasce de isMixedWork)", () => {
     expect(page).toMatch(/const isMixedWork = isMixedEditionState\(work\.edition_state\)/)
     expect(page).toMatch(/const editionResolution = isMixedWork\s*\?\s*resolveMixedEdition\(/)
-    expect(page).toMatch(/\{editionResolution && <EditionSelector/)
+    expect(page).toMatch(/\{editionResolution && \(?\s*<EditionSelector/)
   })
   it("a URL (?edition) e o filtro (?adult) entram na resolução; hide vem das preferências", () => {
     expect(page).toMatch(/urlEdition: parseMixedEdition\(sp\.edition\)/)

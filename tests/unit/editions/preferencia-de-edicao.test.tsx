@@ -60,10 +60,12 @@ describe("de onde vem o contexto da versão padrão", () => {
   it("trocar a versão na página não grava preferência nenhuma (o seletor é navegação)", () => {
     expect(ler("components/titles/edition-selector.tsx")).not.toMatch(/server\/actions/)
   })
-  it("a página da obra passa a sessão e os extras à régua", () => {
+  it("a página da obra passa a sessão à régua; os extras vão só para a frase do seletor", () => {
     const page = semComentarios(ler("app/catalog/[id]/page.tsx"))
-    const chamada = page.slice(page.indexOf("resolveMixedEdition({"), page.indexOf("resolveMixedEdition({") + 400)
+    const inicio = page.indexOf("resolveMixedEdition({")
+    const chamada = page.slice(inicio, page.indexOf("})", inicio))
     expect(chamada).toMatch(/signedIn: editionSettings\?\.signedIn/)
-    expect(chamada).toMatch(/r18OnlyInExtras: r18ExtrasWorkIds\?\.has\(/)
+    expect(chamada).not.toMatch(/xtras/)
+    expect(page).toMatch(/<EditionSelector[\s\S]{0,200}r18OnlyInExtras=\{r18ExtrasWorkIds\?\.has\(/)
   })
 })
