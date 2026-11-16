@@ -135,7 +135,9 @@ export async function getWorkReviews(workId: string): Promise<WorkReviewsSnapsho
     .map(([source, list]) => ({ source, reviews: list }))
 
   return {
-    fetchedAt: reviews[0]?.fetchedAt ?? null,
+    // A MAIS RECENTE. Era `reviews[0]` — a primeira na ordem por FONTE —, então "buscadas …" e o
+    // marco "reviews" do painel mostravam a data de uma fonte qualquer.
+    fetchedAt: reviews.reduce<string | null>((max, r) => (r.fetchedAt && (max == null || r.fetchedAt > max) ? r.fetchedAt : max), null),
     total: reviews.length,
     bySource,
     manual,

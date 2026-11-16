@@ -57,9 +57,12 @@ describe("aviso de saldo negativo", () => {
     expect(billing.getAttribute("href")).toBe("https://platform.claude.com/settings/billing")
     // Sai do app: sem `noopener` a página de destino ganha acesso a `window.opener`.
     expect(billing.getAttribute("rel")).toContain("noopener")
-    expect(
-      screen.getByRole("link", { name: /Reinformar o saldo/ }).getAttribute("href"),
-    ).toBe("/curation/ai-usage")
+    const reinformar = screen.getByRole("link", { name: /Reinformar o saldo/ })
+    expect(reinformar.getAttribute("href")).toBe("/curation/ai-usage")
+    // Os dois abrem em NOVA aba (pedido de 16/11/2026): o aviso aparece por cima do que você estava
+    // fazendo, e resolver o saldo não pode tirar você dali.
+    expect(billing.getAttribute("target")).toBe("_blank")
+    expect(reinformar.getAttribute("target")).toBe("_blank")
   })
 
   it("saldo BAIXO não abre modal — âmbar informa, vermelho interrompe", () => {

@@ -58,7 +58,8 @@ describe("o que compara é LINHA, o que identifica é cabeçalho", () => {
     // O bump zera a personalização, que é visível e refazível.
     //   v6 → v7: entra a linha "grupos" (recorrência nos grupos de favoritos).
     //   v7 → v8: entra "tags-density" (o % de tags amadas/evitadas).
-    expect(drawer).toContain('const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v8"')
+    //   v8 → v9: entra "score:art" (Arte) no grupo Notas.
+    expect(drawer).toContain('const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v9"')
   })
 })
 
@@ -122,3 +123,12 @@ describe("cor de tema", () => {
     expect(textoEscuro, "texto escuro sem par dark: some no tema escuro").toEqual([])
   })
 })
+
+describe("linha Arte (pedido de 16/11/2026)", () => {
+  const fonte = readFileSync(join(process.cwd(), "components/titles/work-compare-drawer.tsx"), "utf8")
+  it("existe no grupo Notas e é desenhada pela MESMA célula das listas (percentil, nunca pontos)", () => {
+    expect(fonte).toContain('{ key: "score:art", label: "Arte" }')
+    expect(fonte).toMatch(/key: "score:art"[\s\S]{0,600}<ArtCell percentile=\{w\.artPercentile\} \/>/)
+  })
+})
+

@@ -120,6 +120,14 @@ export function StaleRerankPanel({
   // Só as NOVAS: as lidas/puladas ficam recolhidas no fim, e o topo da tela é a fila aberta.
   const handleRerankQueue = () => runBatch(split.unread.slice(0, queueSize).map((w) => w.id))
   const handleRerankSelected = () => runBatch(selection.selectedIds)
+  const handleSkipSelected = async () => {
+    const ids = selection.selectedIds
+    if (ids.length === 0) return
+    if (await mark(ids)) {
+      toast.success(`${ids.length} ${ids.length === 1 ? "obra pulada" : "obras puladas"} na sua fila. Estão em "Lidas ou puladas", no fim.`)
+      selection.clear()
+    }
+  }
 
   if (works.length === 0) {
     return (
@@ -171,16 +179,23 @@ export function StaleRerankPanel({
           ) : undefined
         }
         selectedActions={
-          isPaid ? (
-            <Button size="sm" onClick={handleRerankSelected} disabled={batchRunning}>
-              {batchRunning ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1 h-3.5 w-3.5" />}
-              {batchRunning
-                ? progress
-                  ? `Re-rankeando… ${progress.done}/${progress.total}`
-                  : "Re-rankeando…"
-                : `Calcular selecionadas (${selection.count})`}
+          <>
+            {isPaid && (
+              <Button size="sm" onClick={handleRerankSelected} disabled={batchRunning}>
+                {batchRunning ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1 h-3.5 w-3.5" />}
+                {batchRunning
+                  ? progress
+                    ? `Re-rankeando… ${progress.done}/${progress.total}`
+                    : "Re-rankeando…"
+                  : `Calcular selecionadas (${selection.count})`}
+              </Button>
+            )}
+            {/* "Pular selecionadas" (pedido de 16/11/2026): o mesmo "Pular" pessoal do card, em lote. */}
+            <Button size="sm" variant="outline" onClick={handleSkipSelected} disabled={batchRunning || !!skippingId}>
+              <SkipForward className="mr-1 h-3.5 w-3.5" />
+              Pular selecionadas ({selection.count})
             </Button>
-          ) : undefined
+          </>
         }
       />
 

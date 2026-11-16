@@ -65,7 +65,8 @@ export interface WorkStatePanelProps {
     created: string | null
     refreshed: string | null
     evaluated: string | null
-    digest: string | null
+    /** Quando a review mais recente chegou (`work_reviews.fetched_at`, a maior). */
+    reviews: string | null
     tags: string | null
     /** `works.last_read_at` — a única data PESSOAL daqui; some pra quem não leu. */
     lastRead?: string | null
@@ -175,7 +176,9 @@ export function WorkStatePanel({
         <Marco k="criada" v={formatProvenanceWhen(dates.created)} />
         <Marco k="dados" v={formatProvenanceWhen(dates.refreshed)} />
         <Marco k="avaliada" v={formatProvenanceWhen(dates.evaluated)} />
-        <Marco k="síntese" v={formatProvenanceWhen(dates.digest)} />
+        {/* Pedido de 16/11/2026: a data que importa aqui é a das REVIEWS (a matéria-prima), não a
+            da síntese — a síntese é derivada, e a idade dela já aparece no card de reviews. */}
+        <Marco k="reviews" v={formatProvenanceWhen(dates.reviews)} />
         <Marco k="tags" v={formatProvenanceWhen(dates.tags)} />
         {dates.lastRead && <Marco k="sua leitura" v={formatProvenanceWhen(dates.lastRead)} />}
       </div>

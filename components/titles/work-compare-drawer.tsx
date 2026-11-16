@@ -74,6 +74,7 @@ import { sortByTitleLanguage } from "@/lib/titles/title-language"
 import { fetchCompareWorks, type CompareWork } from "@/server/actions/compare"
 import { rerankClusterAction } from "@/server/actions/recommendations"
 import { BussolaPlane } from "@/components/ranking/bussola-plane"
+import { ArtCell } from "@/components/ranking/ranking-cells"
 import type { BussolaDatum } from "@/components/ranking/bussola-plane"
 import {
   ColumnPicker,
@@ -99,7 +100,9 @@ const HIDDEN_ROWS_STORAGE_KEY = "compare_hidden_rows_v1"
 // visível e reversível — em vez de contradizê-la sem avisar.
 // v7 → v8: entra "tags-density" (o % de amadas/evitadas). Sem o bump ela cairia no
 // FIM da ordem salva — depois da nuvem de chips que ela resume.
-const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v8"
+// v8 → v9: entra "score:art" (Arte) no grupo Notas, pedido de 16/11/2026. Sem o bump ela
+// cairia no fim da ordem salva, depois dos critérios e das tags.
+const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v9"
 // Tabela (grid) ⇄ Bússola (plano 2D das 3 forças). Persistido entre aberturas.
 const COMPARE_VIEW_STORAGE_KEY = "compare_view_v1"
 type CompareView = "table" | "bussola"
@@ -147,6 +150,7 @@ const COMPARE_ROW_GROUPS: CompareRowGroup[] = [
       { key: "score:alignmentScore", label: "Veredito" },
       { key: "score:platformAvg", label: "Média externa" },
       { key: "score:totalVotes", label: "Votos" },
+      { key: "score:art", label: "Arte" },
       { key: "score:userScore", label: "Pessoal" },
     ],
   },
@@ -1232,6 +1236,17 @@ function CompareGrid({
       get: (w) => (w.totalVotes > 0 ? w.totalVotes : null),
       thresholds: null,
       formatScore: (v) => formatVotes(v),
+    },
+    {
+      // Arte: o PERCENTIL do catálogo, desenhado pela MESMA célula das listas (`ArtCell`) —
+      // nunca a estimativa em pontos, que é comprimida e convida à comparação errada com nota
+      // de critério. É um dos separadores mais fortes entre obras empatadas. Para quem não é
+      // o dono vem NULL (é treinada nos rótulos dele) e cai no "—".
+      key: "score:art",
+      label: "Arte",
+      get: (w) => (w.artPercentile != null ? Math.round(w.artPercentile * 100) : null),
+      thresholds: null,
+      wrapScore: (_node, w) => <ArtCell percentile={w.artPercentile} />,
     },
   ]
 

@@ -3170,8 +3170,7 @@ some do padrão, continua no seletor porque é o único jeito de ORDENAR por ano
 e alinhamento misto faz o olho reancorar. A exceção é Gêneros·Tags, texto corrido em muitos
 chips, onde a borda esquerda é o que dá o que ler.
 
-⚠️ **Mudar CHAVE de linha exige bump do `ROWS_CONFIG_STORAGE_KEY`** (hoje `v8` — esta
-linha já disse `v6` com o código em `v7`; o teste confere, a prosa não).
+⚠️ **Mudar CHAVE de linha exige bump do `ROWS_CONFIG_STORAGE_KEY`** (hoje `v9`; o teste confere, a prosa não).
 `normalizeRowsConfig` descarta chave desconhecida: sem o bump, quem tinha "status" escondido
 veria as duas linhas novas VISÍVEIS — a escolha da pessoa invertida em silêncio.
 

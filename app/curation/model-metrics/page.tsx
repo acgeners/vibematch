@@ -45,7 +45,7 @@ const STATUS_BANNER: Record<CollectionStatus, { tone: "ok" | "warn" | "err"; tex
   unexpected_error: { tone: "err", text: "Coleta indisponível: erro inesperado ao ler os snapshots." },
 }
 
-export const metadata = { title: "Métricas do modelo" }
+export const metadata = { title: "Métricas do Modelo" }
 
 export default async function ModelMetricsPage() {
   const d = await getModelMetricsDashboard()
@@ -75,7 +75,7 @@ export default async function ModelMetricsPage() {
     <div className="w-full max-w-5xl space-y-6">
       <Header
         kicker="Diagnóstico técnico"
-        title="Métricas do modelo (prospectivas)"
+        title="Métricas do Modelo (prospectivas)"
         description="Validação prequencial: previsões registradas ANTES da nota real (prediction_snapshots). Métrica principal = 1 previsão por obra; baselines no mesmo conjunto."
         icon={<Activity />}
       />

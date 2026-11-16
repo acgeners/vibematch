@@ -75,7 +75,7 @@ const PAGES: Array<Omit<SearchEntry, "kind" | "crumb">> = [
   { id: "page-curadoria", title: "Curadoria do catálogo", description: "a console: o que precisa da sua decisão", href: "/curation", minRole: "curador", requiresSession: true, iconName: "Wrench" },
   { id: "page-aieval", title: "Curadoria da Obra", description: "fila de atributos para avaliar", href: "/curation/works", minRole: "curador", requiresSession: true, iconName: "Wrench" },
   { id: "page-aiusage", title: "Uso da API IA", description: "custo, tokens e chamadas por operação", href: "/curation/ai-usage", minRole: "curador", requiresSession: true, iconName: "Activity" },
-  { id: "page-metrics", title: "Métricas do modelo", description: "acurácia da Nota Prevista", href: "/curation/model-metrics", minRole: "curador", requiresSession: true, iconName: "ChartNoAxesCombined" },
+  { id: "page-metrics", title: "Métricas do Modelo", description: "acurácia da Nota Prevista", href: "/curation/model-metrics", minRole: "curador", requiresSession: true, iconName: "ChartNoAxesCombined" },
   { id: "page-new", title: "Nova obra", description: "criar do zero ou buscar dados nas fontes", href: "/catalog/new", minRole: "curador", requiresSession: true, iconName: "Plus" },
 ]
 

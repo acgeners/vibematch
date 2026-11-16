@@ -93,3 +93,15 @@ describe("sidebar da console: exatamente UMA linha ativa por rota", () => {
     expect(marcados.some((t) => /Visão geral/i.test(t))).toBe(false)
   })
 })
+
+describe("sidebar da console: ordem e nomes (decisão da Ana, 16/11/2026)", () => {
+  it("Visão Geral → Configurações → Curadoria da Obra → Uso da API IA → Métricas do Modelo → Pedidos", () => {
+    renderAt("/curation")
+    // "Configurações" é um GRUPO (abre os tópicos), não link — por isso a ordem sai do texto na tela.
+    const nav = document.body.textContent ?? ""
+    const nomes = ["Visão Geral", "Configurações", "Curadoria da Obra", "Uso da API IA", "Métricas do Modelo", "Pedidos"]
+    const posicoes = nomes.map((n) => nav.indexOf(n))
+    for (const [i, n] of nomes.entries()) expect(posicoes[i], `"${n}" não aparece com essa grafia`).toBeGreaterThanOrEqual(0)
+    expect([...posicoes].sort((a, b) => a - b)).toEqual(posicoes)
+  })
+})

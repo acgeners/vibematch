@@ -3,7 +3,9 @@
 import { useMemo, useState } from "react"
 import { useRefresh } from "@/lib/use-refresh"
 import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
-import { Loader2, Sparkles } from "lucide-react"
+import { Loader2, SkipForward, Sparkles } from "lucide-react"
+import { toast } from "sonner"
+import { skipSynopsisInterestForWorks } from "@/server/actions/synopsis-quality"
 
 import { Button } from "@/components/ui/button"
 import { PredictSynopsisRowActions } from "@/components/titles/predict-synopsis-row-actions"
@@ -148,6 +150,26 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
   // só a execução vira tarefa global. Daí os dois sinais somados no `batchRunning`.
   const batchRunning = taskRunning || batchAi.planning
 
+  // "Pular selecionadas" (pedido de 16/11/2026): o mesmo "Pular" do card, em lote.
+  const [skippingSelected, setSkippingSelected] = useState(false)
+  const skipSelected = async () => {
+    const ids = selection.selectedIds
+    if (ids.length === 0 || skippingSelected) return
+    setSkippingSelected(true)
+    try {
+      const res = await skipSynopsisInterestForWorks(ids)
+      if (res.error) {
+        toast.error(res.error)
+        return
+      }
+      toast.success(`${ids.length} ${ids.length === 1 ? "obra pulada" : "obras puladas"} na fila de Interesse.`)
+      selection.clear()
+      refresh()
+    } finally {
+      setSkippingSelected(false)
+    }
+  }
+
   const predictSelected = () => {
     if (batchRunning) return
     void batchAi.predictInterest(selection.selectedIds)
@@ -186,12 +208,18 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
         }
         idleExtras={isPaid ? <InterestBackfillButton works={works} isPaid={isPaid} /> : undefined}
         selectedActions={
-          isPaid ? (
-            <Button size="sm" onClick={predictSelected} disabled={batchRunning || selectedPending.length === 0}>
-              {batchRunning ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1 h-3.5 w-3.5" />}
-              Prever selecionadas ({selectedPending.length})
+          <>
+            {isPaid && (
+              <Button size="sm" onClick={predictSelected} disabled={batchRunning || selectedPending.length === 0}>
+                {batchRunning ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1 h-3.5 w-3.5" />}
+                Prever selecionadas ({selectedPending.length})
+              </Button>
+            )}
+            <Button size="sm" variant="outline" onClick={skipSelected} disabled={batchRunning || skippingSelected}>
+              {skippingSelected ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <SkipForward className="mr-1 h-3.5 w-3.5" />}
+              Pular selecionadas ({selection.count})
             </Button>
-          ) : undefined
+          </>
         }
       />
 

@@ -14,6 +14,8 @@ import { balanceTone } from "@/lib/ai-usage/balance"
 import { DECISION_QUEUES } from "@/lib/curation/decision-queues"
 import type { DecisionQueueKey } from "@/lib/curation/decision-queues"
 import { cn } from "@/lib/utils"
+import type { ReactNode } from "react"
+import { BalanceQuickEdit } from "@/components/curation/balance-quick-edit"
 
 export const metadata = { title: "Curadoria" }
 
@@ -98,10 +100,11 @@ export default async function CuradoriaPage() {
             chamadas saiu; ela vive em /curation/ai-usage, que é o destino do clique. */}
         <Tile
           label="Saldo Anthropic"
+          action={<BalanceQuickEdit balanceUsd={balance?.balanceUsd ?? null} />}
           value={balance?.remainingUsd != null ? formatUsd(balance.remainingUsd) : "—"}
           note={
             balance?.remainingUsd == null
-              ? "nunca informado — defina em Uso da API IA"
+              ? "nunca informado — defina no lápis ao lado"
               : `${usage ? formatUsd(usage.last30d.totalCostUsd) : "—"} gastos em 30 dias`
           }
           accent={tone === "negative" ? "rose" : tone === "low" ? "amber" : "emerald"}
@@ -272,19 +275,25 @@ function Tile({
   note,
   accent,
   emphasis = false,
+  action,
 }: {
   label: string
   value: string
   note: string
   accent: ConsoleAccent
   emphasis?: boolean
+  /** Ação ao lado do rótulo (ex.: editar o saldo). */
+  action?: ReactNode
 }) {
   const s = ACCENT_STYLES[accent]
   return (
     <div className="rounded-xl border border-border bg-card px-3.5 py-3">
-      <p className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
-        {label}
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
+          {label}
+        </p>
+        {action}
+      </div>
       <p
         className={cn(
           "mt-0.5 text-[25px] font-bold leading-tight tracking-tight tabular-nums",
