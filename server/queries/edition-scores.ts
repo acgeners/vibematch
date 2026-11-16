@@ -43,8 +43,8 @@ export async function getEditionScoresForWork(workId: string): Promise<EditionSc
 
 /**
  * As obras `mixed` cuja R18 está SÓ nos extras/side stories (`work_edition_state.r18_extra_chapters`).
- * Nelas a versão padrão é a normal para todo mundo (`resolveMixedEdition`). Hoje são 10 — paginado
- * mesmo assim, em ordem total pela PK.
+ * Só INFORMA a página da obra (a frase do seletor de versão): desde 2026-11-15 isso não muda a versão
+ * padrão. Hoje são 10 — paginado mesmo assim, em ordem total pela PK.
  */
 export async function fetchR18ExtrasWorkIds(supabase: Pick<SupabaseClient, "from">): Promise<Set<string>> {
   const rows = await fetchAllRows<{ work_id: string }>(
@@ -54,7 +54,7 @@ export async function fetchR18ExtrasWorkIds(supabase: Pick<SupabaseClient, "from
   return new Set(rows.map((r) => r.work_id))
 }
 
-/** O mesmo conjunto, memoizado por requisição (páginas e listas). */
+/** O mesmo conjunto, memoizado por requisição. */
 export const getR18ExtrasWorkIds = cache(async (): Promise<Set<string>> => fetchR18ExtrasWorkIds(createAdminClient()))
 
 /**

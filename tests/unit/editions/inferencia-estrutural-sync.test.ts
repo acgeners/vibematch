@@ -201,6 +201,63 @@ describe("o carregador leva a procedência do vínculo da tag até a política",
   })
 })
 
+describe("o carregador leva a avaliação de IA MAIS RECENTE até a política (2026-11-15)", () => {
+  const avaliacao = (id: string, created_at: string, prompt_version: string, limites: Row | null = { floor: null, ceiling: null }) => ({
+    id, work_id: W, created_at, status: "completed", prompt_version, ext: null, limites,
+  })
+  const notaIa = (ai_evaluation_id: string, suggested_score: number) => ({ ai_evaluation_id, criterion_slug: "adult_content", suggested_score })
+
+  beforeEach(() => {
+    // Sem tag nenhuma: só a avaliação pode confirmar.
+    db.tables.work_tags = []
+  })
+
+  it("a mais recente é v32 com 9 e sem piso de tag ⇒ confirma e grava o piso da R18", async () => {
+    db.tables.ai_evaluations = [avaliacao("e-velha", "2026-05-24T03:41:33Z", "v17"), avaliacao("e-nova", "2026-11-16T01:34:33Z", "v32")]
+    db.tables.ai_evaluation_scores = [notaIa("e-velha", 5.5), notaIa("e-nova", 9)]
+    const r = await reconcileStructuralInference(db as never, { apply: true, nowIso: NOW })
+    expect(r.works[0].facts.aiEvaluation).toEqual({ promptVersion: "v32", adultContent: 9, tagFloor: null })
+    expect(nota(W, "r18")).toMatchObject({ score: ADULT_EDITION_SEXUAL_FLOOR, evidence: { sinais: ["avaliação de IA (v32): 9.0"] } })
+  })
+
+  it("só a MAIS RECENTE conta: uma v32 antiga com 9 não vale se a nova deu 7", async () => {
+    db.tables.ai_evaluations = [avaliacao("e-1", "2026-11-10T00:00:00Z", "v32"), avaliacao("e-2", "2026-11-16T00:00:00Z", "v32")]
+    db.tables.ai_evaluation_scores = [notaIa("e-1", 9), notaIa("e-2", 7)]
+    const r = await reconcileStructuralInference(db as never, { apply: false, nowIso: NOW })
+    expect(r.works[0].facts.aiEvaluation?.adultContent).toBe(7)
+    expect(r.works[0].plan.decisions.r18).toMatchObject({ kind: "none" })
+  })
+
+  it("piso de tag no explícito, ou limite não registrado ⇒ não confirma", async () => {
+    db.tables.ai_evaluations = [avaliacao("e-1", "2026-11-16T00:00:00Z", "v32", { floor: EXPLICIT_FLOOR, ceiling: null })]
+    db.tables.ai_evaluation_scores = [notaIa("e-1", 9)]
+    let r = await reconcileStructuralInference(db as never, { apply: false, nowIso: NOW })
+    expect(r.works[0].plan.decisions.r18).toMatchObject({ kind: "none" })
+
+    db.tables.ai_evaluations = [avaliacao("e-1", "2026-11-16T00:00:00Z", "v32", null)]
+    r = await reconcileStructuralInference(db as never, { apply: false, nowIso: NOW })
+    expect(r.works[0].facts.aiEvaluation?.tagFloor).toBeUndefined()
+    expect(r.works[0].plan.decisions.r18).toMatchObject({ kind: "none" })
+  })
+
+  it("prompt fora da lista nem chega a ler a nota", async () => {
+    db.tables.ai_evaluations = [avaliacao("e-1", "2026-11-16T00:00:00Z", "v31")]
+    db.tables.ai_evaluation_scores = [notaIa("e-1", 9)]
+    const r = await reconcileStructuralInference(db as never, { apply: false, nowIso: NOW })
+    expect(r.works[0].facts.aiEvaluation).toBeNull()
+    expect(db.calls).not.toContain("ai_evaluation_scores")
+  })
+
+  // O banco falso ignora o select: quem guarda as colunas é a leitura do source.
+  it("o select das avaliações pede a versão do prompt e o registro do limite de tag", () => {
+    const src = readFileSync(join(__dirname, "../../../server/editions/structural-inference-sync.ts"), "utf8")
+    const select = src.match(/from\("ai_evaluations"\)\s*\.select\(\s*"([^"]*)"/)?.[1]
+    expect(select).toBeDefined()
+    expect(select).toMatch(/\bprompt_version\b/)
+    expect(select).toMatch(/limites:raw_response->adultContentBounds\b/)
+  })
+})
+
 describe("aplicação, idempotência e retirada", () => {
   it("caso A: 5→6 e não avaliado→9, guardando o estado anterior; nenhuma subida recusada pelo gatilho", async () => {
     const r = await reconcileStructuralInference(db as never, { apply: true, nowIso: NOW })

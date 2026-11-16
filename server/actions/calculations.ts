@@ -68,7 +68,7 @@ import {
   parseMixedEdition,
 } from "@/lib/editions/mixed-edition"
 import type { EditionPrediction, EditionScoreRow, MixedEdition, PredictionByEdition } from "@/lib/editions/mixed-edition"
-import { fetchAllEditionScores, fetchR18ExtrasWorkIds, loadMixedEditionSettingsFor } from "@/server/queries/edition-scores"
+import { fetchAllEditionScores, loadMixedEditionSettingsFor } from "@/server/queries/edition-scores"
 import { readFantasyDrift, scoringCriteriaSignature } from "@/server/queries/fantasy-drift"
 import { SCORING_CONTRACT, conferirContratoDoCalculo, mensagemDeContratoQuebrado } from "@/lib/calculations/scoring-contract"
 import { exigirContratoDeScoring } from "@/server/queries/canonical-contract"
@@ -161,14 +161,15 @@ export interface RawWork {
 export interface RecalcEditionContext {
   /** `hide_adult_content` de quem recebe a nota (é uma CONTA: sem sessão aqui, mas logada). */
   hideAdult: boolean
-  /** Obras cuja R18 está só nos extras: a padrão delas é a normal (`resolveMixedEdition`). */
-  r18ExtrasWorkIds: Set<string>
   rowsByWork: Map<string, EditionScoreRow[]>
 }
 
-/** A edição padrão desta obra para quem recebe a nota — a mesma régua da página. */
-export function recalcDefaultEdition(ctx: RecalcEditionContext, workId: string): MixedEdition {
-  return defaultMixedEdition({ hideAdult: ctx.hideAdult, signedIn: true, r18OnlyInExtras: ctx.r18ExtrasWorkIds.has(workId) })
+/**
+ * A edição padrão de quem recebe a nota — a mesma régua da página. É a mesma para toda obra mixed:
+ * a R18 só nos extras deixou de mudar o padrão em 2026-11-15.
+ */
+export function recalcDefaultEdition(ctx: RecalcEditionContext): MixedEdition {
+  return defaultMixedEdition({ hideAdult: ctx.hideAdult, signedIn: true })
 }
 
 /** Os mapas de notas VISTOS numa edição (cru e calibrado). */
@@ -335,7 +336,7 @@ export function buildWork(raw: RawWork, biasMap: AttributeBiasMap, edition?: Rec
       return { raw: scoresForEdition(categoryScores, resolution), calibrated }
     }
     editionMaps = { normal: mapsFor("normal"), r18: mapsFor("r18") }
-    predictionEdition = recalcDefaultEdition(edition, raw.id)
+    predictionEdition = recalcDefaultEdition(edition)
     predictionCategoryScores = editionMaps[predictionEdition].raw
     predictionCategoryScoresCalibrated = editionMaps[predictionEdition].calibrated
   }
@@ -717,12 +718,8 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
       // Nota por EDIÇÃO das obras mixed (migs 213/214) + a edição padrão DO DONO — explícito, pelo
       // mesmo motivo do perfil acima: sem sessão, "o usuário corrente" seria o singleton por acaso.
       getOwnerUserId().then(async (id): Promise<RecalcEditionContext> => {
-        const [rows, settings, extras] = await Promise.all([
-          fetchAllEditionScores(supabase),
-          loadMixedEditionSettingsFor(id, supabase),
-          fetchR18ExtrasWorkIds(supabase),
-        ])
-        return { hideAdult: settings.hideAdult, r18ExtrasWorkIds: extras, rowsByWork: groupEditionRows(rows) }
+        const [rows, settings] = await Promise.all([fetchAllEditionScores(supabase), loadMixedEditionSettingsFor(id, supabase)])
+        return { hideAdult: settings.hideAdult, rowsByWork: groupEditionRows(rows) }
       }),
     ])
 

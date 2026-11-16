@@ -77,7 +77,7 @@ const config = { score_weights_auto: false, formula_version: "teste", gpt_mean: 
  * ocultar 18+ (oculto ⇒ normal; visível ⇒ R18), sem obra "R18 só nos extras" aqui.
  */
 function ctxDe(edition: MixedEdition, rowsByWork: RecalcEditionContext["rowsByWork"]): RecalcEditionContext {
-  return { hideAdult: edition === "normal", r18ExtrasWorkIds: new Set(), rowsByWork }
+  return { hideAdult: edition === "normal", rowsByWork }
 }
 
 function rodar(edition?: MixedEdition) {

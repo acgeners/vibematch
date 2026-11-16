@@ -2,11 +2,13 @@ import "server-only"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { fetchAllRows } from "@/lib/supabase/paginate"
 import {
+  AI_EVALUATION_VERSIONS_THAT_CONFIRM,
   OWNED_STRUCTURAL_RULES,
   decisionWrites,
   planStructuralInference,
 } from "@/lib/editions/structural-inference"
 import type {
+  AiEvaluationAdultFacts,
   CurrentEditionRow,
   EditionDecision,
   StructuralFacts,
@@ -145,6 +147,7 @@ export async function loadStructuralFacts(sb: Db, scope: { workIds?: string[] } 
   const notas = new Map<string, Partial<Record<MixedEdition, CurrentEditionRow>>>()
   const tags = new Map<string, StructuralTagFacts[]>()
   const ratings = new Map<string, { at: string; rating: string }>()
+  const avaliacaoIa = new Map<string, AiEvaluationAdultFacts>()
   for (const lote of lotes(ids)) {
     const { data, error } = await sb.from("work_edition_scores").select(SCORE_SELECT).in("work_id", lote).eq("criterion_slug", CRITERIO)
     if (error) throw new Error(`inferencia-estrutural.notas: ${error.message}`)
@@ -185,19 +188,61 @@ export async function loadStructuralFacts(sb: Db, scope: { workIds?: string[] } 
 
     // A classificação da FONTE (MangaDex/ComicK) só fica gravada na avaliação: vale a mais recente que a
     // registrou. Não é a nota da IA — é o rótulo que a fonte deu à série.
-    const avaliacoes = await fetchAllRows<{ id: string; work_id: string; created_at: string; ext: string | null }>(
+    const avaliacoes = await fetchAllRows<{
+      id: string
+      work_id: string
+      created_at: string
+      prompt_version: string | null
+      ext: string | null
+      limites: { floor?: unknown } | null
+    }>(
       () =>
         sb
           .from("ai_evaluations")
-          .select("id, work_id, created_at, ext:raw_response->>externalContentRating")
+          .select("id, work_id, created_at, prompt_version, ext:raw_response->>externalContentRating, limites:raw_response->adultContentBounds")
           .in("work_id", lote)
           .eq("status", "completed"),
-      { orderBy: ["id"], label: "inferencia-estrutural.classificacao-externa" },
+      { orderBy: ["id"], label: "inferencia-estrutural.avaliacoes" },
     )
+    const maisRecente = new Map<string, (typeof avaliacoes)[number]>()
     for (const a of avaliacoes) {
+      const ultima = maisRecente.get(a.work_id)
+      if (!ultima || a.created_at > ultima.created_at) maisRecente.set(a.work_id, a)
       if (!a.ext) continue
       const atual = ratings.get(a.work_id)
       if (!atual || a.created_at > atual.at) ratings.set(a.work_id, { at: a.created_at, rating: a.ext })
+    }
+
+    // A nota de Conteúdo Adulto da avaliação MAIS RECENTE (uma linha por avaliação): só as de prompt
+    // na lista de permissão podem confirmar, então só elas são lidas.
+    const candidatas = [...maisRecente.values()].filter(
+      (a) => a.prompt_version != null && AI_EVALUATION_VERSIONS_THAT_CONFIRM.has(a.prompt_version),
+    )
+    if (candidatas.length > 0) {
+      const notasIa = await fetchAllRows<{ ai_evaluation_id: string; suggested_score: number | string | null }>(
+        () =>
+          sb
+            .from("ai_evaluation_scores")
+            .select("ai_evaluation_id, suggested_score")
+            .in("ai_evaluation_id", candidatas.map((a) => a.id))
+            .eq("criterion_slug", CRITERIO),
+        { orderBy: ["id"], label: "inferencia-estrutural.nota-da-avaliacao" },
+      )
+      const notaPorAvaliacao = new Map(
+        notasIa.map((r) => [
+          r.ai_evaluation_id,
+          r.suggested_score == null ? null : Number(r.suggested_score),
+        ]),
+      )
+      for (const a of candidatas) {
+        const limites = a.limites != null && typeof a.limites === "object" ? a.limites : null
+        avaliacaoIa.set(a.work_id, {
+          promptVersion: a.prompt_version,
+          adultContent: notaPorAvaliacao.get(a.id) ?? null,
+          // Sem o registro do limite, `undefined`: a política não confirma (não dá para saber a origem do 9).
+          tagFloor: limites == null || !("floor" in limites) ? undefined : limites.floor == null ? null : Number(limites.floor),
+        })
+      }
     }
   }
 
@@ -213,6 +258,7 @@ export async function loadStructuralFacts(sb: Db, scope: { workIds?: string[] } 
         muGenres: [...strings(s?.generos_adultos), ...strings(s?.genres)],
         tags: tags.get(workId) ?? [],
         externalRatings: ratings.has(workId) ? [ratings.get(workId)!.rating] : [],
+        aiEvaluation: avaliacaoIa.get(workId) ?? null,
         current: notas.get(workId) ?? {},
       },
     }

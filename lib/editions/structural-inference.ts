@@ -148,6 +148,42 @@ export interface CurrentEditionRow {
   rule: string | null
 }
 
+/**
+ * Versões de prompt da avaliação de IA cuja nota de Conteúdo Adulto pode confirmar a natureza sexual
+ * da versão R18 (decisão da Ana, 2026-11-15) — lista de PERMISSÃO. As anteriores subiam a nota só por
+ * existir marcador R19, então uma nota alta delas não prova nada. Trocar o `PROMPT_VERSION` da
+ * avaliação exige decidir aqui: fora da lista, a avaliação nova deixa de confirmar e a reconciliação
+ * RETIRA o piso que ela sustentava (guardado por `tests/unit/editions/inferencia-estrutural.test.ts`).
+ */
+export const AI_EVALUATION_VERSIONS_THAT_CONFIRM: ReadonlySet<string> = new Set(["v32"])
+
+/** A avaliação de IA concluída MAIS RECENTE da obra, pelo que importa à natureza sexual da R18. */
+export interface AiEvaluationAdultFacts {
+  /** `ai_evaluations.prompt_version`. */
+  promptVersion: string | null
+  /** `adult_content` gravado da avaliação (`ai_evaluation_scores.suggested_score`), já com piso/teto de tag. */
+  adultContent: number | null
+  /**
+   * Piso de tag aplicado à nota (`raw_response.adultContentBounds.floor`). `undefined` = a avaliação
+   * não registrou o limite, e aí não dá para saber se o número veio da leitura ou de uma tag.
+   */
+  tagFloor: number | null | undefined
+}
+
+/**
+ * A avaliação de IA confirma a natureza sexual da R18? Só com prompt da lista, nota na faixa explícita
+ * (≥ `EXPLICIT_FLOOR`) e SEM piso de tag na faixa explícita — senão o 9 pode ter vindo de uma tag que a
+ * própria IA inferiu (`ai_inferred`), que a política recusa como prova. Com piso abaixo de 9, nota ≥ 9
+ * só existe se o modelo a deu. Numa obra mixed a normal é R15 e não mostra cena explícita, então uma
+ * leitura de "cena de sexo explícita" das reviews é da R18.
+ */
+export function aiEvaluationConfirmsSexual(a: AiEvaluationAdultFacts | null | undefined): boolean {
+  if (!a || a.promptVersion == null || !AI_EVALUATION_VERSIONS_THAT_CONFIRM.has(a.promptVersion)) return false
+  if (a.adultContent == null || a.adultContent < EXPLICIT_FLOOR) return false
+  if (a.tagFloor === undefined) return false
+  return a.tagFloor == null || a.tagFloor < EXPLICIT_FLOOR
+}
+
 export interface SexualSignalInput {
   tags: ReadonlyArray<StructuralTagFacts>
   /** Gêneros do MangaUpdates gravados na evidência de edição (`work_genres` não guarda os adultos). */
@@ -160,6 +196,8 @@ export interface SexualSignalInput {
    * sexual: não pode criar o piso que ela mesma violaria (a curadoria usa a mesma régua, sem ela).
    */
   adultEditionRow: CurrentEditionRow | null | undefined
+  /** A avaliação de IA mais recente da obra (`aiEvaluationConfirmsSexual`). */
+  aiEvaluation?: AiEvaluationAdultFacts | null
 }
 
 /**
@@ -168,8 +206,9 @@ export interface SexualSignalInput {
  *
  * Não confirmam sozinhos (de propósito): tag ou gênero de IDADE (Adult, Mature, R19), "Uncensored" no
  * MangaUpdates (a censura pode ser de gore), aviso do digest e texto de review (prosa), tag que a IA
- * inferiu dessa prosa (`TAG_SOURCES_THAT_CONFIRM`) e a nota genérica da avaliação da obra (não tem
- * versão-alvo). Uma tag de IA não impede a inferência: só não conta — se houver outro sinal, ele basta.
+ * inferiu dessa prosa (`TAG_SOURCES_THAT_CONFIRM`). Uma tag de IA não impede a inferência: só não
+ * conta — se houver outro sinal, ele basta.
+ * A nota da AVALIAÇÃO de IA conta desde 2026-11-15, só nas condições de `aiEvaluationConfirmsSexual`.
  */
 export function sexualNatureSignals(input: SexualSignalInput): string[] {
   const out: string[] = []
@@ -186,6 +225,8 @@ export function sexualNatureSignals(input: SexualSignalInput): string[] {
     const rating = r.trim().toLowerCase()
     if (SEXUAL_EXTERNAL_RATINGS.includes(rating)) out.push(`classificação externa: ${rating}`)
   }
+  const ia = input.aiEvaluation
+  if (ia && aiEvaluationConfirmsSexual(ia)) out.push(`avaliação de IA (${ia.promptVersion}): ${ia.adultContent!.toFixed(1)}`)
   const adulta = input.adultEditionRow
   if (adulta && STRONGER_EDITION_SOURCES.has(adulta.source) && adulta.score != null && adulta.score >= ADULT_EDITION_SEXUAL_FLOOR)
     out.push(`versão adulta já avaliada: ${adulta.score.toFixed(1)} (${adulta.source})`)
@@ -196,8 +237,14 @@ export function sexualNatureSignals(input: SexualSignalInput): string[] {
  * A natureza sexual da versão adulta por sinais que NÃO dependem da nota da própria versão — a régua
  * de quem está REVENDO essa nota (curadoria): a nota em revisão não pode travar a si mesma.
  */
-export function independentSexualSignals(f: Pick<StructuralFacts, "tags" | "muGenres" | "externalRatings">): string[] {
-  return sexualNatureSignals({ tags: f.tags, muGenres: f.muGenres, externalRatings: f.externalRatings, adultEditionRow: null })
+export function independentSexualSignals(f: Pick<StructuralFacts, "tags" | "muGenres" | "externalRatings" | "aiEvaluation">): string[] {
+  return sexualNatureSignals({
+    tags: f.tags,
+    muGenres: f.muGenres,
+    externalRatings: f.externalRatings,
+    aiEvaluation: f.aiEvaluation,
+    adultEditionRow: null,
+  })
 }
 
 // ── Rótulo etário da versão padrão ──────────────────────────────────────────────────────────
@@ -227,6 +274,8 @@ export interface StructuralFacts {
   tags: ReadonlyArray<StructuralTagFacts>
   muGenres: ReadonlyArray<string>
   externalRatings: ReadonlyArray<string>
+  /** A avaliação de IA concluída mais recente (ausente = sem avaliação, ou não lida). */
+  aiEvaluation?: AiEvaluationAdultFacts | null
   current: Partial<Record<MixedEdition, CurrentEditionRow>>
 }
 
@@ -265,6 +314,7 @@ export function planStructuralInference(f: StructuralFacts): StructuralPlan {
     tags: f.tags,
     muGenres: f.muGenres,
     externalRatings: f.externalRatings,
+    aiEvaluation: f.aiEvaluation,
     adultEditionRow: f.current.r18,
   })
   const sexual = sexualSignals.length > 0

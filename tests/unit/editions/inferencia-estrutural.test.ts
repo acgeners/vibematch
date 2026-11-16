@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { EXPLICIT_FLOOR, R15_FROM_R19_CEILING } from "@/lib/ai-evaluation/adult-content-rules"
+import { PROMPT_VERSION } from "@/lib/ai-evaluation/service"
 import {
+  AI_EVALUATION_VERSIONS_THAT_CONFIRM,
   ADULT_EDITION_SEXUAL_FLOOR,
   EDITION_EXPLICIT_THRESHOLD,
   LEGACY_STANDARD_BASE_RULE,
@@ -8,6 +10,7 @@ import {
   STANDARD_EDITION_BASE,
   STRUCTURAL_RULES,
   TAG_SOURCES_THAT_CONFIRM,
+  aiEvaluationConfirmsSexual,
   decisionWrites,
   editionBoundsViolation,
   independentSexualSignals,
@@ -15,7 +18,7 @@ import {
   sexualNatureSignals,
   standardEditionLabel,
 } from "@/lib/editions/structural-inference"
-import type { CurrentEditionRow, StructuralFacts, StructuralTagFacts } from "@/lib/editions/structural-inference"
+import type { AiEvaluationAdultFacts, CurrentEditionRow, StructuralFacts, StructuralTagFacts } from "@/lib/editions/structural-inference"
 
 /**
  * A política da nota de Conteúdo Adulto por versão (6/7 em 2026-10-15; fronteira editorial 6/9 em
@@ -347,5 +350,65 @@ describe("rótulo da versão padrão — os dois formatos de evidência", () => 
     expect(standardEditionLabel(["Original Webtoon: R15", "Official Translations: R17: Tapas"])).toBe("R17")
     expect(standardEditionLabel(["Original Webtoon: Ridibooks"])).toBe("desconhecido")
     expect(standardEditionLabel([])).toBe("desconhecido")
+  })
+})
+
+describe("a avaliação de IA atual confirma a natureza sexual da R18 (decisão da Ana, 2026-11-15)", () => {
+  const ia = (over: Partial<AiEvaluationAdultFacts> = {}): AiEvaluationAdultFacts => ({
+    promptVersion: "v32",
+    adultContent: 9,
+    tagFloor: null,
+    ...over,
+  })
+
+  it("prompt atual, nota na faixa explícita, sem piso de tag ⇒ confirma", () => {
+    expect(aiEvaluationConfirmsSexual(ia())).toBe(true)
+    expect(aiEvaluationConfirmsSexual(ia({ adultContent: 9.5 }))).toBe(true)
+    // Piso abaixo de 9 não empurra a nota para 9: o 9 foi do modelo.
+    expect(aiEvaluationConfirmsSexual(ia({ tagFloor: ADULT_EDITION_SEXUAL_FLOOR - 2 }))).toBe(true)
+  })
+
+  it("NÃO confirma: prompt antigo, nota abaixo do explícito, piso de tag no explícito, limite não registrado", () => {
+    // As anteriores subiam a nota só por existir marcador R19.
+    expect(aiEvaluationConfirmsSexual(ia({ promptVersion: "v31" }))).toBe(false)
+    expect(aiEvaluationConfirmsSexual(ia({ promptVersion: null }))).toBe(false)
+    expect(aiEvaluationConfirmsSexual(ia({ adultContent: EXPLICIT_FLOOR - 0.5 }))).toBe(false)
+    expect(aiEvaluationConfirmsSexual(ia({ adultContent: null }))).toBe(false)
+    // O 9 pode ter vindo de uma tag (talvez inferida pela própria IA): não é leitura dela.
+    expect(aiEvaluationConfirmsSexual(ia({ tagFloor: EXPLICIT_FLOOR }))).toBe(false)
+    expect(aiEvaluationConfirmsSexual(ia({ tagFloor: undefined }))).toBe(false)
+    expect(aiEvaluationConfirmsSexual(null)).toBe(false)
+  })
+
+  it("trocar o PROMPT_VERSION da avaliação exige decidir se a versão nova confirma", () => {
+    // Fora da lista, a avaliação nova deixa de confirmar e a reconciliação RETIRA o piso que ela sustentava.
+    expect([...AI_EVALUATION_VERSIONS_THAT_CONFIRM]).toContain(PROMPT_VERSION)
+  })
+
+  it("I Failed to Oust the Villain! (fatos da nuvem, 2026-11-15): R18 só nos extras, sem tag sexual, IA v32 = 9 ⇒ R18 recebe o piso", () => {
+    const sem = fatos({
+      r18ExtraChapters: true,
+      tags: [],
+      muGenres: ["Mature"],
+      current: { normal: NAO_AVALIADO, r18: NAO_AVALIADO },
+    })
+    expect(planStructuralInference(sem).decisions.r18).toMatchObject({ kind: "none" })
+
+    const p = planStructuralInference({ ...sem, aiEvaluation: ia() })
+    expect(p.sexualSignals).toEqual(["avaliação de IA (v32): 9.0"])
+    expect(p.decisions.r18).toMatchObject({ kind: "infer", target: { score: ADULT_EDITION_SEXUAL_FLOOR, rule: STRUCTURAL_RULES.adultFloor } })
+    // A padrão segue sem base: o conteúdo adulto está só nos extras.
+    expect(p.decisions.normal).toMatchObject({ kind: "none", reason: "conteúdo adulto só nos extras" })
+  })
+
+  it("a curadoria usa o mesmo sinal: com a IA confirmando, a R18 não pode ficar abaixo do explícito", () => {
+    const f = fatos({ tags: [], aiEvaluation: ia() })
+    expect(independentSexualSignals(f)).toEqual(["avaliação de IA (v32): 9.0"])
+  })
+
+  it("avaliação nova abaixo do explícito RETIRA o piso que a antiga sustentava (sem outro sinal)", () => {
+    const piso = row("inferred_base", ADULT_EDITION_SEXUAL_FLOOR, { rule: STRUCTURAL_RULES.adultFloor })
+    const p = planStructuralInference(fatos({ tags: [], aiEvaluation: ia({ adultContent: 7 }), current: { normal: NAO_AVALIADO, r18: piso } }))
+    expect(p.decisions.r18).toMatchObject({ kind: "retract" })
   })
 })

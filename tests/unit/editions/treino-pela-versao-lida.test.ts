@@ -66,8 +66,8 @@ const LINHAS: EditionScoreRow[] = MIXED.flatMap((id) => [
   id === "w049" ? row(id, "r18", null, "not_rated") : row(id, "r18", 9.5, "ai_evaluated"),
 ])
 
-const ctx = (hideAdult: boolean, extras: string[] = []): RecalcEditionContext => ({
-  hideAdult, r18ExtrasWorkIds: new Set(extras), rowsByWork: groupEditionRows(LINHAS),
+const ctx = (hideAdult: boolean): RecalcEditionContext => ({
+  hideAdult, rowsByWork: groupEditionRows(LINHAS),
 })
 const montar = (readEdition: (id: string) => string | null, c: RecalcEditionContext | null = ctx(false)) =>
   new Map(catalogo(readEdition).map((raw) => [raw.id, buildWork(raw, {} as Parameters<typeof buildWork>[1], c ?? undefined)]))
@@ -160,11 +160,11 @@ describe("Nota Prevista: a padrão de quem recebe, sem fallback", () => {
     expect(r.get("w049")!.expected_edition).toBe("normal")
     expect(r.get("w049")!.expected_score).not.toBeNull()
   })
-  it("R18 só nos extras ⇒ a normal mesmo vendo 18+", () => {
-    expect(recalcDefaultEdition(ctx(false, ["w049"]), "w049")).toBe("normal")
-    expect(recalcDefaultEdition(ctx(false, ["w049"]), "w045")).toBe("r18")
-    const r = rodar(() => null, ctx(false, ["w049"]))
-    expect(r.get("w049")!.expected_edition).toBe("normal")
-    expect(r.get("w049")!.expected_score).not.toBeNull()
+  it("a padrão é a mesma para toda obra mixed: R18 só nos extras não muda (2026-11-15)", () => {
+    // Quem ainda passasse o conjunto dos extras seria ignorado — e o tipo não tem mais o campo.
+    const comExtras = { ...ctx(false), r18ExtrasWorkIds: new Set(["w049"]) } as unknown as RecalcEditionContext
+    expect(recalcDefaultEdition(comExtras)).toBe("r18")
+    const r = rodar(() => null, comExtras)
+    for (const id of MIXED) expect(r.get(id)!.expected_edition).toBe("r18")
   })
 })

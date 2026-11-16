@@ -14,7 +14,7 @@ import { getAllActiveSynopsisPredictions } from "@/server/queries/synopsis-quali
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { getHideAdultContent } from "@/server/queries/current-user"
-import { fetchEditionScoresFor, getMixedEditionSettings, getR18ExtrasWorkIds } from "@/server/queries/edition-scores"
+import { fetchEditionScoresFor, getMixedEditionSettings } from "@/server/queries/edition-scores"
 import { adultContentFor, groupEditionRows, isMixedEditionState, predictionForEdition, resolveMixedEdition, scoresForEdition } from "@/lib/editions/mixed-edition"
 import { selectByIdsInChunks, fetchAllRows } from "@/lib/supabase/paginate"
 import { titleTokens, workMatchesQuery } from "@/lib/title-match"
@@ -783,19 +783,17 @@ export async function getRanking(
   // leves por obra, sem `evidence`).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mixedIds = (data ?? []).filter((w: any) => isMixedEditionState(w.edition_state)).map((w: any) => w.id as string)
-  const [editionRows, editionSettings, r18ExtrasWorkIds] =
+  const [editionRows, editionSettings] =
     mixedIds.length > 0
-      ? await Promise.all([fetchEditionScoresFor(supabase, mixedIds), getMixedEditionSettings(), getR18ExtrasWorkIds()])
-      : [[], null, new Set<string>()]
+      ? await Promise.all([fetchEditionScoresFor(supabase, mixedIds), getMixedEditionSettings()])
+      : [[], null]
   const editionByWork = groupEditionRows(editionRows)
-  // Por OBRA: a R18 só nos extras deixa a normal como padrão daquela obra (`resolveMixedEdition`).
-  const contextEditionFor = (workId: string) =>
-    resolveMixedEdition({
-      hideAdult,
-      signedIn: editionSettings?.signedIn ?? false,
-      r18OnlyInExtras: r18ExtrasWorkIds.has(workId),
-      adultFilter: filters.adultFilter ?? null,
-    }).edition
+  // A mesma para toda obra mixed da lista: depende só da conta e do filtro (`resolveMixedEdition`).
+  const contextEdition = resolveMixedEdition({
+    hideAdult,
+    signedIn: editionSettings?.signedIn ?? false,
+    adultFilter: filters.adultFilter ?? null,
+  }).edition
 
   const personalStatusSymbolsById = new Map(
     personalStatusOptions.map((status) => [status.id, status.symbol])
@@ -829,7 +827,7 @@ export async function getRanking(
     if (isMixed) {
       scores = scoresForEdition(
         scores,
-        adultContentFor({ isMixed, legacyScore: scores.adult_content, editionRows: editionByWork.get(w.id) }, contextEditionFor(w.id)),
+        adultContentFor({ isMixed, legacyScore: scores.adult_content, editionRows: editionByWork.get(w.id) }, contextEdition),
       )
     }
     const synopsisPred = synopsisPredictions.get(w.id) ?? null
@@ -852,7 +850,7 @@ export async function getRanking(
     // Nota Prevista/Chance de obra mixed: as da EDIÇÃO de contexto (`expected_by_edition`). Sem ela —
     // ou linha gravada antes da fase 2, sobre a nota misturada — o número some e a obra cai para o fim
     // de quem ordena por ele. Nunca a previsão da outra edição.
-    w.calculated_scores = predictionForEdition(w.calculated_scores, isMixed, contextEditionFor(w.id)).row
+    w.calculated_scores = predictionForEdition(w.calculated_scores, isMixed, contextEdition).row
 
     return {
       rank: 0,

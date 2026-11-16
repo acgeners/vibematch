@@ -16,7 +16,7 @@ import {
 } from "@/lib/editions/mixed-edition"
 import type { MixedEdition } from "@/lib/editions/mixed-edition"
 import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
-import { fetchEditionScoresFor, getMixedEditionSettings, getR18ExtrasWorkIds } from "@/server/queries/edition-scores"
+import { fetchEditionScoresFor, getMixedEditionSettings } from "@/server/queries/edition-scores"
 import type { ReadingEditionValues, ReadingFilterFields } from "@/lib/reading/reading-filters"
 
 type CoverRow = { url: string; is_primary: boolean; position: number }
@@ -146,10 +146,10 @@ export async function getReadingWorks(
   // Obras `mixed`: a nota de conteúdo adulto e a Nota Prevista são por EDIÇÃO, e o filtro decide
   // qual vale no cliente. Só consulta quando há mixed na lista.
   const mixedIds = rows.filter((w) => isMixedEditionState(w.edition_state)).map((w) => w.id)
-  const [editionRows, editionSettings, r18ExtrasWorkIds] =
+  const [editionRows, editionSettings] =
     mixedIds.length > 0
-      ? await Promise.all([fetchEditionScoresFor(supabase, mixedIds), getMixedEditionSettings(), getR18ExtrasWorkIds()])
-      : [[], null, new Set<string>()]
+      ? await Promise.all([fetchEditionScoresFor(supabase, mixedIds), getMixedEditionSettings()])
+      : [[], null]
   const editionByWork = groupEditionRows(editionRows)
 
   // Sem data de leitura, a recência sai da última alteração da pessoa na obra. Consulta só essas, e
@@ -211,7 +211,6 @@ export async function getReadingWorks(
         ? resolveMixedEdition({
             hideAdult: editionSettings?.hideAdult ?? false,
             signedIn: editionSettings?.signedIn ?? false,
-            r18OnlyInExtras: r18ExtrasWorkIds.has(w.id),
           }).edition
         : null,
       criterionScores,

@@ -16,7 +16,7 @@ import { foldTitle, titleTokens, workMatchesQuery } from "@/lib/title-match"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
-import { fetchEditionScoresFor, getMixedEditionSettings, getR18ExtrasWorkIds, visibleTagIdsOnNormal } from "@/server/queries/edition-scores"
+import { fetchEditionScoresFor, getMixedEditionSettings, visibleTagIdsOnNormal } from "@/server/queries/edition-scores"
 import { adultContentFor, groupEditionRows, isMixedEditionState, predictionForEdition, resolveMixedEdition } from "@/lib/editions/mixed-edition"
 import type { MixedEdition } from "@/lib/editions/mixed-edition"
 
@@ -819,22 +819,16 @@ async function withEditionView(
   )
   if (mixedIds.size === 0) return works
   const admin = createAdminClient()
-  const [settings, r18ExtrasWorkIds] = await Promise.all([getMixedEditionSettings(), getR18ExtrasWorkIds()])
-  // Por OBRA: a R18 só nos extras deixa a normal como padrão daquela obra.
-  const editionOf = new Map(
-    [...mixedIds].map((id) => [
-      id,
-      resolveMixedEdition({
-        hideAdult: settings.hideAdult,
-        signedIn: settings.signedIn,
-        r18OnlyInExtras: r18ExtrasWorkIds.has(id),
-        adultFilter,
-      }).edition,
-    ]),
-  )
+  const settings = await getMixedEditionSettings()
+  // A mesma para toda obra mixed da lista: depende só da conta e do filtro.
+  const edition: MixedEdition = resolveMixedEdition({
+    hideAdult: settings.hideAdult,
+    signedIn: settings.signedIn,
+    adultFilter,
+  }).edition
   const tagIdsOf = (w: WorkWithRelations) =>
     ((w.tags ?? []) as Array<{ id?: unknown }>).map((t) => (typeof t?.id === "string" ? t.id : "")).filter(Boolean)
-  const naNormal = works.filter((w) => editionOf.get(w.id) === "normal")
+  const naNormal = edition === "normal" ? works.filter((w) => mixedIds.has(w.id)) : []
   const [rows, visiveisPorObra] = await Promise.all([
     fetchEditionScoresFor(admin, [...mixedIds]),
     naNormal.length > 0
@@ -844,7 +838,6 @@ async function withEditionView(
   const rowsByWork = groupEditionRows(rows)
   return works.map((w) => {
     if (!mixedIds.has(w.id)) return w
-    const edition = editionOf.get(w.id) as MixedEdition
     const res = adultContentFor({ isMixed: true, legacyScore: null, editionRows: rowsByWork.get(w.id) }, edition)
     const category_scores = (w.category_scores ?? [])
       .map((cs) =>

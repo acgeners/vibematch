@@ -9,7 +9,7 @@ import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getOwnerUserId } from "@/server/queries/current-user"
 import { exigirContratoDeScoring } from "@/server/queries/canonical-contract"
 import { assertRecalcCodeAllowed } from "@/server/recalc/code-guard"
-import { fetchAllEditionScores, fetchR18ExtrasWorkIds, loadMixedEditionSettingsFor } from "@/server/queries/edition-scores"
+import { fetchAllEditionScores, loadMixedEditionSettingsFor } from "@/server/queries/edition-scores"
 import { groupEditionRows } from "@/lib/editions/mixed-edition"
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -68,7 +68,7 @@ export async function recalculateForUser(userId: string): Promise<UserRecalcResu
   // Contrato canônico (migration 202): mesmo preflight do `recalculateAll`, antes de ler e gravar.
   await exigirContratoDeScoring(supabase)
 
-  const [worksRes, weightsRes, configRes, labels, biasMap, declaredTagPrefs, tasteProfile, editionRows, editionSettings, r18ExtrasWorkIds] =
+  const [worksRes, weightsRes, configRes, labels, biasMap, declaredTagPrefs, tasteProfile, editionRows, editionSettings] =
     await Promise.all([
       // Só CATÁLOGO. As colunas pessoais não vêm daqui: `withOwnerLabels` sobrescreve TODAS as
       // PERSONAL_COLUMNS com as DESTE usuário (`loadLabelsFor(userId)`), tenham vindo no select
@@ -98,7 +98,6 @@ export async function recalculateForUser(userId: string): Promise<UserRecalcResu
       // Nota por EDIÇÃO (migs 213/214) e a edição padrão DELA (ocultar 18+ força a normal).
       fetchAllEditionScores(supabase),
       loadMixedEditionSettingsFor(userId, supabase),
-      fetchR18ExtrasWorkIds(supabase),
     ])
 
   if (worksRes.error) throw new Error(worksRes.error.message)
@@ -107,7 +106,7 @@ export async function recalculateForUser(userId: string): Promise<UserRecalcResu
 
   // As colunas pessoais que vieram de `works` são as do DONO — trocadas pelas DELA.
   const rawWorks = withOwnerLabels(worksRes.data as unknown as RawWork[], labels)
-  const editionCtx = { hideAdult: editionSettings.hideAdult, r18ExtrasWorkIds, rowsByWork: groupEditionRows(editionRows) }
+  const editionCtx = { hideAdult: editionSettings.hideAdult, rowsByWork: groupEditionRows(editionRows) }
   const works = rawWorks.map((raw) => buildWork(raw, biasMap, editionCtx))
 
   const { rows, expectedPredictor } = computeRecalc({

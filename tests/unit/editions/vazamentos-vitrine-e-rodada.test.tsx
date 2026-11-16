@@ -168,13 +168,13 @@ describe("rodada de recomendação — cards da versão normal", () => {
     expect(mixed.justificationHiddenForEdition).toBe(false)
   })
 
-  it("R18 só nos extras ⇒ a normal, mesmo para quem vê 18+", async () => {
+  it("R18 só nos extras NÃO muda a padrão (2026-11-15): quem vê 18+ abre a R18 inteira", async () => {
     settings.hideAdult = false
     montar(["mixed"])
     const { getRecommendationRun } = await import("@/server/queries/recommendations")
     const mixed = (await getRecommendationRun("r1"))!.ranked.find((x) => x.work_id === "mixed")!
-    expect(mixed.work!.tags.map((t) => t.name)).not.toContain("Cunnilingus")
-    expect(mixed.justificationHiddenForEdition).toBe(true)
+    expect(mixed.work!.tags.map((t) => t.name)).toContain("Cunnilingus")
+    expect(mixed.justificationHiddenForEdition).toBe(false)
   })
 })
 

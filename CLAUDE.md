@@ -5729,8 +5729,11 @@ uma mixed usa o `adult_content` dessa versão, e sem nota nela fica sem o atribu
 conhecida, o legado. Avaliação de obra não-mixed não tem versão.
 
 **Edição ativa** (`resolveMixedEdition`): ocultar 18+ ⇒ normal (a R18 só com `?edition=r18` + confirmação,
-sem mudar preferência) · `?adult=only` ⇒ R18 · `?edition=` · R18 só nos extras ⇒ normal · logado ⇒ R18 · anônimo
-⇒ normal. `preferred_mixed_edition` não é lida (coluna legada).
+sem mudar preferência) · `?adult=only` ⇒ R18 · `?edition=` · logado ⇒ R18 · anônimo ⇒ normal.
+`preferred_mixed_edition` não é lida (coluna legada).
+**R18 só nos extras não muda a versão padrão** (decisão da Ana, 15/11/2026): até então essas obras abriam na
+normal para quem vê 18+, contra a `read_edition = r18` gravada nas avaliações dela. Hoje o dado só vira uma
+frase no seletor de versão.
 Anônimo nunca herda a preferência do dono (`getCurrentUserSettingsRow` é só da sessão).
 
 **Na normal saem** tags `r18` e `desconhecida` (classe pelas FLAGS do banco, sem lista de slug —
@@ -5765,8 +5768,12 @@ política: `lib/editions/structural-inference.ts`; executor: `server/editions/st
   guarda os adultos), classificação externa erotica/pornographic, ou adulta já avaliada por fonte forte
   na faixa explícita (abaixo dela a própria nota não confirma: não cria o piso que violaria).
   **Não confirmam:** rótulo de idade (Adult, Mature, R19), violência (Whipping fica no subgrupo
-  `explicit` sem nível — é a marca de obra adulta por violência), "Uncensored", prosa, e a nota
-  genérica da avaliação (sem versão-alvo — nunca é promovida para a R18).
+  `explicit` sem nível — é a marca de obra adulta por violência), "Uncensored" e prosa.
+  **A avaliação de IA confirma desde 15/11/2026** (decisão da Ana), só a MAIS RECENTE e só com prompt
+  da lista `AI_EVALUATION_VERSIONS_THAT_CONFIRM` (hoje v32): Conteúdo Adulto ≥ 9 SEM piso de tag ≥ 9
+  aplicado (`raw_response.adultContentBounds.floor`). Sem essa trava o 9 poderia vir de tag `ai_inferred`.
+  Trocar o `PROMPT_VERSION` exige decidir se a versão nova entra na lista (o teste reprova); fora dela, a
+  avaliação nova deixa de confirmar e o piso que ela sustentava é retirado.
   🔴 **A tag só conta pela PROCEDÊNCIA do vínculo** (`TAG_SOURCES_THAT_CONFIRM`, lista de permissão):
   legado/formulário/fontes (`null`), `imported` e `curadoria`. Tag `ai_inferred` é a IA lendo a mesma
   prosa — não confirma sozinha (só outro sinal confirma). Vínculo sem `source` lido também não.

@@ -43,7 +43,7 @@ describe("página da obra — fiação do selo (lida do source)", () => {
   it("o seletor depende só do estado de edição (mixed) — adult_override não entra", () => {
     expect(src).toMatch(/const isMixedWork = isMixedEditionState\(work\.edition_state\)/)
     expect(src).toMatch(/const editionResolution = isMixedWork\s*\?/)
-    expect(src).toMatch(/\{editionResolution && <EditionSelector/)
+    expect(src).toMatch(/\{editionResolution && \(?\s*<EditionSelector/)
   })
 })
 

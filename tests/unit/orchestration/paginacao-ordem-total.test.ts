@@ -35,6 +35,7 @@ const CHAVES_UNICAS: Record<string, string[][]> = {
   ai_api_calls: [["id"]],
   ai_cache_events: [["id"]],
   ai_evaluations: [["id"]],
+  ai_evaluation_scores: [["id"]], // PK (migration 001); sem UNIQUE em (ai_evaluation_id, criterion_slug)
   ai_eval_read_acks: [["user_id", "work_id", "queue"]],
   deep_dive_results: [["id"]],
   genres: [["id"]],
