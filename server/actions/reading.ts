@@ -82,6 +82,12 @@ export interface ReadingUpdateResult {
   delta: number | null
   /** Contagem EXATA de capítulos lançados não lidos, da lista real (mangago). `null` = sem lista (cai na estimativa). */
   unreadCount: number | null
+  /**
+   * O capítulo lido com que `unreadCount` foi contado. A contagem só vale para ESTE valor: depois
+   * de marcar mais capítulos ela fica velha, e reaproveitá-la deixava a obra lida até o fim com
+   * "1 pra ler" e presa em "Acompanhando" (16/11/2026).
+   */
+  unreadCountReadBase: number | null
   /** `true` quando nenhuma fonte retornou capítulo (timeout/Cloudflare/sem match). */
   failed: boolean
   /** Data relativa do último capítulo (string pré-formatada da fonte, ex.: "8mos ago"). */
@@ -160,7 +166,7 @@ export async function checkReadingUpdates(
         // isto também pula o mangago da obra — comix-rejeitada é caso raro.)
         if (comixRejected && !comixHid) {
           const failure = logChapterCheckFailure(w, { kind: "whole", reason: "Comix marcada como ausente: checagem pulada (o Mangago também)" })
-          return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null, failure }
+          return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, unreadCountReadBase: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null, failure }
         }
 
         // O que a Comix disse do código SALVO (404 × existe) — gravado logo abaixo como a marca de
@@ -278,6 +284,7 @@ export async function checkReadingUpdates(
           hasNew,
           delta,
           unreadCount,
+          unreadCountReadBase: unreadCount != null ? Number(w.chapters_read ?? 0) : null,
           failed: latest == null,
           releasedLabel: releasedLabel ?? null,
           releasedAt: lastReleasedIso,
@@ -289,7 +296,7 @@ export async function checkReadingUpdates(
         }
       } catch (err) {
         const failure = logChapterCheckFailure(w, { kind: "whole", reason: `erro: ${err instanceof Error ? err.message : String(err)}` })
-        return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null, failure }
+        return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, unreadCountReadBase: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null, failure }
       }
     },
   )
