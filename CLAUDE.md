@@ -164,7 +164,7 @@ apagada (`.incompleto`/`.sem-schema` são a família `backup-parcial`, nunca pod
 exige `BACKUP_PODAR=1` — e só ligue isso quando a cópia externa estiver conferida: o iCloud guarda
 só as 5 mais recentes, então a cópia local mais antiga pode ser a única. Custo de não podar: ~50 MB/semana.
 
-⚠️ **São 19 hoje**, e esta linha já disse **7**, **11** e **17** — a lista de envs acima cobre 6 delas.
+⚠️ **São 20 hoje**, e esta linha já disse **7**, **11** e **17** — a lista de envs acima cobre 6 delas.
 Contagem em prosa não acusa a própria defasagem: **não a repita aqui, leia o `FAMILIAS`.**
 
 🔴 **E essa frase não bastou: a linha defasou de 11 para 14 com o aviso escrito nela mesma.** É a
@@ -347,12 +347,12 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**112 arquivos, remedidos em 2026-11-15**):
+banco declara um dos dois (**113 arquivos, remedidos em 2026-11-16**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **45** | só LÊ ⇒ vai pro local, de graça |
-| `ALVO: NUVEM` no cabeçalho | **55** | GRAVA ⇒ tem que ir pra nuvem |
+| `ALVO: NUVEM` no cabeçalho | **56** | GRAVA ⇒ tem que ir pra nuvem |
 | (não tocam o banco) | 9 | fora da régua — entrou o `smoke-browser.mjs`, que só abre rota |
 
 🔴 **A régua tem DOIS rótulos e o mundo tem TRÊS casos — `smoke-logado.mjs` é o terceiro.**
@@ -868,9 +868,10 @@ Dono: `pickTotalChapters` (`lib/external/chapter-total.ts`), usado pela checagem
 **Obra "não verificada" na checagem de capítulos deixa o motivo de cada fonte na tela e no log, a partir do MESMO objeto (`ChapterCheckFailure`, `lib/reading/check-failures.ts`):** na `/reading`, o link "N não verificadas · ver motivos" e o "Ver motivos" do aviso; no painel "Capítulos e status", a mesma lista; no log, a linha `[reading-check]` (local: `~/Library/Logs/satoria-npm-start.log`; Fly: `fly logs`). Nada vai para o banco: recarregar a aba apaga a lista. Por isso as fontes de capítulo LANÇAM na falha e `getLatestChapter` devolve `failures`: não volte a trocar falha por `null` nem a esvaziar o `catch`.
 **O aviso do fim só diz "nenhuma novidade" sobre as obras verificadas** (`checkOutcomeHeadline`, mesmo arquivo): com parte em falha, "Nenhuma novidade nas N obras verificadas"; com todas, "Nenhuma obra foi verificada". **Sem o desvio do Cloudflare (produção), o botão fica desabilitado com o motivo visível**, aqui, no lote "Capítulos e status" e no "Testar agora" da Comix, cujo canário grava o estado da Comix no banco para todos os processos (`hasCfBypassConfigured`, prop obrigatória nos três componentes).
 
-### O status de publicação tem UMA regra, e o MangaUpdates decide
+### O status de publicação é o da TRADUÇÃO, e o MangaUpdates decide
 
-**Sem humano escolhendo, o status sai de `decidePublicationStatus` (`lib/external/publication-status-sync.ts`): o MangaUpdates decide, o Comix só sem ele; nunca tira uma obra de Completed ou Cancelled; "Ongoing" só pelo MangaUpdates, sobre obra em Hiatus ou sem status.** Vale para a checagem da `/reading`, o lote do catálogo e o "Atualizar automático"; o "Atualizar dados" do curador segue mostrando o conflito. Não trate discordância entre fontes como conflito aqui: elas discordam quase sempre, e era isso que fazia o "Atualizar automático" nunca gravar status.
+**O status é o da tradução disponível, não o do original (decisão da Ana, 16/11/2026): enquanto o último capítulo disponível estiver abaixo do total do original (cabeçalho do status do MangaUpdates, "78 Chapters (Complete)"), a obra está Ongoing — mesmo concluída, cancelada ou em hiato no original.** A marca "Completely scanlated" do MangaUpdates não serve de sinal: erra nos dois sentidos. Dono: `statusByTranslation` (`lib/external/publication-status-sync.ts`); passivo: `scripts/status-pela-traducao.ts`.
+**Sem humano escolhendo, o status sai de `decidePublicationStatus`: o MangaUpdates decide, o Comix só sem ele; só o MangaUpdates tira uma obra de Completed ou Cancelled; "Ongoing" só pelo MangaUpdates.** Vale para a checagem da `/reading`, o lote do catálogo, o "Atualizar automático" e o valor proposto no cadastro (`mergeData`); quando as fontes divergem entre si, o "Atualizar dados" do curador segue mostrando o conflito. Não trate discordância entre fontes como conflito aqui: elas discordam quase sempre, e era isso que fazia o "Atualizar automático" nunca gravar status.
 O lote do catálogo (`/curation/settings?g=fontes`, "Capítulos e status") roda a checagem da `/reading` nas obras Ongoing, Hiatus e Unknown (`CATALOG_SYNC_STATUSES`); precisa do bypass do Mac, então roda no localhost.
 
 ### Reviews do catálogo: lote próprio, e o "+N desde a avaliação" é DERIVADO
@@ -4142,7 +4143,7 @@ faz `relatar()` devolver `false`. É o "declara o que esperava achar" do título
 
 ### Onde vale, e a válvula
 
-Aplicado a **16 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos`
+Aplicado a **17 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos` · `status-pela-traducao`
 · `normalizar-titulos-alternativos` · `reverter-calibracao-auto-aplicada` ·
 `backfill-faixa-citada` · `repick-dead-covers` · `seed-art-signal` · `tag-r19-adult` ·
 `push-opening-structure` · `recalcular-vies-da-dona` · `reconciliar-inferencia-estrutural` ·

@@ -1,10 +1,15 @@
 import { describe, it, expect } from "vitest"
-import { decidePublicationStatus, statusBySource } from "@/lib/external/publication-status-sync"
+import {
+  decidePublicationStatus,
+  statusBySource,
+  statusByTranslation,
+} from "@/lib/external/publication-status-sync"
+import { mapStatus, originalChaptersFromStatus } from "@/lib/external/mangaupdates"
 import { getPublicationStatusIdByName } from "@/lib/constants/status-lookups"
 import { CATALOG_SYNC_STATUSES } from "@/server/queries/catalog-sync"
 
-// A regra ÚNICA de status (2026-11-09): vale para a /reading, o lote do catálogo e o
-// "Atualizar automático". O que cada caso guarda está no nome dele.
+// A regra ÚNICA de status: vale para a /reading, o lote do catálogo e o "Atualizar automático".
+// Desde 2026-11-16 o status é o da TRADUÇÃO disponível. O que cada caso guarda está no nome dele.
 
 describe("decidePublicationStatus — quem decide", () => {
   it("o MangaUpdates vence o Comix", () => {
@@ -34,23 +39,75 @@ describe("decidePublicationStatus — quem decide", () => {
   })
 })
 
-describe("decidePublicationStatus — o que nunca acontece", () => {
-  it("nunca tira uma obra de Completed ou Cancelled", () => {
+describe("decidePublicationStatus — quem tira uma obra de Completed ou Cancelled", () => {
+  it("o Comix nunca tira", () => {
     for (const current of ["Completed", "Cancelled"]) {
       for (const status of ["Ongoing", "Hiatus", "Cancelled", "Completed"]) {
-        expect(decidePublicationStatus(current, { mangaupdates: status })).toBeNull()
+        expect(decidePublicationStatus(current, { mangaupdates: null, comix: status })).toBeNull()
       }
     }
+  })
+
+  it("o MangaUpdates tira: obra marcada concluída com o original em andamento volta a Ongoing", () => {
+    // Caso medido em 16/11: 10 obras presas em Completed com o MangaUpdates dizendo Ongoing.
+    expect(decidePublicationStatus("Completed", { mangaupdates: "Ongoing", comix: "Completed" })).toEqual({
+      status: "Ongoing",
+      source: "mangaupdates",
+    })
+    expect(decidePublicationStatus("Cancelled", { mangaupdates: "Hiatus" })?.status).toBe("Hiatus")
   })
 
   it("'Ongoing' nunca vem do Comix", () => {
     expect(decidePublicationStatus("Hiatus", { mangaupdates: null, comix: "Ongoing" })).toBeNull()
   })
+})
 
-  it("'Ongoing' não troca um status que não seja de hiato ou desconhecido", () => {
-    // Hoje só sobra Ongoing → Ongoing (nada) e os terminais (bloqueados acima); o caso
-    // guarda a forma da regra para quando um status novo aparecer.
-    expect(decidePublicationStatus("Novo Status", { mangaupdates: "Ongoing" })).toBeNull()
+describe("o status é o da TRADUÇÃO", () => {
+  const atrasada = { originalChapters: 78, availableChapters: 29 }
+  const emDia = { originalChapters: 84, availableChapters: 84 }
+
+  it("original concluído com capítulo por traduzir: em andamento", () => {
+    expect(statusByTranslation("Completed", atrasada)).toBe("Ongoing")
+    expect(decidePublicationStatus("Completed", { mangaupdates: "Completed" }, atrasada)?.status).toBe("Ongoing")
+    expect(decidePublicationStatus("Ongoing", { mangaupdates: "Completed" }, atrasada)).toBeNull()
+  })
+
+  it("tradução alcançou o original: concluída", () => {
+    expect(decidePublicationStatus("Ongoing", { mangaupdates: "Completed" }, emDia)?.status).toBe("Completed")
+    expect(decidePublicationStatus("Ongoing", { mangaupdates: "Completed" }, { originalChapters: 84, availableChapters: 90 })?.status).toBe(
+      "Completed",
+    )
+  })
+
+  it("hiato e cancelamento do original também esperam a tradução alcançar", () => {
+    expect(statusByTranslation("Hiatus", atrasada)).toBe("Ongoing")
+    expect(statusByTranslation("Cancelled", atrasada)).toBe("Ongoing")
+    expect(statusByTranslation("Hiatus", emDia)).toBe("Hiatus")
+  })
+
+  it("sem as duas contagens, fica o status do original", () => {
+    expect(statusByTranslation("Completed", undefined)).toBe("Completed")
+    expect(statusByTranslation("Completed", { originalChapters: 78, availableChapters: null })).toBe("Completed")
+    expect(statusByTranslation("Completed", { originalChapters: null, availableChapters: 29 })).toBe("Completed")
+  })
+
+  it("a contagem só traduz o status do MangaUpdates, nunca o do Comix", () => {
+    expect(decidePublicationStatus("Hiatus", { mangaupdates: null, comix: "Completed" }, atrasada)?.status).toBe("Completed")
+  })
+})
+
+describe("o total do original vem do MangaUpdates", () => {
+  it("do cabeçalho do status", () => {
+    expect(originalChaptersFromStatus("78 Chapters (Complete)")).toBe(78)
+    expect(originalChaptersFromStatus("150 Chapters   (Complete)\n\nS1: 48 Chapters (1-48)")).toBe(150)
+    // Sem número no início não há total: "S1: 41 chapters" é só a 1ª temporada.
+    expect(originalChaptersFromStatus("S1: 41 chapters")).toBeNull()
+    expect(originalChaptersFromStatus("**Main Story:** 25 Chapters (1~25)")).toBeNull()
+  })
+
+  it("'Incomplete' não é 'Complete'", () => {
+    expect(mapStatus("108 Chapters (Unfinished/Incomplete; Artist dropped after Season 3)")).not.toBe("Completed")
+    expect(mapStatus("110 Chapters (Completed)")).toBe("Completed")
   })
 })
 

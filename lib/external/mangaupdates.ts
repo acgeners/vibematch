@@ -53,7 +53,8 @@ export function mapStatus(status: string | undefined): PublicationStatus {
   if (!status) return "Unknown" as PublicationStatus
   // "<algo> Special(s)" é nome de extra ("Hiatus Special", "AU Special"), nunca estado.
   const s = headerOf(status).replace(/[\w-]+\s+Specials?/gi, "").toLowerCase()
-  if (s.includes("complete")) return "Completed"
+  // Palavra inteira: "Unfinished/Incomplete" contém "complete" e virava Completed (1 obra em 16/11).
+  if (/\bcompleted?\b/.test(s)) return "Completed"
   if (s.includes("hiatus")) return "Hiatus"
   if (s.includes("cancel") || s.includes("axed")) return "Cancelled"
   if (s.includes("ongoing") || s.includes("continuing")) return "Ongoing"
@@ -326,20 +327,29 @@ export async function fetchMangaUpdatesById(id: number): Promise<MangaUpdatesDet
   }
 }
 
+/** Total de capítulos do ORIGINAL, do cabeçalho do status ("78 Chapters (Complete)"). Exportada para teste. */
+export function originalChaptersFromStatus(status: string | undefined): number | null {
+  return parseChaptersFromStatus(status) ?? null
+}
+
 /**
- * Status de publicação por ID — chamada de API LEVE (sem o scrape de rating do
- * `fetchMangaUpdatesById`). MangaUpdates é a fonte mais confiável pra status, então
- * é a preferida na checagem de capítulos. Retorna `null` em falha ou status
- * desconhecido (pra o chamador cair na próxima fonte).
+ * Status de publicação do ORIGINAL por ID, com o total de capítulos do original — chamada de
+ * API LEVE (sem o scrape de rating do `fetchMangaUpdatesById`). MangaUpdates é a fonte mais
+ * confiável pra status, então é a preferida na checagem de capítulos; o total do original é o
+ * que permite traduzir o status para o da tradução (`statusByTranslation`). Retorna `null` em
+ * falha ou status desconhecido (pra o chamador cair na próxima fonte).
  */
-export async function fetchMangaUpdatesStatus(id: number): Promise<PublicationStatus | null> {
+export async function fetchMangaUpdatesStatus(
+  id: number,
+): Promise<{ status: PublicationStatus; originalChapters: number | null } | null> {
   try {
     const res = await fetch(`${MU_BASE}/series/${id}`, { cache: "no-store" })
     if (!res.ok) return null
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any = await res.json()
     const status = mapStatus(data.status)
-    return status === "Unknown" ? null : status
+    if (status === "Unknown") return null
+    return { status, originalChapters: originalChaptersFromStatus(data.status) }
   } catch {
     return null
   }

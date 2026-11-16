@@ -14,6 +14,7 @@ import { fetchMangaUpdatesStatus } from "@/lib/external/mangaupdates"
 import { withTimeout } from "@/lib/external/with-timeout"
 import { toChapterCount } from "@/lib/external/chapter-total"
 import { decidePublicationStatus } from "@/lib/external/publication-status-sync"
+import type { TranslationEvidence } from "@/lib/external/publication-status-sync"
 import { mapWithConcurrency } from "@/lib/external/map-with-concurrency"
 import { markRecalcPending } from "@/server/recalc/queue"
 import { ensureAdmin } from "@/server/queries/current-user"
@@ -164,7 +165,7 @@ export async function checkReadingUpdates(
         // O que a Comix disse do código SALVO (404 × existe) — gravado logo abaixo como a marca de
         // código morto (migration 222). Fora do ar não chega aqui.
         const linkStatuses: Array<{ source: ExternalSourceId; externalId: string; status: SourceLinkStatus }> = []
-        const [chapterResult, muStatus] = await Promise.all([
+        const [chapterResult, mu] = await Promise.all([
           getLatestChapter(
             {
               title: w.title,
@@ -195,6 +196,7 @@ export async function checkReadingUpdates(
         // precedência; a comix é fallback quando o MU não tem ID/dado.
         const comixStatus =
           chapterResult.status && chapterResult.status !== "Unknown" ? chapterResult.status : null
+        const muStatus = mu?.status ?? null
         const statusExternal = muStatus ?? comixStatus
 
         // Self-healing: hid resolvido via busca e ainda não salvo → persiste pra
@@ -253,13 +255,16 @@ export async function checkReadingUpdates(
           await markRecalcPending("reading-chapter-sync").catch(() => {})
         }
 
-        // Sincroniza o status de publicação pela regra única (`decidePublicationStatus`): o
-        // MangaUpdates decide, o Comix só sem ele; nunca tira de Completed/Cancelled; "Ongoing"
-        // só pelo MangaUpdates, no fim do hiato. Status é feature do Ridge → marca recálculo.
-        const statusApplied = await maybeApplyPublicationStatus(supabase, w.id, w.publication_status_id, {
-          mangaupdates: muStatus,
-          comix: comixStatus,
-        })
+        // Sincroniza o status de publicação pela regra única (`decidePublicationStatus`): o status
+        // é o da TRADUÇÃO — o original do MangaUpdates, em andamento enquanto o último capítulo
+        // disponível estiver abaixo do total do original. Status é feature do Ridge → marca recálculo.
+        const statusApplied = await maybeApplyPublicationStatus(
+          supabase,
+          w.id,
+          w.publication_status_id,
+          { mangaupdates: muStatus, comix: comixStatus },
+          { originalChapters: mu?.originalChapters ?? null, availableChapters: latestCount ?? total },
+        )
 
         return {
           workId: w.id,
@@ -296,8 +301,10 @@ function logChapterCheckFailure(w: { id: string; title: string }, failure: Chapt
   return failure
 }
 
-/** Status de publicação do MangaUpdates por ID (fail-soft, com timeout). `null` se sem ID/dado. */
-async function fetchMuStatus(muId: string | null | undefined): Promise<string | null> {
+/** Status do original e total do original no MangaUpdates por ID (fail-soft, com timeout). `null` se sem ID/dado. */
+async function fetchMuStatus(
+  muId: string | null | undefined,
+): Promise<{ status: string; originalChapters: number | null } | null> {
   const n = muId != null ? Number(muId) : NaN
   if (!Number.isFinite(n)) return null
   return withTimeout(fetchMangaUpdatesStatus(n), 8000, "status:mangaupdates").catch(() => null)
@@ -314,8 +321,9 @@ async function maybeApplyPublicationStatus(
   workId: string,
   currentStatusId: number | null,
   external: { mangaupdates: string | null; comix: string | null },
+  translation: TranslationEvidence,
 ): Promise<string | null> {
-  const decision = decidePublicationStatus(getPublicationStatusNameById(currentStatusId), external)
+  const decision = decidePublicationStatus(getPublicationStatusNameById(currentStatusId), external, translation)
   if (!decision) return null
   const newId = getPublicationStatusIdByName(decision.status)
   if (newId == null) return null

@@ -25,9 +25,10 @@ import { searchMalManga, fetchMalMangaById, fetchMalRecommendations } from "./my
 import { fetchMalReviews } from "./myanimelist-reviews"
 import { searchKitsuManga, fetchKitsuMangaById, fetchKitsuReactions } from "./kitsu"
 import { searchMangaDex, fetchMangaDexById, fetchMangaDexForumComments } from "./mangadex"
-import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews, fetchMangaUpdatesAlternativeTitles } from "./mangaupdates"
+import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews, fetchMangaUpdatesAlternativeTitles, originalChaptersFromStatus } from "./mangaupdates"
 import { withTimeout, WithTimeoutError } from "./with-timeout"
 import { pickTotalChapters, toChapterCount } from "./chapter-total"
+import { statusByTranslation } from "./publication-status-sync"
 import { normalizeText, bestTitleMatch, bestTitleMatchDetailed } from "./title-match"
 import { normalizeAlternativeTitles } from "@/lib/titles/alternative-titles"
 // Re-export: fonte única mora em ./title-match; preservado aqui porque vários
@@ -1873,7 +1874,8 @@ function buildFieldProvenance(
   return provenance
 }
 
-function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[], apDetail?: AnimePlanetDetail | null, muStatusText?: string): ExternalWorkData {
+/** Exportada para teste. */
+export function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[], apDetail?: AnimePlanetDetail | null, muStatusText?: string): ExternalWorkData {
   const primary = accepted[0] ?? candidate
   const synopsisInputs: Array<{ source: ExternalSourceId; text: string | null | undefined }> = accepted.map(
     (result) => ({ source: result.source, text: result.synopsis })
@@ -1907,7 +1909,22 @@ function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[],
     ? [{ platform: "animeplanet" as const, rating: apDetail.rating ?? null, votes: apDetail.votes ?? null }]
     : []
 
-  const publicationStatus = accepted.find((result) => result.publicationStatus)?.publicationStatus ?? candidate.publicationStatus
+  const originalStatus = accepted.find((result) => result.publicationStatus)?.publicationStatus ?? candidate.publicationStatus
+  // Régua com dono (`pickTotalChapters`): o último capítulo disponível (Comix primeiro), o
+  // mesmo número que a `/reading` grava — em obra em andamento E concluída.
+  const totalChapters = pickTotalChapters(accepted, originalStatus).value ?? toChapterCount(candidate.chapters)
+  // O status proposto é o da TRADUÇÃO (`statusByTranslation`), a mesma régua das rotas
+  // automáticas: com o MangaUpdates decidindo, obra concluída no original e com capítulo por
+  // traduzir entra como em andamento. O total do original sai do cabeçalho do status do
+  // MangaUpdates (o `chapters` dele, sem número no cabeçalho, cai no último capítulo traduzido).
+  const muResult = accepted.find((result) => result.source === "mangaupdates")
+  const publicationStatus =
+    originalStatus && muResult?.publicationStatus === originalStatus
+      ? (statusByTranslation(originalStatus, {
+          originalChapters: originalChaptersFromStatus(muStatusText),
+          availableChapters: totalChapters ?? null,
+        }) as typeof originalStatus)
+      : originalStatus
 
   return {
     title: primary.title,
@@ -1928,9 +1945,7 @@ function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[],
       accepted.find((result) => result.yearEnd)?.yearEnd ?? candidate.yearEnd,
     ),
     publicationStatus,
-    // Régua com dono (`pickTotalChapters`): o último capítulo disponível (Comix primeiro), o
-    // mesmo número que a `/reading` grava — em obra em andamento E concluída.
-    totalChapters: pickTotalChapters(accepted, publicationStatus).value ?? toChapterCount(candidate.chapters),
+    totalChapters,
     genres: uniqueStrings(accepted.flatMap((result) => result.genres ?? [])),
     tags: [],
     muRating: ratings.find((r) => r.platform === "mangaupdates")?.rating ?? undefined,
