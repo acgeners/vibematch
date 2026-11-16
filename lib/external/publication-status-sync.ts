@@ -38,13 +38,40 @@ function known(status: string | null | undefined): string | null {
 export interface TranslationEvidence {
   originalChapters?: number | null
   availableChapters?: number | null
+  /**
+   * O MangaUpdates declara o total como FINAL na primeira linha ("60 Chapters (Complete)"), e não
+   * como o que saiu até agora. Sem isso a tolerância de 1 capítulo não vale.
+   */
+  finalTotalDeclared?: boolean
+  /** Data (ISO) do último capítulo disponível, de `works.last_chapter_released_at` ou da checagem. */
+  lastReleaseAt?: string | null
+  /** Relógio injetável para teste. */
+  now?: Date
 }
 
-/** `true` quando há capítulos do original que ainda não estão disponíveis. Sem as duas contagens, `false`. */
+/** Dias sem lançamento a partir dos quais 1 capítulo de diferença deixa de ser "falta traduzir". */
+export const STALE_ONE_CHAPTER_DAYS = 90
+
+/**
+ * `true` quando há capítulos do original que ainda não estão disponíveis. Sem as duas contagens,
+ * `false`.
+ *
+ * Tolerância de 1 capítulo (decisão da Ana, 16/11): a diferença de um só pode ser numeração (o
+ * MangaUpdates conta o prólogo no total, a Comix o numera como 0), e não um capítulo faltando.
+ * Ela só vale com o total declarado FINAL no MangaUpdates e sem lançamento há mais de
+ * `STALE_ONE_CHAPTER_DAYS` — obra que lançou há pouco pode estar mesmo esperando o capítulo final.
+ * Sem a data, não há tolerância.
+ */
 export function translationBehind(t: TranslationEvidence | undefined): boolean {
   const original = t?.originalChapters
   const available = t?.availableChapters
-  return original != null && original > 0 && available != null && available > 0 && available < original
+  if (!(original != null && original > 0 && available != null && available > 0 && available < original)) return false
+  if (original - available === 1 && t?.finalTotalDeclared && t.lastReleaseAt) {
+    const last = Date.parse(t.lastReleaseAt)
+    const now = (t.now ?? new Date()).getTime()
+    if (Number.isFinite(last) && now - last > STALE_ONE_CHAPTER_DAYS * 86_400_000) return false
+  }
+  return true
 }
 
 /**

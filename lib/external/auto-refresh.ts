@@ -1,6 +1,6 @@
 import type { ConflictField, ExternalWorkData } from "./types"
 import { decidePublicationStatus, statusBySource } from "./publication-status-sync"
-import { originalChaptersFromStatus } from "./mangaupdates"
+import { declaresFinalTotal, originalChaptersFromStatus } from "./mangaupdates"
 
 /**
  * Campos que a atualização AUTOMÁTICA (Assinante) pode gravar.
@@ -88,6 +88,8 @@ export function buildAutoRefreshPlan(
   data: ExternalWorkData,
   conflicts: ConflictField[],
   currentStatus: string | null,
+  /** `works.last_chapter_released_at`: sem ela, a tolerância de 1 capítulo não vale. */
+  lastReleaseAt: string | null = null,
 ): AutoRefreshPlan {
   const conflicted = new Set<string>(conflicts.map((c) => String(c.field)))
   const updates: AutoRefreshUpdate = {}
@@ -103,6 +105,8 @@ export function buildAutoRefreshPlan(
         {
           originalChapters: originalChaptersFromStatus(data.mangaUpdatesStatusText),
           availableChapters: data.totalChapters ?? null,
+          finalTotalDeclared: declaresFinalTotal(data.mangaUpdatesStatusText),
+          lastReleaseAt,
         },
       )
       if (decision) updates.publicationStatus = decision.status

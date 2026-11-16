@@ -3198,7 +3198,7 @@ export async function autoRefreshWorkData(workId: string): Promise<AutoRefreshWo
   // é ela que impede tirar uma obra de Completed e só deixa "Ongoing" entrar no fim do hiato.
   const { data: current, error: currentError } = await createAdminClient()
     .from("works")
-    .select("publication_status_id")
+    .select("publication_status_id, last_chapter_released_at")
     .eq("id", workId)
     .single()
   if (currentError) return { ok: false, error: currentError.message }
@@ -3206,6 +3206,7 @@ export async function autoRefreshWorkData(workId: string): Promise<AutoRefreshWo
     refreshed.data,
     refreshed.conflicts,
     getPublicationStatusNameById(current?.publication_status_id ?? null),
+    current?.last_chapter_released_at ?? null,
   )
   if (Object.keys(plan.updates).length === 0) {
     return { ok: true, updatedFields: [], skippedConflicts: plan.skippedConflicts, sources: refreshed.sources }

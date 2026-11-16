@@ -25,7 +25,7 @@ import { searchMalManga, fetchMalMangaById, fetchMalRecommendations } from "./my
 import { fetchMalReviews } from "./myanimelist-reviews"
 import { searchKitsuManga, fetchKitsuMangaById, fetchKitsuReactions } from "./kitsu"
 import { searchMangaDex, fetchMangaDexById, fetchMangaDexForumComments } from "./mangadex"
-import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews, fetchMangaUpdatesAlternativeTitles, originalChaptersFromStatus } from "./mangaupdates"
+import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews, fetchMangaUpdatesAlternativeTitles, originalChaptersFromStatus, declaresFinalTotal } from "./mangaupdates"
 import { withTimeout, WithTimeoutError } from "./with-timeout"
 import { pickTotalChapters, toChapterCount } from "./chapter-total"
 import { statusByTranslation } from "./publication-status-sync"
@@ -1922,6 +1922,9 @@ export function mergeData(candidate: MergedCandidate, accepted: ExternalSearchRe
     originalStatus && muResult?.publicationStatus === originalStatus
       ? (statusByTranslation(originalStatus, {
           originalChapters: originalChaptersFromStatus(muStatusText),
+          // Sem a data do último lançamento aqui (obra nova não tem), a tolerância de 1 capítulo não
+          // vale: a proposta é estrita, e a checagem de capítulos a ajusta depois.
+          finalTotalDeclared: declaresFinalTotal(muStatusText),
           availableChapters: totalChapters ?? null,
         }) as typeof originalStatus)
       : originalStatus
