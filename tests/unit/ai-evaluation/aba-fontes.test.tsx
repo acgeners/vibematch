@@ -186,3 +186,27 @@ describe("fila", () => {
     expect(vazio.textContent).toMatch(/já tem o vínculo com .+ avaliado/)
   })
 })
+
+describe("padrão: as obras da sua lista (pedido de 16/11/2026)", () => {
+  it("o padrão é todo status com prateleira na /my-list — fica de fora só Untracked", async () => {
+    const { SOURCES_DEFAULT_PERSONAL_NAMES, ALL_PERSONAL_NAMES, PERSONAL_STATUS_NAME_TO_ID } = await import(
+      "@/lib/ai-evaluation/queue-filters"
+    )
+    const { shelfOfStatusId } = await import("@/lib/my-list/shelves")
+    const semPrateleira = ALL_PERSONAL_NAMES.filter((n) => shelfOfStatusId(PERSONAL_STATUS_NAME_TO_ID[n]) == null)
+    expect(semPrateleira).toEqual(["Untracked"])
+    expect([...SOURCES_DEFAULT_PERSONAL_NAMES].sort()).toEqual(ALL_PERSONAL_NAMES.filter((n) => n !== "Untracked").sort())
+  })
+
+  it("no padrão, diz que as nunca tocadas ficaram fora e oferece incluí-las", () => {
+    renderTab({ usingDefaultPersonal: true, includeUntouchedHref: "/curation/works?tab=fontes&personal=todos" })
+    const link = screen.getByRole("link", { name: "incluir as nunca tocadas" })
+    expect(link.getAttribute("href")).toBe("/curation/works?tab=fontes&personal=todos")
+  })
+
+  it("com escolha própria de status, sem o aviso", () => {
+    renderTab({ usingDefaultPersonal: false, includeUntouchedHref: "/x" })
+    expect(screen.queryByText("incluir as nunca tocadas")).toBeNull()
+  })
+})
+

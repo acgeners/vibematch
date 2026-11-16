@@ -10,6 +10,9 @@ import { MODEL, PROMPT_VERSION, CURRENT_PROMPT_VERSION_NUM, parsePromptVersion }
 import {
   PUB_STATUS_NAME_TO_ID,
   PERSONAL_STATUS_NAME_TO_ID,
+  SOURCES_DEFAULT_PERSONAL_NAMES,
+  SOURCES_DEFAULT_PERSONAL_IDS,
+  ALL_PERSONAL_NAMES,
   parseStatusList,
   parseSynopsisQualities,
   parsePredictionQualities,
@@ -726,10 +729,13 @@ const getCuradoriaTabCounts = unstable_cache(
       // fora de `args` de propósito — entrar ali só faria o cache fragmentar por
       // combinação de filtro sem mudar o número.
       getReviewDigestQueue({ countOnly: true }),
-      // Mesma razão pra fila de Fontes: lacuna de vínculo externo não tem relação com
-      // status pessoal nem com interesse. O número global é o tamanho da fila; quando a
-      // aba está aberta, o `activeCount` o sobrescreve pelo que está na tela.
-      getSourceGapQueue({}, { countOnly: true }),
+      // Fontes: o MESMO padrão de status pessoal que a aba aplica ao abrir (as obras da sua
+      // lista). Com `{}` aqui, o "Fontes (N)" visto das outras abas contava também as nunca
+      // tocadas e mudava de 695 para 199 ao clicar na aba.
+      getSourceGapQueue(
+        { personalStatusIds: args.personalStatusIds.length > 0 ? args.personalStatusIds : SOURCES_DEFAULT_PERSONAL_IDS },
+        { countOnly: true },
+      ),
       // Ver `TabCounts.attrDot`: mesma fonte do badge da barra superior.
       getCuradoriaBadgeUnreadCount(),
     ])
@@ -751,7 +757,7 @@ const getCuradoriaTabCounts = unstable_cache(
       sources: sourceQueue.withGapsCount,
     }
   },
-  ["curadoria-tab-counts-v2"],
+  ["curadoria-tab-counts-v3"],
   { revalidate: 60, tags: ["ai-eval-tab-counts"] },
 )
 
@@ -980,9 +986,14 @@ export default async function CuradoriaDaObraPage({
     // ⚠️ Os MESMOS filtros que o painel desenha. O painel de filtros é compartilhado e
     // exibe Interesse em toda aba — passá-los pela metade produziria um chip aceso que
     // não filtra nada, que é pior do que não oferecer o controle.
+    // Sem escolha de status na URL, o padrão desta aba são as obras da sua lista (ver
+    // `SOURCES_DEFAULT_PERSONAL_NAMES`). Escolha explícita sobrepõe.
+    const sourcesUsesDefault = personalStatusNames.length === 0
+    const sourcesPersonalNames = sourcesUsesDefault ? SOURCES_DEFAULT_PERSONAL_NAMES : personalStatusNames
+    const sourcesPersonalIds = sourcesUsesDefault ? SOURCES_DEFAULT_PERSONAL_IDS : personalStatusIds
     const queue = await getSourceGapQueue({
       pubStatusIds,
-      personalStatusIds,
+      personalStatusIds: sourcesPersonalIds,
       synopsisQualities,
       predictionQualities,
       source: activeSource,
@@ -998,7 +1009,10 @@ export default async function CuradoriaDaObraPage({
         withGapsCount={queue.withGapsCount}
         activeSource={activeSource}
         activePubStatuses={pubStatusNames}
-        activePersonalStatuses={personalStatusNames}
+        activePersonalStatuses={sourcesPersonalNames}
+        defaultPersonalStatuses={SOURCES_DEFAULT_PERSONAL_NAMES}
+        usingDefaultPersonal={sourcesUsesDefault}
+        includeUntouchedHref={`${sourcesBaseHref}${sourcesBaseHref.includes("?") ? "&" : "?"}personal=${encodeURIComponent(ALL_PERSONAL_NAMES.join(","))}`}
         activeInterest={synopsisQualities}
         activePredictionQualities={predictionQualities}
         baseHref={sourcesBaseHref}
