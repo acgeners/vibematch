@@ -333,6 +333,16 @@ export function originalChaptersFromStatus(status: string | undefined): number |
 }
 
 /**
+ * A PRIMEIRA linha do status declara o total como final: "60 Chapters (Complete)" ou
+ * "60 Chapters + Prologue (Complete)". "41 Chapters (*Hiatus since 3/2026*)" não declara: ali o
+ * número é o que saiu até agora. Exportada para teste.
+ */
+export function declaresFinalTotal(status: string | undefined): boolean {
+  const first = (status ?? "").split("\n")[0]
+  return /^\s*\d+\s+chapters?\b.*\(\s*\**\s*completed?\b/i.test(first)
+}
+
+/**
  * Status de publicação do ORIGINAL por ID, com o total de capítulos do original — chamada de
  * API LEVE (sem o scrape de rating do `fetchMangaUpdatesById`). MangaUpdates é a fonte mais
  * confiável pra status, então é a preferida na checagem de capítulos; o total do original é o
@@ -341,7 +351,7 @@ export function originalChaptersFromStatus(status: string | undefined): number |
  */
 export async function fetchMangaUpdatesStatus(
   id: number,
-): Promise<{ status: PublicationStatus; originalChapters: number | null } | null> {
+): Promise<{ status: PublicationStatus; originalChapters: number | null; finalTotalDeclared: boolean } | null> {
   try {
     const res = await fetch(`${MU_BASE}/series/${id}`, { cache: "no-store" })
     if (!res.ok) return null
@@ -349,7 +359,11 @@ export async function fetchMangaUpdatesStatus(
     const data: any = await res.json()
     const status = mapStatus(data.status)
     if (status === "Unknown") return null
-    return { status, originalChapters: originalChaptersFromStatus(data.status) }
+    return {
+      status,
+      originalChapters: originalChaptersFromStatus(data.status),
+      finalTotalDeclared: declaresFinalTotal(data.status),
+    }
   } catch {
     return null
   }

@@ -126,7 +126,7 @@ export async function checkReadingUpdates(
   const { data, error } = await supabase
     .from("works_owner")
     .select(
-      "id, title, original_title, alternative_titles, total_chapters, chapters_read, publication_status_id, work_external_ids(source, external_id, is_rejected)",
+      "id, title, original_title, alternative_titles, total_chapters, chapters_read, publication_status_id, last_chapter_released_at, work_external_ids(source, external_id, is_rejected)",
     )
     .in("id", workIds)
 
@@ -140,6 +140,7 @@ export async function checkReadingUpdates(
     total_chapters: number | null
     chapters_read: number | null
     publication_status_id: number | null
+    last_chapter_released_at: string | null
     work_external_ids?: ExternalIdRow[] | null
   }>
 
@@ -263,7 +264,12 @@ export async function checkReadingUpdates(
           w.id,
           w.publication_status_id,
           { mangaupdates: muStatus, comix: comixStatus },
-          { originalChapters: mu?.originalChapters ?? null, availableChapters: latestCount ?? total },
+          {
+            originalChapters: mu?.originalChapters ?? null,
+            availableChapters: latestCount ?? total,
+            finalTotalDeclared: mu?.finalTotalDeclared ?? false,
+            lastReleaseAt: lastReleasedIso ?? w.last_chapter_released_at,
+          },
         )
 
         return {
@@ -304,7 +310,7 @@ function logChapterCheckFailure(w: { id: string; title: string }, failure: Chapt
 /** Status do original e total do original no MangaUpdates por ID (fail-soft, com timeout). `null` se sem ID/dado. */
 async function fetchMuStatus(
   muId: string | null | undefined,
-): Promise<{ status: string; originalChapters: number | null } | null> {
+): Promise<{ status: string; originalChapters: number | null; finalTotalDeclared: boolean } | null> {
   const n = muId != null ? Number(muId) : NaN
   if (!Number.isFinite(n)) return null
   return withTimeout(fetchMangaUpdatesStatus(n), 8000, "status:mangaupdates").catch(() => null)

@@ -114,9 +114,11 @@ vi.mock("@/lib/supabase/admin", () => ({
 vi.mock("@/server/queries/current-user", () => ({ ensureAdmin: async () => ({ ok: true }) }))
 vi.mock("@/server/recalc/queue", () => ({ markRecalcPending: vi.fn(async () => {}) }))
 vi.mock("@/server/actions/comix-hid", () => ({ persistComixHid: vi.fn(async () => {}) }))
-const mu = vi.hoisted(() => ({ status: "Completed" as string | null, originalChapters: null as number | null }))
+const mu = vi.hoisted(() => ({ status: "Completed" as string | null, originalChapters: null as number | null, finalTotalDeclared: false }))
 vi.mock("@/lib/external/mangaupdates", () => ({
-  fetchMangaUpdatesStatus: vi.fn(async () => (mu.status == null ? null : { status: mu.status, originalChapters: mu.originalChapters })),
+  fetchMangaUpdatesStatus: vi.fn(async () =>
+    mu.status == null ? null : { status: mu.status, originalChapters: mu.originalChapters, finalTotalDeclared: mu.finalTotalDeclared },
+  ),
 }))
 vi.mock("@/lib/external/mangadex", () => ({ fetchMangaDexChapterDates: vi.fn(async () => []) }))
 
@@ -188,6 +190,7 @@ describe("checkReadingUpdates — status de publicação", () => {
     lookups.mangago.mockReset()
     banco.updates = []
     mu.originalChapters = null
+    mu.finalTotalDeclared = false
     comixResponde(23)
     mangagoResponde(23)
   })
@@ -236,6 +239,41 @@ describe("checkReadingUpdates — status de publicação", () => {
     const [r] = await checkReadingUpdates(["w1"])
 
     expect(r.statusApplied).toBe("Ongoing")
+  })
+
+  it("1 capítulo de diferença, total final e parada há mais de 3 meses: concluída", async () => {
+    banco.obra = comMangaUpdates("Ongoing")
+    mu.status = "Completed"
+    mu.originalChapters = 24
+    mu.finalTotalDeclared = true
+    lookups.mangago.mockResolvedValue({
+      chapter: 23,
+      source: "mangago",
+      sourceUrl: "https://www.mangago.me/read-manga/obra_teste/",
+      releasedAt: "2025-06-01T00:00:00.000Z",
+      chapterNumbers: Array.from({ length: 23 }, (_, i) => i + 1),
+    })
+    const [r] = await checkReadingUpdates(["w1"])
+
+    expect(r.statusApplied).toBe("Completed")
+  })
+
+  it("1 capítulo de diferença com lançamento recente: segue em andamento", async () => {
+    banco.obra = comMangaUpdates("Ongoing")
+    mu.status = "Completed"
+    mu.originalChapters = 24
+    mu.finalTotalDeclared = true
+    // Relativa ao relógio: uma data fixa viraria "antiga" sozinha e o caso mudaria de lado.
+    lookups.mangago.mockResolvedValue({
+      chapter: 23,
+      source: "mangago",
+      sourceUrl: "https://www.mangago.me/read-manga/obra_teste/",
+      releasedAt: new Date(Date.now() - 5 * 86_400_000).toISOString(),
+      chapterNumbers: Array.from({ length: 23 }, (_, i) => i + 1),
+    })
+    const [r] = await checkReadingUpdates(["w1"])
+
+    expect(r.statusApplied).toBeNull()
   })
 
   it("tradução alcançou o original: concluída", async () => {

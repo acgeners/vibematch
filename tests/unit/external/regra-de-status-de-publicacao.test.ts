@@ -3,8 +3,10 @@ import {
   decidePublicationStatus,
   statusBySource,
   statusByTranslation,
+  translationBehind,
+  STALE_ONE_CHAPTER_DAYS,
 } from "@/lib/external/publication-status-sync"
-import { mapStatus, originalChaptersFromStatus } from "@/lib/external/mangaupdates"
+import { declaresFinalTotal, mapStatus, originalChaptersFromStatus } from "@/lib/external/mangaupdates"
 import { getPublicationStatusIdByName } from "@/lib/constants/status-lookups"
 import { CATALOG_SYNC_STATUSES } from "@/server/queries/catalog-sync"
 
@@ -93,6 +95,50 @@ describe("o status é o da TRADUÇÃO", () => {
 
   it("a contagem só traduz o status do MangaUpdates, nunca o do Comix", () => {
     expect(decidePublicationStatus("Hiatus", { mangaupdates: null, comix: "Completed" }, atrasada)?.status).toBe("Completed")
+  })
+})
+
+describe("tolerância de 1 capítulo (numeração × capítulo faltando)", () => {
+  // Regra da Ana (16/11): 1 capítulo de diferença, total declarado FINAL no MangaUpdates e mais de
+  // 3 meses sem lançamento ⇒ concluída. Casos reais: "Don't Give Cookies to Hungry Wolves" (7 de 8,
+  // 330 dias parada) conclui; "The Pearl of Albrecht" (49 de 50, lançou há 8 dias) segue em andamento.
+  const now = new Date("2026-11-16T00:00:00Z")
+  const diasAtras = (d: number) => new Date(now.getTime() - d * 86_400_000).toISOString()
+  const base = { originalChapters: 8, availableChapters: 7, finalTotalDeclared: true, now }
+
+  it("parada há mais de 3 meses: concluída", () => {
+    expect(translationBehind({ ...base, lastReleaseAt: diasAtras(330) })).toBe(false)
+    expect(statusByTranslation("Completed", { ...base, lastReleaseAt: diasAtras(330) })).toBe("Completed")
+  })
+
+  it("lançou há pouco: segue em andamento (o final pode estar a caminho)", () => {
+    expect(translationBehind({ ...base, lastReleaseAt: diasAtras(8) })).toBe(true)
+    expect(translationBehind({ ...base, lastReleaseAt: diasAtras(STALE_ONE_CHAPTER_DAYS - 1) })).toBe(true)
+  })
+
+  it("sem a data, sem tolerância", () => {
+    expect(translationBehind({ ...base, lastReleaseAt: null })).toBe(true)
+  })
+
+  it("total que NÃO é declarado final (hiato, só o que saiu): sem tolerância", () => {
+    expect(translationBehind({ ...base, finalTotalDeclared: false, lastReleaseAt: diasAtras(916) })).toBe(true)
+  })
+
+  it("só vale para 1 capítulo", () => {
+    expect(translationBehind({ ...base, availableChapters: 6, lastReleaseAt: diasAtras(400) })).toBe(true)
+  })
+
+  it("o MangaUpdates declara o total como final só na primeira linha, com 'Complete'", () => {
+    expect(declaresFinalTotal("8 Chapters (Complete)")).toBe(true)
+    expect(declaresFinalTotal("60 Chapters + Prologue (Complete)")).toBe(true)
+    expect(declaresFinalTotal("150 Chapters   (Complete)\n\nS1: 48 Chapters (1-48)")).toBe(true)
+    expect(declaresFinalTotal("41 Chapters (*Hiatus since 3/2026*)")).toBe(false)
+    expect(declaresFinalTotal("68 Chapters (Cancelled)")).toBe(false)
+    expect(declaresFinalTotal("5 Volumes (Ongoing)\n111 Chapters + Prologue (Complete)")).toBe(false)
+    expect(declaresFinalTotal("S1: 41 Chapters (Complete)")).toBe(false)
+    // Só a temporada 1 está completa; a obra segue saindo. O "(Complete)" de baixo não é do total.
+    expect(declaresFinalTotal("80 Chapters (Ongoing)\n\nS1: 40 Chapters (Complete) (1-40)")).toBe(false)
+    expect(declaresFinalTotal(undefined)).toBe(false)
   })
 })
 

@@ -41,6 +41,7 @@ interface Obra {
   title: string
   publication_status_id: number | null
   total_chapters: number | null
+  last_chapter_released_at: string | null
 }
 
 interface Mudanca {
@@ -77,7 +78,7 @@ async function main() {
 
   const funil = criarFunil("status pela tradução")
 
-  const obras = await lerTudo<Obra>("works", "id, title, publication_status_id, total_chapters", "id", (q) =>
+  const obras = await lerTudo<Obra>("works", "id, title, publication_status_id, total_chapters, last_chapter_released_at", "id", (q) =>
     q.eq("is_archived", false),
   )
   funil.passo("obras ativas", obras.length)
@@ -111,7 +112,12 @@ async function main() {
       const d = decidePublicationStatus(
         antes,
         { mangaupdates: mu.status, comix: null },
-        { originalChapters: mu.originalChapters, availableChapters: o.total_chapters },
+        {
+          originalChapters: mu.originalChapters,
+          availableChapters: o.total_chapters,
+          finalTotalDeclared: mu.finalTotalDeclared,
+          lastReleaseAt: o.last_chapter_released_at,
+        },
       )
       if (d) {
         plano.push({

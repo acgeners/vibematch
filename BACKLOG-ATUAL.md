@@ -123,7 +123,9 @@ Não reabrir sem evidência nova e concreta.
   1.085 ativas → 1.070 com MangaUpdates → 1.053 lidas → **83/83 gravadas** (66 Completed → Ongoing, 10 Hiatus →
   Ongoing, 3 Cancelled → Completed, 2 Cancelled → Ongoing, 1 Ongoing → Completed, 1 Ongoing → Hiatus), estado
   anterior em `.backups/status-pela-traducao-2026-11-16T04-58-23-923Z/`, recálculo da nuvem concluído (1.085).
-  Em aberto, sem conferir: 11 das obras estão a 1 capítulo do original (pode ser numeração; lista no #619).
+  Das 11 a 1 capítulo do original, a regra de tolerância (#621: total final no MangaUpdates + 90 dias sem
+  lançamento) concluiu 1; 4 lançaram há pouco ou estão em hiato no MangaUpdates e seguem em andamento; **5 não
+  têm a data do último lançamento** e só se resolvem quando o lote "Capítulos e status" as checar.
 
 - **Servidor de desenvolvimento esquecido na 3001 (encerrado em 16/11/2026):** a porta estava livre na
   conferência de 16/11, sem processo escutando. O laço de recarregamento (HMR) de 11/11 não foi investigado;
