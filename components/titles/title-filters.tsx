@@ -38,6 +38,7 @@ import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
 import { LABELS } from "@/lib/constants/ui-labels"
+import { CHANCE_DESCRIPTION, CHANCE_LABELS } from "@/lib/calculations/forces"
 import { cn } from "@/lib/utils"
 import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 import { CollapseIconTrigger, CollapseTitleTrigger } from "@/components/ui/collapse-trigger"
@@ -1003,6 +1004,7 @@ export function TitleFilters({
   }
   pushRange("chapters", LABELS.chapters_total.short, "min_chapters", "max_chapters")
   pushRange("expected", LABELS.expected_score.full, "min_expected", "max_expected")
+  pushRange("chance", CHANCE_LABELS.full, "min_chance", "max_chance")
   pushRange("fit", LABELS.personal_fit.full, "min_fit", "max_fit")
   pushRange("platform", LABELS.platform_avg.full, "min_platform_avg", "max_platform_avg")
   pushRange("votes", LABELS.total_votes.full, "min_votes", "max_votes")
@@ -1368,7 +1370,7 @@ export function TitleFilters({
           </div>
 
           {/* Linha 2: Interesse + Capítulos + Notas + Votos (tudo na mesma linha) */}
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-[1.4fr_0.7fr_1fr_1fr_1fr_1fr]">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-[1.4fr_0.7fr_1fr_1fr_1fr_1fr_1fr]">
             <FilterCard title={`Interesse${selectedSynopsisQ.size ? ` (${selectedSynopsisQ.size})` : ""}`}>
               <div className="grid grid-cols-4 gap-1.5">
                 {SYNOPSIS_QUALITIES.map((q) => (
@@ -1413,6 +1415,18 @@ export function TitleFilters({
               minKey="min_expected"
               maxKey="max_expected"
               step={0.5}
+              searchParams={searchParams}
+              updateParams={updateParams}
+            />
+            <ScoreRangeCard
+              emoji="💜"
+              label={CHANCE_LABELS.full}
+              tooltip={CHANCE_DESCRIPTION}
+              minKey="min_chance"
+              maxKey="max_chance"
+              step={5}
+              min={0}
+              max={100}
               searchParams={searchParams}
               updateParams={updateParams}
             />

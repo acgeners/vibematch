@@ -18,7 +18,8 @@ import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { WorkContentChip } from "@/components/ui/work-content-chip"
 import { ResponsiveHeaderLabel, headerFormsFor } from "@/components/titles/responsive-header-label"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
-import { AlignmentCell, AlignmentScoreCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
+import { AlignmentCell, AlignmentScoreCell, ChanceCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
+import { CHANCE_DESCRIPTION, CHANCE_LABELS, displayChance } from "@/lib/calculations/forces"
 import { pickCriterionTierByRange } from "@/components/ui/score-badge"
 import type { AttrColorMode, CriterionRange, CriterionTier } from "@/components/ui/score-badge"
 import { readAttrColorMode, subscribeAttrColorMode } from "@/lib/ui/attr-color-mode"
@@ -148,6 +149,7 @@ function ResizeHandle({ columnKey, onResize, startWidth }: ResizeHandleProps) {
 const NON_CRITERION_LABELS: Record<string, string> = {
   expected_score: LABELS.expected_score.short,
   personal_fit: LABELS.personal_fit.abbrev,
+  chance_score: CHANCE_LABELS.short,
   platform_avg: LABELS.platform_avg.short,
   total_votes: LABELS.total_votes.short,
   alignment_score: LABELS.alignment_score.short,
@@ -158,6 +160,7 @@ const NON_CRITERION_LABELS: Record<string, string> = {
 const NON_CRITERION_TOOLTIPS: Record<string, string> = {
   expected_score: LABELS.expected_score.tooltip_full,
   personal_fit: LABELS.personal_fit.tooltip_full,
+  chance_score: CHANCE_DESCRIPTION,
   platform_avg: LABELS.platform_avg.tooltip_full,
   total_votes: LABELS.total_votes.tooltip_full,
   alignment_score: LABELS.alignment_score.tooltip_full,
@@ -252,6 +255,8 @@ function getValueForKey(work: WorkWithRelations, key: string): number | null {
     return cs?.personal_fit != null ? cs.personal_fit * 100 : null
   }
   if (key === "alignment_score") return work.calculated_scores?.alignment_score ?? null
+  // O inteiro exibido ("62%"), para que a ordenação do heatmap empate o que aparece igual.
+  if (key === "chance_score") return displayChance(work.calculated_scores?.chance_score)
   if (key.startsWith("crit_")) {
     return scoreFor(work, key.slice("crit_".length))
   }
@@ -641,6 +646,10 @@ function ScoreCell({
         showBar={false}
       />
     )
+  }
+
+  if (col.key === "chance_score") {
+    return <ChanceCell chanceScore={work.calculated_scores?.chance_score ?? null} />
   }
 
   if (col.key === "platform_avg") {

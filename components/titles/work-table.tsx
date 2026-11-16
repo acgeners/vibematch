@@ -82,8 +82,9 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { addWorksToList, countSelectedWorksInFolders, removeWorksFromList } from "@/server/actions/lists"
 import type { ListPickerOption, WorkGroupRef } from "@/server/queries/lists"
 import { GroupCountCell } from "@/components/titles/group-count-cell"
-import { AlignmentCell, AlignmentScoreCell, ArtCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
+import { AlignmentCell, AlignmentScoreCell, ArtCell, ChanceCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { computeDecisionScore } from "@/lib/calculations/decision"
+import { CHANCE_LABELS } from "@/lib/calculations/forces"
 import type { VerdictScale } from "@/lib/calculations/decision"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
 import { MoodRefineDialog } from "@/components/ranking/mood-refine-dialog"
@@ -1109,6 +1110,7 @@ function WorkListView({
     decision: { field: "decision", label: "Prioridade" },
     expected_score: { field: "expected_score", label: LABELS.expected_score.full },
     user_score: { field: "user_score", label: "Minha nota (Real)" },
+    chance_score: { field: "chance_score", label: CHANCE_LABELS.full },
     personal_fit: { field: "personal_fit", label: "Alinhamento" },
     platform_avg: { field: "platform_avg", label: "Nota.M" },
     total_votes: { field: "total_votes", label: "Votos" },
@@ -1261,6 +1263,7 @@ function WorkListView({
     // fila usam pra este número. Passar `scoreThresholds?.expected` aqui coloriria a nota
     // pela distribuição da PREVISTA: duas grandezas, uma régua só.
     user_score: (work) => <ScoreBadge score={work.user_score ?? null} size="sm" />,
+    chance_score: (work) => <ChanceCell chanceScore={work.calculated_scores?.chance_score ?? null} />,
     personal_fit: (work) => (
       <AlignmentCell
         value={work.calculated_scores?.personal_fit ?? null}

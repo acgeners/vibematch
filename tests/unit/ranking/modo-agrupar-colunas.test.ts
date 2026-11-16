@@ -41,8 +41,9 @@ const ESTRUTURAIS = ["select", "rank"] as const
  * Três não vêm de `max-content`:
  * - `separator` 294 — o degrau do container query (270 de conteúdo) + 24. O clone mede 24px
  *   ali, porque a barra é `absolute` e o `@container` não resolve fora da árvore.
- * - `title` 260 — piso escolhido: ele é o único que degrada bem (reticências num nome são
- *   esperadas), e por isso é ele que absorve a sobra do orçamento.
+ * - `title` 200 — piso escolhido: ele é o único que degrada bem (reticências num nome são
+ *   esperadas), e por isso é ele que absorve a sobra do orçamento. Caiu de 250 quando a Chance
+ *   entrou no modo pagando com o título (escolha da Ana, 16/11/2026).
  * - `total_votes` 74 — o pior caso da TELA era "16,2K", o do CATÁLOGO é 193.712 votos
  *   ⇒ "193,7K". Dimensionar coluna de número pela amostra visível trunca no dia da obra popular.
  */
@@ -50,7 +51,7 @@ const PEDE: Record<string, number> = {
   select: 40,
   rank: 41,
   fav: 52,
-  title: 250,
+  title: 200,
   publication_status: 92,
   // ⚠️ 50 e não 49: o medido é 49,2 e o `text-overflow` dispara em QUALQUER estouro — 0,2px
   // viraram "2…" numa coluna de 3 dígitos. Idem `art` e `platform_avg`. Arredonde PRA CIMA.
@@ -60,6 +61,8 @@ const PEDE: Record<string, number> = {
   decision: 62,
   separator: 294,
   expected_score: 58,
+  // "62%" em mono text-sm: os mesmos três glifos da Média externa ("8,1"), medida em 50.
+  chance_score: 50,
   synopsis_q: 73,
   synopsis_pred: 90,
   alignment_score: 100,
@@ -84,6 +87,14 @@ describe("o conjunto do modo Agrupar", () => {
 
   it("a ordem declarada é a ordem desenhada", () => {
     expect(getTierModeColumns().map((c) => c.key)).toEqual([...TIER_MODE_COLUMN_KEYS])
+  })
+
+  it("carrega as três forças que o separador compara", () => {
+    // O separador ("O que a separa") aponta a força que mais distancia a obra das empatadas;
+    // sem a coluna, a força apontada não teria número na linha.
+    for (const key of ["chance_score", "platform_avg", "total_votes"]) {
+      expect(TIER_MODE_COLUMN_KEYS).toContain(key)
+    }
   })
 
   it("carrega a coluna que só existe neste modo", () => {
@@ -130,11 +141,10 @@ describe("o conjunto do modo Agrupar", () => {
     // Ele é o único que degrada bem, então o orçamento fecha nele: o que sobra depois de todo
     // mundo receber o que pede vai pro título. Sem o piso, "fechar" viraria comer o título.
     //
-    // ⚠️ O piso é 250 e o título tem 255 — 5px de margem, e é o número mais apertado do modo.
-    // O piso ANTERIOR (260) era um chute; este continua sendo escolha, mas com a medida ao
-    // lado: a MEDIANA dos títulos pede 275px, ou seja mais da metade trunca de qualquer jeito.
-    // Baixar daqui é decidir que o nome da obra deixa de identificar a linha.
-    expect(larguraReal("title")).toBeGreaterThanOrEqual(250)
+    // ⚠️ O piso é 200 e o título tem 205. Era 250 até a Chance entrar no modo pagando com o
+    // título (escolha da Ana, 16/11/2026). A MEDIANA dos títulos pede 275px, então a maioria
+    // trunca. Baixar daqui de novo é decidir que o nome da obra deixa de identificar a linha.
+    expect(larguraReal("title")).toBeGreaterThanOrEqual(200)
   })
 })
 

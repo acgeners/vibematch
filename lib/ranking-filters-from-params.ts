@@ -59,6 +59,8 @@ export function parseFiltersFromSearchParams(sp: URLSearchParams): RankingFilter
     maxExpectedScore: num("max_expected"),
     minPersonalFitPct: num("min_fit"),
     maxPersonalFitPct: num("max_fit"),
+    minChance: num("min_chance"),
+    maxChance: num("max_chance"),
     minAlignment: num("min_align"),
     maxAlignment: num("max_align"),
     minPlatformAvg: num("min_platform_avg"),

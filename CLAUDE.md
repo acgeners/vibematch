@@ -1783,6 +1783,11 @@ Guardadas por `tests/unit/ranking/score-rounding.test.ts`, `build-tiers.test.ts`
 `prioridade-ordena-pelo-numero-da-tela.test.ts` — o último com a contraprova do comportamento
 antigo, conferida com sonda.
 
+**A Chance de gostar segue a mesma régua pelo inteiro exibido ("62%"):** coluna, filtro
+(`min_chance`/`max_chance`, só com modelo; sem Chance não passa) e ordenação (`chance_score`) leem
+`displayChance` (`lib/calculations/forces.ts`), nunca o `chance_score` cru. Guardado por
+`tests/unit/ranking/chance-filtro-e-ordem.test.ts`.
+
 ## Desempatar o que está EMPATADO: o refino por mood, com peso
 
 O caso real: a lista mostra seis obras com a mesma nota e cada uma tem um "porém"
@@ -2098,8 +2103,8 @@ de maior conteúdo, mas **o problema nunca foi dela**.
 
 Desde 17/08/2026, com tiers na tela a Lista usa **`TIER_MODE_COLUMN_KEYS`**
 (`work-table-config.ts`) no lugar da config do seletor: `♥ · título · Pub. · Caps. · Ano ·
-Arte · Prioridade · O que a separa · N. Prevista · Interesse · Int. Previsto · Veredito · Média
-externa · Votos` (+ as duas estruturais).
+Arte · Prioridade · O que a separa · N. Prevista · Chance · Interesse · Int. Previsto · Veredito ·
+Média externa · Votos` (+ as duas estruturais).
 
 🔴 **As larguras do modo são PRÓPRIAS (`TIER_MODE_COLUMN_WIDTHS`), e a soma é a largura MEDIDA
 da tabela — 1.442px.** Com a soma igual à tabela, `natural ÷ soma × container` devolve o
@@ -2126,10 +2131,10 @@ Média externa.
 | `separator` = **294** | é o degrau do container query (270 de conteúdo) + 24. O clone mede 24px ali — a barra é `absolute` e o `@container` não resolve fora da árvore |
 | `total_votes` = **75** | o pior caso da TELA era "16,2K"; o do CATÁLOGO é 193.712 votos ⇒ "193,7K" |
 | `alignment_score` = **100** | é o botão **"Rankear"** (a pílula pede 83), que aparece nas obras sem Veredito — a maioria desta lista |
-| `title` = **255** | a SOBRA: ele é o único que degrada bem, então absorve o que resta |
+| `title` = **205** | a SOBRA: ele é o único que degrada bem, então absorve o que resta. Era 255; a Chance (50px) entrou pagando com ele (escolha da Ana, 16/11/2026) |
 
-⚠️ **O orçamento fecha, mas sem folga — e a mediana do título pede 275px.** Mais da metade dos
-nomes trunca de qualquer jeito. Os dois candidatos a ceder estão medidos: o botão "Rankear"
+⚠️ **O orçamento fecha, mas sem folga — e a mediana do título pede 275px.** A maioria dos nomes
+trunca; o piso do teste é 200px. Os dois candidatos a ceder estão medidos: o botão "Rankear"
 (−14px, virando ícone) e a frase do separador (−24px, voltando ao degrau de 270). Nenhum dos
 dois foi feito porque os dois trocam um defeito visível por outro.
 
@@ -2139,8 +2144,8 @@ depois o σ). O que o mapa garante é que **na largura de referência nada é co
 
 🔴 **A régua de quem entra: responde "destas empatadas, qual eu escolho?"** — ligar o Agrupar
 troca a PERGUNTA da tela. Entram o eixo da decisão (`decision`), o separador, o estado da obra,
-as notas que sustentam a escolha, e as forças que o separador compara
-(`why-this-work.ts`: avaliação = `platform_avg`, alcance = `total_votes`).
+as notas que sustentam a escolha, e as três forças que o separador compara
+(`why-this-work.ts`: chance = `chance_score`, avaliação = `platform_avg`, alcance = `total_votes`).
 
 🔴 **O status da coluna é o de PUBLICAÇÃO, não o seu** (escolha da Ana, 17/08/2026). Ele
 responde *"dá pra começar agora?"* — o mesmo eixo que `startabilityOf` pontua no refino por
@@ -2150,8 +2155,6 @@ Untracked + Want to Read (`BASELINE_PERSONAL_STATUSES`), então a coluna gastava
 orçamento para repetir "—". ⚠️ Ela vale **92px** no mapa do modo — o que a pílula "⏸️ HIA »"
 pede, medido. ⚠️ E o padrão de publicação é `Completed` só, então quem não abrir esse filtro vê
 "✅ CMP" em toda linha — a coluna paga a share quando a pessoa amplia o filtro.
-⚠️ **Não existe coluna para a força "chance"** (ela só vive na Bússola), então o conjunto tem 2
-das 3 — inventar uma coluna aqui seria criar dado novo dentro de uma decisão de largura.
 
 🔴 **`decision` e `expected_score` NÃO são redundantes, e a intuição erra o lado.** Dentro de um
 tier o campo ORDENADO é o constante — os tiers são construídos por `displayTierKey` sobre ele —,

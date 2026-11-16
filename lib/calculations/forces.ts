@@ -67,15 +67,35 @@ export function classifyArchetypeByPercentile(chancePct: number, avaliacaoPct: n
   return "skip"
 }
 
+/**
+ * Os nomes e a explicação da Chance de gostar fora da Bússola: coluna, filtro, chip e
+ * ordenação. Moram aqui porque a Chance não tem linha em `ui_labels` (gerado do banco).
+ */
+export const CHANCE_LABELS = { full: "Chance de gostar", short: "Chance", abbrev: "Chance" } as const
+
+export const CHANCE_DESCRIPTION =
+  "Probabilidade de você dar 8 ou mais a esta obra (0–100%), calibrada nas suas próprias notas. O modelo olha os nove atributos, as tags que você marcou como amadas ou evitadas, o Alinhamento e o Interesse. A Nota Prevista estima QUANTO você daria; a Chance, o quão provável é você gostar. Fica vazia enquanto não há modelo (menos de 20 obras avaliadas)."
+
+/**
+ * A Chance de gostar como a TELA a imprime: inteiro 0–100 (`62%`), ou null sem modelo.
+ *
+ * 🔴 Dono único de propósito: a célula da tabela, o card, a Bússola, o FILTRO
+ * (`min_chance`/`max_chance`) e a ORDENAÇÃO leem este número. Filtrar ou ordenar pelo
+ * decimal cru (`chance_score` é `numeric(5,2)`) faria "≥ 70" esconder uma obra que a
+ * coluna mostra como 70%, e duas obras exibidas como 62% não empatariam na ordenação.
+ */
+export function displayChance(chanceScore: number | null | undefined): number | null {
+  return chanceScore != null && Number.isFinite(chanceScore)
+    ? Math.round(clamp(chanceScore, 0, 100))
+    : null
+}
+
 export function computeWorkForces(input: {
   chanceScore: number | null
   platformAvg: number | null
   totalVotes: number | null
 }): WorkForces {
-  const chance =
-    input.chanceScore != null && Number.isFinite(input.chanceScore)
-      ? Math.round(clamp(input.chanceScore, 0, 100))
-      : null
+  const chance = displayChance(input.chanceScore)
 
   const avaliacao =
     input.platformAvg != null && Number.isFinite(input.platformAvg)

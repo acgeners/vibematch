@@ -12,6 +12,7 @@ import type { AlignmentPayload } from "@/components/ranking/score-tooltip-conten
 import { ART_BAND_LABELS, artBandFromPercentile } from "@/lib/art/bands"
 import { verdictBandClass } from "@/lib/ui/verdict-band"
 import { ConfidenceMark } from "@/components/ui/confidence-mark"
+import { displayChance } from "@/lib/calculations/forces"
 
 /**
  * Botão pequeno que substitui o "—" da `AlignmentScoreCell` quando há um
@@ -491,6 +492,37 @@ export function AlignmentCell({
   )
 }
 
+
+/**
+ * Cell da CHANCE DE GOSTAR (0–100%) — o inteiro de `displayChance`, o mesmo número que o
+ * filtro `min_chance`/`max_chance` e a ordenação usam.
+ *
+ * Cor ÚNICA (violeta): é a identidade da força na Bússola e no card (`ForceMeters`), não uma
+ * escala de valor — o número já diz o quanto. Sem Chance é "—": sem modelo (menos de 20
+ * obras avaliadas), ou obra mixed sem previsão da edição de contexto.
+ */
+export function ChanceCell({ chanceScore }: { chanceScore: number | null | undefined }) {
+  const chance = displayChance(chanceScore)
+  if (chance == null) {
+    return <span className="font-mono text-sm text-muted-foreground">—</span>
+  }
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="cursor-help font-mono text-sm tabular-nums text-violet-600 dark:text-violet-400">
+            {chance}%
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[260px]">
+          <p className="text-[11px] text-background/80">
+            {chance}% de chance de você dar 8 ou mais a esta obra.
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
 
 /**
  * Cell da ARTE nas listas — o PERCENTIL (0–100), nunca a estimativa em pontos.
