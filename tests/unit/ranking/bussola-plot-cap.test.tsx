@@ -1,23 +1,18 @@
-import { vi, describe, it, expect } from "vitest"
+import { vi, describe, it, expect, beforeEach } from "vitest"
 
 vi.mock("server-only", () => ({}))
+vi.mock("@/server/actions/bussola", () => ({ getBussolaLinks: vi.fn(async () => null) }))
 
-import { render } from "@testing-library/react"
+import { render, within } from "@testing-library/react"
 import { BussolaPlane } from "@/components/ranking/bussola-plane"
 import type { BussolaDatum } from "@/components/ranking/bussola-plane"
 
 /**
- * O teto de pontos da Bússola (`MAX_PLOT`).
+ * O teto de capas da Bússola (`MAX_PLOT`).
  *
- * O plano fica legível enquanto os pontos não se empilham, e a degradação NÃO é
- * gradual — medido em 2026-08-06 sobre o catálogo real, num plano de 820×615:
- *
- *    40 obras (o `top_n` padrão) → 10,0% dos pontos a menos de 9px de outro
- *   100 obras                    → 12,0%
- *   965 obras (catálogo inteiro) → 52,6%   ← mancha listrada
- *
- * O eixo Y é `platform_avg × 10` arredondado, e num acervo curado isso dá só ~23
- * alturas distintas. Sem teto, afrouxar o filtro vira mancha SEM AVISO.
+ * O mapa fica legível enquanto as capas não se empilham, e a degradação NÃO é gradual — medido
+ * em 2026-08-06 sobre o catálogo real: 40 obras → 10,0% colidindo; 100 → 12,0%; 965 (catálogo
+ * inteiro) → 52,6%, uma mancha. Sem teto, afrouxar o filtro vira mancha SEM AVISO.
  */
 
 function makeEntries(n: number): BussolaDatum[] {
@@ -33,69 +28,67 @@ function makeEntries(n: number): BussolaDatum[] {
   }))
 }
 
-const dotsOf = (container: HTMLElement) => container.querySelectorAll("a[aria-label*='alcance']")
+const pointsOf = (container: HTMLElement) => container.querySelectorAll("[data-point]")
+const absoluteDotsOf = (container: HTMLElement) => container.querySelectorAll("a[aria-label*='alcance']")
 
-describe("BussolaPlane — teto de pontos", () => {
-  it("desenha todas as obras quando o conjunto cabe no plano", () => {
+beforeEach(() => window.localStorage.clear())
+
+describe("Bússola do /ranking — teto de capas", () => {
+  it("desenha todas as obras quando o conjunto cabe no mapa", () => {
     const { container, unmount } = render(<BussolaPlane entries={makeEntries(40)} />)
-    expect(dotsOf(container)).toHaveLength(40)
+    expect(pointsOf(container)).toHaveLength(40)
     unmount()
   })
 
   it("corta em 100 e AVISA quando o conjunto passa do teto", () => {
     const { container, unmount } = render(<BussolaPlane entries={makeEntries(965)} />)
-    expect(dotsOf(container)).toHaveLength(100)
-    // O aviso é o que separa "recorte deliberado" de "bug silencioso": sem ele o
-    // usuário lê o plano como se fosse o ranking inteiro.
+    expect(pointsOf(container)).toHaveLength(100)
+    // O aviso é o que separa "recorte deliberado" de "bug silencioso": sem ele o mapa é lido
+    // como se fosse o ranking inteiro.
     expect(container.textContent).toMatch(/mostrando as/i)
     expect(container.textContent).toContain("965")
     unmount()
   })
 
   it("não aplica teto na comparação (modo absoluto)", () => {
-    // O drawer compara no máximo 10 obras; o teto nunca deveria interferir ali.
     const { container, unmount } = render(<BussolaPlane entries={makeEntries(10)} mode="absolute" />)
-    expect(dotsOf(container)).toHaveLength(10)
+    expect(absoluteDotsOf(container)).toHaveLength(10)
     unmount()
   })
 })
 
-describe("BussolaPlane — cantos e lista pareada", () => {
-  it("nomeia os quatro cantos com o vocabulário compartilhado e conta cada um", () => {
+describe("Bússola do /ranking — tipos de aposta e lista", () => {
+  it("o filtro de tipo de aposta usa o vocabulário compartilhado e conta cada tipo", () => {
     const { container, unmount } = render(<BussolaPlane entries={makeEntries(40)} />)
-    const corners = [...container.querySelectorAll("button[aria-pressed]")]
-    const nomes = corners.map((c) => c.textContent ?? "")
+    const grupo = within(container).getByRole("group", { name: "Tipo de aposta" })
+    const chips = [...grupo.querySelectorAll("button")]
+    const nomes = chips.map((c) => (c.textContent ?? "").toLowerCase())
     for (const esperado of ["pode ir sem medo", "vale o risco", "só teu gosto", "fica pra depois"]) {
       expect(nomes.some((n) => n.includes(esperado))).toBe(true)
     }
-    // a soma das contagens dos cantos é o total de pontos: nenhuma obra fica
-    // fora de um canto, e nenhuma é contada duas vezes
-    const total = corners.reduce((sum, c) => {
-      const m = (c.textContent ?? "").match(/(\d+)/)
-      return sum + (m ? Number(m[1]) : 0)
-    }, 0)
-    expect(total).toBe(dotsOf(container).length)
+    // "Todas" + os quatro tipos: a soma dos tipos é o total, ninguém fica fora nem conta duas vezes.
+    const n = (c: Element) => Number((c.textContent ?? "").match(/(\d+)\s*$/)?.[1] ?? 0)
+    const [todas, ...tipos] = chips
+    expect(n(todas)).toBe(40)
+    expect(tipos.reduce((s, c) => s + n(c), 0)).toBe(pointsOf(container).length)
     unmount()
   })
 
-  it("lista cada obra do plano ao lado dele — o ponto deixa de ser anônimo", () => {
+  it("lista cada obra do mapa no painel — a capa deixa de ser anônima", () => {
     const { container, unmount } = render(<BussolaPlane entries={makeEntries(40)} />)
-    // A lista pareada marca cada linha com data-work; uma por obra plotada.
     expect(container.querySelectorAll("[data-work]")).toHaveLength(40)
     unmount()
   })
 
-  it("agrupa a lista em prateleiras quando Agrupar está ligado, sem mexer no plano", () => {
+  it("agrupa a lista em prateleiras quando Agrupar está ligado, sem mexer no mapa", () => {
     const semGrupo = render(<BussolaPlane entries={makeEntries(40)} />)
-    const pontosAntes = dotsOf(semGrupo.container).length
+    const pontosAntes = pointsOf(semGrupo.container).length
     const linhasAntes = semGrupo.container.querySelectorAll("[data-work]").length
     semGrupo.unmount()
 
     const comGrupo = render(<BussolaPlane entries={makeEntries(40)} grouped />)
-    // o plano é o mesmo — agrupar organiza a lista, não filtra o mapa
-    expect(dotsOf(comGrupo.container)).toHaveLength(pontosAntes)
+    expect(pointsOf(comGrupo.container)).toHaveLength(pontosAntes)
     expect(comGrupo.container.querySelectorAll("[data-work]")).toHaveLength(linhasAntes)
-    // e surgem os cabeçalhos colapsáveis das prateleiras
     expect(comGrupo.container.querySelectorAll("button[aria-expanded]").length).toBeGreaterThan(0)
     comGrupo.unmount()
   })
