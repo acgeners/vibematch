@@ -1,6 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const setAnthropicBalance = vi.fn(async (_n: number) => ({ error: null as string | null }))
+const setAnthropicBalance = vi.fn(async (n: number) => ({ error: n >= 0 ? null : ("valor negativo" as string | null) }))
 vi.mock("@/server/actions/account", () => ({ setAnthropicBalance: (n: number) => setAnthropicBalance(n) }))
 vi.mock("@/lib/use-refresh", () => ({ useRefresh: () => vi.fn() }))
 
@@ -13,7 +13,9 @@ import { BalanceQuickEdit } from "@/components/curation/balance-quick-edit"
  * divergiria no separador decimal aceito.
  */
 describe("saldo editável na Visão Geral", () => {
-  beforeEach(() => setAnthropicBalance.mockClear())
+  beforeEach(() => {
+    setAnthropicBalance.mockClear()
+  })
 
   it("abre no lápis, aceita vírgula e grava; o popover fecha ao salvar", async () => {
     render(<BalanceQuickEdit balanceUsd={12.5} />)

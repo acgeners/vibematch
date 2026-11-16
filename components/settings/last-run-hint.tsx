@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { formatDateTime } from "@/lib/catalog/batch-targets"
 
 function formatRelativeTime(iso: string | null | undefined): string {
   if (!iso) return "nunca"
@@ -21,18 +22,24 @@ interface LastRunHintProps {
   iso: string | null | undefined
   label?: string
   className?: string
+  /** Data e hora por extenso ("16/11/2026 às 02:37 · há 3h") em vez de só o relativo. */
+  showDateTime?: boolean
 }
 
-export function LastRunHint({ iso, label = "Última execução", className }: LastRunHintProps) {
+export function LastRunHint({ iso, label = "Última execução", className, showDateTime = false }: LastRunHintProps) {
   // Date.now() differs between SSR and client hydrate — render "—" first, then
   // populate after mount. Refresh every 30s so the relative text stays live.
   const [text, setText] = useState<string>("—")
   useEffect(() => {
-    const update = () => setText(formatRelativeTime(iso))
+    const update = () => {
+      const relative = formatRelativeTime(iso)
+      const absolute = showDateTime ? formatDateTime(iso) : null
+      setText(absolute ? `${absolute} · ${relative}` : relative)
+    }
     update()
     const id = setInterval(update, 30_000)
     return () => clearInterval(id)
-  }, [iso])
+  }, [iso, showDateTime])
 
   return (
     <span

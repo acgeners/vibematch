@@ -5,6 +5,9 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { Loader2, MessageSquarePlus, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { BatchSizeInput } from "@/components/settings/batch-size-input"
+import { LastRunHint } from "@/components/settings/last-run-hint"
+import { firstN, latestCheck } from "@/lib/catalog/batch-targets"
 import { RunningStrip } from "@/components/settings/running-strip"
 import { StatCard } from "@/components/settings/stat-card"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
@@ -59,10 +62,12 @@ export function CatalogReviewsPanel({
   const isRunning = tasks.some((t) => t.id === TASK_ID && t.status === "running")
   const [summary, setSummary] = useState<ReviewBatchSummary | null>(null)
   const [stopping, setStopping] = useState(false)
+  const [limit, setLimit] = useState<number | null>(null)
   const refresh = useRefresh()
 
   const handleRun = () => {
-    const ids = targets.map((t) => t.id)
+    // As N primeiras = as buscadas há mais tempo (a lista chega nessa ordem).
+    const ids = firstN(targets, limit).map((t) => t.id)
     const total = ids.length
     if (total === 0) return
     const titleById = new Map(targets.map((t) => [t.id, t.title]))
@@ -128,11 +133,14 @@ export function CatalogReviewsPanel({
           </p>
           <p className="text-xs">
             Rode no localhost:3000 com o Docker (FlareSolverr) ligado: Comix e Mangago dependem dele. Cerca de{" "}
-            {secondsPerWork} s por obra ({formatDuration(targets.length * secondsPerWork)} para todas); pode navegar
+            {secondsPerWork} s por obra ({formatDuration(targets.length * secondsPerWork)} para todas
+            {limit != null ? `, ${formatDuration(limit * secondsPerWork)} para ${limit}` : ""}); pode navegar
             enquanto roda e parar quando quiser — a próxima rodada continua das buscadas há mais tempo.
           </p>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 flex-col items-end gap-1">
+        <BatchSizeInput value={limit} onChange={setLimit} total={targets.length} disabled={isRunning} />
+        <div className="flex gap-2">
           {isRunning && (
             <Button variant="outline" onClick={handleStop} disabled={stopping}>
               {stopping ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Square className="mr-1 h-4 w-4" />}
@@ -143,6 +151,10 @@ export function CatalogReviewsPanel({
             {isRunning ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <MessageSquarePlus className="mr-1 h-4 w-4" />}
             {isRunning ? "Buscando…" : "Buscar reviews"}
           </Button>
+        </div>
+        {/* A busca completa mais recente entre as obras (pedido de 16/11/2026). Só este lote grava
+            `reviews_checked_at`, e só quando nenhuma fonte falhou. */}
+        <LastRunHint iso={latestCheck(targets)} label="Última busca" showDateTime />
         </div>
       </div>
 
