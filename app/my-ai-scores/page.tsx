@@ -296,7 +296,11 @@ interface TabCounts {
 async function _getRecomendacaoTabCounts(args: CountArgs): Promise<TabCounts> {
   const [iaRk, syn, untracked, ackSets] = await Promise.all([
     getAlignmentQueueWorks({ states: args.iaRkStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds }),
-    getSynopsisQueueWorks({ states: args.synopsisStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, synopsisQualities: args.synopsisQualities, predictionVersions: args.predictionVersions, predictionQualities: args.predictionQualities, predictionDeltas: args.predictionDeltas, missingManual: args.synopsisQualities.includes("none"), countOnly: true }),
+    // MESMO default de status pessoal que a aba Interesse aplica ao abrir (sem escolha
+    // explícita, todos MENOS Completed/Dropped/Stalled). Com `personalStatusIds` vazio
+    // aqui, o "Interesse (N)" visto das outras abas contava também essas três, e o
+    // número mudava ao clicar na aba.
+    getSynopsisQueueWorks({ states: args.synopsisStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds.length === 0 ? INTEREST_DEFAULT_PERSONAL_IDS : args.personalStatusIds, synopsisQualities: args.synopsisQualities, predictionVersions: args.predictionVersions, predictionQualities: args.predictionQualities, predictionDeltas: args.predictionDeltas, missingManual: args.synopsisQualities.includes("none"), countOnly: true }),
     getUntrackedWorks({ pubStatusIds: args.pubStatusIds }),
     getReadAckSets(),
   ])
@@ -335,7 +339,7 @@ async function getRecomendacaoTabCounts(args: CountArgs): Promise<TabCounts> {
   const userId = await getCurrentUserId()
   return unstable_cache(
     _getRecomendacaoTabCounts,
-    ["recomendacao-tab-counts-v1", userId],
+    ["recomendacao-tab-counts-v2", userId],
     { revalidate: 60, tags: ["ai-eval-tab-counts"] },
   )(args)
 }

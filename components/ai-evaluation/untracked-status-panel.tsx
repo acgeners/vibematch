@@ -1,10 +1,9 @@
 "use client"
 
-import { useMemo } from "react"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { SynopsisInputsPopover } from "@/components/ai-evaluation/synopsis-inputs-popover"
 import { WorkQueueCard } from "@/components/ai-evaluation/queue/work-queue-card"
-import { WorkQueueGrid } from "@/components/ai-evaluation/queue/work-queue-grid"
+import { ReadQueueSections, useReadSplit } from "@/components/ai-evaluation/queue/read-split"
 import { QueueToolbar } from "@/components/ai-evaluation/queue/queue-toolbar"
 import { useWorkSelection } from "@/components/ai-evaluation/queue/use-work-selection"
 import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
@@ -30,9 +29,9 @@ export interface UntrackedWorkWithMeta {
 }
 
 export function UntrackedStatusPanel({ works, readIds = [] }: { works: UntrackedWorkWithMeta[]; readIds?: string[] }) {
-  const ids = useMemo(() => works.map((w) => w.id), [works])
-  const selection = useWorkSelection(ids)
   const { isRead, unmark } = useToggleRead("untracked", readIds)
+  const split = useReadSplit(works, isRead)
+  const selection = useWorkSelection(split.visibleIds)
 
   if (works.length === 0) {
     return (
@@ -54,8 +53,10 @@ export function UntrackedStatusPanel({ works, readIds = [] }: { works: Untracked
         showStatusAction
       />
 
-      <WorkQueueGrid dense>
-        {works.map((w) => {
+      <ReadQueueSections
+        split={split}
+        dense
+        render={(w) => {
           const details = <SynopsisInputsPopover workId={w.id} />
 
           return (
@@ -85,8 +86,8 @@ export function UntrackedStatusPanel({ works, readIds = [] }: { works: Untracked
               onToggleRead={() => unmark(w.id)}
             />
           )
-        })}
-      </WorkQueueGrid>
+        }}
+      />
     </div>
   )
 }

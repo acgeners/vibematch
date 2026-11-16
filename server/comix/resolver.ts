@@ -643,6 +643,8 @@ const COMIX_CANARY_HID = "003kd"
 // getComixResolverStatus em resolve-comix-panel).
 interface ComixHealthCheck {
   ok: boolean
+  /** Qual superfície (estável; o `label` é texto de tela). A dica de cada falha sai daqui. */
+  key: "flaresolverr" | "detail" | "reviews" | "image"
   /** Nome curto da superfície testada (ex.: "FlareSolverr", "Detalhe (SSR)"). */
   label: string
   /** Detalhe legível do resultado (versão, título resolvido, status HTTP…). */
@@ -680,6 +682,7 @@ export async function checkComixHealth(): Promise<ComixHealthResult> {
   const fs = await flareSolverrHealth()
   checks.push({
     ok: true,
+    key: "flaresolverr",
     label: "FlareSolverr",
     detail: fs.ok
       ? `ativo · v${fs.version ?? "?"} · sessões: ${fs.sessions?.length ? fs.sessions.join(", ") : "nenhuma"}`
@@ -691,6 +694,7 @@ export async function checkComixHealth(): Promise<ComixHealthResult> {
   const detail = await fetchComixById(COMIX_CANARY_HID)
   checks.push({
     ok: !!detail?.title,
+    key: "detail",
     label: "Detalhe (SSR)",
     detail: detail?.title
       ? `"${detail.title}"${detail.year ? ` (${detail.year})` : ""}`
@@ -706,6 +710,7 @@ export async function checkComixHealth(): Promise<ComixHealthResult> {
     checks.push({
       // O canário foi escolhido por TER comentários: qualquer zero aqui merece olhar, mesmo o legítimo.
       ok: reviews.length > 0,
+      key: "reviews",
       label: "Reviews (threads)",
       detail:
         reviews.length > 0
@@ -720,6 +725,7 @@ export async function checkComixHealth(): Promise<ComixHealthResult> {
   } catch (err) {
     checks.push({
       ok: false,
+      key: "reviews",
       label: "Reviews (threads)",
       detail:
         err instanceof ComixUnavailableError
@@ -733,7 +739,7 @@ export async function checkComixHealth(): Promise<ComixHealthResult> {
   // `comix.to/images/…`; as capas antigas seguem em `static.comix.to`). 403 = CF bloqueou.
   const coverUrl = detail?.coverUrl ?? null
   if (!coverUrl) {
-    checks.push({ ok: false, label: "Imagem (CDN)", detail: "sem cover no detalhe pra testar" })
+    checks.push({ ok: false, key: "image", label: "Imagem (CDN)", detail: "sem cover no detalhe pra testar" })
   } else {
     const t3 = Date.now()
     let ok = false
@@ -750,7 +756,7 @@ export async function checkComixHealth(): Promise<ComixHealthResult> {
     // Alimenta o bloqueio dinâmico de covers: o canário é o re-probe manual que
     // libera/re-bloqueia o host (ex.: static.comix.to) a partir do 200 real.
     recordCoverUrlResult(coverUrl, ok)
-    checks.push({ ok, label: "Imagem (CDN)", detail: info, ms: Date.now() - t3 })
+    checks.push({ ok, key: "image", label: "Imagem (CDN)", detail: info, ms: Date.now() - t3 })
   }
 
   return { checks, checkedAt }

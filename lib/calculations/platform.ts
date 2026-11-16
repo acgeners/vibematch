@@ -40,7 +40,7 @@ export function calculatePlatformAvg(
 /**
  * Total de votos somando todas as plataformas.
  */
-export function sumVotes(ratings: PlatformRating[]): number {
+export function sumVotes(ratings: ReadonlyArray<Pick<PlatformRating, "vote_count">>): number {
   return ratings.reduce((acc, r) => acc + (r.vote_count ?? 0), 0)
 }
 

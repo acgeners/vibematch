@@ -457,7 +457,7 @@ async function ItemBody({
                 accent="amber"
               />
             </div>
-            <ComixHealthPanel accent="amber" />
+            <ComixHealthPanel accent="amber" available={hasCfBypassConfigured()} />
           </div>
 
           {/* Cobertura: recolhida por padrão; abre sozinha quando há hid pendente ou com 404. */}

@@ -11,10 +11,9 @@ import { LABELS } from "@/lib/constants/ui-labels"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { useBatchAiActions, RERANK_TASK_ID } from "@/components/titles/use-batch-ai-actions"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
-import { skipAiEvaluation } from "@/server/actions/ai"
 import type { AlignmentQueueWork } from "@/server/queries/recommendations"
 import { WorkQueueCard, type WorkQueueState } from "@/components/ai-evaluation/queue/work-queue-card"
-import { WorkQueueGrid } from "@/components/ai-evaluation/queue/work-queue-grid"
+import { ReadQueueSections, useReadSplit } from "@/components/ai-evaluation/queue/read-split"
 import { QueueToolbar, QueueSortSelect } from "@/components/ai-evaluation/queue/queue-toolbar"
 import { useWorkSelection } from "@/components/ai-evaluation/queue/use-work-selection"
 import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
@@ -40,7 +39,7 @@ export function StaleRerankPanel({
   isPaid?: boolean
 }) {
   const refresh = useRefresh()
-  const { isRead, unmark } = useToggleRead("veredito", readIds)
+  const { isRead, unmark, mark } = useToggleRead("veredito", readIds)
   const [sortField, setSortField] = useState<SortField>("default")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
   const [queueSize, setQueueSize] = useState(10)
@@ -55,16 +54,15 @@ export function StaleRerankPanel({
   const batchRunning = batchTask?.status === "running"
   const progress = batchTask?.progress ?? null
 
+  // "Pular" é PESSOAL: marca a obra como lida na SUA fila de Veredito. Até 2026-11-16
+  // ele gravava `works.ai_eval_status = 'skipped'` — o status da avaliação de ATRIBUTOS
+  // do catálogo inteiro, restrito ao curador, que tirava a obra da fila de
+  // /curation/works para todos e sobrescrevia um `review_pending`. O Veredito é
+  // per-usuário; pular o dele não pode decidir nada sobre o catálogo.
   const handleSkip = async (workId: string) => {
     setSkippingId(workId)
     try {
-      const result = await skipAiEvaluation(workId)
-      if (result.error) {
-        toast.error(result.error)
-      } else {
-        toast.success("Obra marcada para pular avaliação/re-rank por IA.")
-        refresh()
-      }
+      if (await mark([workId])) toast.success("Pulada na sua fila. Está em \"Lidas ou puladas\", no fim.")
     } finally {
       setSkippingId(null)
     }
@@ -94,8 +92,8 @@ export function StaleRerankPanel({
     })
   }, [works, sortField, sortDir])
 
-  const ids = useMemo(() => sortedWorks.map((w) => w.id), [sortedWorks])
-  const selection = useWorkSelection(ids)
+  const split = useReadSplit(sortedWorks, isRead)
+  const selection = useWorkSelection(split.visibleIds)
 
   // O lote em si mora em `useBatchAiActions` — o MESMO caminho que a seleção do
   // /ranking usa. Duas cópias divergiriam justo no detalhe que não dá erro: sem o
@@ -119,7 +117,8 @@ export function StaleRerankPanel({
   // Fatia a lista VISÍVEL (sortedWorks), não a ordem crua do servidor — senão o
   // lote processa N obras fora da tela e o topo que o usuário está olhando
   // continua "Não avaliado" (a query da fila nem tem ORDER BY).
-  const handleRerankQueue = () => runBatch(sortedWorks.slice(0, queueSize).map((w) => w.id))
+  // Só as NOVAS: as lidas/puladas ficam recolhidas no fim, e o topo da tela é a fila aberta.
+  const handleRerankQueue = () => runBatch(split.unread.slice(0, queueSize).map((w) => w.id))
   const handleRerankSelected = () => runBatch(selection.selectedIds)
 
   if (works.length === 0) {
@@ -159,7 +158,7 @@ export function StaleRerankPanel({
               <Input
                 type="number"
                 min={1}
-                max={works.length}
+                max={Math.max(1, split.unread.length)}
                 value={queueSize}
                 onChange={(e) => setQueueSize(Math.max(1, parseInt(e.target.value) || 1))}
                 className="h-7 w-16 text-xs"
@@ -185,8 +184,11 @@ export function StaleRerankPanel({
         }
       />
 
-      <WorkQueueGrid>
-        {sortedWorks.map((w) => {
+      <ReadQueueSections
+        split={split}
+        readLabel="Lidas ou puladas"
+        emptyUnread="Nada novo nesta fila — as lidas e puladas estão logo abaixo."
+        render={(w) => {
           const isStale = w.alignmentStale && w.alignmentScore != null
           const state: WorkQueueState | null = isStale
             ? { label: "Desatualizado", tone: "amber" }
@@ -209,16 +211,18 @@ export function StaleRerankPanel({
           const actions = (
             <>
               <RerankAiRkButton workId={w.id} hasScore={w.alignmentScore != null} workTitle={w.title} />
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleSkip(w.id)}
-                disabled={batchRunning || !!skippingId}
-                title="Marcar para pular re-rank por IA"
-              >
-                <SkipForward className="h-3.5 w-3.5 mr-1" />
-                Pular
-              </Button>
+              {!isRead(w.id) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleSkip(w.id)}
+                  disabled={batchRunning || !!skippingId}
+                  title="Tira a obra da sua fila de Veredito (vai para Lidas ou puladas). Não muda nada no catálogo."
+                >
+                  <SkipForward className="h-3.5 w-3.5 mr-1" />
+                  Pular
+                </Button>
+              )}
             </>
           )
 
@@ -250,8 +254,8 @@ export function StaleRerankPanel({
               onToggleRead={() => unmark(w.id)}
             />
           )
-        })}
-      </WorkQueueGrid>
+        }}
+      />
     </div>
   )
 }

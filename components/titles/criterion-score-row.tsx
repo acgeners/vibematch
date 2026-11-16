@@ -64,7 +64,7 @@ export function CriterionBandReadout({
             {band}
           </span>
           {title && (
-            <span className="shrink-0 font-semibold text-violet-600 dark:text-violet-300">
+            <span className="max-w-full shrink-0 truncate font-semibold text-violet-600 dark:text-violet-300">
               {title}
             </span>
           )}
@@ -126,7 +126,10 @@ export function CriterionScoreRow({
           // campo de nota já mostra ao lado.
           <span
             className={cn(
-              "shrink-0 rounded-full bg-violet-500/10 px-2 py-0.5 text-[10.5px] font-semibold text-violet-600 dark:text-violet-300",
+              // `max-w-full truncate`: `shrink-0` num container `flex-wrap` trava o chip no
+              // max-content e o desenha POR FORA do pai. O rótulo hoje é curto por construção
+              // (`rubricTitle`), e isto é a rede se um dia não for.
+              "max-w-full shrink-0 truncate rounded-full bg-violet-500/10 px-2 py-0.5 text-[10.5px] font-semibold text-violet-600 dark:text-violet-300",
               active && "ring-1 ring-inset ring-violet-500/40",
             )}
             title={`Faixa ${band}`}

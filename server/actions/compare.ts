@@ -5,6 +5,7 @@ import { getWorksByIds } from "@/server/queries/works"
 import { isMixedEditionState } from "@/lib/editions/mixed-edition"
 import type { HiatusFields } from "@/lib/works/hiatus-display"
 import { computeDecisionScore } from "@/lib/calculations/decision"
+import { sumVotes } from "@/lib/calculations/platform"
 import { getVerdictScale } from "@/server/queries/verdict-scale"
 import type { VerdictScale } from "@/lib/calculations/decision"
 import { CRITERION_SLUGS } from "@/types/domain"
@@ -264,7 +265,10 @@ function mapWorkToCompare(
     personalFitPercentile: work.calculated_scores?.personal_fit_percentile ?? null,
     userScore: (work as { user_score?: number | null }).user_score ?? null,
     platformAvg: work.calculated_scores?.platform_avg ?? null,
-    totalVotes: work.calculated_scores?.total_votes ?? 0,
+    // AO VIVO, pela mesma soma do recálculo (`sumVotes`). `calculated_scores.total_votes` é a
+    // foto do último recálculo, e entre um "Atualizar dados" e o recálculo seguinte (janela de
+    // 1h ou mais) o comparador mostrava um total e a página da obra outro.
+    totalVotes: sumVotes(work.platform_ratings ?? []),
     chanceScore: work.calculated_scores?.chance_score ?? null,
     artPercentile: work.calculated_scores?.art_percentile ?? null,
     alignmentScore: work.calculated_scores?.alignment_score ?? null,

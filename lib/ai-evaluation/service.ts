@@ -979,6 +979,22 @@ function normalizeReviewId(value: unknown): string | null {
   return `R${Number(match[1])}`
 }
 
+/**
+ * Quantas reviews foram ao prompt, lido do `evaluationContext` gravado (caminho do cache).
+ * Mesma grandeza que `prepared.ids.length` no caminho fresco: as reviews depois do dedup.
+ * Exportada para teste.
+ */
+export function reviewsSentToPromptFromContext(raw: Record<string, unknown> | null | undefined): number {
+  const ctx = raw?.evaluationContext as
+    | { sourcedReviewsAfterDedup?: unknown; legacyReviewsAfterDedup?: unknown; sourcedReviews?: unknown }
+    | undefined
+  if (!ctx) return 0
+  const sourced = typeof ctx.sourcedReviewsAfterDedup === "number" ? ctx.sourcedReviewsAfterDedup : null
+  const legacy = typeof ctx.legacyReviewsAfterDedup === "number" ? ctx.legacyReviewsAfterDedup : null
+  if (sourced != null || legacy != null) return (sourced ?? 0) + (legacy ?? 0)
+  return Array.isArray(ctx.sourcedReviews) ? ctx.sourcedReviews.length : 0
+}
+
 function extractUsedReviewIds(rawResponse: unknown): string[] {
   const raw = rawObject(rawResponse)
   const usage = raw.review_usage
@@ -1227,11 +1243,13 @@ function attachEvaluationContext(
   prepared: PreparedReviews
 ): AiEvaluationResponse {
   const normalizedTags = normalizeTags(req.tags)
-  const expected = new Set(prepared.ids)
-  const usedReviewIds = extractUsedReviewIds(response.rawResponse).filter((id) => expected.has(id))
   return {
     ...response,
-    reviewsUsed: usedReviewIds.length,
+    // Quantas reviews FORAM AO PROMPT. Até 2026-11-16 era o número de IDs (R1, R2…) que o
+    // modelo citou em `review_usage` — campo que saiu da tool no eval-2 (2026-07-07). Desde
+    // então dava 0 em toda avaliação, e o toast dizia "sem reviews externas" sobre obras
+    // avaliadas com 30.
+    reviewsUsed: prepared.ids.length,
     rawResponse: {
       ...rawObject(response.rawResponse),
       evaluationContext: {
@@ -1491,11 +1509,7 @@ async function readDbCache(
     })
 
     const raw = data.raw_response as Record<string, unknown> | null
-    const reviewAudit = raw?.reviewAudit as { usedReviewIds?: unknown[] } | undefined
-    const evaluationContext = raw?.evaluationContext as { reviewsIncludedInPrompt?: boolean } | undefined
-    const reviewsUsed = Array.isArray(reviewAudit?.usedReviewIds)
-      ? reviewAudit.usedReviewIds.length
-      : evaluationContext?.reviewsIncludedInPrompt ? 1 : 0
+    const reviewsUsed = reviewsSentToPromptFromContext(raw)
 
     return {
       modelName: data.model_name ?? modelName,
