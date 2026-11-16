@@ -5,6 +5,8 @@ import { getInterestReader } from "@/server/queries/user-interest"
 import { resolveInterestPromptVersion, COMPILED_PREFERENCES_V4_SHADOW } from "@/lib/ai-evaluation/compiled-preferences"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
+import { computeInterestAccuracy } from "@/lib/ai-evaluation/interest-accuracy"
+import type { InterestAccuracyRow, SynopsisPredictionAccuracy } from "@/lib/ai-evaluation/interest-accuracy"
 
 /** Nível ordinal (♥=1 … ♥♥♥♥=4); 0 se desconhecido. */
 function synopsisLevel(q: string | null | undefined): number {
@@ -238,78 +240,50 @@ export async function markSynopsisPredictionsStale(currentHash: string): Promise
   }
 }
 
-export interface SynopsisPredictionAccuracy {
-  /** Obras com valor manual E previsão fresca (base da comparação). */
-  n: number
-  /** Viés médio em níveis (previsto − manual). + = IA superestima o interesse. */
-  meanDelta: number | null
-  /** Erro absoluto médio em níveis (|previsto − manual|). Menor = mais confiável. */
-  mae: number | null
-  /** Fração com acerto exato (delta = 0). */
-  exactRate: number | null
-  /** Fração dentro de ±1 nível. */
-  within1Rate: number | null
-}
+export type { SynopsisPredictionAccuracy } from "@/lib/ai-evaluation/interest-accuracy"
 
 /**
- * Acurácia da previsão de Interesse Sinopse: compara a previsão (fresca) com o
- * valor MANUAL, em escala de níveis (♥=1 … ♥♥♥♥=4), sobre todas as obras que têm
- * os dois. Serve de termômetro de confiança — recalculado a cada page load,
- * então melhora "conforme for gerando" mais previsões e marcando manuais.
- *
- * Ressalva: "Aplicar" copia a previsão pro manual ⇒ aquela obra vira delta 0 e
- * infla a concordância. Pra um sinal limpo, compare contra manuais que você
- * preencheu independentemente.
+ * Acurácia da previsão de Interesse: compara a previsão mais recente de cada obra
+ * nesta versão de prompt com o Interesse que a pessoa deu À MÃO, em níveis
+ * (♥=1 … ♥♥♥♥=4). As regras (desatualizadas entram; "Aplicar" sai) e os números que
+ * as decidiram moram em `computeInterestAccuracy`.
  */
 export async function getSynopsisPredictionAccuracy(
   version: string = resolveInterestPromptVersion(),
 ): Promise<SynopsisPredictionAccuracy> {
   const supabase = createAdminClient()
-  // O manual (`synopsis_quality`) é dado PESSOAL do DONO → vem do espelho via a view
-  // `works_owner`, não da linha compartilhada de `works` (que vai perder essa coluna).
+  // O manual (`synopsis_quality`) e a procedência dele são dado PESSOAL do DONO → vêm
+  // do espelho via a view `works_owner`, não da linha compartilhada de `works`.
   let data: Array<Record<string, unknown>>
   try {
     data = await fetchAllRows<Record<string, unknown>>(
       () =>
         supabase
           .from("synopsis_quality_predictions")
-          .select("predicted_quality, works_owner!work_id(synopsis_quality)")
-          .eq("stale", false)
+          .select("work_id, predicted_at, predicted_quality, works_owner!work_id(synopsis_quality, synopsis_quality_source)")
           .eq("prompt_version", version),
       { orderBy: ["id"], label: "getSynopsisPredictionAccuracy" },
     )
   } catch (e) {
     console.warn("[synopsis-pred] getSynopsisPredictionAccuracy falhou:", (e as Error).message)
-    return { n: 0, meanDelta: null, mae: null, exactRate: null, within1Rate: null }
+    return { n: 0, meanDelta: null, mae: null, exactRate: null, within1Rate: null, appliedExcluded: 0 }
   }
 
-  let n = 0
-  let sum = 0
-  let absSum = 0
-  let exact = 0
-  let within1 = 0
+  type OwnerRel = { synopsis_quality: string | null; synopsis_quality_source: string | null }
+  const rows: InterestAccuracyRow[] = []
   for (const row of data ?? []) {
-    const r = row as { predicted_quality: string | null; works_owner: { synopsis_quality: string | null } | { synopsis_quality: string | null }[] | null }
-    const workRel = Array.isArray(r.works_owner) ? r.works_owner[0] : r.works_owner
-    const manualLevel = synopsisLevel(workRel?.synopsis_quality)
-    const predLevel = synopsisLevel(r.predicted_quality)
-    if (manualLevel === 0 || predLevel === 0) continue
-    const delta = predLevel - manualLevel
-    n += 1
-    sum += delta
-    absSum += Math.abs(delta)
-    if (delta === 0) exact += 1
-    if (Math.abs(delta) <= 1) within1 += 1
+    const r = row as { work_id: string; predicted_at: string; predicted_quality: string | null; works_owner: OwnerRel | OwnerRel[] | null }
+    // Embed to-one volta OBJETO no PostgREST; o array fica tolerado (o client já mudou isso).
+    const owner = Array.isArray(r.works_owner) ? r.works_owner[0] : r.works_owner
+    rows.push({
+      workId: r.work_id,
+      predictedAt: String(r.predicted_at),
+      predicted: r.predicted_quality,
+      manual: owner?.synopsis_quality ?? null,
+      manualSource: owner?.synopsis_quality_source ?? null,
+    })
   }
-
-  if (n === 0) return { n: 0, meanDelta: null, mae: null, exactRate: null, within1Rate: null }
-  return {
-    n,
-    meanDelta: sum / n,
-    mae: absSum / n,
-    exactRate: exact / n,
-    within1Rate: within1 / n,
-  }
+  return computeInterestAccuracy(rows)
 }
 
 export interface SynopsisVersionComparison {

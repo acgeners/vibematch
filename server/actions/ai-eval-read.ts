@@ -78,6 +78,42 @@ export async function unmarkAllAiEvalRead(
   return { ok: true }
 }
 
+/** Teto de obras por chamada: a action é endpoint HTTP público, e o maior lote real é uma fila (~1k). */
+const MARK_WORKS_MAX = 2000
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Marca obras ESPECÍFICAS como lidas numa fila. É o "Pular" do Veredito em
+ * /my-ai-scores: o Veredito é per-usuário, então pular tem de valer só para quem
+ * pulou. Até 2026-11-16 o botão gravava `works.ai_eval_status = 'skipped'`, que é o
+ * status da avaliação de ATRIBUTOS do catálogo inteiro (tirava a obra da fila de
+ * /curation/works para todo mundo e sobrescrevia um `review_pending`).
+ */
+export async function markAiEvalWorksRead(
+  workIds: string[],
+  queue: ReadQueue,
+): Promise<{ ok: boolean; marked: number }> {
+  if (!READ_QUEUES.includes(queue)) throw new Error("Fila inválida ao marcar como lida.")
+  if (!Array.isArray(workIds) || workIds.length > MARK_WORKS_MAX || workIds.some((id) => typeof id !== "string" || !UUID_RE.test(id))) {
+    throw new Error("Lista de obras inválida ao marcar como lida.")
+  }
+  const userId = await getSessionUserId()
+  if (!userId) return { ok: false, marked: 0 }
+  const ids = [...new Set(workIds)]
+  if (ids.length === 0) return { ok: true, marked: 0 }
+
+  const supabase = createAdminClient()
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500).map((work_id) => ({ user_id: userId, work_id, queue }))
+    const { error } = await supabase
+      .from("ai_eval_read_acks")
+      .upsert(chunk, { onConflict: "user_id,work_id,queue", ignoreDuplicates: true })
+    if (error) throw new Error(`Falha marcando obras como lidas: ${error.message}`)
+  }
+  invalidateEvalChrome()
+  return { ok: true, marked: ids.length }
+}
+
 /**
  * Desmarca UMA obra numa fila (clicar no selo "Lida" do card) — ela volta a
  * contar naquela aba/badge.

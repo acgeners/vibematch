@@ -866,7 +866,7 @@ Obra sem `last_read_at` usa `user_work_state.updated_at` só para classificar, e
 **`works.total_chapters` = último capítulo disponível: Comix (`latestChapter`) primeiro, o Mangago só sem ele, as demais fontes só sem os dois — em obra em andamento E concluída.** O total do original fazia a `/reading` cobrar capítulos que não existem traduzidos. Nunca "o maior entre as fontes" (um capítulo-aviso do Mangago vira capítulo novo) nem o `finalChapter` do Comix (é cadastro, não o postado); e o status do Comix não separa tradução completa de incompleta (diz "releasing" quase sempre).
 Dono: `pickTotalChapters` (`lib/external/chapter-total.ts`), usado pela checagem da `/reading` e pelo "Atualizar dados"; a conferência de número corrompido (`isImplausibleChapter`) só descarta erro de ordem de grandeza, nunca fonte mais baixa.
 **Obra "não verificada" na checagem de capítulos deixa o motivo de cada fonte na tela e no log, a partir do MESMO objeto (`ChapterCheckFailure`, `lib/reading/check-failures.ts`):** na `/reading`, o link "N não verificadas · ver motivos" e o "Ver motivos" do aviso; no painel "Capítulos e status", a mesma lista; no log, a linha `[reading-check]` (local: `~/Library/Logs/satoria-npm-start.log`; Fly: `fly logs`). Nada vai para o banco: recarregar a aba apaga a lista. Por isso as fontes de capítulo LANÇAM na falha e `getLatestChapter` devolve `failures`: não volte a trocar falha por `null` nem a esvaziar o `catch`.
-**O aviso do fim só diz "nenhuma novidade" sobre as obras verificadas** (`checkOutcomeHeadline`, mesmo arquivo): com parte em falha, "Nenhuma novidade nas N obras verificadas"; com todas, "Nenhuma obra foi verificada". **Sem o desvio do Cloudflare (produção), o botão fica desabilitado com o motivo visível**, aqui e no lote "Capítulos e status" (`hasCfBypassConfigured`, prop obrigatória nos dois componentes).
+**O aviso do fim só diz "nenhuma novidade" sobre as obras verificadas** (`checkOutcomeHeadline`, mesmo arquivo): com parte em falha, "Nenhuma novidade nas N obras verificadas"; com todas, "Nenhuma obra foi verificada". **Sem o desvio do Cloudflare (produção), o botão fica desabilitado com o motivo visível**, aqui, no lote "Capítulos e status" e no "Testar agora" da Comix, cujo canário grava o estado da Comix no banco para todos os processos (`hasCfBypassConfigured`, prop obrigatória nos três componentes).
 
 ### O status de publicação tem UMA regra, e o MangaUpdates decide
 
@@ -5253,6 +5253,11 @@ bancos REAIS — passa no local (11 critérios), barra na nuvem (9) nomeando `fa
 ⚠️ A página virou **duas** em 2026-08-02: `/curation/works` ficou só com a fila de **atributos**
 (curadoria do catálogo — do dono), e as filas de **Veredito IA / IA-Rk / Interesse / Sinopse**
 foram pra **`/my-ai-scores`** (qualquer logado).
+
+**Em `/my-ai-scores` a lista aberta é a das obras NÃO lidas, que é o número da aba; as lidas ficam
+recolhidas no fim** (`components/ai-evaluation/queue/read-split.tsx`). **O "Pular" do Veredito é
+pessoal: marca a obra como lida (`markAiEvalWorksRead`, fila `veredito`). Nunca grave
+`works.ai_eval_status` a partir dali**: é o status dos atributos do catálogo inteiro.
 
 🔴 **"Aguardando revisão" nomeava uma ação que não existia — corrigido em 2026-08-14.** O modal
 de revisão só abria como RESULTADO de uma avaliação paga (`handleEvaluate` → confirmação de

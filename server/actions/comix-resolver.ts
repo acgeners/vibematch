@@ -12,6 +12,8 @@
 // Os gates de admin ficam na implementação (startComixResolver, setComixHidManually).
 
 import * as impl from "@/server/comix/resolver"
+import { ensureAdmin } from "@/server/queries/current-user"
+import { hasCfBypassConfigured } from "@/lib/external/flaresolverr"
 
 export async function getComixResolverStatus() {
   return impl.getComixResolverStatus()
@@ -33,7 +35,18 @@ export async function validateComixHid(hidOrUrl: string) {
   return impl.validateComixHid(hidOrUrl)
 }
 
+/**
+ * O botão "Testar agora". O canário MOVE o gate da Comix, que é gravado no banco e vale
+ * para todo processo: rodado de onde a Comix bloqueia (o servidor do Fly responde 403),
+ * ele marcaria a Comix como fora também para o Mac. Por isso só roda com o contorno do
+ * Cloudflare configurado — a mesma régua da checagem de capítulos — e só para o curador
+ * (até 2026-11-16 esta action não tinha gate nenhum). Quem a usa em background
+ * (`ensureComixReady`) chama a implementação direto.
+ */
 export async function checkComixHealth() {
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error ?? "Só o Curador do catálogo pode fazer isso.")
+  if (!hasCfBypassConfigured()) throw new Error("Indisponível neste servidor: sem o contorno do Cloudflare.")
   return impl.checkComixHealth()
 }
 

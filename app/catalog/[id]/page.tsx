@@ -95,6 +95,7 @@ import { ScoreBadge, getScoreTextColor, pickCriterionTierByRange, criterionTierP
 import type { CriterionTier } from "@/components/ui/score-badge"
 import { ForceMeters } from "@/components/ranking/force-meters"
 import { computeWorkForces } from "@/lib/calculations/forces"
+import { sumVotes } from "@/lib/calculations/platform"
 import { balanceScoreCardColumns } from "@/lib/ui/score-card-columns"
 import { PublicationStatusBadge } from "@/components/ui/status-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -884,7 +885,8 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
   })
   const calcTwoCols = scoreColumns.calc === 2
 
-  const totalVotes = platformRatings.reduce((sum, pr) => sum + (pr.vote_count ?? 0), 0)
+  // Mesma soma que o comparador e o recálculo usam (`sumVotes`).
+  const totalVotes = sumVotes(platformRatings)
   const ratedPlatforms = platformRatings.filter((pr) => pr.rating != null && pr.vote_count > 0)
   const bayesianAvg =
     ratedPlatforms.length > 0

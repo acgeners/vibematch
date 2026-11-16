@@ -103,17 +103,44 @@ export function rubricForBand(slug: string, band: string): string | null {
 }
 
 /**
- * Título curto e FIXO da faixa — o pedaço antes do ":" na rubrica. Ex.: "7-8 | Core romance: romance
- * é um dos pilares…" → "Core romance". É o rótulo canônico da faixa (não a paráfrase da IA). Faixas
- * escritas como frase, sem título, devolvem a frase até o primeiro ":"; dar-lhes um apelido curto é
- * edição de banco (`criteria.ranges`), não código.
+ * Rótulo mais longo que isto não é rótulo, é frase. O maior rótulo de verdade das rubricas
+ * de 2026-11 tem 26 caracteres ("Conflituosa ou ambivalente"); o menor trecho-frase que
+ * passaria por rótulo tem 44.
  */
-export function rubricTitle(slug: string, band: string): string | null {
+export const RUBRIC_TITLE_MAX_CHARS = 30
+
+/**
+ * Separa a definição da faixa em RÓTULO curto + DETALHE. O rótulo é o trecho antes do ":"
+ * ("Destrutiva: dano ativo…") ou, sem ele, antes do " — " ("Protagonismo moderado — …"), e só
+ * conta se for curto.
+ *
+ * 🔴 Até 2026-11-16 o rótulo era "tudo antes do primeiro ':'", sem teto. Desde a régua dos
+ * 11 critérios (v32), 7 deles — Romance, Fantasia, Era, Ação, Protagonismo, Drama, Angst —
+ * escrevem a faixa como FRASE, e o "rótulo" virou a frase inteira (até 289 caracteres) num
+ * chip que não encolhe: o texto passava por cima do campo de nota em "Meu Status". Dar a
+ * essas faixas um apelido no banco (`criteria.ranges`) muda o prompt da avaliação (versão
+ * nova + reavaliação), então o corte mora aqui.
+ */
+function splitRubric(slug: string, band: string): { title: string | null; detail: string } | null {
   const range = rubricForBand(slug, band)
   if (!range) return null
-  const afterBand = range.includes("|") ? range.slice(range.indexOf("|") + 1) : range
-  const title = afterBand.split(":")[0].trim()
-  return title || null
+  const afterBand = (range.includes("|") ? range.slice(range.indexOf("|") + 1) : range).trim()
+  for (const sep of [":", " — "]) {
+    const at = afterBand.indexOf(sep)
+    if (at > 0 && at <= RUBRIC_TITLE_MAX_CHARS) {
+      return { title: afterBand.slice(0, at).trim(), detail: afterBand.slice(at + sep.length).trim() }
+    }
+  }
+  return { title: null, detail: afterBand }
+}
+
+/**
+ * Título curto e FIXO da faixa. Ex.: "4-6 | Conflituosa ou ambivalente: conflitos…" →
+ * "Conflituosa ou ambivalente". null quando a faixa é escrita como frase, sem rótulo curto —
+ * aí quem desenha mostra só a faixa e a primeira frase (`rubricSummary`).
+ */
+export function rubricTitle(slug: string, band: string): string | null {
+  return splitRubric(slug, band)?.title || null
 }
 
 /**
@@ -129,14 +156,11 @@ export function rubricTitle(slug: string, band: string): string | null {
  * meio. null quando a faixa não tem rubrica ou não tem texto além do rótulo.
  */
 export function rubricSummary(slug: string, band: string): string | null {
-  const range = rubricForBand(slug, band)
-  if (!range) return null
-  const afterBand = range.includes("|") ? range.slice(range.indexOf("|") + 1) : range
-  const colon = afterBand.indexOf(":")
-  if (colon === -1) return null
-  const detail = afterBand.slice(colon + 1).trim()
-  const first = detail.split(/(?<=\.)\s+/)[0]?.trim()
-  return first || null
+  const parts = splitRubric(slug, band)
+  if (!parts || !parts.detail) return null
+  const first = parts.detail.split(/(?<=\.)\s+/)[0]?.trim()
+  // Depois de "Rótulo — …" a frase começa em minúscula; na tela ela abre o parágrafo.
+  return first ? first.charAt(0).toUpperCase() + first.slice(1) : null
 }
 
 /** Estado da relação entre a NOTA e a faixa que a prosa cita. */

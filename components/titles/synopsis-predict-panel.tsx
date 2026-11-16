@@ -10,7 +10,7 @@ import { PredictSynopsisRowActions } from "@/components/titles/predict-synopsis-
 import { SynopsisQualityPicker } from "@/components/titles/synopsis-quality-picker"
 import { SynopsisInputsPopover } from "@/components/ai-evaluation/synopsis-inputs-popover"
 import { WorkQueueCard, type WorkQueueState } from "@/components/ai-evaluation/queue/work-queue-card"
-import { WorkQueueGrid } from "@/components/ai-evaluation/queue/work-queue-grid"
+import { ReadQueueSections, useReadSplit } from "@/components/ai-evaluation/queue/read-split"
 import { QueueToolbar, QueueSortSelect } from "@/components/ai-evaluation/queue/queue-toolbar"
 import { useWorkSelection } from "@/components/ai-evaluation/queue/use-work-selection"
 import { InterestBackfillButton } from "@/components/titles/interest-backfill-button"
@@ -121,8 +121,8 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
     })
   }, [works, sortField, sortDir])
 
-  const ids = useMemo(() => sortedWorks.map((w) => w.id), [sortedWorks])
-  const selection = useWorkSelection(ids)
+  const split = useReadSplit(sortedWorks, isRead)
+  const selection = useWorkSelection(split.visibleIds)
 
   // Contagem da seleção pra rotular a ação em lote (Prever = a operação cara que
   // faz sentido em lote; Aplicar/Pular seguem por card, item a item).
@@ -195,8 +195,9 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
         }
       />
 
-      <WorkQueueGrid>
-        {sortedWorks.map((w) => {
+      <ReadQueueSections
+        split={split}
+        render={(w) => {
           const isStale = w.predictedQuality != null && w.predictionStale
           const hasBoth = w.predictedQuality != null && w.manualSynopsisQuality != null
           const alreadyApplied = w.predictedQuality != null && w.manualSynopsisQuality === w.predictedQuality
@@ -315,8 +316,8 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
               onToggleRead={() => unmark(w.id)}
             />
           )
-        })}
-      </WorkQueueGrid>
+        }}
+      />
     </div>
   )
 }

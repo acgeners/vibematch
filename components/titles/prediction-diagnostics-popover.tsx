@@ -5,10 +5,9 @@ import { Gauge } from "lucide-react"
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 
-import type {
-  SynopsisPredictionAccuracy,
-  SynopsisVersionComparison,
-} from "@/server/queries/synopsis-quality"
+import type { SynopsisVersionComparison } from "@/server/queries/synopsis-quality"
+import { MIN_ACCURACY_SAMPLE } from "@/lib/ai-evaluation/interest-accuracy"
+import type { SynopsisPredictionAccuracy } from "@/lib/ai-evaluation/interest-accuracy"
 
 function fmtSigned(v: number): string {
   return `${v > 0 ? "+" : ""}${v.toFixed(2)}`
@@ -21,8 +20,10 @@ const CONF: Record<ConfLevel, { dot: string; text: string; bg: string }> = {
   baixa: { dot: "bg-rose-500", text: "text-rose-600 dark:text-rose-300", bg: "bg-rose-500/12" },
 }
 
-function confidenceOf(mae: number | null): ConfLevel | null {
-  if (mae == null) return null
+// Com amostra pequena não há nível a afirmar: até 2026-11-16 a pílula dizia "alta"
+// sobre n = 2. Os números seguem visíveis no popover, com o aviso.
+function confidenceOf(mae: number | null, n: number): ConfLevel | null {
+  if (mae == null || n < MIN_ACCURACY_SAMPLE) return null
   if (mae <= 0.5) return "alta"
   if (mae <= 1.0) return "média"
   return "baixa"
@@ -53,8 +54,8 @@ export function PredictionDiagnosticsPopover({
   /** ShadowComparePanel já renderizado (server). `null`/`undefined` = oculto. */
   shadow?: ReactNode
 }) {
-  const { n, meanDelta, mae, exactRate, within1Rate } = accuracy
-  const level = confidenceOf(mae)
+  const { n, meanDelta, mae, exactRate, within1Rate, appliedExcluded } = accuracy
+  const level = confidenceOf(mae, n)
   const c = level ? CONF[level] : null
 
   const biasText =
@@ -100,8 +101,8 @@ export function PredictionDiagnosticsPopover({
           </div>
           {mae == null ? (
             <p className="text-xs text-muted-foreground">
-              Sem comparações no prompt atual. Re-preveja obras com{" "}
-              <b className="font-semibold text-foreground">Interesse manual</b> preenchido pra medir a confiança.
+              Sem comparações no prompt atual. Preveja obras em que você deu o{" "}
+              <b className="font-semibold text-foreground">Interesse à mão</b> pra medir a confiança.
             </p>
           ) : (
             <>
@@ -125,9 +126,14 @@ export function PredictionDiagnosticsPopover({
                 {meanDelta != null && <Tile k="Viés">{fmtSigned(meanDelta)}</Tile>}
               </div>
               <div className="mt-2.5 text-[11px] text-muted-foreground/80">
-                {n} {n === 1 ? "comparação" : "comparações"}
-                {n < 10 ? " (amostra pequena)" : ""} · viés {biasText}
+                {n} {n === 1 ? "comparação" : "comparações"} com o Interesse que você deu à mão
+                {n < MIN_ACCURACY_SAMPLE ? " (amostra pequena)" : ""} · viés {biasText}
               </div>
+              <p className="mt-1 text-[11px] leading-4 text-muted-foreground/80">
+                Usa a previsão mais recente de cada obra nesta versão, mesmo desatualizada (é a que aparece na fila).
+                {appliedExcluded > 0 &&
+                  ` Ficam fora ${appliedExcluded} ${appliedExcluded === 1 ? "obra" : "obras"} em que o Interesse veio do "Aplicar" — ali a previsão concordaria consigo mesma.`}
+              </p>
             </>
           )}
         </div>
