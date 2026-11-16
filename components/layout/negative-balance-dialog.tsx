@@ -1,7 +1,6 @@
 "use client"
 
 import { useSyncExternalStore } from "react"
-import Link from "next/link"
 import { AlertTriangle, ExternalLink } from "lucide-react"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
 import { balanceTone } from "@/lib/ai-usage/balance"
@@ -172,10 +171,13 @@ export function NegativeBalanceDialog({ balance }: { balance: BalanceStatus | nu
               <ExternalLink className="size-4" />
             </a>
           </Button>
+          {/* Nova aba, como o botão de cima (pedido da Ana, 16/11/2026): o aviso aparece por cima do
+              que você estava fazendo, e resolver o saldo não pode tirar você dali. */}
           <Button asChild variant="secondary" className="w-full">
-            <Link href="/curation/ai-usage" onClick={() => handleOpenChange(false)}>
+            <a href="/curation/ai-usage" target="_blank" rel="noopener noreferrer" onClick={() => handleOpenChange(false)}>
               Reinformar o saldo
-            </Link>
+              <ExternalLink className="size-4" />
+            </a>
           </Button>
           <Button
             type="button"

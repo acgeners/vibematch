@@ -1,9 +1,7 @@
 "use client"
 
 import { Wallet } from "lucide-react"
-import { useRefresh } from "@/lib/use-refresh"
-import { useState, useTransition } from "react"
-import { setAnthropicBalance } from "@/server/actions/account"
+import { BalanceForm } from "@/components/settings/ai-usage/balance-form"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
 import { balanceTone } from "@/lib/ai-usage/balance"
 import { makeUsdScale } from "@/lib/format/money"
@@ -24,16 +22,6 @@ function formatDateTime(iso: string): string {
 // formulário), mas o NÚMERO tem que ser o mesmo — ver lib/ai-usage/balance.ts.
 
 export function BalanceCard({ status }: { status: BalanceStatus }) {
-  const refresh = useRefresh()
-  const [pending, startTransition] = useTransition()
-  // Vírgula: o campo fica ao lado do saldo formatado ("$19,96") e o placeholder
-  // dele já promete "0,00". `handleSubmit` normaliza os dois separadores, então
-  // quem digitar ponto continua funcionando.
-  const [value, setValue] = useState(
-    status.balanceUsd != null ? String(status.balanceUsd).replace(".", ",") : "",
-  )
-  const [error, setError] = useState<string | null>(null)
-
   const hasBalance = status.balanceUsd != null
   const remaining = status.remainingUsd
   // Do `balanceTone`, não de um `remaining <= LOW_BALANCE_USD` escrito aqui: o número
@@ -51,24 +39,6 @@ export function BalanceCard({ status }: { status: BalanceStatus }) {
   // implícito. O veto de US$1 do `makeUsdScale` mantém tudo em dólar no caso
   // normal; ele só cai pra ¢ quando o próprio saldo é de centavos.
   const usd = makeUsdScale(status.balanceUsd, status.spentSinceUsd, remaining)
-
-  function handleSubmit(event: React.FormEvent) {
-    event.preventDefault()
-    const amount = Number(value.replace(",", "."))
-    if (!Number.isFinite(amount) || amount < 0) {
-      setError("Informe um valor válido (≥ 0).")
-      return
-    }
-    setError(null)
-    startTransition(async () => {
-      const res = await setAnthropicBalance(amount)
-      if (res.error) {
-        setError(res.error)
-        return
-      }
-      refresh()
-    })
-  }
 
   return (
     <section className="rounded-xl border border-border/70 bg-card/55 p-4 shadow-sm shadow-black/5 sm:p-5">
@@ -110,36 +80,8 @@ export function BalanceCard({ status }: { status: BalanceStatus }) {
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex shrink-0 items-center gap-2">
-          <div className="relative">
-            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-              $
-            </span>
-            <input
-              type="text"
-              inputMode="decimal"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder="0,00"
-              disabled={pending}
-              aria-label="Saldo Anthropic em USD"
-              className="w-28 rounded-lg border border-border/70 bg-background/60 py-1.5 pl-6 pr-2 text-sm tabular-nums text-foreground outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
-            />
-          </div>
-          {/* Sem gate de "valor igual": reinformar o mesmo saldo é intencional
-              (re-sincroniza o "gasto desde então"). Só bloqueia campo vazio. */}
-          <button
-            type="submit"
-            disabled={pending || !value.trim()}
-            title={!value.trim() ? "Informe um valor para salvar" : undefined}
-            className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/30 transition-colors hover:bg-primary/90 disabled:opacity-50"
-          >
-            {pending ? "Salvando…" : hasBalance ? "Atualizar" : "Salvar"}
-          </button>
-        </form>
+        <BalanceForm balanceUsd={status.balanceUsd} />
       </div>
-
-      {error && <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{error}</p>}
 
       <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground/80">
         Estimativa baseada no custo registrado das chamadas deste app — o saldo real do console

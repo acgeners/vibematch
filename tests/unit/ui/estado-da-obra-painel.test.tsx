@@ -22,7 +22,7 @@ const BASE: WorkStatePanelProps = {
     created: "2026-05-02T10:00:00Z",
     refreshed: null,
     evaluated: "2026-05-22T07:36:00Z",
-    digest: "2026-07-14T12:00:00Z",
+    reviews: "2026-07-14T12:00:00Z",
     tags: null,
   },
   tagCount: 98,
@@ -54,6 +54,15 @@ describe("painel Estado da obra", () => {
     expect(screen.getByText("155 de 196")).toBeTruthy()
     expect(container.textContent).toContain("criada")
     expect(container.textContent).toContain("avaliada")
+  })
+
+  it("o marco de frescor das reviews é a data das REVIEWS, não a da síntese (pedido de 16/11/2026)", () => {
+    const { container } = renderPainel({ dates: { ...BASE.dates, reviews: "2026-07-14T12:00:00Z" } })
+    const rotulos = Array.from(container.querySelectorAll("span"))
+      .map((el) => el.textContent?.trim())
+      .filter((t) => t === "reviews" || t === "síntese")
+    expect(rotulos).toEqual(["reviews"])
+    expect(container.textContent).toContain("14/07/2026")
   })
 
   it("conta TAGS na matéria-prima — é a única entrada do Alinhamento", () => {

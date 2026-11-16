@@ -72,8 +72,12 @@ function CommandDialog({
 
 function CommandInput({
   className,
+  endAdornment,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Input>) {
+}: React.ComponentProps<typeof CommandPrimitive.Input> & {
+  /** Desenhado no fim da linha do campo (indicador de carregamento, botão de limpar). */
+  endAdornment?: React.ReactNode
+}) {
   return (
     <div
       data-slot="command-input-wrapper"
@@ -88,6 +92,7 @@ function CommandInput({
         )}
         {...props}
       />
+      {endAdornment}
     </div>
   )
 }

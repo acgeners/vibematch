@@ -95,27 +95,14 @@ interface ConsoleEntry {
  * O componente segue existindo — `/preferences` (que é do usuário, e por isso nunca
  * entrou na console) continua usando.
  */
+// Ordem e caixa decididas pela Ana em 16/11/2026: Title Case em todos os nomes, e a ordem pelo uso.
 const ENTRIES: ConsoleEntry[] = [
   {
     href: "/curation",
-    label: "Visão geral",
+    label: "Visão Geral",
     hint: "o que precisa de decisão",
     iconName: "LayoutDashboard",
     accent: "cyan",
-  },
-  {
-    href: "/curation/works",
-    label: "Curadoria da Obra",
-    hint: "fila de atributos",
-    iconName: "Wrench",
-    accent: "violet",
-  },
-  {
-    href: "/curation/requests",
-    label: "Pedidos",
-    hint: "o que o leitor pediu",
-    iconName: "Inbox",
-    accent: "amber",
   },
   {
     href: "/curation/settings",
@@ -126,6 +113,13 @@ const ENTRIES: ConsoleEntry[] = [
     branch: "settings",
   },
   {
+    href: "/curation/works",
+    label: "Curadoria da Obra",
+    hint: "fila de atributos",
+    iconName: "Wrench",
+    accent: "violet",
+  },
+  {
     href: "/curation/ai-usage",
     label: "Uso da API IA",
     hint: "custo e chamadas",
@@ -134,10 +128,17 @@ const ENTRIES: ConsoleEntry[] = [
   },
   {
     href: "/curation/model-metrics",
-    label: "Métricas do modelo",
+    label: "Métricas do Modelo",
     hint: "acurácia da Prevista",
     iconName: "ChartNoAxesCombined",
     accent: "indigo",
+  },
+  {
+    href: "/curation/requests",
+    label: "Pedidos",
+    hint: "o que o leitor pediu",
+    iconName: "Inbox",
+    accent: "amber",
   },
 ]
 

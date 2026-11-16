@@ -94,6 +94,26 @@ describe("fila de Veredito: lidas recolhidas e Pular pessoal", () => {
   })
 })
 
+describe("Pular selecionadas (pedido de 16/11/2026)", () => {
+  beforeEach(() => {
+    skipAiEvaluation.mockClear()
+    markAiEvalWorksRead.mockClear()
+  })
+
+  it("pula as selecionadas de uma vez, só para quem pulou", async () => {
+    render(<StaleRerankPanel works={works} readIds={[]} />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole("checkbox", { name: "Selecionar Alpha" }))
+      fireEvent.click(screen.getByRole("checkbox", { name: "Selecionar Gamma" }))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Pular selecionadas \(2\)/ }))
+    })
+    expect(skipAiEvaluation).not.toHaveBeenCalled()
+    expect(markAiEvalWorksRead).toHaveBeenCalledWith([ID.a, ID.c], "veredito")
+  })
+})
+
 describe("useReadSplit: a seleção só alcança o que está na tela", () => {
   it("visibleIds exclui as lidas enquanto a seção está recolhida", () => {
     const isRead = (id: string) => id === ID.b

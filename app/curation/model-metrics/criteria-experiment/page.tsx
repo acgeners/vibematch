@@ -33,12 +33,12 @@ export default async function Page() {
         href="/curation/model-metrics"
         className="inline-block text-xs text-muted-foreground hover:underline"
       >
-        ← Métricas do modelo
+        ← Métricas do Modelo
       </Link>
 
       <Header
         icon={<FlaskConical className="size-5" />}
-        kicker="Métricas do modelo"
+        kicker="Métricas do Modelo"
         title="Comparar Nota Prevista: 9 × 11 atributos"
         description="Ferramenta de diagnóstico, US$0: com os dados já acumulados, setting_era e angst melhoram de fato a Nota Prevista se entrarem no modelo?"
       />

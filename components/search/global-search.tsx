@@ -14,6 +14,7 @@ import {
   Heart,
   Home,
   Info,
+  Loader2,
   Palette,
   Plus,
   Scale,
@@ -26,6 +27,7 @@ import {
   UserCircle,
   Wand2,
   Wrench,
+  X,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import {
@@ -256,6 +258,10 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
     (k) => activeScope === "tudo" || activeScope === k,
   )
   const nothing = works.length === 0 && matches.length === 0 && !loadingWorks
+  // A obra não existe no catálogo: quem tem conta pode cadastrá-la (`createWork` é do leitor),
+  // e `/catalog/new?title=` já chega com o título preenchido.
+  const offerCreate = showWorks && canSearchWorks && !loadingWorks && works.length === 0 && signedIn
+  const inputRef = useRef<HTMLInputElement>(null)
 
   return (
     <>
@@ -305,6 +311,9 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
       <CommandDialog
         open={open}
         onOpenChange={(v) => (v ? setOpen(true) : close())}
+        // Sem o X de FECHAR no canto: ele ficava colado no campo e era lido como "apagar o que
+        // digitei" — e fechava o diálogo. O X do campo limpa; Esc e clique fora fecham.
+        showCloseButton={false}
         title="Buscar"
         description="Busque obras, ajustes e páginas"
         /**
@@ -331,9 +340,31 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
         shouldFilter={false}
       >
         <CommandInput
+          ref={inputRef}
           placeholder="Buscar obras, ajustes, páginas…"
           value={raw}
           onValueChange={setRaw}
+          endAdornment={
+            <>
+              {loadingWorks && (
+                <Loader2 aria-label="Buscando obras" className="size-4 shrink-0 animate-spin text-muted-foreground" />
+              )}
+              {raw && (
+                <button
+                  type="button"
+                  aria-label="Limpar a busca"
+                  title="Limpar a busca"
+                  onClick={() => {
+                    setRaw("")
+                    inputRef.current?.focus()
+                  }}
+                  className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <X className="size-4" />
+                </button>
+              )}
+            </>
+          }
           onKeyDown={(e) => {
             if (e.key === "Tab") {
               e.preventDefault()
@@ -369,6 +400,10 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
               tab
             </kbd>
             cicla
+            <kbd className="ml-1.5 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+              esc
+            </kbd>
+            fecha
           </span>
         </div>
 
@@ -383,6 +418,31 @@ export function GlobalSearch({ index }: { index: SearchEntry[] }) {
                 ? `Nada para "${term}" neste escopo.`
                 : "Comece a digitar para buscar."}
             </CommandEmpty>
+          )}
+
+          {showWorks && loadingWorks && works.length === 0 && (
+            <div role="status" className="flex items-center gap-2 px-4 py-3 text-[13px] text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Buscando obras…
+            </div>
+          )}
+
+          {offerCreate && (
+            <CommandGroup heading="Obras">
+              <CommandItem value="create-work" asChild className="cursor-pointer">
+                <a href={`/catalog/new?title=${encodeURIComponent(term)}`} onClick={close}>
+                  <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground [&_svg]:size-4">
+                    <Plus />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13.5px] font-semibold">Cadastrar “{term}”</span>
+                    <span className="block truncate text-[11.5px] text-muted-foreground">
+                      Nenhuma obra no catálogo com esse nome
+                    </span>
+                  </span>
+                </a>
+              </CommandItem>
+            </CommandGroup>
           )}
 
           {showWorks && works.length > 0 && (

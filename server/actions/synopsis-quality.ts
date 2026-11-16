@@ -271,12 +271,34 @@ export async function skipSynopsisInterestAction(
   workId: string,
   skipped = true,
 ): Promise<{ data?: { skipped: boolean }; error?: string }> {
+  return skipInterestFor([workId], skipped)
+}
+
+/** Teto por chamada: a action é endpoint HTTP público, e o maior lote real é uma fila (~1k). */
+const SKIP_BATCH_MAX = 2000
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** "Pular selecionadas" da fila de Interesse (pedido de 16/11/2026): o mesmo "Pular", em lote. */
+export async function skipSynopsisInterestForWorks(
+  workIds: string[],
+): Promise<{ data?: { skipped: boolean }; error?: string }> {
+  if (!Array.isArray(workIds) || workIds.length > SKIP_BATCH_MAX || workIds.some((id) => typeof id !== "string" || !UUID_RE.test(id))) {
+    return { error: "Lista de obras inválida." }
+  }
+  if (workIds.length === 0) return { data: { skipped: true } }
+  return skipInterestFor([...new Set(workIds)], true)
+}
+
+async function skipInterestFor(
+  workIds: string[],
+  skipped: boolean,
+): Promise<{ data?: { skipped: boolean }; error?: string }> {
   try {
     const gate = await ensureAdmin()
     if (!gate.ok) return { error: gate.error }
     // FASE E: só o espelho. O `update` em `works` que vinha antes gravava o mesmo booleano, e
     // era ELE que gateava o espelho (`if (!error)`) — agora o espelho é a escrita, não a cópia.
-    const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], {
+    const mirror = await mirrorOwnerState(await getOwnerUserId(), workIds, {
       synopsis_interest_skipped: skipped,
     })
     if (mirror.error) {

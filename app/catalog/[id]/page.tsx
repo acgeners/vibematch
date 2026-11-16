@@ -1394,7 +1394,7 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
                   created: (work as { created_at?: string | null }).created_at ?? null,
                   refreshed: (work as { data_refreshed_at?: string | null }).data_refreshed_at ?? null,
                   evaluated: latestAiEval?.created_at ?? null,
-                  digest: reviewsSnapshot.digestAt,
+                  reviews: reviewsSnapshot.fetchedAt,
                   tags: tagsInferredAt,
                   lastRead: (work as { last_read_at?: string | null }).last_read_at ?? null,
                 }}

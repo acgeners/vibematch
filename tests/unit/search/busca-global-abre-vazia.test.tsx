@@ -29,12 +29,13 @@ Element.prototype.scrollIntoView ??= function scrollIntoView() {}
 // ⚠️ Os papéis são em PORTUGUÊS ("curador", não "curator"). Com um nome inválido,
 // `roleAtLeast` compara `undefined >= undefined` → false, `visible` fica vazio e o teste passa
 // verde sem nunca ter renderizado um item — foi exatamente o que aconteceu na 1ª versão daqui.
+const sessao = vi.hoisted(() => ({ logada: true }))
 vi.mock("@/components/layout/admin-context", () => ({
   useRole: () => "curador",
-  useIsSignedIn: () => true,
+  useIsSignedIn: () => sessao.logada,
 }))
 
-const searchWorkSuggestions = vi.fn(async (_term: string) => [])
+const searchWorkSuggestions = vi.fn(async (_term: string): Promise<unknown[]> => [])
 vi.mock("@/server/actions/work-search", () => ({
   searchWorkSuggestions: (t: string) => searchWorkSuggestions(t),
 }))
@@ -80,7 +81,9 @@ const itensNaLista = () =>
   Array.from(document.querySelectorAll("[data-slot=command-item]"))
 
 beforeEach(() => {
-  searchWorkSuggestions.mockClear()
+  searchWorkSuggestions.mockReset()
+  searchWorkSuggestions.mockImplementation(async () => [])
+  sessao.logada = true
 })
 
 async function abrirBusca() {
@@ -136,5 +139,68 @@ describe("busca global", () => {
     expect(cls, "centralização vertical do padrão não pode sobreviver").not.toMatch(
       /translate-y-\[-50%\]/,
     )
+  })
+})
+
+/**
+ * Pedidos de 16/11/2026: feedback de carregamento, o X apagar o texto SEM fechar, e oferecer o
+ * cadastro quando a obra não existe. Teste de RENDER: o que regride é a árvore desenhada.
+ */
+describe("busca global: carregar, limpar, cadastrar", () => {
+  const campo = () => screen.getByPlaceholderText(/Buscar obras, ajustes, páginas/i) as HTMLInputElement
+  async function digitar(valor: string) {
+    const { fireEvent } = await import("@testing-library/react")
+    await act(async () => {
+      fireEvent.change(campo(), { target: { value: valor } })
+    })
+  }
+  const esperarDebounce = () => act(() => new Promise((r) => setTimeout(r, 300)))
+
+  it("o diálogo não tem o X de fechar; o X do campo limpa e o diálogo segue aberto", async () => {
+    await abrirBusca()
+    expect(document.querySelector("[data-slot=dialog-close]")).toBeNull()
+    await digitar("abc")
+    await act(async () => {
+      screen.getByRole("button", { name: "Limpar a busca" }).click()
+    })
+    expect(campo().value).toBe("")
+    expect(document.querySelector("[data-slot=dialog-content]")).not.toBeNull()
+  })
+
+  it("enquanto as obras chegam, diz que está buscando", async () => {
+    searchWorkSuggestions.mockImplementation(() => new Promise(() => {}))
+    await abrirBusca()
+    await digitar("xyzw")
+    expect(screen.getByText("Buscando obras…")).toBeTruthy()
+    expect(screen.getByLabelText("Buscando obras")).toBeTruthy()
+  })
+
+  it("obra que não existe: oferece cadastrar, com o título no link", async () => {
+    await abrirBusca()
+    await digitar("Obra Inexistente")
+    await esperarDebounce()
+    // O cmdk põe `role="option"` no item; a âncora é o próprio item (asChild).
+    const link = screen.getByText("Cadastrar “Obra Inexistente”").closest("a")
+    expect(link?.getAttribute("href")).toBe("/catalog/new?title=Obra%20Inexistente")
+    expect(screen.queryByText("Buscando obras…")).toBeNull()
+  })
+
+  it("sem sessão não oferece cadastrar", async () => {
+    sessao.logada = false
+    await abrirBusca()
+    await digitar("Obra Inexistente")
+    await esperarDebounce()
+    expect(screen.queryByText(/Cadastrar “/)).toBeNull()
+  })
+
+  it("com obra encontrada, não oferece cadastrar", async () => {
+    searchWorkSuggestions.mockImplementation(async () => [
+      { id: "w1", slug: "obra", title: "Obra Existente", coverUrls: [], year: 2020, publicationStatus: "Completed", matchedAlias: null, isAdult: false, isMixed: false },
+    ])
+    await abrirBusca()
+    await digitar("Obra Existente")
+    await esperarDebounce()
+    expect(screen.getByText("Obra Existente")).toBeTruthy()
+    expect(screen.queryByText(/Cadastrar “/)).toBeNull()
   })
 })
