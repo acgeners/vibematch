@@ -101,7 +101,6 @@ function buildWorkFromRow(row: Record<string, unknown>): WorkForEmbedding {
   return {
     workId: row.id as string,
     data: {
-      title: row.title as string,
       synopsis,
       tags,
       categoryScores,
@@ -179,7 +178,7 @@ async function loadEmbeddingCandidates(workId?: string): Promise<{
 }> {
   const supabase = createAdminClient()
 
-  const WORK_COLS = `id, title, review_digest, review_summary,
+  const WORK_COLS = `id, review_digest, review_summary,
        category_scores(criterion_slug, score),
        work_tags(tags(name, tag_group_id)),
        work_synopses(text, is_primary, position)`

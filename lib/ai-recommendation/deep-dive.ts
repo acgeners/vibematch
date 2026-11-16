@@ -17,7 +17,9 @@ import type { UsageTokens } from "@/lib/ai/pricing"
 // match_score; evidência fraca/única fica só em tags_cons/flags).
 // v5 (Item C, Passe 1): consenso das reviews (review_summary) no work bundle.
 // v6 (Item C, Passe 2): digest estruturado (review_digest) tem precedência.
-export const DEEP_DIVE_PROMPT_VERSION = "deep-dive-v6"
+// v7: o "sim=NN%" das obras similares saiu. A busca passou ao espaço centralizado (mig 225),
+// onde "33%" é uma vizinha forte mas leria como pouco parecida; a lista já vem em ordem.
+export const DEEP_DIVE_PROMPT_VERSION = "deep-dive-v7"
 
 // Extended thinking budget tokens — escolhido em discussão com o user.
 // Reduz pra metade na segunda tentativa pra liberar headroom de output

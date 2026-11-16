@@ -42,9 +42,15 @@ function formatSimilarity(s: number): string {
   return `${Math.round(s * 100)}%`
 }
 
+/**
+ * Faixas na escala CENTRALIZADA (mig 225: 0 = duas obras quaisquer). Medido em 2026-11-16 sobre
+ * as 8 mais parecidas de cada uma das 1.085 obras, com o texto sem título: p25 0,29 · p50 0,33 ·
+ * p75 0,37. Verde = quartil de cima, cinza = quartil de baixo. Os cortes antigos (0,85/0,70) eram
+ * da escala crua, onde duas obras quaisquer já davam 0,69; na nova, nada os alcançaria.
+ */
 function similarityClasses(s: number): string {
-  if (s >= 0.85) return "bg-emerald-500/15 text-emerald-700 border-emerald-500/40 dark:text-emerald-300"
-  if (s >= 0.7) return "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
+  if (s >= 0.37) return "bg-emerald-500/15 text-emerald-700 border-emerald-500/40 dark:text-emerald-300"
+  if (s >= 0.29) return "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
   return "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
 }
 
@@ -309,7 +315,10 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
                     “retrato” em texto — sinopse, tags e gêneros, as notas dos atributos
                     avaliados pela IA e um resumo das reviews — e transformamos esse texto
                     num vetor (<strong>embedding</strong>). O <strong>%</strong> é a
-                    proximidade entre os dois vetores, medida por distância cosseno.
+                    proximidade entre os dois vetores, descontado o que todas as obras do
+                    catálogo têm em comum: 0% é o que duas obras quaisquer dão, e entre as 8
+                    mais parecidas de uma obra o comum fica entre 29% e 37%. O título não
+                    entra no retrato.
                     {embedding && (
                       <span className="mt-2 block border-t border-background/20 pt-1.5 text-[11px] text-muted-foreground">
                         Vetor desta obra: <span className="font-mono font-semibold">{embedding.model ?? "sem registro"}</span>
