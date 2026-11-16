@@ -425,7 +425,9 @@ export function AiEvaluationFilters({
     (iaRkFilterActive ? 1 : 0) +
     (synopsisFilterActive ? 1 : 0) +
     draft.pub.length +
-    draft.personal.length +
+    // O padrão de status da aba não é filtro "seu": contá-lo faria o botão abrir "Filtros 11" na
+    // aba Fontes sem você ter escolhido nada (o mesmo que já valia para o padrão dos atributos).
+    (sameSet(draft.personal, defaultPersonalStatuses) ? 0 : draft.personal.length) +
     draft.synQ.length +
     draft.predQ.length +
     advancedActiveCount

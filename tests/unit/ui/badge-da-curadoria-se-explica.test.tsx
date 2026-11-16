@@ -181,3 +181,32 @@ describe("o painel de filtros não apaga mais o recorte", () => {
     expect(filter?.split(",").sort()).toEqual([...ATTR_DECISION_FILTERS].sort())
   })
 })
+
+describe("o padrão de status da aba Fontes não conta como filtro (pedido de 16/11/2026)", () => {
+  it("no padrão, sem contador; com escolha própria, conta", async () => {
+    const { SOURCES_DEFAULT_PERSONAL_NAMES } = await import("@/lib/ai-evaluation/queue-filters")
+    const { unmount } = render(
+      <AiEvaluationFilters
+        activeFilters={[]}
+        activePubStatuses={[]}
+        activePersonalStatuses={[...SOURCES_DEFAULT_PERSONAL_NAMES]}
+        defaultPersonalStatuses={[...SOURCES_DEFAULT_PERSONAL_NAMES]}
+        showEvalState={false}
+      />,
+    )
+    // Com o padrão contado, o botão abria "Filtros 11" sem ninguém ter escolhido nada.
+    expect(screen.getByRole("heading", { name: "Filtros" }).nextElementSibling).toBeNull()
+    unmount()
+    render(
+      <AiEvaluationFilters
+        activeFilters={[]}
+        activePubStatuses={[]}
+        activePersonalStatuses={["Reading", "Want to Read"]}
+        defaultPersonalStatuses={[...SOURCES_DEFAULT_PERSONAL_NAMES]}
+        showEvalState={false}
+      />,
+    )
+    expect(screen.getByRole("heading", { name: "Filtros" }).nextElementSibling?.textContent).toBe("2")
+  })
+})
+

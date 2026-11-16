@@ -42,6 +42,9 @@ export function SourcesTab({
   activeSource,
   activePubStatuses,
   activePersonalStatuses,
+  defaultPersonalStatuses = [],
+  usingDefaultPersonal = false,
+  includeUntouchedHref,
   activeInterest = [],
   activePredictionQualities = [],
   baseHref,
@@ -53,6 +56,12 @@ export function SourcesTab({
   activeSource: ExternalSourceId | null
   activePubStatuses: string[]
   activePersonalStatuses: string[]
+  /** Padrão de status pessoal da aba (as obras da sua lista) — o painel o trata como "sem filtro". */
+  defaultPersonalStatuses?: string[]
+  /** A lista está no padrão (a URL não escolheu status)? Então o aviso explica o recorte. */
+  usingDefaultPersonal?: boolean
+  /** Mesma aba com todos os status, inclusive Untracked. */
+  includeUntouchedHref?: string
   activeInterest?: string[]
   activePredictionQualities?: string[]
   /** Href da aba SEM o parâmetro `source` — os chips o acrescentam. */
@@ -163,10 +172,23 @@ export function SourcesTab({
         activeFilters={[]}
         activePubStatuses={activePubStatuses}
         activePersonalStatuses={activePersonalStatuses}
+        defaultPersonalStatuses={defaultPersonalStatuses}
         activeSynopsisQualities={activeInterest}
         activePredictionQualities={activePredictionQualities}
         showEvalState={false}
       />
+
+      {/* O padrão esconde as obras nunca tocadas — e diz isso, com a saída a um clique. Recorte
+          calado é a pior forma de filtro: a fila parece menor do que é. */}
+      {usingDefaultPersonal && includeUntouchedHref && (
+        <p className="text-xs text-muted-foreground">
+          Mostrando só as obras da sua lista (com status seu). As nunca tocadas ficam fora:{" "}
+          <Link href={includeUntouchedHref} className="underline underline-offset-2 hover:text-foreground">
+            incluir as nunca tocadas
+          </Link>
+          .
+        </p>
+      )}
 
       <QueueToolbar
         count={selection.count}

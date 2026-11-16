@@ -4,6 +4,7 @@ import {
   INTEREST_HIDDEN_PERSONAL_STATUSES,
 } from "@/lib/constants/criteria"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
+import { shelfOfStatusId } from "@/lib/my-list/shelves"
 
 /**
  * Parsing de filtros de URL compartilhado por /curation/works ("Curadoria da
@@ -24,6 +25,19 @@ export const PERSONAL_STATUS_NAME_TO_ID: Record<string, number> = Object.fromEnt
  *  (`personal_status.hide_from_interest`, migration 155) — antes era escrita à mão aqui, e
  *  "Completed" parou de casar em silêncio quando o status virou "Finished".
  *  Escolha explícita de status no filtro sobrepõe. */
+/**
+ * Padrão da aba Fontes de `/curation/works` (pedido de 16/11/2026): as obras da SUA LISTA — status
+ * explícito que não é Untracked, a mesma régua da `/my-list` (`shelfOfStatusId`), nunca uma lista
+ * de nomes. Medido na nuvem em 16/11: a aba tinha 695 obras com lacuna, 496 delas nunca tocadas;
+ * com o padrão, 199. As nunca tocadas seguem a um clique ("incluir as nunca tocadas").
+ */
+export const SOURCES_DEFAULT_PERSONAL_NAMES = Object.entries(PERSONAL_STATUS_NAME_TO_ID)
+  .filter(([, id]) => shelfOfStatusId(id) != null)
+  .map(([name]) => name)
+export const SOURCES_DEFAULT_PERSONAL_IDS = SOURCES_DEFAULT_PERSONAL_NAMES.map((s) => PERSONAL_STATUS_NAME_TO_ID[s])
+/** Todos os status pessoais: o "incluir as nunca tocadas" da aba Fontes. */
+export const ALL_PERSONAL_NAMES = Object.keys(PERSONAL_STATUS_NAME_TO_ID)
+
 export const INTEREST_DEFAULT_PERSONAL_NAMES = Object.keys(PERSONAL_STATUS_NAME_TO_ID).filter(
   (s) => !(INTEREST_HIDDEN_PERSONAL_STATUSES as readonly string[]).includes(s),
 )
