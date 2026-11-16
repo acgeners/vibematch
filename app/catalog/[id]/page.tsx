@@ -104,6 +104,9 @@ import type { AiProvenanceSealProps } from "@/components/ui/ai-provenance"
 import { SimilarWorksCard } from "@/components/titles/similar-works-card"
 import { getSimilarWorks } from "@/server/queries/similar-works"
 import { getFavoriteFolderMenu } from "@/server/queries/lists"
+import { getExpectedExplanation } from "@/server/queries/user-scores"
+import { explanationForEdition } from "@/lib/calculations/expected-explanation"
+import { ExpectedExplanation } from "@/components/titles/expected-explanation"
 import {
   FavoriteToggleButton,
   MoreActionsMenu,
@@ -453,7 +456,7 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
   ])
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, openingStructure, sources, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData, hideAdultContent, archivedCovers, favoriteFolderMenu, aiProvenance, alignmentModel, embeddingProvenance] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, openingStructure, sources, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData, hideAdultContent, archivedCovers, favoriteFolderMenu, aiProvenance, alignmentModel, embeddingProvenance, expectedExplanationRead] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
@@ -478,6 +481,9 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
     getWorkAiProvenance(work.id as string),
     getAlignmentRunModel(work.calculated_scores?.alignment_run_id as string | null | undefined),
     getWorkEmbeddingProvenance(work.id as string),
+    // A justificativa da Nota Prevista de quem olha (mig 224). Fora do `calculated_scores(*)` para
+    // quem não é o dono — o overlay a zera, como os demais campos pessoais.
+    getExpectedExplanation(work.id as string),
   ])
   // Capas que você apagou na edição (migration 163): o "Atualizar dados" não as
   // traz de volta sozinho, mas as lista numa seção "Arquivadas (N)" de onde podem
@@ -595,6 +601,12 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
    */
   const editionPrediction = predictionForEdition(work.calculated_scores, isMixedWork, activeEdition)
   work.calculated_scores = editionPrediction.row
+  /** A justificativa da MESMA nota exibida: em obra mixed, a da edição ativa — nunca a da outra. */
+  const expectedExplanation = explanationForEdition(
+    expectedExplanationRead?.column,
+    isMixedWork ? (activeEdition ?? "normal") : null,
+    expectedExplanationRead?.columnEdition ?? null,
+  )
   // "Não calculada para esta edição": a linha não tem a previsão da edição, ou a edição não tem nota
   // de conteúdo adulto (o gate dos 9 atributos zera a previsão). Falta de OUTRO atributo não entra
   // aqui — aí a mensagem de sempre ("após avaliação IA") é a verdadeira.
@@ -1901,6 +1913,10 @@ export default async function TitleDetailPage({ params, searchParams }: TitleDet
             </div>
           </CardHeader>
           <CardContent className="@container pt-0">
+            <ExpectedExplanation
+              payload={expectedExplanation}
+              shownScore={work.calculated_scores?.expected_score}
+            />
             {/* QUANDO abrir em 2 colunas é decisão de contagem (`scoreColumns`, pra
                 equilibrar a altura com "Avaliações externas"); o `@md` (card ≥ 448px) é só
                 a GUARDA de largura. Container query, não `sm:`: a largura que importa é a

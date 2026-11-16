@@ -285,3 +285,49 @@ describe("recálculo por edição — a Chance some junto com a Nota Prevista", 
     }
   })
 })
+
+describe("recálculo por edição — a JUSTIFICATIVA da Nota Prevista (mig 224)", () => {
+  type Expl = { score: number; editions?: Record<MixedEdition, { score: number } | null> }
+
+  it("a justificativa de cada edição explica a nota DAQUELA edição, nunca a da outra", () => {
+    for (const id of MIXED) {
+      for (const run of [normal, r18]) {
+        const r = run.porId.get(id)!
+        const porEdicao = r.expected_by_edition!
+        const expl = r.expected_explanation as Expl | null
+        for (const ed of ["normal", "r18"] as const) {
+          const nota = porEdicao[ed].expected_score
+          const daEdicao = expl?.editions?.[ed] ?? null
+          if (nota == null) expect(daEdicao).toBeNull()
+          else expect(daEdicao!.score).toBeCloseTo(nota, 2)
+        }
+      }
+    }
+  })
+
+  it("obra não-mixed: justificativa sem edições, com a mesma nota da coluna", () => {
+    for (const [id, r] of normal.porId) {
+      if (MIXED.includes(id)) continue
+      const expl = r.expected_explanation as Expl | null
+      if (r.expected_score == null) expect(expl).toBeNull()
+      else {
+        expect(expl!.editions).toBeUndefined()
+        expect(expl!.score).toBeCloseTo(r.expected_score as number, 2)
+      }
+    }
+  })
+})
+
+describe("justificativa: o topo da coluna é a nota DAS COLUNAS", () => {
+  it("edição padrão sem nota → topo sem justificativa, só a da outra edição dentro de editions", () => {
+    // w051 com a R18 como padrão: R18 sem nota, normal com nota.
+    const r = r18.porId.get("w051")!
+    expect(r.expected_score).toBeNull()
+    const expl = r.expected_explanation as Record<string, unknown>
+    expect(expl).not.toBeNull()
+    expect("base" in expl).toBe(false)
+    const eds = expl.editions as Record<string, { score: number } | null>
+    expect(eds.r18).toBeNull()
+    expect(eds.normal!.score).toBeCloseTo(r.expected_by_edition!.normal.expected_score as number, 2)
+  })
+})

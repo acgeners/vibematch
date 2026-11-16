@@ -155,6 +155,8 @@ const PERSONAL_SCORE_COLUMNS = [
   /** Obra mixed: a edição das colunas acima e as previsões das DUAS edições (mig 213). Pessoais como elas. */
   "expected_edition",
   "expected_by_edition",
+  /** A justificativa da Nota Prevista (mig 224) — sai do modelo de cada pessoa, pessoal como a nota. */
+  "expected_explanation",
   "calc_score",
   "chance_score",
   "chance_is_stub",

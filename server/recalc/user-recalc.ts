@@ -133,6 +133,9 @@ export async function recalculateForUser(userId: string): Promise<UserRecalcResu
           expected_baseline: null,
           expected_quality_adj: null,
           expected_is_stub: true,
+          // A justificativa explica a nota; sem nota, explicaria a média do treino como se fosse
+          // uma previsão sobre ela — o mesmo chute que esta função existe para não exibir.
+          expected_explanation: null,
           chance_score: null,
           chance_is_stub: true,
         },
