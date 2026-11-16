@@ -2,6 +2,7 @@ import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
+import { CHANCE_DESCRIPTION, CHANCE_LABELS } from "@/lib/calculations/forces"
 
 export type WorkColumnGroup = "basico" | "notas" | "criterios"
 
@@ -144,6 +145,20 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
     configLabel: "Minha nota (Real)",
     description:
       "A nota que VOCÊ deu à obra, depois de ler — o rótulo com que a Nota Prevista é treinada. Fica vazia enquanto você não avaliar.",
+    align: "center",
+    group: "notas",
+  },
+  // Chance de gostar (0–100%) — a probabilidade de você dar 8+, ao lado da Prevista (o par
+  // de decisão do card). Imprime o inteiro de `displayChance`, o mesmo que filtra e ordena.
+  // Visível por padrão em TODOS os namespaces, e é isso que dispensa bump de versão: config
+  // salvo não a menciona no `hidden`, então ela já apareceria (ao fim da ordem salva).
+  // Sem linha em `ui_labels`: as formas vêm de `CHANCE_LABELS`.
+  {
+    key: "chance_score",
+    label: CHANCE_LABELS.short,
+    headerForms: CHANCE_LABELS,
+    configLabel: CHANCE_LABELS.full,
+    description: CHANCE_DESCRIPTION,
     align: "center",
     group: "notas",
   },
@@ -345,6 +360,8 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   decision: 90,
   expected_score: 90,
   user_score: 80,
+  // "62%": três glifos monoespaçados, como as outras numéricas de 70 (`art`).
+  chance_score: 70,
   personal_fit: 64,
   calc_score: 80,
   predicted_score: 80,
@@ -412,8 +429,9 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
  * 🔴 **A régua de quem entra: responde "destas empatadas, qual eu escolho?".** Ligar o Agrupar
  * troca a PERGUNTA da tela — de "meu catálogo em N colunas" para a escolha dentro de um tier.
  * Entram o eixo do tier (`decision`), o separador, o estado da obra (publicação, capítulos, ano,
- * arte), as notas que sustentam a escolha, e as **forças** que o separador compara
- * (`why-this-work.ts`: avaliação = `platform_avg` · alcance = `total_votes`).
+ * arte), as notas que sustentam a escolha, e as **três forças** que o separador compara
+ * (`why-this-work.ts`: chance = `chance_score` · avaliação = `platform_avg` · alcance =
+ * `total_votes`).
  *
  * 🔴 **O status é o de PUBLICAÇÃO, não o seu** (escolha da Ana, 17/08/2026). Aqui a coluna
  * responde "dá pra começar agora?" — concluída · em andamento · hiato · cancelada —, que é o
@@ -427,9 +445,8 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
  * feita em `TIER_MODE_COLUMN_WIDTHS`, onde a coluna vale os **92px** que a pílula "⏸️ HIA »"
  * de fato pede — medidos, não herdados do mapa global.
  *
- * ⚠️ **Não existe coluna para a força "chance"** — ela só aparece na Bússola. Por isso o
- * conjunto tem 2 das 3 forças, e não 3: inventar uma coluna aqui seria criar dado novo dentro
- * de uma decisão de largura.
+ * 🔴 **A Chance entrou pagando com o TÍTULO** (escolha da Ana, 16/11/2026): 50px tirados
+ * dele, que caiu de 255 para 205px. Ela fica ao lado da Nota Prevista — o mesmo par do card.
  *
  * 🔴 **`decision` e `expected_score` NÃO são redundantes, e a intuição erra o lado.** Dentro de
  * um tier o campo ORDENADO é o constante — os tiers são construídos por `displayTierKey` sobre
@@ -463,10 +480,12 @@ export const TIER_MODE_COLUMN_KEYS = [
   "separator",
   // as notas que sustentam a escolha
   "expected_score",
+  // a força "chance", ao lado da Prevista (o par de decisão do card)
+  "chance_score",
   "synopsis_q",
   "synopsis_pred",
   "alignment_score",
-  // as duas forças que o separador compara (a terceira, chance, não tem coluna)
+  // as outras duas forças que o separador compara
   "platform_avg",
   "total_votes",
 ] as const
@@ -514,15 +533,14 @@ export const TIER_MODE_TABLE_WIDTH = 1442
  * - `separator` = **294** — o degrau do container query da célula (270px de conteúdo) + 24. Um
  *   clone mede 24px ali, porque a barra é `absolute` e o `@container` não resolve fora da
  *   árvore; medir o pedido dela pelo clone daria "cabe em qualquer lugar".
- * - `title` = a SOBRA (**255**). Ele é o único que degrada bem — reticências num nome são
+ * - `title` = a SOBRA (**205**). Ele é o único que degrada bem — reticências num nome são
  *   esperadas —, então é ele que absorve o que resta depois de todo o resto receber o pedido.
  * - `total_votes` = **75** e não os 66 medidos: o pior caso da TELA era "16,2K", e o do
  *   CATÁLOGO é 193.712 votos ⇒ "193,7K". Coluna de número dimensionada pela amostra visível
  *   trunca no dia em que a obra popular aparece.
  *
- * ⚠️ **O orçamento fecha, mas sem folga: o título ficou em 255px e a mediana dele pede 275.**
- * Ou seja, mais da metade dos nomes trunca — o modo é ~20px curto para caber tudo com o
- * título inteiro. Os dois candidatos a ceder, se um dia isso incomodar, estão MEDIDOS: o
+ * ⚠️ **O orçamento fecha, mas sem folga: o título ficou em 205px e a mediana dele pede 275.**
+ * Ou seja, a maioria dos nomes trunca — o preço aceito por ter a Chance no modo. Os dois candidatos a ceder, se um dia isso incomodar, estão MEDIDOS: o
  * botão "Rankear" (−14px, virando ícone) e a frase do separador (−24px, voltando ao degrau
  * de 270). Nenhum dos dois foi feito porque os dois trocam um defeito visível por outro.
  *
@@ -540,7 +558,7 @@ export const TIER_MODE_COLUMN_WIDTHS: Record<string, number> = {
   select: 41,
   rank: 41,
   fav: 53,
-  title: 255,
+  title: 205,
   publication_status: 92,
   chapters_total: 50,
   year: 58,
@@ -548,6 +566,8 @@ export const TIER_MODE_COLUMN_WIDTHS: Record<string, number> = {
   decision: 62,
   separator: 294,
   expected_score: 58,
+  // "62%": três glifos monoespaçados em text-sm, como a Média externa ("8,1"), medida em 50.
+  chance_score: 50,
   synopsis_q: 73,
   synopsis_pred: 90,
   alignment_score: 100,
@@ -641,12 +661,14 @@ export function writeWorkColumnConfig(
 // Colunas renderizáveis no heatmap. Inclui:
 //   - notas 0-10 com color coding (final, calc, predicted, expected, user_score, criterios)
 //   - `personal_fit` (Alinhamento — percentil 0-100, célula própria)
+//   - `chance_score` (Chance de gostar — 0-100%, célula própria)
 //   - `total_votes` (count sem color coding — formatado como 1.5k/50k)
 //   - `synopsis_q` (string de corações ♥-♥♥♥♥ pra interesse na sinopse informado)
 //   - `synopsis_pred` (Interesse IA — previsão ♥-♥♥♥♥; dado só em /favorites)
 const SCORE_COLUMN_KEYS = new Set<string>([
   "expected_score",
   "user_score",
+  "chance_score",
   "personal_fit",
   "platform_avg",
   "total_votes",

@@ -1,4 +1,5 @@
 import { LABELS } from "@/lib/constants/ui-labels"
+import { CHANCE_LABELS } from "@/lib/calculations/forces"
 import {
   EXPECTED_BASELINE_FEATURES,
   EXPECTED_CATEGORICAL_FEATURES,
@@ -156,6 +157,20 @@ const MEDIDAS: ReadonlyArray<Omit<ScoreEntry, "role" | "note">> = [
     where: "/ranking · /catalog · card da obra · recomendações",
     movedBy: ["user_score", "category_scores", "platform_ratings", "work_tags"],
     coverage: "nota_prevista",
+    href: null,
+  },
+  {
+    key: "chance_score",
+    name: CHANCE_LABELS.full,
+    slug: "chance_score",
+    producer: "modelo",
+    scale: "0–100%",
+    summary:
+      "A probabilidade de você dar 8 ou mais à obra, calibrada nas suas próprias notas. É um modelo à parte da Nota Prevista: olha os nove atributos, as tags que você marcou como amadas ou evitadas, o Alinhamento e o seu Interesse. A Prevista estima QUANTO você daria; a Chance, o quão provável é você gostar.",
+    feedsExpected: "não — é um modelo à parte, treinado nas mesmas notas",
+    where: "coluna Chance · filtro · card do /ranking · Bússola",
+    movedBy: ["user_score", "category_scores", "tag_preferences", "work_tags", "synopsis_quality"],
+    coverage: null,
     href: null,
   },
   {

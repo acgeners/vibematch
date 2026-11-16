@@ -275,6 +275,7 @@ const CASOS: Array<[string, RankingFilters]> = [
   ["critério", { ...CATALOGO, sortLevels: [L(`crit_${SLUG}`)] }],
   ["arte", { ...CATALOGO, sortLevels: [L("art")] }],
   ["alinhamento", { ...CATALOGO, sortLevels: [L("personal_fit")] }],
+  ["chance de gostar", { ...CATALOGO, sortLevels: [L("chance_score")] }],
   ["Interesse previsto", { ...CATALOGO, sortLevels: [L("synopsis_pred")] }],
   ["sua nota", { ...CATALOGO, sortLevels: [L("user_score")] }],
   ["atualizada em", { ...CATALOGO, sortLevels: [L("updated_at")] }],
@@ -284,6 +285,7 @@ const CASOS: Array<[string, RankingFilters]> = [
   ["filtro: arte forte", { ...CATALOGO, artFilter: "forte" }],
   ["filtro: status de publicação", { ...CATALOGO, publicationStatus: ["Completed"], sortLevels: [L("decision")] }],
   ["filtro: Nota Prevista mínima", { ...CATALOGO, minExpectedScore: 7 }],
+  ["filtro: Chance mínima", { ...CATALOGO, minChance: 50, sortLevels: [L("decision")] }],
   ["filtro: só com nota", { ...CATALOGO, onlyWithFinalScore: true }],
   ["filtro: gênero (lotes de id)", { ...CATALOGO, genreAny: ["Romance"], sortLevels: [L("decision")] }],
   ["arquivadas incluídas", { ...CATALOGO, includeArchived: true, sortLevels: [L("decision")] }],
@@ -293,10 +295,16 @@ const CASOS: Array<[string, RankingFilters]> = [
 
 /**
  * Combinações em que o resultado VAZIO é o correto, nos dois modos: o visitante não tem Nota
- * Prevista nem arte (campos pessoais), e a outra conta não tem estimativa de arte. Fora daqui,
+ * Prevista nem arte (campos pessoais), e a outra conta não tem estimativa de arte nem Chance
+ * (a linha dela neste catálogo falso não traz `chance_score`, e a da dona não vaza). Fora daqui,
  * vazio é tratado como falha — senão a igualdade "[] = []" passaria por vacuidade.
  */
-const VAZIO_ESPERADO = new Set(["anon · filtro: arte forte", "anon · filtro: só com nota", "outra · filtro: arte forte"])
+const VAZIO_ESPERADO = new Set([
+  "anon · filtro: arte forte",
+  "anon · filtro: só com nota",
+  "outra · filtro: arte forte",
+  "outra · filtro: Chance mínima",
+])
 
 const ids = (entries: Array<{ workId: string }>) => entries.map((e) => e.workId)
 const worksSelects = () => estado.consultas.filter((c) => c.tabela === "works").map((c) => c.select.replace(/\s+/g, ""))

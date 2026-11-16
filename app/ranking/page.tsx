@@ -152,6 +152,8 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     // Sua nota (Real) — a coluna `user_score` da RankingTable ordena por este campo.
     "user_score",
     "alignment_score",
+    // Chance de gostar — a coluna `chance_score` ordena pelo inteiro exibido.
+    "chance_score",
     // Estimativa de arte — ordena pelo PERCENTIL (o valor cru nem chega ao cliente).
     "art",
     // Plataforma
@@ -272,6 +274,8 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     maxExpectedScore: num("max_expected"),
     minPersonalFitPct: num("min_fit") ?? prefs.minFit ?? undefined,
     maxPersonalFitPct: num("max_fit"),
+    minChance: num("min_chance"),
+    maxChance: num("max_chance"),
     minAlignment: num("min_align") ?? prefs.minAlign ?? undefined,
     maxAlignment: num("max_align"),
     minPlatformAvg: num("min_platform_avg"),

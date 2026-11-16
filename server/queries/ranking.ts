@@ -9,6 +9,7 @@ import {
 import { coverCandidates } from "@/lib/work-derived"
 import type { HiatusKind } from "@/lib/external/hiatus-kind"
 import { computeDecisionScore } from "@/lib/calculations/decision"
+import { displayChance } from "@/lib/calculations/forces"
 import { getVerdictScale } from "@/server/queries/verdict-scale"
 import { getAllActiveSynopsisPredictions } from "@/server/queries/synopsis-quality"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
@@ -166,6 +167,8 @@ export type RankingSortBy =
   | "last_read_at"
   | "personal_fit"
   | "alignment_score"
+  /** Chance de gostar — ordena pelo inteiro exibido (`displayChance`). */
+  | "chance_score"
   | "art"
   /** Recorrência nos grupos de favoritos — exige `groupCountByWorkId` nos filtros. */
   | "groups"
@@ -244,6 +247,9 @@ export interface RankingFilters {
   /** Alinhamento (personal_fit) filtrado pelo PERCENTIL 0–100 (o valor exibido na UI). */
   minPersonalFitPct?: number
   maxPersonalFitPct?: number
+  /** Chance de gostar (0–100), pelo inteiro exibido (`displayChance`). Pessoal, como a Prevista. */
+  minChance?: number
+  maxChance?: number
   /** IA Rk (alignment_score, 0–100) — re-rank do consultor LLM. */
   minAlignment?: number
   maxAlignment?: number
@@ -1053,6 +1059,22 @@ export async function getRanking(
         return p != null && p <= max
       })
     }
+    // Chance de gostar: pelo inteiro que a coluna imprime, e sem Chance a obra NÃO passa
+    // (mesma régua da Prevista). Obra mixed sem previsão da edição de contexto fica de fora.
+    if (filters.minChance != null) {
+      const min = filters.minChance
+      entries = entries.filter((e) => {
+        const c = displayChance(e.chanceScore)
+        return c != null && c >= min
+      })
+    }
+    if (filters.maxChance != null) {
+      const max = filters.maxChance
+      entries = entries.filter((e) => {
+        const c = displayChance(e.chanceScore)
+        return c != null && c <= max
+      })
+    }
   }
   // Veredito IA (alignment) é calculado sob demanda/pago — parte do catálogo tem
   // alignment_score NULL. Um mínimo/máximo NÃO deve reprovar quem nunca teve o
@@ -1182,6 +1204,11 @@ export async function getRanking(
       const av = a.alignmentScore ?? -Infinity
       const bv = b.alignmentScore ?? -Infinity
       return m * (av - bv)
+    }
+    // Chance pelo inteiro EXIBIDO ("62%"): duas obras que aparecem iguais empatam e o
+    // próximo nível decide. Sem Chance vai pro fim em `desc`.
+    if (field === "chance_score") {
+      return m * ((displayChance(a.chanceScore) ?? -Infinity) - (displayChance(b.chanceScore) ?? -Infinity))
     }
     // Arte ordena pelo PERCENTIL, nunca pela estimativa em pontos — que nem chega aqui, por
     // não vir no select. Sem estimativa vai pro fim em `desc` (o -Infinity), que é o certo:

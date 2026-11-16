@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
 import { LABELS } from "@/lib/constants/ui-labels"
+import { CHANCE_DESCRIPTION, CHANCE_LABELS, CHANCE_LIKELY_THRESHOLD } from "@/lib/calculations/forces"
 import { CRITERION_SLUGS, SYNOPSIS_QUALITIES, DEFAULT_CRITERION_SCORE_PRESETS } from "@/types/domain"
 import {
   fmtSigma,
@@ -101,6 +102,7 @@ const SORTABLE_FIELD_GROUPS: Array<{ label: string; fields: Array<{ value: strin
     label: "Notas",
     fields: [
       { value: "expected_score", label: LABELS.expected_score.short },
+      { value: "chance_score", label: CHANCE_LABELS.full },
       { value: "personal_fit", label: LABELS.personal_fit.short },
       { value: "alignment_score", label: LABELS.alignment_score.short },
       { value: "platform_avg", label: LABELS.platform_avg.short },
@@ -1008,12 +1010,19 @@ function buildCriterionScoreDefs(
   })
 }
 
+// A ordem é a da grade de 2 colunas: Prevista e Chance lado a lado (os dois números de
+// decisão, como no card). Com 6 pílulas a grade fecha sem buraco, então Votos deixou de
+// ocupar a linha inteira — o `fullWidth` existia para preencher a sobra da contagem ímpar.
 const GENERAL_SCORE_DEFS: ScoreDef[] = [
   { key: "expected", emoji: "🎯", label: LABELS.expected_score.full, minKey: "min_expected", maxKey: "max_expected", min: 0, max: 10, step: 0.5, presets: [6, 7, 7.5, 8] },
+  // Pelo inteiro que a coluna imprime (`displayChance`). Atalhos: 50 é o limiar de
+  // "provável gostar" da Bússola (`CHANCE_LIKELY_THRESHOLD`); o catálogo vai de ~0 a ~85
+  // (registro de 07/2026 no PLANO-BUSSOLA-3-FORCAS.md), por isso nenhum atalho ≥ 90.
+  { key: "chance", emoji: "💜", label: CHANCE_LABELS.full, minKey: "min_chance", maxKey: "max_chance", min: 0, max: 100, step: 5, presets: [CHANCE_LIKELY_THRESHOLD, 60, 70], help: CHANCE_DESCRIPTION },
   { key: "fit", emoji: "🧭", label: LABELS.personal_fit.full, minKey: "min_fit", maxKey: "max_fit", min: 0, max: 100, step: 5, presets: [50, 75, 90] },
   { key: "platform", emoji: "🌐", label: LABELS.platform_avg.full, minKey: "min_platform_avg", maxKey: "max_platform_avg", min: 0, max: 10, step: 0.5, presets: [6, 7, 8] },
   { key: "align", emoji: "🤖", label: LABELS.alignment_score.full, minKey: "min_align", maxKey: "max_align", min: 0, max: 100, step: 5, presets: [50, 75, 90] },
-  { key: "votes", emoji: "🗳️", label: LABELS.total_votes.full, minKey: "min_votes", maxKey: "max_votes", min: 0, max: 0, step: 1, presets: [], kind: "votes", fullWidth: true, help: "Soma dos votos das plataformas externas (MyAnimeList, AniList, Kitsu…) — o tamanho da amostra da opinião pública. Quanto mais votos, mais a média do público pesa na Nota Prevista; abaixo do limiar de confiança (marcado ✓ nos presets) a nota é puxada pra IA. Filtrar acima dele deixa só as obras onde a nota externa é estatisticamente confiável." },
+  { key: "votes", emoji: "🗳️", label: LABELS.total_votes.full, minKey: "min_votes", maxKey: "max_votes", min: 0, max: 0, step: 1, presets: [], kind: "votes", help:"Soma dos votos das plataformas externas (MyAnimeList, AniList, Kitsu…) — o tamanho da amostra da opinião pública. Quanto mais votos, mais a média do público pesa na Nota Prevista; abaixo do limiar de confiança (marcado ✓ nos presets) a nota é puxada pra IA. Filtrar acima dele deixa só as obras onde a nota externa é estatisticamente confiável." },
 ]
 
 
@@ -2752,6 +2761,7 @@ export function RankingFilters({
       : undefined
   const generalFmt = (key: string) => defFmt(GENERAL_SCORE_DEFS.find((d) => d.key === key))
   pushRangeChip("expected", LABELS.expected_score.full, "min_expected", "max_expected", generalFmt("expected"))
+  pushRangeChip("chance", CHANCE_LABELS.full, "min_chance", "max_chance", generalFmt("chance"))
   pushRangeChip("fit", LABELS.personal_fit.full, "min_fit", "max_fit", generalFmt("fit"))
   pushRangeChip("align", LABELS.alignment_score.full, "min_align", "max_align", generalFmt("align"))
   pushRangeChip("platform", LABELS.platform_avg.full, "min_platform_avg", "max_platform_avg", generalFmt("platform"))

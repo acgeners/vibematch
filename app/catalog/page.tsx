@@ -58,6 +58,8 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
     // Sua nota (Real) — a coluna `user_score` da WorkTable ordena por este campo.
     "user_score",
     "alignment_score",
+    // Chance de gostar — a coluna `chance_score` da WorkTable ordena por este campo.
+    "chance_score",
     // Plataforma
     "platform_avg", "total_votes",
     // Metadata
@@ -125,6 +127,8 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
     maxExpectedScore: num("max_expected"),
     minPersonalFitPct: num("min_fit"),
     maxPersonalFitPct: num("max_fit"),
+    minChance: num("min_chance"),
+    maxChance: num("max_chance"),
     minAlignment: num("min_align"),
     maxAlignment: num("max_align"),
     minPlatformAvg: num("min_platform_avg"),

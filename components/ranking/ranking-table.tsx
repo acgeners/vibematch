@@ -47,7 +47,7 @@ import { PublicationStatusBadge, PersonalStatusBadge, AiStatusBadge } from "@/co
 import { WorkContentChip } from "@/components/ui/work-content-chip"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
-import { AlignmentCell, AlignmentScoreCell, ArtCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
+import { AlignmentCell, AlignmentScoreCell, ArtCell, ChanceCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { BussolaPlane } from "@/components/ranking/bussola-plane"
 import { computeWorkForces } from "@/lib/calculations/forces"
 import { LABELS } from "@/lib/constants/ui-labels"
@@ -125,6 +125,7 @@ const COLUMN_TO_SORT_FIELD: Record<string, string> = {
   decision: "decision",
   expected_score: "expected_score",
   user_score: "user_score",
+  chance_score: "chance_score",
   personal_fit: "personal_fit",
   alignment_score: "alignment_score",
 }
@@ -587,6 +588,7 @@ function renderCell(
   // Sua nota (Real) — sem `thresholds`, como as demais superfícies deste número (a régua
   // de cor da Prevista é da distribuição DELA). Coluna oculta por padrão neste namespace.
   if (col.key === "user_score") return <ScoreBadge score={entry.userScore} size="sm" />
+  if (col.key === "chance_score") return <ChanceCell chanceScore={entry.chanceScore} />
   if (col.key === "personal_fit")
     return <AlignmentCell value={entry.personalFit} percentile={entry.personalFitPercentile} showBar={false} />
   if (col.key === "alignment_score")
