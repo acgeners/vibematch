@@ -222,7 +222,7 @@ function formatWorkBundle(work: DeepDiveWorkBundle): string {
 }
 
 function formatSimilarsBundle(similars: DeepDiveSimilarsBundle): string {
-  const lines: string[] = ["OBRAS SIMILARES NA BIBLIOTECA"]
+  const lines: string[] = ["OBRAS SIMILARES NA BIBLIOTECA (da mais parecida para a menos)"]
 
   if (similars.loved.length === 0 && similars.avoided.length === 0) {
     lines.push("(nenhuma obra similar suficientemente avaliada na biblioteca)")
@@ -233,8 +233,7 @@ function formatSimilarsBundle(similars: DeepDiveSimilarsBundle): string {
     lines.push("", `AMADAS (user_score ≥ 7):`)
     similars.loved.forEach((w) => {
       const score = w.userScore != null ? w.userScore.toFixed(1) : "—"
-      const sim = (w.similarity * 100).toFixed(0)
-      lines.push(`  - work_id=${w.id} sim=${sim}% nota=${score} — "${w.title}"`)
+      lines.push(`  - work_id=${w.id} nota=${score} — "${w.title}"`)
       if (w.synopsis) lines.push(`    sinopse: ${truncate(w.synopsis, 250)}`)
     })
   }
@@ -243,8 +242,7 @@ function formatSimilarsBundle(similars: DeepDiveSimilarsBundle): string {
     lines.push("", `EVITADAS (user_score ≤ 5):`)
     similars.avoided.forEach((w) => {
       const score = w.userScore != null ? w.userScore.toFixed(1) : "—"
-      const sim = (w.similarity * 100).toFixed(0)
-      lines.push(`  - work_id=${w.id} sim=${sim}% nota=${score} — "${w.title}"`)
+      lines.push(`  - work_id=${w.id} nota=${score} — "${w.title}"`)
       if (w.synopsis) lines.push(`    sinopse: ${truncate(w.synopsis, 250)}`)
     })
   }

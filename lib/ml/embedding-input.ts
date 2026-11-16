@@ -11,8 +11,14 @@ import { createHash } from "node:crypto"
 import type { CategoryScoreMap, CriterionSlug } from "@/types/domain"
 import { SCORING_CRITERION_SLUGS } from "@/lib/calculations/scoring-features"
 
+/**
+ * 🔴 SEM o título, de propósito (v3, 2026-11-16). Com ele, 25% das 8 obras mais parecidas de
+ * cada obra dividiam uma palavra do título com ela (ao acaso: 2%; entre as de notas parecidas:
+ * 3%) — as 8 de "The Villainess Is a Marionette" eram todas "The Villainess …". Sem o título,
+ * medido com os vetores gerados de verdade: 8%, o resto que a premissa da sinopse explica.
+ * O nome da obra não diz nada sobre ela; não devolva o campo.
+ */
 export interface EmbeddingInputData {
-  title: string
   synopsis: string | null
   tags: Array<{ name: string; group: string | null }>
   categoryScores: CategoryScoreMap
@@ -30,7 +36,9 @@ export interface BuiltEmbeddingInput {
 }
 
 // v2: passou a incluir o bloco "Reviews" (digest/resumo) no texto embedado.
-const HASH_VERSION = "v2"
+// v3: o título saiu do texto (ver `EmbeddingInputData`). Trocar a versão marca o catálogo
+// inteiro como desatualizado: o "Atualizar embeddings" re-embeda tudo (~US$0,02).
+const HASH_VERSION = "v3"
 
 function normalizeText(s: string): string {
   return s.replace(/\s+/g, " ").trim()
@@ -53,7 +61,6 @@ export function buildEmbeddingInput(data: EmbeddingInputData): BuiltEmbeddingInp
   const reviews = data.reviewContext ? normalizeText(data.reviewContext) : null
 
   const text = [
-    `Título: ${normalizeText(data.title)}`,
     `Sinopse: ${synopsis}`,
     tagsSorted.length > 0 ? `Tags: ${tagsSorted.join(", ")}` : "Tags: (nenhuma)",
     criteria.length > 0 ? `Critérios: ${criteria.join(", ")}` : "Critérios: (nenhum)",

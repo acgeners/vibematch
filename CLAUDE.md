@@ -2952,6 +2952,16 @@ saía `$-4.20`, com o cifrão na frente do sinal) e por
 o `money.test.ts` passava verde enquanto o badge chamava `formatUsd` quatro vezes em separado. O
 que regride nesta classe não é a fórmula, é o **escopo**, e escopo só aparece na árvore desenhada.
 
+## "Parecida" tem uma régua só: o embedding centralizado e sem título
+
+**Toda semelhança entre obras compara `embedding − média do catálogo`**: `find_similar_works`
+(aba Recomendações e Deep Dive, mig 225), `find_similar_to_seeds` (187) e `pairwise_similarity`
+(189). No cru, obras com muitas tags viram ímãs (uma estava em 145 listas de parecidas). Nessa
+escala 0 = acaso; faixas de cor e limiares de semelhança têm de ser medidos nela.
+**O título não entra no texto do embedding** (`lib/ml/embedding-input.ts`): puxava vizinhas pelo
+nome. Mudar o texto exige trocar `HASH_VERSION` e re-embedar o catálogo ("Atualizar embeddings",
+~US$0,02). Guardado por `semelhanca-centralizada.test.ts` e `embedding-sem-titulo.test.ts`.
+
 ## Em quantos grupos a obra está é DESEMPATE — e o número não promete gosto
 
 Uma obra pode estar em vários grupos de favoritos (M-pra-N desde a migration 123), e a
