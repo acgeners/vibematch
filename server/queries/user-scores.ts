@@ -2,6 +2,7 @@ import "server-only"
 import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getOwnerUserId, getSessionUserId } from "./current-user"
+import type { ExpectedExplanationColumn } from "@/lib/calculations/expected-explanation"
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // Os SCORES DERIVADOS de quem está olhando — FATIA 2b
@@ -43,6 +44,13 @@ export const PERSONAL_SCORE_FIELDS = [
   /** Obra mixed: a edição das colunas acima e as previsões das DUAS edições (mig 213). Pessoais como elas. */
   "expected_edition",
   "expected_by_edition",
+  /**
+   * A justificativa da Nota Prevista (mig 224): pessoal como a nota. ⚠️ Fora do select de
+   * `loadUserScores` DE PROPÓSITO — ele carrega a tabela inteira da pessoa a cada página, e este é
+   * o único campo pesado (~0,4 KB por obra). Para outra conta o overlay o deixa NULL (nunca o do
+   * dono), e a página da obra busca o da pessoa à parte: `getExpectedExplanation`.
+   */
+  "expected_explanation",
   "calc_score",
   "chance_score",
   "chance_is_stub",
@@ -207,4 +215,48 @@ async function loadUserScores(userId: string): Promise<Map<string, Record<string
   }
 
   return byWorkId
+}
+
+/** A justificativa da Nota Prevista gravada para quem olha, e a edição das colunas daquela linha. */
+export interface ExpectedExplanationRead {
+  column: ExpectedExplanationColumn | null
+  /** `expected_edition` da MESMA linha: diz de que edição é a justificativa de cima (obra mixed). */
+  columnEdition: string | null
+}
+
+/**
+ * A justificativa da Nota Prevista de UMA obra, de quem está olhando. Mesma bifurcação do
+ * `getScoresReader`, e pelo mesmo motivo: a justificativa é a conta do modelo de alguém, e mostrar a
+ * do dono a outra pessoa explicaria uma nota que não é a dela.
+ *
+ *   sem sessão → null (não há nota pessoal, então não há o que explicar)
+ *   dono       → `calculated_scores`
+ *   os demais  → `user_calculated_scores` dela; sem linha → null
+ *
+ * ⚠️ Falha de leitura vira `null` com log, sem derrubar a página da obra: a justificativa é
+ * explicação, não dado de que outra coisa dependa — e a coluna só existe depois da mig 224.
+ */
+export async function getExpectedExplanation(workId: string): Promise<ExpectedExplanationRead | null> {
+  const reader = await getScoresReader()
+  if (!reader.userId) return null
+  const supabase = createAdminClient()
+  const { data, error } = reader.isOwner
+    ? await supabase
+        .from("calculated_scores")
+        .select("expected_explanation, expected_edition")
+        .eq("work_id", workId)
+        .maybeSingle()
+    : await supabase
+        .from("user_calculated_scores")
+        .select("expected_explanation, expected_edition")
+        .eq("user_id", reader.userId)
+        .eq("work_id", workId)
+        .maybeSingle()
+  if (error) {
+    console.error(`[expected-explanation] obra ${workId}: ${error.message}`)
+    return null
+  }
+  if (!data) return null
+  const row = data as { expected_explanation: ExpectedExplanationColumn | null; expected_edition: string | null }
+  return { column: row.expected_explanation ?? null, columnEdition: row.expected_edition ?? null }
 }

@@ -182,6 +182,22 @@ export interface ExpectedDecomposition {
   qualityAdjFromImputation: boolean
 }
 
+/**
+ * De onde sai a Nota Prevista de UMA obra, entrada por entrada (a "justificativa").
+ *
+ * `base` é a previsão de uma obra MÉDIA do treino (intercept + Σ coef × média de cada coluna), e
+ * cada contribuição é `coef × (x − média da coluna)` — quanto aquela entrada desta obra puxa a nota
+ * para cima ou para baixo em relação à obra média. Por construção, `base + Σ contribuições` é a
+ * previsão linear (antes do clamp em [0, 10]) — a MESMA conta do `predict`, nunca uma paráfrase.
+ */
+export interface ExpectedExplanation {
+  base: number
+  /** Por nome de entrada (`featureNames`), alinhado ao vetor do modelo. */
+  contributions: Record<string, number>
+  /** `base + Σ contribuições` (pré-clamp). */
+  linear: number
+}
+
 export interface ExpectedPredictionResult {
   predictions: ExpectedDecomposition[]
   /** Distância euclidiana ao centróide do treino (todas as features). */
@@ -191,6 +207,8 @@ export interface ExpectedPredictionResult {
 export interface TrainedExpectedPredictor {
   predict(inputs: ExpectedScoreInput[]): ExpectedDecomposition[]
   predictWithDistance(inputs: ExpectedScoreInput[]): ExpectedPredictionResult
+  /** A justificativa de cada previsão (ver `ExpectedExplanation`). */
+  explain(inputs: ExpectedScoreInput[]): ExpectedExplanation[]
   /** Modelo Ridge único com todas as 22 features + Status one-hot. */
   model: RidgeModel
   /** Nomes alinhados com coefficients: [...baseline, ...quality, ...status_oh]. */
@@ -303,6 +321,8 @@ export function trainExpectedPredictor(
         })),
         distances: rows.map(() => 0),
       }),
+      // Sem modelo (poucos rótulos), a previsão é a média: nenhuma entrada pesa.
+      explain: (rows) => rows.map(() => ({ base: fallbackMean, contributions: {}, linear: fallbackMean })),
       model: { coefficients: [], intercept: fallbackMean, alpha: 0, cvMAE: 0, cvRMSE: 0 },
       featureNames: [],
       baselineIndices: [],
@@ -408,6 +428,25 @@ export function trainExpectedPredictor(
     return inputs.map((input, i) => decompose(X[i], input))
   }
 
+  // A previsão da obra média do treino: centróide de cada coluna × coeficiente, mais o intercept.
+  const baseAtCentroid =
+    model.intercept + model.coefficients.reduce((sum, c, j) => sum + c * (centroid[j] ?? 0), 0)
+
+  function explainBatch(inputs: ExpectedScoreInput[]): ExpectedExplanation[] {
+    if (inputs.length === 0) return []
+    const X = transform(inputs)
+    return X.map((x) => {
+      const contributions: Record<string, number> = {}
+      let linear = baseAtCentroid
+      for (let j = 0; j < model.coefficients.length; j++) {
+        const c = model.coefficients[j] * (x[j] - centroid[j])
+        contributions[featureNames[j]] = c
+        linear += c
+      }
+      return { base: baseAtCentroid, contributions, linear }
+    })
+  }
+
   function euclideanToCentroid(row: number[]): number {
     let sumSq = 0
     for (let j = 0; j < row.length; j++) {
@@ -425,6 +464,7 @@ export function trainExpectedPredictor(
       const predictions = inputs.map((input, i) => decompose(X[i], input))
       return { predictions, distances: X.map(euclideanToCentroid) }
     },
+    explain: explainBatch,
     model,
     featureNames,
     baselineIndices,

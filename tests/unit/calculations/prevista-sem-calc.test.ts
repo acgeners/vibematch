@@ -159,3 +159,23 @@ describe("arquitetura: o blend não volta", () => {
     }
   })
 })
+
+describe("a justificativa gravada é a conta da nota gravada (mig 224)", () => {
+  it("base + parcelas + ajuste = a Nota Prevista da linha, obra a obra", () => {
+    const { res } = rodar()
+    let conferidas = 0
+    for (const r of res.rows) {
+      const e = r.expected_explanation as { base: number; contributions: Record<string, number>; obs: number; score: number } | null
+      if (r.expected_score == null) {
+        expect(e).toBeNull()
+        continue
+      }
+      const soma = e!.base + Object.values(e!.contributions).reduce((s, c) => s + c, 0) + e!.obs
+      expect(Math.abs(soma - (r.expected_score as number))).toBeLessThan(0.03)
+      expect(e!.score).toBeCloseTo(r.expected_score as number, 2)
+      conferidas++
+    }
+    // Zero linha conferida não é sucesso — não houve o que olhar.
+    expect(conferidas).toBeGreaterThan(40)
+  })
+})

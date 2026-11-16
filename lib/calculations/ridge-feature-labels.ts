@@ -26,6 +26,8 @@ const FEATURE_LABELS: Record<string, string> = {
   CriterionFitScore: "Alinhamento de critérios",
   ReleaseAge: "Idade da obra",
   RunLength: "Duração",
+  /** Só entra no Ridge com `includeArt` ligado (estimativa de arte do dono). */
+  ArtEstimate: "Arte (estimada)",
   ObsAdjustment: "Ajuste de observação",
   MeanPostScore: "Nota pós-leitura (média)",
 }

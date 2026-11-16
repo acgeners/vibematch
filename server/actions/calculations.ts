@@ -68,6 +68,8 @@ import {
   parseMixedEdition,
 } from "@/lib/editions/mixed-edition"
 import type { EditionPrediction, EditionScoreRow, MixedEdition, PredictionByEdition } from "@/lib/editions/mixed-edition"
+import { toExplanationPayload } from "@/lib/calculations/expected-explanation"
+import type { ExpectedExplanationColumn, ExpectedExplanationPayload } from "@/lib/calculations/expected-explanation"
 import { fetchAllEditionScores, loadMixedEditionSettingsFor } from "@/server/queries/edition-scores"
 import { readFantasyDrift, scoringCriteriaSignature } from "@/server/queries/fantasy-drift"
 import { SCORING_CONTRACT, conferirContratoDoCalculo, mensagemDeContratoQuebrado } from "@/lib/calculations/scoring-contract"
@@ -257,6 +259,8 @@ interface WorkComputed {
   expectedBaseline: number | null
   /** Stage 2 puro (ajuste de qualidade ±). 0 quando Stage 2 não rodou. */
   expectedQualityAdj: number | null
+  /** De onde saiu a Nota Prevista (`expected-explanation.ts`) — pessoal como ela. */
+  expectedExplanation: ExpectedExplanationColumn | null
   expectedIsStub: boolean
   personalFit: number | null
   /** Percentil (0–100) do personalFit dentro da biblioteca (migration 071). */
@@ -430,6 +434,7 @@ export function buildWork(raw: RawWork, biasMap: AttributeBiasMap, edition?: Rec
     expectedScore: null,
     expectedBaseline: null,
     expectedQualityAdj: null,
+    expectedExplanation: null,
     expectedIsStub: true,
     personalFit: null,
     personalFitPercentile: null,
@@ -1319,6 +1324,8 @@ export function computeRecalc(input: RecalcComputeInput) {
   const expectedAllInputs = works.map(buildExpectedPredictionInput)
   const expectedPredictor = trainExpectedPredictor(expectedTrainInputs, trainTargets, includeQuality)
   const expectedPredictions = expectedPredictor.predict(expectedAllInputs)
+  // A justificativa de cada previsão: a MESMA conta, parcela por parcela (ver `explain`).
+  const expectedExplanations = expectedPredictor.explain(expectedAllInputs)
 
   // ---------- Nota Prevista = Ridge puro · Nota.Calc aposentada ----------
   // Até 2026-09-29 havia aqui um blend `w·Ridge + (1−w)·calcNoObs`, com `w` escolhido por
@@ -1385,6 +1392,7 @@ export function computeRecalc(input: RecalcComputeInput) {
       w.expectedScore = null
       w.expectedBaseline = null
       w.expectedQualityAdj = null
+      w.expectedExplanation = null
       w.expectedIsStub = expectedPredictor.isStub
       continue
     }
@@ -1392,6 +1400,7 @@ export function computeRecalc(input: RecalcComputeInput) {
     // aposentada" acima). observation_adjustment é um nudge manual DETERMINÍSTICO (±0.30) somado
     // UMA vez sobre ela — não é feature do Ridge (ver lib/calculations/expected.ts).
     w.expectedScore = applyObsAdjustment(p.expected, w.observationAdjustment)
+    w.expectedExplanation = toExplanationPayload(expectedExplanations[i], w.observationAdjustment, w.expectedScore)
     // Invariante do waterfall: baseline + qualityAdj == expected (pré-obs). Em Free
     // qualityAdj=0 → baseline = p.expected. O coef cru do Ridge fica preservado em
     // formula_config.expected_ridge_coefficients.
@@ -1593,9 +1602,13 @@ export function computeRecalc(input: RecalcComputeInput) {
       chance_is_stub: w.chanceIsStub,
     }
     const porEdicao = {} as PredictionByEdition
+    const explicacaoPorEdicao: Record<MixedEdition, ExpectedExplanationPayload | null> = { normal: null, r18: null }
     for (const ed of MIXED_EDITIONS) {
       if (ed === w.predictionEdition) {
         porEdicao[ed] = daPadrao
+        // Aqui ainda é a justificativa do laço principal (a nota das colunas), sem edições.
+        const principal = w.expectedExplanation
+        explicacaoPorEdicao[ed] = principal && "base" in principal ? principal : null
         continue
       }
       const maps = w.editionMaps[ed]
@@ -1615,18 +1628,23 @@ export function computeRecalc(input: RecalcComputeInput) {
         }
         continue
       }
-      const [p] = expectedPredictor.predict([
-        {
-          ...buildExpectedInput(w),
-          categoryScores: maps.calibrated,
-          iaEvalNormalized: normalizeGPT(calculateGPT(maps.calibrated, effectiveWeights)),
-          criterionFitScore: effectiveProfile
-            ? criterionAlignment(maps.calibrated, effectiveProfile.criterion_preferences)
-            : null,
-        },
-      ])
+      const entradaDaEdicao = {
+        ...buildExpectedInput(w),
+        categoryScores: maps.calibrated,
+        iaEvalNormalized: normalizeGPT(calculateGPT(maps.calibrated, effectiveWeights)),
+        criterionFitScore: effectiveProfile
+          ? criterionAlignment(maps.calibrated, effectiveProfile.criterion_preferences)
+          : null,
+      }
+      const [p] = expectedPredictor.predict([entradaDaEdicao])
+      const notaDaEdicao = applyObsAdjustment(p.expected, w.observationAdjustment)
+      explicacaoPorEdicao[ed] = toExplanationPayload(
+        expectedPredictor.explain([entradaDaEdicao])[0],
+        w.observationAdjustment,
+        notaDaEdicao,
+      )
       porEdicao[ed] = {
-        expected_score: applyObsAdjustment(p.expected, w.observationAdjustment),
+        expected_score: notaDaEdicao,
         expected_baseline: p.expected - p.qualityAdj,
         expected_quality_adj: p.qualityAdj,
         expected_is_stub: expectedPredictor.isStub,
@@ -1637,6 +1655,14 @@ export function computeRecalc(input: RecalcComputeInput) {
     // Com as MESMAS casas das colunas de sempre (que o banco arredonda ao gravar): sem isto a página
     // (que lê daqui) e a home/hover (que leem a coluna) arredondam a mesma previsão de pontos diferentes.
     w.expectedByEdition = { normal: asPersistedEditionPrediction(porEdicao.normal), r18: asPersistedEditionPrediction(porEdicao.r18) }
+    // A justificativa de cada edição vai junto. O topo é o da edição padrão (a mesma nota das
+    // colunas); sem nota nela, o topo fica só com as edições — nunca com a justificativa da outra.
+    const daPadraoExpl = explicacaoPorEdicao[w.predictionEdition]
+    w.expectedExplanation = daPadraoExpl
+      ? { ...daPadraoExpl, editions: explicacaoPorEdicao }
+      : explicacaoPorEdicao.normal || explicacaoPorEdicao.r18
+        ? { v: 1, editions: explicacaoPorEdicao }
+        : null
   }
 
   // ---------- 6) Bulk upsert calculated_scores ----------
@@ -1659,6 +1685,8 @@ export function computeRecalc(input: RecalcComputeInput) {
     // edição ativa lê `expected_by_edition` (`predictionForEdition`); NULL nas não-mixed.
     expected_edition: w.predictionEdition,
     expected_by_edition: w.expectedByEdition,
+    // A justificativa da Nota Prevista (mig 224). Pessoal: vai também para o espelho per-user.
+    expected_explanation: w.expectedExplanation,
     personal_fit: w.personalFit,
     personal_fit_percentile: w.personalFitPercentile,
     chance_score: w.chanceScore,
