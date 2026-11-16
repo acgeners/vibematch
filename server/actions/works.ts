@@ -39,6 +39,7 @@ import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import { hiatusFieldsFor } from "@/lib/external/hiatus-kind"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
+import { acquireReviewsForNewWork } from "@/server/works/new-work-reviews"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
 import { recomputeAdultAuto } from "@/lib/tags/adult-classify"
 import { recordMangaUpdatesEditionEvidence } from "@/lib/editions/record-edition-evidence"
@@ -1528,41 +1529,28 @@ export async function createWork(
   // duplicar. Fica só o saveWorkReviews do Path B (persiste as reviews do eval).
   const generateAll = !skipAi && (await getGenerateAllOnCreate())
 
-  if (externalReviews && externalReviews.length > 0) {
-    // A avaliação (Path B) já buscou as reviews pra montar o prompt — reusa o
-    // pool em vez de re-buscar na borda.
-    //
-    // TUDO em `after()`: o save agora aguarda resumo (Haiku) E digest (Sonnet) pra a
-    // inferência de tags enxergar os dois — ~30s de IA que não podem segurar a
-    // resposta do create. Antes o save era inline e já pendurava o resumo (~10s) na
-    // resposta do usuário; sair da borda também devolve esse tempo.
-    after(async () => {
-      const { saveWorkReviews } = await import("@/lib/external/persist-reviews")
-      // fromFreshEval: a obra acabou de ser avaliada com estas reviews ⇒ não marca
-      // a avaliação como desatualizada (só atualiza o fingerprint do pool).
-      await saveWorkReviews(result.workId, externalReviews, {
-        fromFreshEval: true,
-        skipPaidEnrichment: skipAi,
-        awaitDigest: true,
+  if (generateAll) {
+    // A cascata "gerar todos os dados" faz a aquisição e o resto em ordem; aqui só persiste
+    // o recorte que a avaliação leu (Path B), quando houve avaliação.
+    if (externalReviews && externalReviews.length > 0) {
+      after(async () => {
+        const { saveWorkReviews } = await import("@/lib/external/persist-reviews")
+        await saveWorkReviews(result.workId, externalReviews, {
+          fromFreshEval: true,
+          skipPaidEnrichment: skipAi,
+          awaitDigest: true,
+        })
       })
-      if (!generateAll) await inferTagsForNewWork(result.workId)
-    })
-  } else if (!generateAll) {
-    // Criada SEM avaliar: extrai + persiste reviews na borda, desacoplado da
-    // avaliação, em background (`after()`). A obra passa a exibir reviews na
-    // própria página sem esperar uma avaliação. No-op se não há IDs aceitos.
-    // A inferência de tags roda DEPOIS, na MESMA task (reviews já persistidas).
-    after(async () => {
-      // Espera o hid da Comix (bounded) ANTES de ler os ids aceitos — senão a
-      // Comix fica de fora deste pool e de tudo que é derivado dele.
-      await comixHidReady()
-      const { acquireAndPersistWorkReviews } = await import("@/lib/external/acquire-reviews")
-      await acquireAndPersistWorkReviews(result.workId, {
-        skipPaidEnrichment: skipAi,
-        awaitDigest: true,
-      })
-      await inferTagsForNewWork(result.workId)
-    })
+    }
+  } else {
+    // Com ou sem avaliação, a MESMA ordem: recorte da avaliação → hid da Comix → busca
+    // completa → resumo/digest uma vez → tags. Ver `acquireReviewsForNewWork`.
+    after(() =>
+      acquireReviewsForNewWork(result.workId, externalReviews, { skipPaidEnrichment: skipAi }, {
+        comixHidReady,
+        inferTags: inferTagsForNewWork,
+      }),
+    )
   }
 
   // Resolve o hid da Comix na criação: a Comix não entra na busca multi-fonte
@@ -1683,8 +1671,8 @@ export async function createWorksBatch(
   }
 
   const created: Array<{ id: string; title: string }> = []
-  const needEdgeReviews: string[] = []
-  let saveWorkReviewsFn: typeof import("@/lib/external/persist-reviews").saveWorkReviews | null = null
+  // O recorte que a avaliação do "Buscar dados" leu, por obra (quando houve avaliação).
+  const evaluatedPools = new Map<string, SourcedReview[]>()
   for (const { values, aiMeta, externalReviews } of normalized) {
     // O lote é `ensureAdmin()` lá em cima, então isto é sempre true hoje. Calculado mesmo assim,
     // e não fixado: se o gate do lote afrouxar um dia, `approved` acompanha em vez de mentir.
@@ -1693,18 +1681,7 @@ export async function createWorksBatch(
       approvedByRole: (await ensurePermission("curate_ai")).ok,
     })
     if (!result.ok) return { error: result.error, data: { created } }
-    if (externalReviews && externalReviews.length > 0) {
-      if (!saveWorkReviewsFn) {
-        saveWorkReviewsFn = (await import("@/lib/external/persist-reviews")).saveWorkReviews
-      }
-      // `fromFreshEval`: estas reviews vieram da MESMA busca que avaliou a obra. Sem ele, a obra
-      // recém-criada (`done`) já nascia na fila "Reviews novas", e as reviews entravam com data
-      // posterior à avaliação — contando como "+N desde a avaliação" sem ter entrado nada novo.
-      // Sem avaliação concluída, as duas coisas não fazem nada.
-      await saveWorkReviewsFn(result.workId, externalReviews, { fromFreshEval: true })
-    } else {
-      needEdgeReviews.push(result.workId)
-    }
+    if (externalReviews && externalReviews.length > 0) evaluatedPools.set(result.workId, externalReviews)
     created.push({ id: result.workId, title: values.title })
   }
 
@@ -1712,16 +1689,25 @@ export async function createWorksBatch(
   // recém-criadas e extrai reviews na borda das que não vieram com pool. Um único
   // run "mop-up" do resolver (sem --work) evita N Chrome concorrentes no mesmo
   // userDataDir. Tudo em background.
+  //
+  // 🔴 Até 2026-11-16 a busca completa corria em PARALELO com a resolução da Comix (chegava
+  // antes do hid e deixava a Comix fora), e só nas obras NÃO avaliadas: as avaliadas ficavam com
+  // resumo e digest gerados sobre o recorte da avaliação, pagos dentro da requisição. Hoje: hid
+  // primeiro, depois a busca completa de todas, e o pago uma vez sobre o pool inteiro.
   after(async () => {
     const { resolveComixHidsPending } = await import("@/server/comix/resolver")
-    await resolveComixHidsPending(created.map((c) => c.id))
+    await resolveComixHidsPending(created.map((c) => c.id)).catch((err) =>
+      console.error("[createWorksBatch] resolução da Comix falhou:", err instanceof Error ? err.message : err),
+    )
+    // A mesma ordem da obra única (`acquireReviewsForNewWork`). O hid já foi resolvido acima
+    // para o lote inteiro; o lote não infere tags (nunca inferiu).
+    for (const { id } of created) {
+      await acquireReviewsForNewWork(id, evaluatedPools.get(id), { skipPaidEnrichment: false }, {
+        comixHidReady: async () => {},
+        inferTags: async () => {},
+      })
+    }
   })
-  if (needEdgeReviews.length > 0) {
-    after(async () => {
-      const { acquireAndPersistWorkReviews } = await import("@/lib/external/acquire-reviews")
-      for (const id of needEdgeReviews) await acquireAndPersistWorkReviews(id)
-    })
-  }
 
   // Recalc DEFERIDO (não-bloqueante): obras recém-criadas em lote ainda não têm
   // dados pra uma Nota Prevista significativa (vão direto pra Avaliação IA). Evita

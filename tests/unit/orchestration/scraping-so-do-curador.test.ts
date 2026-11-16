@@ -40,6 +40,10 @@ const RASPAM_SEMENTE = [
   "resolveMangagoUrlProd",
   "resolveMangagoForEvalContext",
   "acquireAndPersistWorkReviews",
+  // Mora em `server/works/new-work-reviews.ts`, fora dos ARQUIVOS varridos, e chama
+  // `acquireAndPersistWorkReviews`. Sem ela aqui, `createWork` e `createWorksBatch` SUMIRAM desta
+  // verificação quando passaram a usá-la (16/11/2026: 957 → 955 casos, sem nada acusar).
+  "acquireReviewsForNewWork",
   "buildAutoRefreshPlan",
 ]
 

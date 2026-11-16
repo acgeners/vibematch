@@ -5543,6 +5543,7 @@ sempre toca. A Visão geral (`/curation`) troca só o texto do cartão. Guardado
 - Passes `sourcedReviews: SourcedReview[]`; final selected synopsis is sent as the primary synopsis. Extra external context is omitted when a selected synopsis exists to avoid evaluating unselected synopsis blocks.
 - Scores go into form fields; if saved unchanged they are persisted as `source: "ai_accepted"` with an `ai_evaluation_id`
 - Works with all 9 criteria set get `ai_eval_status = "done"` and skip the Avaliar queue
+- **Reviews de obra recém-criada (uma ou lote), sempre nesta ordem: recorte da avaliação sem pago → hid da Comix → busca completa → resumo/digest uma vez → tags.** Dono: `acquireReviewsForNewWork` (`server/works/new-work-reviews.ts`). Gerar o pago sobre o recorte do "Buscar dados" deixa a Comix e o resto do pool fora do resumo, do digest e das tags.
 - Completed AI evaluations that still need review use `ai_eval_status = "review_pending"`
 
 Post-processing applied to every evaluation (in `service.ts`):

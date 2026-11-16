@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react"
 import { useRouter } from "next/navigation"
-import { useRefresh } from "@/lib/use-refresh"
 import { refreshChrome } from "@/lib/chrome-refresh"
 import { useFieldArray, useForm, useWatch, type Control, type FieldPath } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -698,7 +697,6 @@ function CriterionReadonlyValue({
 
 export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEvalOnCreate = false, reviewsSlot, existingExternalIds, openCoversAdvanced = false }: WorkFormProps) {
   const router = useRouter()
-  const refresh = useRefresh()
   const confirmCost = useCostConfirm()
   const isCreating = !workId
 
@@ -1390,7 +1388,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
       steps: cascade.steps,
       title: "Salvar e enriquecer com IA?",
       description:
-        "Gravar a obra é grátis. Em 2º plano posso enriquecê-la com IA: tags da sinopse + resumo/digest das reviews externas.",
+        "Gravar a obra é grátis. Em 2º plano busco as reviews de todas as fontes vinculadas e, com elas completas, gero com IA o resumo, o digest e as tags.",
       confirmLabel: "Salvar e enriquecer",
       cancelLabel: "Salvar sem IA",
     })
@@ -1406,7 +1404,14 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
       setPendingLowConfidenceSubmit({ kind: "create", values })
       return
     }
-    const skipAiEnrichment = await resolveCreateEnrichment(values)
+    await submitWithEnrichmentChoice(values)
+  }
+
+  // A pergunta "Salvar e enriquecer com IA?" só existe na CRIAÇÃO: quem enriquece é o
+  // `createWork`. Até 2026-11-16 ela aparecia também ao EDITAR, e o `updateWork` ignorava
+  // a resposta. E o caminho de confiança baixa pulava a pergunta e enriquecia sem perguntar.
+  const submitWithEnrichmentChoice = async (values: WorkFormValues) => {
+    const skipAiEnrichment = isCreating ? await resolveCreateEnrichment(values) : true
     await executeCreateSubmit(values, { skipAiEnrichment })
   }
 
@@ -1491,7 +1496,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     const pending = pendingLowConfidenceSubmit
     setPendingLowConfidenceSubmit(null)
     if (pending.kind === "create") {
-      await executeCreateSubmit(pending.values)
+      await submitWithEnrichmentChoice(pending.values)
     } else {
       await executeAddMoreSubmit(pending.values)
     }
@@ -1609,6 +1614,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
 
   const handleCreateBatch = async () => {
     if (!isCreating || batchDrafts.length === 0) return
+    let navigating = false
     setBatchSubmitting(true)
     scrollToTop()
     setTopFeedback("Criando lote...")
@@ -1683,11 +1689,9 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
         if (result.data?.created?.length === itemsToCreate.length && result.data.created[0]) {
           persistDrafts([])
           setEditingDraftId(null)
-          resetForNewEntry()
           toast.warning(firstError ?? "Obras criadas, mas houve um aviso ao finalizar.")
-          refresh()
-          const idsParam = result.data.created.map((c) => c.id).join(",")
-          router.push(`/catalog/batch?ids=${idsParam}`)
+          navigating = true
+          navigateToBatchReview(result.data.created.map((c) => c.id))
           return
         }
         toast.error(firstError ?? "Erro ao criar lote")
@@ -1698,17 +1702,34 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
       const created = result.data?.created ?? []
       persistDrafts([])
       setEditingDraftId(null)
-      resetForNewEntry()
       toast.success(`${created.length} obra${created.length === 1 ? "" : "s"} criada${created.length === 1 ? "" : "s"}. A Nota Prevista é calculada após a Avaliação IA.`)
-      refresh()
       if (created[0]) {
-        const idsParam = created.map((c) => c.id).join(",")
-        router.push(`/catalog/batch?ids=${idsParam}`)
+        navigating = true
+        navigateToBatchReview(created.map((c) => c.id))
+      } else {
+        resetForNewEntry()
       }
     } finally {
-      setBatchSubmitting(false)
-      setTopFeedback(null)
+      // Navegando: o overlay e o botão travado ficam até o form desmontar. Liberar aqui
+      // reabria o botão "Criar" com a obra atual ainda no form — um 2º clique a criaria de novo.
+      if (!navigating) {
+        setBatchSubmitting(false)
+        setTopFeedback(null)
+      }
     }
+  }
+
+  // 🔴 Até 2026-11-16 o lote fazia `resetForNewEntry()` + `router.refresh()` + `router.push()`.
+  // O refresh logo antes do push ENGOLE a navegação (a mesma corrida documentada em
+  // `executeCreateSubmit`), e sem a rede de segurança o resultado era o form VAZIO na tela de
+  // criação, com as obras criadas e a revisão do lote nunca aberta. Hoje é o mesmo caminho da
+  // obra única: push soft, chrome pelo barramento, hard-nav de reserva em 1,2 s.
+  const navigateToBatchReview = (ids: string[]) => {
+    const destination = `batch?ids=${ids.join(",")}`
+    setTopFeedback("Abrindo a revisão do lote...")
+    router.push(`/catalog/${destination}`)
+    refreshChrome()
+    setPendingCreateNav(destination)
   }
 
   const toggleSection = (section: SectionKey) => {
@@ -1822,7 +1843,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
           variant="secondary"
           onClick={handleSubmit(onSubmitAddMore)}
           disabled={isSubmitting || batchSubmitting}
-          title="Salva no banco mas adia o recálculo até o fim do lote"
+          title="Guarda esta obra num lote (ainda NÃO salva no banco) e limpa o formulário para a próxima. O lote é criado de uma vez no botão Criar."
         >
           {batchSubmitting
             ? "Salvando..."
