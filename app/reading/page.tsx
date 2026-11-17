@@ -22,17 +22,12 @@ export default async function ReadingPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
-  // Lista ÚNICA: tudo que você acompanha (em leitura + em hiatus pessoal). A divisão
-  // que importa na tela é por status de PUBLICAÇÃO (em andamento · concluídas · outras),
-  // feita no cliente — por slug, pra estourar se um status sumir do Supabase em vez de
-  // vir vazio em silêncio.
+  // Lista ÚNICA: tudo que você está lendo. A divisão que importa na tela é por status de
+  // PUBLICAÇÃO (em andamento · concluídas · outras), feita no cliente — por slug, pra estourar
+  // se um status sumir do Supabase em vez de vir vazio em silêncio. O hiato é da OBRA
+  // (publicação), não da leitura: o status de leitura "Hiatus" saiu na migration 226.
   const [works, canArchive] = await Promise.all([
-    getReadingWorks({
-      statuses: [
-        personalStatusNameBySlugOrThrow("reading"),
-        personalStatusNameBySlugOrThrow("hiatus"),
-      ],
-    }),
+    getReadingWorks({ statuses: [personalStatusNameBySlugOrThrow("reading")] }),
     // Arquivar tira a obra do catálogo de todos: só a curadoria vê o botão (o servidor já recusava).
     isCurrentUserAdmin(),
   ])

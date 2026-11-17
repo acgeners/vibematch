@@ -20,7 +20,7 @@ describe("prateleiras da /my-list: a partição é TOTAL", () => {
    * O risco que isto pega não é o rename — é o status NOVO. Um status criado no Supabase que
    * não casasse com prateleira nenhuma faria as obras dele sumirem da página em silêncio:
    * presentes no total, ausentes de toda prateleira. Por isso o teste ENUMERA a tabela, em vez
-   * de listar os 12 status de hoje.
+   * de listar os status de hoje.
    */
   it("todo status pessoal tem prateleira, menos Untracked", () => {
     const chaves = new Set(SHELVES.map((s) => s.key))
@@ -39,7 +39,6 @@ describe("prateleiras da /my-list: a partição é TOTAL", () => {
   it("cada status cai em UMA prateleira, e nas esperadas", () => {
     expect(shelfOfStatusId(idPorSlug("reading"))).toBe("lendo")
     expect(shelfOfStatusId(idPorSlug("started"))).toBe("lendo")
-    expect(shelfOfStatusId(idPorSlug("hiatus"))).toBe("lendo")
     expect(shelfOfStatusId(idPorSlug("on-hold"))).toBe("pausadas")
     expect(shelfOfStatusId(idPorSlug("stalled"))).toBe("pausadas")
     expect(shelfOfStatusId(idPorSlug("finished"))).toBe("terminadas")
