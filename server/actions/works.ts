@@ -29,7 +29,7 @@ import {
 import { markRecalcPending, recalculateScoresNow } from "@/server/recalc/queue"
 import { changedInputs } from "@/lib/calculations/recalc-inputs"
 import type { RecalcInput } from "@/lib/calculations/recalc-inputs"
-import { recalculateForUser } from "@/server/recalc/user-recalc"
+import { scheduleUserRecalc } from "@/server/recalc/user-recalc-schedule"
 import { markWorkAlignmentStale } from "@/server/queries/alignment"
 import { duplicateKeys, foldTitle, isWeakDuplicateAlias } from "@/lib/title-match"
 import { normalizeAlternativeTitles } from "@/lib/titles/alternative-titles"
@@ -2629,13 +2629,7 @@ export async function updateWorkStatus(
     // Vai em `after()`: é Ridge em TS puro (zero IA, zero dinheiro), mas são ~880 obras — não é
     // trabalho pra segurar a resposta do clique. Best-effort: se falhar, o pior que acontece é
     // a Nota Prevista dela ficar uma avaliação atrasada, e o próximo save conserta.
-    after(async () => {
-      try {
-        await recalculateForUser(gate.userId)
-      } catch (err) {
-        console.error("[updateWorkStatus] recalc do usuário falhou:", err)
-      }
-    })
+    after(() => scheduleUserRecalc(gate.userId, "updateWorkStatus"))
 
     revalidatePath("/catalog/[id]", "page")
     revalidatePath("/catalog")

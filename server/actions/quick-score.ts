@@ -9,7 +9,7 @@ import type { TasteScoreKey } from "@/server/queries/pilot-taste"
 import { resolveQuickScoreEffect } from "@/lib/onboarding/quick-score-precedence"
 import { canRateReadingState } from "@/lib/reading-gate"
 import { markRecalcPending } from "@/server/recalc/queue"
-import { recalculateForUser } from "@/server/recalc/user-recalc"
+import { scheduleUserRecalc } from "@/server/recalc/user-recalc-schedule"
 
 /** As 8 craft pós-leitura — presença de qualquer uma = ficha de craft começada. */
 const CRAFT_SCORE_COLUMNS = [
@@ -99,13 +99,7 @@ export async function saveQuickScore(
     if (gate.isOwner) {
       await markRecalcPending("saveQuickScore")
     } else {
-      after(async () => {
-        try {
-          await recalculateForUser(gate.userId)
-        } catch (err) {
-          console.error("[saveQuickScore] recalc do usuário falhou:", err)
-        }
-      })
+      after(() => scheduleUserRecalc(gate.userId, "saveQuickScore"))
     }
     revalidatePath(`/catalog/${workId}`)
   }

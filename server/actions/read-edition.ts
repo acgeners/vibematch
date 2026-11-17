@@ -5,7 +5,7 @@ import { after } from "next/server"
 import { parseMixedEdition } from "@/lib/editions/mixed-edition"
 import { ensureReadingStateWriter, writeReadingState } from "@/server/queries/user-work-state"
 import { markRecalcPending } from "@/server/recalc/queue"
-import { recalculateForUser } from "@/server/recalc/user-recalc"
+import { scheduleUserRecalc } from "@/server/recalc/user-recalc-schedule"
 
 /**
  * Troca EXPLÍCITA da versão que a SUA avaliação de uma obra mixed descreve (o "Alterar" ao lado de
@@ -37,13 +37,7 @@ export async function setEvaluationEdition(
   if (gate.isOwner) {
     await markRecalcPending("setEvaluationEdition", { changed: ["read_edition"], actorId: gate.userId })
   } else {
-    after(async () => {
-      try {
-        await recalculateForUser(gate.userId)
-      } catch (err) {
-        console.error("[setEvaluationEdition] recalc do usuário falhou:", err)
-      }
-    })
+    after(() => scheduleUserRecalc(gate.userId, "setEvaluationEdition"))
   }
   revalidatePath("/catalog/[id]", "page")
   return { ok: true, changed: true }

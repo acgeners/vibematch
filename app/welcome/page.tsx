@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation"
-import { getSessionUserId, getCurrentUserProfile } from "@/server/queries/current-user"
+import { getSessionUserId, getCurrentUserProfile, getHideAdultContent } from "@/server/queries/current-user"
+import { loadChipTasteState } from "@/server/queries/onboarding-tastes"
+import { chipStateFromRows } from "@/lib/onboarding/chip-tastes"
 import { WelcomeFlow } from "./welcome-flow"
 
 export const dynamic = "force-dynamic"
@@ -8,8 +10,9 @@ export const metadata = { title: "Boas-vindas" }
 /**
  * Onboarding pós-cadastro (7 telas; mockup aprovado = especificação de aceite).
  * Roda DEPOIS do cadastro e escreve direto nas tabelas — sem estado no navegador
- * (decisão 1). `signUpAction` desvia pra cá quando o signup já vem com sessão;
- * sem sessão não há o que gravar → /login.
+ * (decisão 1). Chega aqui: o cadastro por email (`signUpAction`), a conta nova pelo Google
+ * (`/auth/callback`) e o link "Rever as boas-vindas" do card "Primeiros passos".
+ * Sem sessão não há o que gravar → /login.
  */
 export default async function BemVindoPage() {
   const userId = await getSessionUserId()
@@ -19,6 +22,21 @@ export default async function BemVindoPage() {
   // load direto (ver `app/catalog/[id]/page.tsx`), num caminho que ninguém abre por bookmark.
   if (!userId) redirect("/login")
 
-  const profile = await getCurrentUserProfile()
-  return <WelcomeFlow displayName={profile.displayName} />
+  // Quem volta às boas-vindas vê os chips como estão gravados: a gravação só mexe no que mudar.
+  const [profile, tastes, hideAdult] = await Promise.all([
+    getCurrentUserProfile(),
+    loadChipTasteState(userId),
+    getHideAdultContent(),
+  ])
+  const chips = chipStateFromRows(tastes.rows)
+  return (
+    <WelcomeFlow
+      displayName={profile.displayName}
+      initialLoved={chips.loved}
+      initialVetos={chips.vetos}
+      // Só "ocultar" é escolha conhecida: "mostrar" é também o padrão de quem nunca escolheu, e a
+      // tela 2 não pode chegar marcada para quem nunca respondeu.
+      initialHideAdult={hideAdult ? true : null}
+    />
+  )
 }

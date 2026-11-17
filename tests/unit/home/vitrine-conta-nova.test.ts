@@ -39,7 +39,8 @@ const works = Array.from({ length: ACTIVE_WORKS }, (_, i) => ({
   publication_status_id: 1,
   total_chapters: 10,
   is_adult: false,
-  calculated_scores: { expected_score: null, platform_avg: 8 - i * 0.1 },
+  // Alinhamento alto em 1 de cada 3 obras — separa "pelo Alinhamento" de "pela comunidade".
+  calculated_scores: { expected_score: null, platform_avg: 8 - i * 0.1, personal_fit: i % 3 === 0 ? 0.9 : 0.1 },
   work_covers: [],
 }))
 
@@ -77,15 +78,18 @@ vi.mock("@/server/queries/user-work-state", async (orig) => {
 })
 
 let hasModel = false
+let hasAlignment = false
 vi.mock("@/server/queries/user-scores", () => ({
   getScoresReader: async () => ({
     hasModel,
+    hasAlignment,
     overlay: <T,>(_workId: string, calcRow: T): T => calcRow,
   }),
 }))
 
 beforeEach(() => {
   hasModel = false
+  hasAlignment = false
 })
 
 describe("vitrine da home, conta nova", () => {
@@ -115,5 +119,14 @@ describe("vitrine da home, conta nova", () => {
     hasModel = true
     const comModelo = await getTopPicksForToday(5)
     expect(comModelo.basis).toBe("expected")
+  })
+
+  it("com tags declaradas e sem modelo, ordena pelo Alinhamento e a comunidade desempata", async () => {
+    // A conta que passou pelas boas-vindas: disse o que gosta, mas ainda não tem 20 notas.
+    hasAlignment = true
+    const { getTopPicksForToday } = await import("@/server/queries/dashboard")
+    const r = await getTopPicksForToday(4)
+    expect(r.basis).toBe("alignment")
+    expect(r.items.map((w) => w.id)).toEqual(["w0", "w3", "w6", "w9"])
   })
 })

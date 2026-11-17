@@ -10,7 +10,7 @@ import {
   writeReadingState,
   ensureReadingStateWriter,
 } from "@/server/queries/user-work-state"
-import { recalculateForUser } from "@/server/recalc/user-recalc"
+import { scheduleUserRecalc } from "@/server/recalc/user-recalc-schedule"
 import { ensureAiConsumption } from "@/server/queries/ai-quota"
 import { makeUsdScale } from "@/lib/format/money"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
@@ -361,13 +361,7 @@ export async function setSynopsisQualityAction(
     } else {
       // O modelo DELA (Fatia 2b): Ridge em TS puro, zero IA — mas ~880 obras, então não segura
       // a resposta do clique. Best-effort, igual ao ramo não-dono de `updateWorkStatus`.
-      after(async () => {
-        try {
-          await recalculateForUser(gate.userId)
-        } catch (err) {
-          console.error("[setSynopsisQuality] recalc do usuário falhou:", err)
-        }
-      })
+      after(() => scheduleUserRecalc(gate.userId, "setSynopsisQuality"))
     }
 
     revalidatePath("/catalog")

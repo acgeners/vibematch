@@ -36,6 +36,7 @@ import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 import { readStatusFilter } from "@/lib/status-filter-toggle"
 import { parseArtFilter } from "@/lib/art/url"
 import { getScoresReader } from "@/server/queries/user-scores"
+import { resolveSortBasis } from "@/lib/ranking/sort-basis"
 
 interface RankingPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -244,6 +245,8 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // não pode aparecer: "Forte" devolveria vazio, indistinguível de "não há obra com arte
   // forte". `cache()` no reader ⇒ sem round-trip extra.
   const artScoresReader = await getScoresReader()
+  // A mesma régua que ordena a lista em `getRanking` — o cabeçalho diz de onde vem a ordem.
+  const sortBasis = resolveSortBasis(artScoresReader)
 
   const filters: RankingFilters = {
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
@@ -371,7 +374,13 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
             <RecalcPendingControl pending={recalcState.pending} variant="indicator" />
           </span>
         }
-        description="Obras ordenadas pela Nota Prevista"
+        description={
+          sortBasis === "expected"
+            ? "Obras ordenadas pela Nota Prevista"
+            : sortBasis === "alignment"
+              ? "A Nota Prevista liga com 20 obras avaliadas. Até lá, o Alinhamento (as tags que você escolheu) ocupa o lugar dela, e a média externa desempata."
+              : "A Nota Prevista liga com 20 obras avaliadas. Até lá, a média externa (a nota da comunidade) ocupa o lugar dela."
+        }
         actions={
           <div className="flex items-center gap-2">
             <FavoritesIconLink href={favoritesUrl} />

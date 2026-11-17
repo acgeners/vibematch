@@ -7,7 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { after } from "next/server"
 import { ensureAdmin, getCurrentUserSettingsId, getOwnerUserId, getSessionUserId } from "@/server/queries/current-user"
 import { markRecalcPending, recalculateScoresInBackground, recalculateScoresNowResult } from "@/server/recalc/queue"
-import { recalculateForUser } from "@/server/recalc/user-recalc"
+import { scheduleUserRecalc } from "@/server/recalc/user-recalc-schedule"
 import {
   computeCalibration,
   computeBucketBreakdown,
@@ -370,13 +370,7 @@ export async function setHideAdultContent(enabled: boolean) {
 async function scheduleUserPredictionRecalc(userId: string, context: string): Promise<boolean> {
   const ownerId = await getOwnerUserId()
   if (userId === ownerId) return true
-  after(async () => {
-    try {
-      await recalculateForUser(userId)
-    } catch (err) {
-      console.error(`[${context}] recalc do usuário falhou:`, err)
-    }
-  })
+  after(() => scheduleUserRecalc(userId, context))
   return false
 }
 

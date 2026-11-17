@@ -1,8 +1,10 @@
 import { createClient } from "@/lib/supabase/server"
+import { landingAfterAuth } from "@/lib/onboarding/fresh-account"
 
 /**
  * Callback do OAuth (Google). O Supabase redireciona pra cá com ?code=…;
- * trocamos o code por uma sessão (grava os cookies) e mandamos pra home.
+ * trocamos o code por uma sessão (grava os cookies) e mandamos pra home — ou, se a conta acabou
+ * de nascer, pras boas-vindas (`lib/onboarding/fresh-account.ts`).
  * O trigger handle_new_user (migration 137) já provisionou a linha free.
  */
 
@@ -42,8 +44,8 @@ export async function GET(request: Request) {
 
   if (code) {
     const supabase = await createClient()
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
-    if (!error) return redirectTo(next)
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+    if (!error) return redirectTo(landingAfterAuth(next, data?.user?.created_at, Date.now()))
   }
 
   // Este callback atende dois fluxos, e mandar os dois pro mesmo lugar mente pra um deles:

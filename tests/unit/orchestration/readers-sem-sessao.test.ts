@@ -83,11 +83,12 @@ describe("arquitetura: leitores per-usuário não caem no dono quando não há s
     const code = stripComments(
       readFileSync(join(process.cwd(), "server/queries/user-scores.ts"), "utf8"),
     )
-    // Recorta o ramo do anônimo e confere que ele não se declara com modelo — é o que faz o
-    // ranking trocar os campos pessoais do sort por platform_avg (ranking.ts, PERSONAL_SORT_FIELDS).
+    // Recorta o ramo do anônimo e confere que ele não se declara com modelo nem com Alinhamento —
+    // é o que faz o ranking ordenar o visitante pela média externa (lib/ranking/sort-basis.ts).
     const branch = code.slice(code.indexOf("if (!sessionId)"))
     const untilNextReturn = branch.slice(0, branch.indexOf("const userId"))
     expect(untilNextReturn).toMatch(/hasModel:\s*false/)
+    expect(untilNextReturn).toMatch(/hasAlignment:\s*false/)
     expect(untilNextReturn).toMatch(/isOwner:\s*false/)
   })
 })

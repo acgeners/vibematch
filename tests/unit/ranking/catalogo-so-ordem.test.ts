@@ -25,8 +25,10 @@ type Leitor = "dona" | "anon" | "outra"
 const estado = vi.hoisted(() => ({
   tabelas: {} as Record<string, Row[]>,
   consultas: [] as Array<{ tabela: string; select: string }>,
-  leitor: "dona" as "dona" | "anon" | "outra",
+  leitor: "dona" as "dona" | "anon" | "outra" | "nova",
   linhasDaOutra: new Map<string, Record<string, unknown>>(),
+  /** Conta recém-saída das boas-vindas: tem tags (Alinhamento), não tem as 20 notas. */
+  fitDaNova: new Map<string, number>(),
   estadoPessoal: new Map<string, Record<string, unknown>>(),
   previsoes: new Map<string, unknown>(),
 }))
@@ -136,6 +138,15 @@ vi.mock("@/server/queries/user-scores", async (orig) => {
     getScoresReader: async () => {
       if (estado.leitor === "dona")
         return { userId: "dona", isOwner: true, hasModel: true, overlay: (_id: string, row: unknown) => row }
+      if (estado.leitor === "nova")
+        return {
+          userId: "nova",
+          isOwner: false,
+          hasModel: false,
+          hasAlignment: true,
+          overlay: (id: string, row: unknown) =>
+            row ? { ...(row as object), ...VAZIO, personal_fit: estado.fitDaNova.get(id) ?? null } : row,
+        }
       if (estado.leitor === "anon")
         return {
           userId: null,
@@ -182,6 +193,7 @@ function semear() {
   const r = lcg(42)
   estado.consultas = []
   estado.linhasDaOutra = new Map()
+  estado.fitDaNova = new Map()
   estado.estadoPessoal = new Map()
   estado.previsoes = new Map()
   const works: Row[] = []
@@ -234,6 +246,8 @@ function semear() {
       category_scores: CRITERION_SLUGS.map((slug) => ({ criterion_slug: slug, score: Math.floor(r() * 21) / 2 })),
       work_covers: [{ url: `https://capa/${i}.jpg`, is_primary: true, position: 0 }],
     })
+    // Poucos valores distintos, como o Alinhamento de quem marcou só alguns chips.
+    estado.fitDaNova.set(id(i), (i % 4) / 4)
     if (r() < 0.4) estado.estadoPessoal.set(id(i), { userScore: 5 + Math.floor(r() * 50) / 10, synopsisQuality: "♥♥" })
     if (r() < 0.5)
       estado.previsoes.set(id(i), { predictedQuality: r() < 0.5 ? "♥" : "♥♥♥", stale: false, confidence: 0.7 })
@@ -395,5 +409,33 @@ describe("getRanking em modo 'ordering-only' (o /catalog)", () => {
       const canon = typeof w.canonical_synopsis === "string" ? (w.canonical_synopsis as string).trim() : ""
       expect(e.synopsis).toBe(canon || `primária de ${e.workId}`)
     }
+  })
+})
+
+describe("sem modelo e com tags declaradas (quem acabou de passar pelas boas-vindas)", () => {
+  beforeEach(semear)
+
+  const PADRAO_FREE = { ...CATALOGO, sortLevels: [L("expected_score"), L("personal_fit")] }
+  type Linha = { workId: string; personalFit: number | null; platformAvg: number | null }
+
+  it("a Nota Prevista dá lugar ao Alinhamento, e a média externa desempata", async () => {
+    estado.leitor = "nova"
+    const entries = (await getRanking(PADRAO_FREE)) as unknown as Linha[]
+    expect(entries.length).toBeGreaterThan(10)
+    for (let i = 1; i < entries.length; i++) {
+      const [a, b] = [entries[i - 1], entries[i]]
+      expect(a.personalFit!, `posição ${i}`).toBeGreaterThanOrEqual(b.personalFit!)
+      if (a.personalFit === b.personalFit) {
+        expect(a.platformAvg ?? -Infinity, `posição ${i}`).toBeGreaterThanOrEqual(b.platformAvg ?? -Infinity)
+      }
+    }
+  })
+
+  it("contraprova: o visitante (sem tags) segue ordenado só pela média externa, numa ordem diferente", async () => {
+    estado.leitor = "anon"
+    const anon = ids(await getRanking(PADRAO_FREE))
+    estado.leitor = "nova"
+    const nova = ids(await getRanking(PADRAO_FREE))
+    expect(nova).not.toEqual(anon)
   })
 })
