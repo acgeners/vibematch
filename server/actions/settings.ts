@@ -356,6 +356,27 @@ export async function setHideAdultContent(enabled: boolean) {
 }
 
 /**
+ * Liga/desliga "esconder as obras com tags que evito" (migration 227). É filtro de lista, não entrada
+ * do cálculo: não recalcula nada. Quem chama: as boas-vindas (tela de gostos) e Preferências.
+ */
+export async function setHideAvoidedTags(enabled: boolean): Promise<{ error: string | null }> {
+  if (typeof enabled !== "boolean") return { error: "Valor inválido." }
+  const settingsId = await getCurrentUserSettingsId()
+  if (!settingsId) return { error: "Entre na sua conta para fazer isso." }
+
+  const { error } = await createAdminClient()
+    .from("user_settings")
+    .update({ hide_avoided_tags: enabled })
+    .eq("id", settingsId)
+  if (error) return { error: error.message }
+
+  revalidatePath("/preferences")
+  revalidatePath("/ranking")
+  revalidatePath("/")
+  return { error: null }
+}
+
+/**
  * A edição padrão mudou ⇒ o `adult_content` que entra na previsão das mixed mudou. Para quem NÃO é
  * o dono, agenda o recalc dele em `after()` e devolve false. Para o dono devolve true: quem chama
  * marca o recalc global com o contexto LITERAL (o inventário de `markRecalcPending` lê o source) e

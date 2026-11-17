@@ -4964,6 +4964,11 @@ pela IDADE da conta — `lib/onboarding/fresh-account.ts`, nunca pelo botão cli
 (`lib/onboarding/chip-tastes.ts`): refazer o fluxo não pode apagar as tags de Preferências que nenhum
 chip cobre. O deck tira as obras com tags evitadas.
 
+**"Esconder tags evitadas" é PREFERÊNCIA da pessoa** (`user_settings.hide_avoided_tags`, mig 227),
+escolhida nas boas-vindas ou em Preferências — nunca ligada por conta de um veto. Sem parâmetro na URL
+ela decide o `/ranking`, o `/favorites` e o "Pra você hoje"; com ela ligada, o "Não" grava
+`hide_avoided=off`. Dono: `lib/tags/hide-avoided.ts`.
+
 ## O badge "Recalcular notas" só acende com mudança MATERIAL
 
 `markRecalcPending` é chamado de **30 lugares** e o default é MARCAR — e isso está

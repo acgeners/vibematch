@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { ScrollToTop } from "@/components/layout/scroll-to-top"
 import { SettingsCard } from "@/components/settings/settings-card"
 import { ACCENT_STYLES } from "@/components/console/console-registry"
-import { getCurrentPlan, getHideAdultContent, isCurrentUserAdmin } from "@/server/queries/current-user"
+import { getCurrentPlan, getHideAdultContent, getHideAvoidedTags, isCurrentUserAdmin } from "@/server/queries/current-user"
 import { getFilterPresets } from "@/server/queries/filter-presets"
 import { getAllTags } from "@/server/queries/tags"
 import { getTagPreferenceRows } from "@/server/queries/tag-preferences"
@@ -17,6 +17,7 @@ import { PostReadingWeightsForm } from "@/components/settings/post-reading-weigh
 import { PostReadingWeightSuggestionsPanel } from "@/components/settings/post-reading-weight-suggestions-panel"
 import { RankingPreferencesForm } from "@/components/settings/ranking-preferences-form"
 import { HideAdultContentToggle } from "@/components/settings/hide-adult-content-toggle"
+import { HideAvoidedTagsToggle } from "@/components/settings/hide-avoided-tags-toggle"
 import { SavedRankingFilters } from "@/components/settings/saved-ranking-filters"
 import { ScoreColorPercentilesForm } from "@/components/settings/score-color-percentiles-form"
 import { CriterionColorPercentilesForm } from "@/components/settings/criterion-color-percentiles-form"
@@ -132,8 +133,19 @@ async function ItemBody({ section, isAdmin }: { section: SettingsSection; isAdmi
     }
 
     case "tag-preferences": {
-      const [allTags, tagPrefRows] = await Promise.all([getAllTags(), getTagPreferenceRows()])
-      return <TagPreferencesForm tags={allTags} initialRows={tagPrefRows} />
+      const [allTags, tagPrefRows, hideAvoided] = await Promise.all([
+        getAllTags(),
+        getTagPreferenceRows(),
+        getHideAvoidedTags(),
+      ])
+      return (
+        <div className="space-y-4">
+          <HideAvoidedTagsToggle initialHidden={hideAvoided} />
+          <div className="border-t pt-4">
+            <TagPreferencesForm tags={allTags} initialRows={tagPrefRows} />
+          </div>
+        </div>
+      )
     }
 
     case "adult-content": {

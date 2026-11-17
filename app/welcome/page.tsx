@@ -1,5 +1,10 @@
 import { redirect } from "next/navigation"
-import { getSessionUserId, getCurrentUserProfile, getHideAdultContent } from "@/server/queries/current-user"
+import {
+  getSessionUserId,
+  getCurrentUserProfile,
+  getHideAdultContent,
+  getHideAvoidedTags,
+} from "@/server/queries/current-user"
 import { loadChipTasteState } from "@/server/queries/onboarding-tastes"
 import { chipStateFromRows } from "@/lib/onboarding/chip-tastes"
 import { WelcomeFlow } from "./welcome-flow"
@@ -23,10 +28,11 @@ export default async function BemVindoPage() {
   if (!userId) redirect("/login")
 
   // Quem volta às boas-vindas vê os chips como estão gravados: a gravação só mexe no que mudar.
-  const [profile, tastes, hideAdult] = await Promise.all([
+  const [profile, tastes, hideAdult, hideAvoided] = await Promise.all([
     getCurrentUserProfile(),
     loadChipTasteState(userId),
     getHideAdultContent(),
+    getHideAvoidedTags(),
   ])
   const chips = chipStateFromRows(tastes.rows)
   return (
@@ -37,6 +43,7 @@ export default async function BemVindoPage() {
       // Só "ocultar" é escolha conhecida: "mostrar" é também o padrão de quem nunca escolheu, e a
       // tela 2 não pode chegar marcada para quem nunca respondeu.
       initialHideAdult={hideAdult ? true : null}
+      initialHideAvoided={hideAvoided}
     />
   )
 }

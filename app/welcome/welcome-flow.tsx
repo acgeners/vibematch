@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { setHideAdultContent } from "@/server/actions/settings"
+import { setHideAdultContent, setHideAvoidedTags } from "@/server/actions/settings"
 import {
   saveOnboardingTastes,
   getOnboardingDeckAction,
@@ -122,6 +122,7 @@ export function WelcomeFlow({
   initialLoved,
   initialVetos,
   initialHideAdult,
+  initialHideAvoided,
 }: {
   displayName: string | null
   /** Os chips como estão gravados (quem volta às boas-vindas). */
@@ -129,6 +130,8 @@ export function WelcomeFlow({
   initialVetos: string[]
   /** `null` = nunca escolheu: a tela 2 abre sem nada marcado. */
   initialHideAdult: boolean | null
+  /** "Esconder as obras com tags que evito" como está gravado (migration 227). */
+  initialHideAvoided: boolean
 }) {
   const router = useRouter()
   const [step, setStep] = useState(0)
@@ -139,6 +142,9 @@ export function WelcomeFlow({
   // tela 3
   const [loved, setLoved] = useState<Set<string>>(() => new Set(initialLoved))
   const [vetos, setVetos] = useState<Set<string>>(() => new Set(initialVetos))
+  // Escolha EXPLÍCITA da pessoa: nada liga sozinho por ela ter vetado algo.
+  const [hideAvoided, setHideAvoided] = useState(initialHideAvoided)
+  const savedHideAvoided = useRef(initialHideAvoided)
   // tela 4
   const [deckStatus, setDeckStatus] = useState<DeckStatus>("idle")
   const [deck, setDeck] = useState<OnboardingDeckWork[]>([])
@@ -191,6 +197,12 @@ export function WelcomeFlow({
     try {
       const save = await saveOnboardingTastes(Array.from(loved), Array.from(vetos))
       if (!save.ok) console.error("[bem-vindo] gostos:", save.error)
+      // Só com veto marcado: a escolha só aparece na tela nesse caso, e o que não se viu não se grava.
+      if (vetos.size > 0 && hideAvoided !== savedHideAvoided.current) {
+        const pref = await setHideAvoidedTags(hideAvoided)
+        if (pref.error) console.error("[bem-vindo] esconder evitadas:", pref.error)
+        else savedHideAvoided.current = hideAvoided
+      }
       goTo(3)
       // Depois de gravar: o deck tira as obras com tags evitadas, e lê as evitadas do banco.
       await loadDeck()
@@ -468,7 +480,7 @@ export function WelcomeFlow({
               <div className={styles.bandHead}>
                 <span className={`${styles.bandName} ${styles.bandVeto}`}>✕ Eu evito</span>
                 <span className={styles.bandWhy}>
-                  Opcional. Obras com essas tags saem do deck logo adiante e descem na sua lista.
+                  Opcional. Obras com essas tags saem do deck logo adiante.
                 </span>
               </div>
               <div className={styles.chips}>
@@ -484,6 +496,27 @@ export function WelcomeFlow({
                   </button>
                 ))}
               </div>
+              {vetos.size > 0 && (
+                <div className={styles.vetoChoice} role="group" aria-label="Nas suas listas, obras com essas tags">
+                  <span className={styles.bandWhy}>Nas suas listas, obras com essas tags:</span>
+                  <button
+                    type="button"
+                    className={styles.chip}
+                    aria-pressed={!hideAvoided}
+                    onClick={() => setHideAvoided(false)}
+                  >
+                    aparecem, mais abaixo
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.chip} ${styles.chipVeto}`}
+                    aria-pressed={hideAvoided}
+                    onClick={() => setHideAvoided(true)}
+                  >
+                    ficam escondidas
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className={styles.foot}>
@@ -807,10 +840,13 @@ export function WelcomeFlow({
                     <dt>evita</dt>
                     <dd>
                       {vetoList.length ? (
-                        <b>
-                          {vetoList.slice(0, 2).join(", ")}
-                          {vetoList.length > 2 ? ` +${vetoList.length - 2}` : ""}
-                        </b>
+                        <>
+                          <b>
+                            {vetoList.slice(0, 2).join(", ")}
+                            {vetoList.length > 2 ? ` +${vetoList.length - 2}` : ""}
+                          </b>
+                          {hideAvoided ? " · escondidas nas listas" : ""}
+                        </>
                       ) : (
                         <b>nenhum veto</b>
                       )}
@@ -851,9 +887,7 @@ export function WelcomeFlow({
                 <button
                   type="button"
                   className={`${styles.btn} ${styles.btnGo}`}
-                  // Com vetos, o ranking abre com "Esconder tags evitadas" ligado: o filtro existe,
-                  // mas não é o padrão, e quem acabou de vetar não pode reencontrar o vetado no topo.
-                  onClick={() => router.push(vetoList.length > 0 ? "/ranking?hide_avoided=all" : "/ranking")}
+                  onClick={() => router.push("/ranking")}
                 >
                   Ver meu ranking →
                 </button>

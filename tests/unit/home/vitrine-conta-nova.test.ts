@@ -44,12 +44,17 @@ const works = Array.from({ length: ACTIVE_WORKS }, (_, i) => ({
   work_covers: [],
 }))
 
+// Obras com tag evitada (o `work_tags` falso devolve sempre estas, para qualquer slug pedido).
+const comTagEvitada = vi.hoisted(() => ({ ids: [] as string[] }))
+
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     from: (table: string) =>
       chain(
         table === "works"
           ? { data: works, error: null }
+          : table === "work_tags"
+            ? { data: comTagEvitada.ids.map((work_id) => ({ work_id })), error: null }
           : table === "calculated_scores"
             ? { data: works.map((w) => ({ work_id: w.id, expected_score: null })), error: null }
             : { data: [], error: null, count: 0 },
@@ -90,6 +95,7 @@ vi.mock("@/server/queries/user-scores", () => ({
 beforeEach(() => {
   hasModel = false
   hasAlignment = false
+  comTagEvitada.ids = []
 })
 
 describe("vitrine da home, conta nova", () => {
@@ -128,5 +134,17 @@ describe("vitrine da home, conta nova", () => {
     const r = await getTopPicksForToday(4)
     expect(r.basis).toBe("alignment")
     expect(r.items.map((w) => w.id)).toEqual(["w0", "w3", "w6", "w9"])
+  })
+})
+
+describe("quem escolheu esconder as obras com tags que evita (migration 227)", () => {
+  it("a prateleira tira essas obras; sem a escolha, elas ficam", async () => {
+    hasAlignment = true
+    comTagEvitada.ids = ["w0", "w6"]
+    const { getTopPicksForToday } = await import("@/server/queries/dashboard")
+    const escondendo = await getTopPicksForToday(4, { hideTagSlugs: ["isekai"] })
+    expect(escondendo.items.map((w) => w.id)).toEqual(["w3", "w9", "w12", "w15"])
+    const semEsconder = await getTopPicksForToday(4)
+    expect(semEsconder.items.map((w) => w.id)).toEqual(["w0", "w3", "w6", "w9"])
   })
 })

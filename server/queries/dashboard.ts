@@ -14,6 +14,7 @@ import { comixWorkUrl } from "@/lib/external/comix"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { resolveSortBasis } from "@/lib/ranking/sort-basis"
+import { workIdsWithAnyTag } from "@/server/queries/works-with-tags"
 import type { SortBasis } from "@/lib/ranking/sort-basis"
 import { FOLLOWING_PERSONAL_STATUSES, DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 import {
@@ -246,6 +247,13 @@ export async function getDashboardStats(): Promise<DashboardStats> {
  */
 export async function getTopPicksForToday(
   limit = 5,
+  opts: {
+    /**
+     * Slugs das tags que a pessoa evita, quando ela escolheu escondê-las ("esconder as obras com
+     * tags que evito", migration 227). Quem chama resolve a sessão e a preferência; vazio = não esconde.
+     */
+    hideTagSlugs?: string[]
+  } = {},
 ): Promise<{ items: TopWorkItem[]; basis: SortBasis }> {
   const supabase = createAdminClient()
 
@@ -254,7 +262,13 @@ export async function getTopPicksForToday(
   //   "melhores por Nota Prevista" ordenava por `calculated_scores` (a previsão DELE)
   // Ou seja, a home da Leitora recomendava obras pelo gosto dele, chamando de "pra você".
   // Passou batido na 2b porque eu religei o "Acompanhando" e os KPIs, mas não este.
-  const [personal, scores] = await Promise.all([getPersonalStateReader(), getScoresReader()])
+  // As escondidas entram no mesmo Promise.all: promise solta que rejeita antes de ser aguardada
+  // vira unhandledRejection.
+  const [personal, scores, hidden] = await Promise.all([
+    getPersonalStateReader(),
+    getScoresReader(),
+    workIdsWithAnyTag(supabase, opts.hideTagSlugs ?? []),
+  ])
 
   // 🔴 PAGINADA: o `.limit(2000)` de antes não valia — o PostgREST corta em 1000 sem erro. Medido
   // em 2026-10-05: 1.044 obras ativas, 1.000 chegavam, e as 44 de fora eram TODAS das 100
@@ -316,6 +330,7 @@ export async function getTopPicksForToday(
     // espelho" para o status que a obra APARENTA ("Want to Read") — sem ele a conta nova, que não
     // tem linha nenhuma, veria a prateleira vazia.
     .filter((w) => isPickablePersonalStatus(personalStatusNameOrDefault(w.personalStatusId)))
+    .filter((w) => !hidden.has(w.id))
 
   // Mesma régua do /ranking (`lib/ranking/sort-basis.ts`): com modelo, a Nota Prevista; sem modelo
   // e com tags declaradas, o Alinhamento com a nota da comunidade desempatando; sem nada, a nota da
