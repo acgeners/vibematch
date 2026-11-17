@@ -33,6 +33,7 @@ import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import { readStatusFilter } from "@/lib/status-filter-toggle"
 import { parseArtFilter } from "@/lib/art/url"
 import { getScoresReader } from "@/server/queries/user-scores"
+import { defaultSortForBasis, resolveSortBasis } from "@/lib/ranking/sort-basis"
 import { getVerdictScale } from "@/server/queries/verdict-scale"
 
 interface FavoritesListPageProps {
@@ -139,7 +140,14 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
   // sobre uma lista ordenada por Grupos — e o "Aplicar filtros" seguinte reescrevia a URL
   // com o que o painel achava que era a ordem, apagando a ordenação da página. Medido na
   // tela em 2026-08-15.
-  const defaultSort = isMulti ? "groups:desc,expected_score:desc" : "expected_score:desc"
+  //
+  // Sem modelo (menos de 20 notas), a mesma conversão que `getRanking` aplica: o painel tem de
+  // mostrar o Alinhamento que de fato ordena, não a "N. Prevista" que não existe para a pessoa.
+  const artScoresReader = await getScoresReader()
+  const defaultSort = defaultSortForBasis(
+    isMulti ? "groups:desc,expected_score:desc" : "expected_score:desc",
+    resolveSortBasis(artScoresReader),
+  )
   const rawSort = str("sort") ?? defaultSort
   const sortLevels: SortLevel[] = rawSort.split(",").map((seg) => {
     const [field, dir] = seg.trim().split(":")
@@ -178,8 +186,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
   const artFilter = parseArtFilter(str("art"))
   // 🔴 Quem NÃO é o dono não tem estimativa de arte (o overlay a anula), então o controle
   // não pode aparecer: "Forte" devolveria vazio, indistinguível de "não há obra com arte
-  // forte". `cache()` no reader ⇒ sem round-trip extra.
-  const artScoresReader = await getScoresReader()
+  // forte". O reader foi lido acima, para a ordenação padrão.
   // Régua do Veredito (migration 193) — descreve o catálogo, então vem do servidor.
   const verdictScale = await getVerdictScale()
 

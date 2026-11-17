@@ -437,21 +437,25 @@ export function WelcomeFlow({
         {/* ── 3 · gostos ── */}
         {step === 2 && (
           <div className={styles.screen}>
-            <h1 className={styles.title}>O que te atrai — e o que te faz largar?</h1>
-            <div className={styles.bloom} aria-hidden="true">
-              <svg viewBox="0 0 100 64">
-                <g transform="translate(50 58)">
-                  {PETALS.map((t, i) => (
-                    <use
-                      key={i}
-                      href="#bv-petal"
-                      transform={t || undefined}
-                      className={`${styles.bloomPetal} ${i < Math.min(7, loved.size) ? styles.bloomPetalLit : ""}`}
-                    />
-                  ))}
-                </g>
-              </svg>
-              <small>{loved.size ? `florescendo · ${Math.min(loved.size, 7)}/7` : "sua lótus"}</small>
+            {/* Título e lótus na MESMA linha: solta (absolute) no canto, a lótus cobria o
+                último chip da 1ª linha e o texto da faixa (medido a 1440px). */}
+            <div className={styles.tasteHead}>
+              <h1 className={styles.title}>O que te atrai — e o que te faz largar?</h1>
+              <div className={styles.bloom} aria-hidden="true">
+                <svg viewBox="0 0 100 64">
+                  <g transform="translate(50 58)">
+                    {PETALS.map((t, i) => (
+                      <use
+                        key={i}
+                        href="#bv-petal"
+                        transform={t || undefined}
+                        className={`${styles.bloomPetal} ${i < Math.min(7, loved.size) ? styles.bloomPetalLit : ""}`}
+                      />
+                    ))}
+                  </g>
+                </svg>
+                <small>{loved.size ? `florescendo · ${Math.min(loved.size, 7)}/7` : "sua lótus"}</small>
+              </div>
             </div>
 
             <div className={styles.band}>

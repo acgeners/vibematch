@@ -5,6 +5,7 @@ import {
   applySessionPersistence,
   persistFromCookieValue,
 } from "@/lib/auth-preference"
+import { SIGNED_IN_HEADER } from "@/lib/auth/signed-in-header"
 import type { NextRequest } from "next/server"
 import type { User } from "@supabase/supabase-js"
 
@@ -51,6 +52,15 @@ export async function updateSession(request: NextRequest): Promise<SessionRefres
 
   // IMPORTANTE: não remover getUser() — é o que revalida/renova o token de sessão.
   const { data } = await supabase.auth.getUser()
+  const user = data.user ?? null
 
-  return { response: supabaseResponse, user: data.user ?? null, supabase }
+  // Diz à página se há sessão (ver `SIGNED_IN_HEADER`). Sempre escrito, para um valor vindo do
+  // cliente nunca passar adiante. A resposta é refeita com o cabeçalho e recebe os cookies que
+  // o refresh gravou, com as opções deles (o padrão do @supabase/ssr para trocar a resposta).
+  const requestHeaders = new Headers(request.headers)
+  requestHeaders.set(SIGNED_IN_HEADER, user ? "1" : "0")
+  const response = NextResponse.next({ request: { headers: requestHeaders } })
+  for (const cookie of supabaseResponse.cookies.getAll()) response.cookies.set(cookie)
+
+  return { response, user, supabase }
 }

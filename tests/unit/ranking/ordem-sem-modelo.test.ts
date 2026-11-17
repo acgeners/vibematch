@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { effectiveSortLevels, hasAlignmentSignal, resolveSortBasis } from "@/lib/ranking/sort-basis"
+import { defaultSortForBasis, effectiveSortLevels, hasAlignmentSignal, resolveSortBasis } from "@/lib/ranking/sort-basis"
 
 /**
  * Sem as 20 notas não há Nota Prevista. Até 2026-11 a lista caía inteira na média externa — até
@@ -71,5 +71,35 @@ describe("os níveis que valem", () => {
     const porTitulo = [L("title", "asc"), L("year")]
     expect(effectiveSortLevels(porTitulo, "alignment")).toEqual(porTitulo)
     expect(effectiveSortLevels(porTitulo, "platform")).toEqual(porTitulo)
+  })
+})
+
+describe("a ordenação padrão que o painel mostra é a que ordena a lista", () => {
+  // O painel de filtros recebe o padrão da página. Ele dizia "N. Prevista" sobre uma lista
+  // ordenada pelo Alinhamento (visto no teste da conta nova, 17/11/2026).
+  it("sem modelo, com tags: Alinhamento e a média externa desempata", () => {
+    expect(defaultSortForBasis("expected_score:desc,personal_fit:desc", "alignment")).toBe(
+      "personal_fit:desc,platform_avg:desc",
+    )
+    expect(defaultSortForBasis("expected_score:desc,alignment_score:desc", "alignment")).toBe(
+      "personal_fit:desc,platform_avg:desc",
+    )
+    expect(defaultSortForBasis("groups:desc,expected_score:desc", "alignment")).toBe(
+      "groups:desc,personal_fit:desc,platform_avg:desc",
+    )
+  })
+
+  it("sem modelo e sem tags: a média externa", () => {
+    expect(defaultSortForBasis("expected_score:desc,personal_fit:desc", "platform")).toBe("platform_avg:desc")
+  })
+
+  it("com modelo, nada muda", () => {
+    const sort = "expected_score:desc,alignment_score:desc"
+    expect(defaultSortForBasis(sort, "expected")).toBe(sort)
+  })
+
+  it("aplicar de novo não muda: é o que a consulta faz sobre o que o painel recebeu", () => {
+    const uma = defaultSortForBasis("expected_score:desc,personal_fit:desc", "alignment")
+    expect(defaultSortForBasis(uma, "alignment")).toBe(uma)
   })
 })
