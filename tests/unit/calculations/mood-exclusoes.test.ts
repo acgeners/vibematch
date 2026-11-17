@@ -21,7 +21,7 @@ import { PERSONAL_STATUSES_BY_ID, PUBLICATION_STATUSES_BY_ID } from "@/lib/const
  *
  * 🔴 O risco desta feature é o balde ERRADO: uma obra em curso classificada como
  * "descartada" some da comparação sem a pessoa ter pedido, e some em silêncio. Por
- * isso os testes abaixo varrem os 12 status pessoais e os 5 de publicação — não uma
+ * isso os testes abaixo varrem todos os status pessoais e de publicação — não uma
  * amostra que eu tenha lembrado.
  */
 
@@ -68,7 +68,7 @@ describe("cada status cai num balde, e no balde CERTO", () => {
     for (const nome of ["Dropped", "Not Now", "Not Interested"]) {
       expect(readingBucketOf(PER(nome)), `${nome} deveria ser descartada`).toBe("read:discarded")
     }
-    for (const nome of ["Stalled", "Read Again", "On-hold", "Hiatus", "Reading", "Started"]) {
+    for (const nome of ["Stalled", "Read Again", "On-hold", "Reading", "Started"]) {
       expect(readingBucketOf(PER(nome)), `${nome} NÃO é descartada — é leitura em curso`).toBe(
         "read:inProgress",
       )

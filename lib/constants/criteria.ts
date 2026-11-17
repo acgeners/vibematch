@@ -186,8 +186,6 @@ export const PERSONAL_STATUS_LABELS: Record<string, string> = {
   "Stalled": "Stalled",
   "on-hold": "On-hold",
   "On-hold": "On-hold",
-  "hiatus": "Hiatus",
-  "Hiatus": "Hiatus",
   "finished": "Finished",
   "Finished": "Finished",
   "read_again": "Read Again",
@@ -252,7 +250,6 @@ export const PERSONAL_STATUSES_BY_ID: Record<number, PersonalStatusInfo> = {
   2: { id: 2, status: "Reading", slug: "reading", color: "#60A5FA", symbol: "📖", comment: "Currently reading or actively following new chapters/releases", bgClass: "bg-emerald-500", descriptionPt: "Estou lendo e acompanhando os capítulos novos", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: false, isDefaultUnset: false, isFollowing: true, isUnread: false },
   4: { id: 4, status: "Stalled", slug: "stalled", color: "#FACC15", symbol: "⏸️", comment: "Lost momentum or interest. Not sure I liked it; likely needs rereading before continuing", bgClass: "bg-orange-500", descriptionPt: "Comecei e pausei por tensão na história — pretendo terminar", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: true, isDefaultUnset: false, isFollowing: false, isUnread: false },
   7: { id: 7, status: "On-hold", slug: "on-hold", color: "#FB923C", symbol: "📁", comment: "Paused for now, but I still want to continue; likely needs rereading before continuing", bgClass: "bg-slate-500", descriptionPt: "Comecei, planejo retomar, mas preciso reler antes", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: false, isDefaultUnset: false, isFollowing: false, isUnread: false },
-  6: { id: 6, status: "Hiatus", slug: "hiatus", color: "#A78BFA", symbol: "⏳", comment: "Waiting for new chapters, season, translation, or official return", bgClass: "bg-cyan-500", descriptionPt: "Aguardando nova temporada / retorno do título", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: false, isDefaultUnset: false, isFollowing: false, isUnread: false },
   1: { id: 1, status: "Finished", slug: "finished", color: "#4ADE80", symbol: "✔", comment: "Finished reading", bgClass: "bg-blue-500", descriptionPt: "Terminei de ler", isTerminal: true, isFullyRead: true, tracksProgress: true, hideFromInterest: true, isDefaultUnset: false, isFollowing: false, isUnread: false },
   12: { id: 12, status: "Read Again", slug: "read_again", color: "#F472B6", symbol: "🔁", comment: "Already read, but want to read again", bgClass: "bg-teal-500", descriptionPt: "Já li mas quero ler novamente", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: true, isDefaultUnset: false, isFollowing: false, isUnread: false },
   9: { id: 9, status: "Dropped", slug: "dropped", color: "#F87171", symbol: "🗑️", comment: "Dropped before finishing", bgClass: "bg-red-500", descriptionPt: "Abandonado, não pretendo continuar", isTerminal: true, isFullyRead: false, tracksProgress: true, hideFromInterest: true, isDefaultUnset: false, isFollowing: false, isUnread: false },
@@ -274,7 +271,7 @@ export const PERSONAL_STATUSES_BY_ID: Record<number, PersonalStatusInfo> = {
  */
 export const TERMINAL_PERSONAL_STATUSES = ["Finished", "Dropped"] as const
 export const FULLY_READ_PERSONAL_STATUSES = ["Finished"] as const
-export const PROGRESS_PERSONAL_STATUSES = ["Started", "Reading", "Stalled", "On-hold", "Hiatus", "Finished", "Read Again", "Dropped"] as const
+export const PROGRESS_PERSONAL_STATUSES = ["Started", "Reading", "Stalled", "On-hold", "Finished", "Read Again", "Dropped"] as const
 export const INTEREST_HIDDEN_PERSONAL_STATUSES = ["Stalled", "Finished", "Read Again", "Dropped"] as const
 export const FOLLOWING_PERSONAL_STATUSES = ["Started", "Reading"] as const
 export const UNREAD_PERSONAL_STATUSES = ["Want to Read", "Untracked"] as const
