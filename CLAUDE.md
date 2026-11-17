@@ -2929,6 +2929,12 @@ escala 0 = acaso; faixas de cor e limiares de semelhança têm de ser medidos ne
 **O título não entra no texto do embedding** (`lib/ml/embedding-input.ts`): puxava vizinhas pelo
 nome. Mudar o texto exige trocar `HASH_VERSION` e re-embedar o catálogo ("Atualizar embeddings",
 ~US$0,02). Guardado por `semelhanca-centralizada.test.ts` e `embedding-sem-titulo.test.ts`.
+**Na aba Recomendações a similaridade aparece em 5 grupos ("Muito parecida" a "Pouco em comum"),
+nunca como % cru:** nessa escala o par mais parecido do catálogo dá ~66%, e "36%" lê como fraco
+sendo uma vizinha normal. O % fica só no tooltip. Dono dos cortes, cores e faixas:
+`lib/ui/similarity-band.ts` (cortes = percentis das 8 vizinhas de cada obra; re-embedar muda a
+distribuição, então remeça). O grupo compara o % INTEIRO que o tooltip imprime, nunca o decimal
+cru (senão "42%" cai no grupo de baixo). Sem âmbar nem verde nos grupos. Teste: `faixas-de-similaridade.test.tsx`.
 
 ## Em quantos grupos a obra está é DESEMPATE — e o número não promete gosto
 
