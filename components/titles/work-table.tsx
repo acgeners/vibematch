@@ -94,6 +94,8 @@ import { sortByMoodAdjusted, isMoodActive } from "@/lib/calculations/mood-refine
 import type { MoodRefine, MoodWork } from "@/lib/calculations/mood-refine"
 import { MoodListButton } from "@/components/ranking/mood-list-button"
 import { applyMoodToList, moodDimensionCount } from "@/lib/ranking/mood-list"
+import { activeSortFieldFor, isSortFieldAvailable } from "@/lib/ranking/sort-basis"
+import type { SortBasis } from "@/lib/ranking/sort-basis"
 import { WorkHeatmapView } from "@/components/titles/work-heatmap-view"
 import { WorkColumnPicker } from "@/components/titles/work-column-picker"
 import { ResponsiveHeaderLabel, headerFormsFor } from "@/components/titles/responsive-header-label"
@@ -187,6 +189,11 @@ interface WorkTableProps {
   /** work_id → grupos de favoritos a que a obra pertence, para a coluna "Grupos".
    *  Só /favorites passa; nas demais telas a coluna nasce oculta e a célula fica em "—". */
   groupsByWorkId?: Record<string, WorkGroupRef[]>
+  /** A ordenação padrão da página (a mesma que ela passa à consulta e ao painel). */
+  defaultSort?: string
+  /** De onde vem a ordem de quem olha (`resolveSortBasis`). Ausente = tem modelo, e a tabela
+   *  segue o `sort` da URL como sempre (o /catalog não converte nada). */
+  sortBasis?: SortBasis
 }
 
 /**
@@ -313,6 +320,8 @@ export function WorkTable({
   currentGroup,
   groupsByWorkId,
   verdictScale = null,
+  defaultSort = "expected_score:desc",
+  sortBasis = "expected",
 }: WorkTableProps) {
   const router = useRouter()
   const refresh = useRefresh()
@@ -647,6 +656,8 @@ export function WorkTable({
           criterionPrefs={criterionPrefs}
           currentGroup={currentGroup}
           groupsByWorkId={groupsByWorkId}
+          defaultSort={defaultSort}
+          sortBasis={sortBasis}
         />
       )}
 
@@ -1039,6 +1050,8 @@ function WorkListView({
   criterionPrefs,
   currentGroup,
   groupsByWorkId,
+  defaultSort = "expected_score:desc",
+  sortBasis = "expected",
 }: {
   works: WorkWithRelations[]
   /**
@@ -1065,6 +1078,8 @@ function WorkListView({
   criterionPrefs?: Record<string, CriterionRange>
   currentGroup?: { id: string; name: string }
   groupsByWorkId?: Record<string, WorkGroupRef[]>
+  defaultSort?: string
+  sortBasis?: SortBasis
 }) {
   const refresh = useRefresh()
   // Stopgap multi-user: o menu "Gerenciar obra" (editar/favoritar/arquivar) muta o
@@ -1085,9 +1100,11 @@ function WorkListView({
     (col) => enableCompare || col.key !== "select"
   )
 
-  const [activeSortField, activeSortDirection = "desc"] = (
-    searchParams.get("sort") ?? "expected_score:desc"
-  ).split(":")
+  const sortRaw = searchParams.get("sort") ?? defaultSort
+  const [, activeSortDirection = "desc"] = sortRaw.split(",")[0].split(":")
+  // O campo que ordena DE FATO: sem modelo, `sort=expected_score` ordena pelo Alinhamento, e é
+  // nele que a seta do cabeçalho tem de estar.
+  const activeSortField = activeSortFieldFor(sortRaw, sortBasis)
 
   const sortableColumns: Record<string, { field: string; label: string }> = {
     title: { field: "title", label: "Título" },
@@ -1525,7 +1542,9 @@ function WorkListView({
       )
     }
     const col = columnsByKey.get(columnId)
-    const sortable = sortableColumns[columnId]
+    // Sem modelo, clicar em "N. Prevista" ordenaria pelo Alinhamento: o cabeçalho não clica.
+    const candidate = sortableColumns[columnId]
+    const sortable = candidate && isSortFieldAvailable(candidate.field, sortBasis) ? candidate : undefined
 
     const slug = columnId.startsWith("crit_") ? columnId.slice(5) : null
     const criterion = slug ? CRITERIA_INFO[slug] : null

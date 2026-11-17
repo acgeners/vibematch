@@ -24,6 +24,8 @@ import { criterionHighlights } from "@/lib/ranking/criterion-highlights"
 import type { CriterionHighlight, HighlightWeight } from "@/lib/ranking/criterion-highlights"
 import type { CriterionMoments } from "@/lib/ranking/criterion-unit"
 import { DEFAULT_TIER_BAND_WIDTH } from "@/lib/ranking/tier-config"
+import { activeSortFieldFor, isSortFieldAvailable } from "@/lib/ranking/sort-basis"
+import type { SortBasis } from "@/lib/ranking/sort-basis"
 import type { CriterionSlug } from "@/types/domain"
 import { MAX_SELECTION_WORKS } from "@/lib/compare-config"
 import { toast } from "sonner"
@@ -130,9 +132,10 @@ const COLUMN_TO_SORT_FIELD: Record<string, string> = {
   alignment_score: "alignment_score",
 }
 
-function getSortFieldForColumn(key: string): string | null {
-  if (key.startsWith("crit_")) return key
-  return COLUMN_TO_SORT_FIELD[key] ?? null
+function getSortFieldForColumn(key: string, basis: SortBasis = "expected"): string | null {
+  const field = key.startsWith("crit_") ? key : (COLUMN_TO_SORT_FIELD[key] ?? null)
+  // Sem modelo, clicar em "N. Prevista" ordenaria pelo Alinhamento: o cabeçalho não clica.
+  return field && isSortFieldAvailable(field, basis) ? field : null
 }
 
 interface Tier {
@@ -279,6 +282,8 @@ interface RankingTableProps {
   scoreThresholds?: ColumnThresholds | null
   /** Sort default efetivo (depende do plano). Mantém o header de coluna coerente com o server. */
   defaultSort?: string
+  /** De onde vem a ordem de quem olha (`resolveSortBasis`). Ausente = tem modelo. */
+  sortBasis?: SortBasis
   /** Quando false, o re-rank por IA por-linha ("Rankear") é desabilitado (feature Pago). */
   isPaid?: boolean
   /** Largura da banda de tiers (formula_config.tier_band_width). Valor medido; ver tier-config.ts. */
@@ -644,7 +649,7 @@ function toMoodPreviewWork(e: RankingEntry): MoodPreviewWork {
   return { ...toMoodWork(e), title: e.title }
 }
 
-export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true, tierBandWidth = DEFAULT_TIER_BAND_WIDTH, criterionPrefs, criterionMoments, highlightWeights, favoriteGroups }: RankingTableProps) {
+export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", sortBasis = "expected", isPaid = true, tierBandWidth = DEFAULT_TIER_BAND_WIDTH, criterionPrefs, criterionMoments, highlightWeights, favoriteGroups }: RankingTableProps) {
   const { widths, setWidth } = useColumnWidths()
   // Colunas do /ranking vêm do vocabulário COMPARTILHADO (work-table-config,
   // namespace "ranking"). Prependa a coluna "#" estrutural e descarta as colunas
@@ -877,8 +882,11 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   const router = useRouter()
   const searchParams = useSearchParams()
   const sortRaw = searchParams.get("sort") ?? defaultSort
-  const [activeSortField, activeSortDirRaw = "desc"] = sortRaw.split(",")[0].split(":")
+  const [, activeSortDirRaw = "desc"] = sortRaw.split(",")[0].split(":")
   const activeSortDir: "asc" | "desc" = activeSortDirRaw === "asc" ? "asc" : "desc"
+  // O campo que ordena DE FATO: sem modelo, `sort=expected_score` ordena pelo Alinhamento, e é
+  // ele que a seta do cabeçalho e os tiers seguem.
+  const activeSortField = activeSortFieldFor(sortRaw, sortBasis)
 
   // Tiers (faixas de prioridade equivalente) fazem sentido em qualquer ordenação
   // descendente pelo MESMO eixo da prioridade: por Prioridade (decisão) OU por
@@ -1208,7 +1216,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
           <thead className="sticky top-[var(--top-nav-h)] z-30 [&_th]:bg-muted [&_tr:first-child_th:first-child]:rounded-tl-lg [&_tr:first-child_th:last-child]:rounded-tr-lg [&>tr>th]:border-b [&>tr>th]:border-border/70">
             <tr>
               {columns.map((col) => {
-                const sortField = getSortFieldForColumn(col.key)
+                const sortField = getSortFieldForColumn(col.key, sortBasis)
                 const isSortable = sortField !== null
                 const isActive = isSortable && activeSortField === sortField
                 const slug = col.key.startsWith("crit_") ? col.key.slice(5) : null

@@ -404,6 +404,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         personalStatuses={statusOptions.personalStatuses}
         defaultTopN={prefs.topN}
         defaultSort={defaultSort}
+        sortBasis={sortBasis}
         savedPresets={savedPresets}
         defaultBand={tierBandWidth}
         criterionPresets={prefs.criterionPresets}
@@ -413,7 +414,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         showAdultFilter
       />
 
-      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} criterionPrefs={criterionPrefs} criterionMoments={criterionMoments} highlightWeights={highlightWeights} favoriteGroups={favoriteGroups} />
+      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} sortBasis={sortBasis} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} criterionPrefs={criterionPrefs} criterionMoments={criterionMoments} highlightWeights={highlightWeights} favoriteGroups={favoriteGroups} />
     </div>
   )
 }

@@ -66,6 +66,27 @@ export function effectiveSortLevels<L extends Level>(levels: L[], basis: SortBas
 }
 
 /**
+ * O campo ordena por ELE MESMO para `basis`? Falso quando `effectiveSortLevels` o troca por
+ * outro (sem modelo, "N. Prevista" vira Alinhamento). O painel não o oferece e o cabeçalho da
+ * tabela não o deixa clicável: escolher um campo e ver a lista ordenar por outro é o defeito.
+ */
+export function isSortFieldAvailable(field: string, basis: SortBasis): boolean {
+  if (basis === "expected") return true
+  return effectiveSortLevels([{ field, dir: "desc" }], basis)[0].field === field
+}
+
+/**
+ * O campo que ordena DE FATO o 1º nível de `sort` (`"campo:dir,..."`) para `basis` — a seta do
+ * cabeçalho e os tiers seguem ele. Dono único das duas tabelas (`/ranking` e `/favorites`): sem
+ * modelo, `sort=expected_score` vindo de um link ordena pelo Alinhamento, e a tabela agrupava e
+ * marcava a coluna por uma nota que não ordena a lista.
+ */
+export function activeSortFieldFor(sort: string, basis: SortBasis): string {
+  const [field] = sort.split(",")[0].trim().split(":")
+  return effectiveSortLevels([{ field, dir: "desc" }], basis)[0].field
+}
+
+/**
  * A ordenação PADRÃO de uma lista (`"campo:dir,campo:dir"`, o formato do parâmetro `sort`) como
  * ela vale para `basis`. A página passa este valor ao painel de filtros E à consulta: sem isso o
  * painel de quem não tem modelo dizia "N. Prevista" sobre uma lista ordenada pelo Alinhamento.
