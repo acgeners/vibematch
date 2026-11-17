@@ -65,8 +65,22 @@ const ROLE_TTL_MS = 300_000
 
 const ANON: CurrentUserChrome = { role: "leitor", signedIn: false }
 
-export function AdminProvider({ children }: { children: ReactNode }) {
-  const [chrome, setChrome] = useState<CurrentUserChrome>(ANON)
+/**
+ * `initialSignedIn` vem do servidor (o layout lê o cabeçalho que o middleware põe, ver
+ * `lib/auth/signed-in-header.ts`). Sem ele a barra nascia de visitante para quem está logado:
+ * "Entrar" e só "Catálogo" até a chamada abaixo voltar. O PAPEL continua começando em `leitor`
+ * (fail-closed) e só sobe quando a chamada confirmar.
+ */
+export function AdminProvider({
+  children,
+  initialSignedIn = false,
+}: {
+  children: ReactNode
+  initialSignedIn?: boolean
+}) {
+  const [chrome, setChrome] = useState<CurrentUserChrome>(
+    initialSignedIn ? { role: "leitor", signedIn: true } : ANON,
+  )
 
   // Só troca o objeto quando o VALOR muda: o poll do chrome devolve um objeto novo a cada
   // 5 min e, como ele é o value do context, uma identidade nova re-renderizaria toda a árvore

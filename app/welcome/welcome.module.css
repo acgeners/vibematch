@@ -315,10 +315,16 @@
 }
 
 /* tela 3 — chips + lótus */
+/* Título e lótus dividem a linha: com a lótus `absolute` no canto, ela cobria o último chip
+   da 1ª linha e o texto da faixa "Me atrai". */
+.tasteHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
 .bloom {
-  position: absolute;
-  right: 4px;
-  top: 44px;
+  flex: none;
   width: 92px;
   text-align: center;
   pointer-events: none;

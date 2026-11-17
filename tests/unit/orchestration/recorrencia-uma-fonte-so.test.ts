@@ -62,7 +62,9 @@ describe("recorrência: ordenar e exibir saem da MESMA leitura", () => {
     // desenhava "N. Prevista · 1 nível" sobre uma lista ordenada por Grupos — e o
     // "Aplicar filtros" seguinte reescrevia a URL com a ordem errada. Medido na tela.
     const s = source()
-    const servidor = s.match(/const (\w+) = isMulti \? "groups:desc/)
+    // Pode vir convertida pela régua sem modelo (`defaultSortForBasis`): continua sendo UMA
+    // constante, que é o que este caso guarda.
+    const servidor = s.match(/const (\w+) = (?:defaultSortForBasis\(\s*)?isMulti \? "groups:desc/)
     expect(servidor, "o default de sort da página precisa ser uma constante").not.toBeNull()
     const nome = servidor![1]
     expect(s).toMatch(new RegExp(`const rawSort = str\\("sort"\\) \\?\\? ${nome}`))

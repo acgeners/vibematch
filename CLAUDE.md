@@ -3733,6 +3733,15 @@ Renderize um estado de carregamento explícito e **nenhuma ação de auth/irreve
 chegar. Pra testar esse ramo, atrase a server action no Playwright (`page.route` + delay quando
 `headers()["next-action"]`) — em dev ela resolve rápido demais e o estado nunca aparece.
 
+**Se há sessão a barra sabe pelo SERVIDOR, não pela chamada do navegador:** o middleware põe
+`SIGNED_IN_HEADER` na requisição (`lib/auth/signed-in-header.ts`) e o layout raiz o passa ao
+`AdminProvider` (`initialSignedIn`). Sem isso quem estava logado via "Entrar" até a chamada voltar. O
+PAPEL continua começando em `leitor` (fail-closed).
+
+**O contador do avatar ("Suas notas de IA") só cobra "Interesse não previsto" de quem pode prever**
+(`AI_CONSUMPTION_PERMISSION`, a mesma de `ensureAiConsumption`): para os demais a fila é o catálogo
+inteiro e nunca esvazia (conta leitora nova abria com "99+").
+
 ## O avatar é DERIVADO da URL — não existe coluna de configuração
 
 `user_settings.avatar_url` é dona única, e guarda **uma string com três formas**: `""` (o chip cai
@@ -4948,6 +4957,9 @@ o "Pra você hoje"), e a média externa desempata; sem tags declaradas, a média
 `lib/ranking/sort-basis.ts` (`resolveSortBasis` + `effectiveSortLevels`), que o `getRanking`, a home
 e o cabeçalho do `/ranking` leem do mesmo `getScoresReader`. O Alinhamento de quem não é o dono só
 existe depois de um recálculo dela: quem grava tag declarada dispara `scheduleUserRecalc`.
+**A ordenação PADRÃO do `/ranking` e do `/favorites` passa por `defaultSortForBasis` antes de ir à
+consulta e ao painel de filtros**: sem isso o painel dizia "N. Prevista" sobre uma lista ordenada pelo
+Alinhamento.
 
 ## Recálculo de quem não é o dono passa SEMPRE por `scheduleUserRecalc`
 

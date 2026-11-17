@@ -1,5 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getSessionUserId } from "@/server/queries/current-user"
+import { getCurrentRole, getSessionUserId } from "@/server/queries/current-user"
+import { AI_CONSUMPTION_PERMISSION } from "@/server/queries/ai-quota"
+import { roleAllows } from "@/lib/plans/roles"
 import { fetchAllRows } from "@/lib/supabase/paginate"
 import { getAlignmentQueueWorks, getSynopsisQueueWorks, getUntrackedWorks } from "@/server/queries/recommendations"
 import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
@@ -142,11 +144,19 @@ export async function getCuradoriaBadgeUnreadCount(): Promise<number> {
  * Metade que sobrou da antiga `getEvalBadgeUnreadCount` depois da divisão em
  * duas páginas (ver `getCuradoriaBadgeUnreadCount`). "Untracked" não entra —
  * nunca entrou no badge original, mesmo hoje morando na mesma página.
+ *
+ * 🔴 "Interesse não previsto" só conta para quem PODE prever: a mesma permissão que as ações
+ * de prever exigem (`ensureAiConsumption` → `consume_ai`, de Assinante para cima). Para os
+ * demais a fila é o catálogo inteiro e nunca esvazia: uma conta leitora recém-criada abria o
+ * app com "99+" no avatar (medido em 17/11/2026: 1.077 obras) sem nada que ela pudesse fazer.
  */
 export async function getRecommendationBadgeUnreadCount(): Promise<number> {
+  const canPredictInterest = roleAllows(await getCurrentRole(), AI_CONSUMPTION_PERMISSION)
   const [veredito, interesse, ackSets] = await Promise.all([
     getAlignmentQueueWorks({ states: ["stale"], countOnly: true }),
-    getSynopsisQueueWorks({ states: ["unpredicted"], countOnly: true }),
+    canPredictInterest
+      ? getSynopsisQueueWorks({ states: ["unpredicted"], countOnly: true })
+      : Promise.resolve([]),
     getReadAckSets(),
   ])
   const ackVer = ackSets.get("veredito")!

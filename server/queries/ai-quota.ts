@@ -95,6 +95,13 @@ export async function getAiBudgetStatus(): Promise<AiBudgetStatus | null> {
 }
 
 /**
+ * A permissão que `ensureAiConsumption` exige. Exportada para quem precisa saber, SEM gastar,
+ * se a pessoa pode rodar IA de consumo (ex.: o contador do avatar só cobra "Interesse não
+ * previsto" de quem pode prever). Uma 2ª grafia da permissão divergiria em silêncio.
+ */
+export const AI_CONSUMPTION_PERMISSION = "consume_ai" as const
+
+/**
  * O gate ÚNICO de toda IA de consumo: permissão **e** cota, nesta ordem.
  *
  * Existe pra que não haja como passar em um e esquecer o outro — foi assim que deep dive
@@ -103,7 +110,7 @@ export async function getAiBudgetStatus(): Promise<AiBudgetStatus | null> {
 export async function ensureAiConsumption(): Promise<
   { ok: true } | { ok: false; error: string }
 > {
-  const permitted = await ensurePermission("consume_ai")
+  const permitted = await ensurePermission(AI_CONSUMPTION_PERMISSION)
   if (!permitted.ok) return permitted
   return ensureAiBudget()
 }

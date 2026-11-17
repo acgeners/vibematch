@@ -66,6 +66,27 @@ export function effectiveSortLevels<L extends Level>(levels: L[], basis: SortBas
 }
 
 /**
+ * A ordenação PADRÃO de uma lista (`"campo:dir,campo:dir"`, o formato do parâmetro `sort`) como
+ * ela vale para `basis`. A página passa este valor ao painel de filtros E à consulta: sem isso o
+ * painel de quem não tem modelo dizia "N. Prevista" sobre uma lista ordenada pelo Alinhamento.
+ * Mesma função que `getRanking` aplica, então reaplicá-la ao que já foi convertido não muda nada.
+ */
+export function defaultSortForBasis(sort: string, basis: SortBasis): string {
+  if (basis === "expected") return sort
+  const levels = sort
+    .split(",")
+    .map((seg) => seg.trim())
+    .filter(Boolean)
+    .map((seg) => {
+      const [field, dir] = seg.split(":")
+      return { field, dir: dir === "asc" ? ("asc" as const) : ("desc" as const) }
+    })
+  return effectiveSortLevels(levels, basis)
+    .map((l) => `${l.field}:${l.dir}`)
+    .join(",")
+}
+
+/**
  * O Alinhamento de alguém ordena alguma coisa? Sem tag declarada o recálculo deixa `personal_fit`
  * nulo; com o perfil sem variação, 0,5 em todas as obras. Nos dois casos ele não separa nada, e a
  * lista fica na média externa. `Number()`: a coluna é `numeric`, que pode chegar como texto.

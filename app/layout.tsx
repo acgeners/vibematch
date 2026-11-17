@@ -1,6 +1,8 @@
 import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
+import { headers } from "next/headers"
 import "./globals.css"
+import { SIGNED_IN_HEADER } from "@/lib/auth/signed-in-header"
 import { TopNav } from "@/components/layout/top-nav"
 import { MobileNav } from "@/components/layout/mobile-nav"
 import { AppShell } from "@/components/layout/app-shell"
@@ -68,6 +70,9 @@ export default async function RootLayout({
   // Configurações e Preferências). Montado aqui e embarcado no HTML, então buscar um ajuste
   // responde na tecla — só obra vai ao servidor. Ver server/queries/search-index.ts.
   const searchIndex = buildSearchIndex()
+  // Se há sessão, pelo `getUser()` que o middleware já fez (sem chamada nova): a barra nasce
+  // certa em vez de mostrar "Entrar" a quem está logado. Ver `lib/auth/signed-in-header.ts`.
+  const signedIn = (await headers()).get(SIGNED_IN_HEADER) === "1"
 
   return (
     <html
@@ -84,7 +89,7 @@ export default async function RootLayout({
               dois são diferentes. Devolve null quando o alvo é a nuvem. */}
           <DbTargetBanner />
           <CostConfirmProvider>
-            <AdminProvider>
+            <AdminProvider initialSignedIn={signedIn}>
               {/* Acima do shell: a barra superior e a sidebar da console leem os
                   mesmos contadores, e um fetch por consumidor duplicaria a leitura
                   mais cara do chrome. Ver components/layout/chrome-badges.tsx. */}

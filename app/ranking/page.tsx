@@ -37,7 +37,7 @@ import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 import { readStatusFilter } from "@/lib/status-filter-toggle"
 import { parseArtFilter } from "@/lib/art/url"
 import { getScoresReader } from "@/server/queries/user-scores"
-import { resolveSortBasis } from "@/lib/ranking/sort-basis"
+import { defaultSortForBasis, resolveSortBasis } from "@/lib/ranking/sort-basis"
 
 interface RankingPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -185,11 +185,18 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // depende SÓ delas — então só elas o bloqueiam. Os metadados do painel (gêneros, tags,
   // status, presets) e as queries independentes da lista descem pro Promise.all de baixo,
   // pra rodarem em PARALELO com o getRanking em vez de na frente dele.
-  const [canAi, prefs, declaredPrefs] = await Promise.all([
+  // 🔴 Quem NÃO é o dono não tem estimativa de arte (o overlay a anula), então o controle
+  // não pode aparecer: "Forte" devolveria vazio, indistinguível de "não há obra com arte
+  // forte". `cache()` no reader ⇒ sem round-trip extra.
+  const [canAi, prefs, declaredPrefs, artScoresReader] = await Promise.all([
     canConsumeAi(),
     getPreferences(),
     hideActive ? getDeclaredTagPreferences() : Promise.resolve([]),
+    getScoresReader(),
   ])
+  // A mesma régua que ordena a lista em `getRanking`: o cabeçalho diz de onde vem a ordem, e a
+  // ordenação padrão do painel já sai convertida (sem modelo, "N. Prevista" vira Alinhamento).
+  const sortBasis = resolveSortBasis(artScoresReader)
   const avoided = declaredPrefs.filter((p) => p.stance === "avoid")
   const avoidedSlugs =
     hideMode === "all"
@@ -198,9 +205,10 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         ? avoided.filter((p) => p.weight >= STRONG_TAG_WEIGHT).map((p) => p.slug)
         : []
   const isPaid = canAi
-  const defaultSort = isPaid
-    ? "expected_score:desc,alignment_score:desc"
-    : "expected_score:desc,personal_fit:desc"
+  const defaultSort = defaultSortForBasis(
+    isPaid ? "expected_score:desc,alignment_score:desc" : "expected_score:desc,personal_fit:desc",
+    sortBasis,
+  )
   const rawSort = str("sort") ?? defaultSort
   let sortLevels: SortLevel[] = rawSort.split(",").map((seg) => {
     const [field, dir] = seg.trim().split(":")
@@ -243,13 +251,6 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
 
   // Estimativa de arte (?art=forte|sem_fraca). Faixa, nunca pontos — ver lib/art/url.ts.
   const artFilter = parseArtFilter(str("art"))
-  // 🔴 Quem NÃO é o dono não tem estimativa de arte (o overlay a anula), então o controle
-  // não pode aparecer: "Forte" devolveria vazio, indistinguível de "não há obra com arte
-  // forte". `cache()` no reader ⇒ sem round-trip extra.
-  const artScoresReader = await getScoresReader()
-  // A mesma régua que ordena a lista em `getRanking` — o cabeçalho diz de onde vem a ordem.
-  const sortBasis = resolveSortBasis(artScoresReader)
-
   const filters: RankingFilters = {
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
     criterionMax: Object.keys(criterionMax).length ? criterionMax : undefined,
