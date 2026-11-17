@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Radar, ImageOff, Info, BookOpen, ChevronDown, Star, Users, Target } from "lucide-react"
 import type { ReactNode } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { ScoreBadge } from "@/components/ui/score-badge"
 import { PersonalStatusBadge } from "@/components/ui/status-badge"
 import { WorkContentChip } from "@/components/ui/work-content-chip"
@@ -18,6 +17,14 @@ import { CoverImage } from "@/components/ui/cover-image"
 import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
 import { formatProvenanceWhen } from "@/components/ui/ai-provenance"
 import type { SimilarWork } from "@/server/queries/similar-works"
+import {
+  SIMILARITY_BANDS,
+  formatSimilarity,
+  similarityBand,
+  similarityBandLevel,
+  similarityBandRange,
+} from "@/lib/ui/similarity-band"
+import type { SimilarityBand } from "@/lib/ui/similarity-band"
 
 interface SimilarWorksCardProps {
   works: SimilarWork[]
@@ -38,20 +45,16 @@ interface SimilarWorksCardProps {
   embedding?: { model: string | null; at: string | null } | null
 }
 
-function formatSimilarity(s: number): string {
-  return `${Math.round(s * 100)}%`
-}
-
-/**
- * Faixas na escala CENTRALIZADA (mig 225: 0 = duas obras quaisquer). Medido em 2026-11-16 sobre
- * as 8 mais parecidas de cada uma das 1.085 obras, com o texto sem título: p25 0,29 · p50 0,33 ·
- * p75 0,37. Verde = quartil de cima, cinza = quartil de baixo. Os cortes antigos (0,85/0,70) eram
- * da escala crua, onde duas obras quaisquer já davam 0,69; na nova, nada os alcançaria.
- */
-function similarityClasses(s: number): string {
-  if (s >= 0.37) return "bg-emerald-500/15 text-emerald-700 border-emerald-500/40 dark:text-emerald-300"
-  if (s >= 0.29) return "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
-  return "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
+/** Barra de segmentos do grupo: N acesos na cor dele, o resto na trilha neutra. */
+function SimilarityMeter({ band }: { band: SimilarityBand }) {
+  const level = similarityBandLevel(band)
+  return (
+    <span className="flex gap-[3px]" aria-hidden>
+      {SIMILARITY_BANDS.map((b, i) => (
+        <span key={b.id} className={cn("h-1.5 w-3 rounded-[2px]", i < level ? band.barClass : "bg-foreground/15")} />
+      ))}
+    </span>
+  )
 }
 
 function formatVotes(votes: number): string {
@@ -221,6 +224,8 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
   // "Não lidas" por padrão: recomendação serve pra achar a PRÓXIMA leitura.
   // O toggle "Todas" traz de volta as já lidas/em andamento.
   const [showOnly, setShowOnly] = useState<"unread" | "all">("unread")
+  // Legenda recolhida por padrão (sempre fechada no SSR e no 1º render: sem risco de hidratação).
+  const [legendOpen, setLegendOpen] = useState(false)
 
   const filtered = useMemo(
     () => (showOnly === "all" ? works : works.filter(isUnreadWork)),
@@ -314,11 +319,11 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
                     <strong>Similaridade semântica.</strong> De cada obra montamos um
                     “retrato” em texto — sinopse, tags e gêneros, as notas dos atributos
                     avaliados pela IA e um resumo das reviews — e transformamos esse texto
-                    num vetor (<strong>embedding</strong>). O <strong>%</strong> é a
-                    proximidade entre os dois vetores, descontado o que todas as obras do
-                    catálogo têm em comum: 0% é o que duas obras quaisquer dão, e entre as 8
-                    mais parecidas de uma obra o comum fica entre 29% e 37%. O título não
-                    entra no retrato.
+                    num vetor (<strong>embedding</strong>). A semelhança é a proximidade
+                    entre os dois vetores, descontado o que todas as obras do catálogo têm em
+                    comum (0% é o que duas obras quaisquer dão). Como esse % não se lê
+                    sozinho, cada obra aparece num grupo: as faixas estão em “Como ler”. O
+                    título não entra no retrato.
                     {embedding && (
                       <span className="mt-2 block border-t border-background/20 pt-1.5 text-[11px] text-muted-foreground">
                         Vetor desta obra: <span className="font-mono font-semibold">{embedding.model ?? "sem registro"}</span>
@@ -350,6 +355,21 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
                 Cruzar com outras
               </Link>
             )}
+
+            <button
+              type="button"
+              onClick={() => setLegendOpen((v) => !v)}
+              aria-expanded={legendOpen}
+              aria-controls="similar-works-legend"
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[13px] font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90",
+                legendOpen && "ring-2 ring-primary ring-offset-2 ring-offset-card",
+              )}
+            >
+              <Info className="h-3.5 w-3.5" />
+              Como ler
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", legendOpen && "rotate-180")} />
+            </button>
           </div>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -421,41 +441,57 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
         </div>
       </CardHeader>
       <CardContent className="pt-0">
-        {/* Barra de Legenda */}
-        <div className="flex flex-col gap-2 border-b border-border/40 pb-4 mb-4 text-xs text-muted-foreground bg-muted/15 p-3 rounded-lg mt-1">
-          <div className="flex items-center gap-1">
-            <span className="font-bold text-foreground text-[13px]">Legenda das informações:</span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 mt-1">
-            <div className="flex items-start gap-4">
-              <div className="flex flex-col items-center gap-1 shrink-0 mt-1">
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-bold leading-none">
+        {/* Legenda recolhida: abre pelo "Como ler" do cabeçalho. A escala de cores mora
+            aqui (chão escuro do card) e não num tooltip, cujo fundo invertido derruba o
+            contraste das cores, e que não abre no toque. */}
+        {legendOpen && (
+          <div
+            id="similar-works-legend"
+            className="@container mb-4 flex flex-col gap-2 rounded-lg border-b border-border/40 bg-muted/15 p-3 text-xs text-muted-foreground"
+          >
+            <span className="text-[13px] font-bold text-foreground">Legenda das informações:</span>
+            <div className="mt-1 grid grid-cols-1 gap-x-6 gap-y-3 @2xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+              <div className="flex flex-col gap-2">
+                <span className="text-[10px] font-bold uppercase leading-none tracking-wider text-muted-foreground/60">
                   similar
                 </span>
-                <Badge
-                  variant="outline"
-                  className="h-8 min-w-[3rem] font-mono text-sm font-bold px-2 py-0.5 rounded-md border flex items-center justify-center shadow-xs bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300 pointer-events-none"
-                >
-                  NN%
-                </Badge>
+                <p className="text-[13px] leading-snug">
+                  Quão parecida ela é com esta obra, comparada às vizinhas de todo o catálogo (cada
+                  obra tem 8). O % exato aparece ao passar o mouse.
+                </p>
+                <div className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[12.5px] @md:grid-cols-[auto_auto_auto_minmax(0,1fr)]">
+                  {SIMILARITY_BANDS.map((band) => (
+                    <div key={band.id} className="contents">
+                      <SimilarityMeter band={band} />
+                      <span
+                        className={cn(
+                          "justify-self-start whitespace-nowrap rounded-md px-2 py-0.5 font-semibold leading-tight",
+                          band.chipClass,
+                        )}
+                      >
+                        {band.label}
+                      </span>
+                      <span className="tabular-nums text-foreground/80">{similarityBandRange(band)}</span>
+                      {/* Some no card estreito (celular): não cabe ao lado sem ser cortada na borda. */}
+                      <span className="hidden whitespace-nowrap text-muted-foreground/80 @md:inline">{band.share} das vizinhas</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <p className="text-[13px] leading-snug">
-                Similaridade semântica com esta obra. Calculada por distância cosseno entre os embeddings de cada obra.
-              </p>
-            </div>
-            <div className="flex items-start gap-4">
-              <div className="flex flex-col items-center gap-1 shrink-0 mt-1">
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-bold leading-none">
-                  prevista
-                </span>
-                <ScoreBadge score={null} variant="solid" className="h-8 min-w-[3rem] text-sm font-bold shadow-xs px-2 pointer-events-none" />
+              <div className="flex items-start gap-4">
+                <div className="mt-1 flex shrink-0 flex-col items-center gap-1">
+                  <span className="text-[10px] font-bold uppercase leading-none tracking-wider text-muted-foreground/60">
+                    prevista
+                  </span>
+                  <ScoreBadge score={null} variant="solid" className="h-8 min-w-[3rem] text-sm font-bold shadow-xs px-2 pointer-events-none" />
+                </div>
+                <p className="text-[13px] leading-snug">
+                  Sua nota pessoal se você já avaliou (rótulo <em>pessoal</em>), ou a Nota Prevista pelo sistema se ainda não (rótulo <em>prevista</em>).
+                </p>
               </div>
-              <p className="text-[13px] leading-snug">
-                Sua nota pessoal se você já avaliou (rótulo <em>pessoal</em>), ou a Nota Prevista pelo sistema se ainda não (rótulo <em>prevista</em>).
-              </p>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Filtro "Não lidas" sem resultado: estado explícito com a saída a um
             clique — a alternativa era um card silenciosamente vazio. */}
@@ -472,9 +508,11 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
           </div>
         )}
 
+        <TooltipProvider>
         <div className="flex flex-col gap-3">
           {sorted.map((w) => {
             const displayScore = w.userScore ?? w.expectedScore
+            const band = similarityBand(w.similarity)
             const isManual = w.userScore != null
             // Status de leitura: oculta "Untracked" (id 10 = sem status ativo).
             const readingStatusId =
@@ -494,7 +532,7 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
             return (
               <div
                 key={w.id}
-                className="group grid grid-cols-1 sm:grid-cols-[auto_minmax(0,300px)_minmax(0,1fr)_auto] rounded-xl border border-border/50 bg-card/25 hover:bg-card/70 hover:border-primary/20 hover:shadow-md transition-all duration-300 overflow-hidden"
+                className="group grid grid-cols-1 sm:grid-cols-[auto_minmax(0,240px)_minmax(0,1fr)_7rem] xl:grid-cols-[auto_minmax(0,300px)_minmax(0,1fr)_7rem] rounded-xl border border-border/50 bg-card/25 hover:bg-card/70 hover:border-primary/20 hover:shadow-md transition-all duration-300 overflow-hidden"
               >
                 {/* Col 1 — capa */}
                 <div className="flex items-start justify-center p-3">
@@ -613,21 +651,36 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
                   )}
                 </div>
 
-                {/* Col 4 — Similar + Prevista/Pessoal */}
-                <div className="flex flex-row items-center justify-center gap-4 border-t border-border/40 p-4 sm:flex-col sm:border-l sm:border-t-0">
-                  <div className="flex flex-col items-center gap-1">
+                {/* Col 4 — Similar + Prevista/Pessoal. O grupo, e não o % cru: na escala
+                    centralizada "36%" é uma vizinha normal e lê como fraca. O % fica no tooltip. */}
+                <div className="flex flex-row items-center justify-center gap-4 border-t border-border/40 p-4 sm:flex-col sm:border-l sm:border-t-0 sm:px-2 sm:py-3">
+                  <div className="flex flex-col items-center gap-1.5">
                     <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-bold leading-none">
                       Similar
                     </span>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "h-8 min-w-[3rem] font-mono text-sm font-bold px-2 py-0.5 rounded-md border flex items-center justify-center shadow-xs",
-                        similarityClasses(w.similarity),
-                      )}
-                    >
-                      {formatSimilarity(w.similarity)}
-                    </Badge>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label={`Similaridade ${formatSimilarity(w.similarity)}: ${band.label}`}
+                          className="flex cursor-help flex-col items-center gap-1.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <SimilarityMeter band={band} />
+                          <span
+                            className={cn(
+                              "max-w-[6rem] rounded-md px-2 py-0.5 text-center text-[12.5px] font-semibold leading-tight",
+                              band.chipClass,
+                            )}
+                          >
+                            {band.label}
+                          </span>
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="left" className="text-xs">
+                        <span className="font-mono font-semibold">{formatSimilarity(w.similarity)}</span>
+                        <span className="text-background/70"> · faixa do grupo: {similarityBandRange(band)}</span>
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
 
                   {displayScore != null && (
@@ -647,6 +700,7 @@ export function SimilarWorksCard({ works, className, embedding, workId }: Simila
             )
           })}
         </div>
+        </TooltipProvider>
       </CardContent>
     </Card>
   )
