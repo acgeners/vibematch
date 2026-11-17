@@ -20,6 +20,7 @@ const acoes = vi.hoisted(() => ({
   saveOnboardingTastes: vi.fn(async () => ({ ok: true })),
   deckSwipeAction: vi.fn(async () => ({ ok: true })),
   setHideAdultContent: vi.fn(async () => ({ error: null })),
+  setHideAvoidedTags: vi.fn(async () => ({ error: null })),
   saveQuickScore: vi.fn(async () => ({ ok: true })),
   push: vi.fn(),
 }))
@@ -30,7 +31,10 @@ vi.mock("@/server/actions/onboarding", () => ({
   deckSwipeAction: acoes.deckSwipeAction,
   getOnboardingProgressAction: acoes.getOnboardingProgressAction,
 }))
-vi.mock("@/server/actions/settings", () => ({ setHideAdultContent: acoes.setHideAdultContent }))
+vi.mock("@/server/actions/settings", () => ({
+  setHideAdultContent: acoes.setHideAdultContent,
+  setHideAvoidedTags: acoes.setHideAvoidedTags,
+}))
 vi.mock("@/server/actions/quick-score", () => ({ saveQuickScore: acoes.saveQuickScore }))
 vi.mock("@/components/import/external-list-import", () => ({ ExternalListImport: () => <div>importar</div> }))
 vi.mock("@/components/ui/cover-image", () => ({ CoverImage: () => null }))
@@ -39,7 +43,16 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: acoes.push }) }))
 const { WelcomeFlow } = await import("@/app/welcome/welcome-flow")
 
 const abrir = (props: Partial<React.ComponentProps<typeof WelcomeFlow>> = {}) =>
-  render(<WelcomeFlow displayName="Ana" initialLoved={[]} initialVetos={[]} initialHideAdult={null} {...props} />)
+  render(
+    <WelcomeFlow
+      displayName="Ana"
+      initialLoved={[]}
+      initialVetos={[]}
+      initialHideAdult={null}
+      initialHideAvoided={false}
+      {...props}
+    />,
+  )
 
 const clicar = (nome: string | RegExp) => fireEvent.click(screen.getByRole("button", { name: nome }))
 
@@ -122,5 +135,38 @@ describe("medidor de notas", () => {
     expect(acoes.getOnboardingProgressAction).toHaveBeenLastCalledWith([deck[0].id])
     // 3 do servidor (sem esta) + 1 da tela = 4, e não 5.
     expect(screen.getByText("de 20").previousElementSibling?.textContent).toBe("4")
+  })
+})
+
+describe("esconder as obras com tags evitadas é ESCOLHA da pessoa", () => {
+  async function irAteGostos() {
+    abrir({ initialHideAdult: false })
+    clicar(/Começar/)
+    clicar(/Continuar/)
+    await screen.findByText(/O que te atrai/)
+    for (const g of ["Romance", "Drama", "Comédia"]) clicar(g)
+  }
+
+  it("sem veto marcado, a escolha não aparece", async () => {
+    await irAteGostos()
+    expect(screen.queryByRole("button", { name: /ficam escondidas/ })).toBeNull()
+  })
+
+  it("vetar sozinho não liga nada: o padrão é aparecer", async () => {
+    await irAteGostos()
+    clicar("Isekai")
+    expect(screen.getByRole("button", { name: /aparecem, mais abaixo/ }).getAttribute("aria-pressed")).toBe("true")
+    clicar(/Continuar/)
+    await screen.findByText("Obra Um")
+    expect(acoes.setHideAvoidedTags).not.toHaveBeenCalled()
+  })
+
+  it("escolher 'ficam escondidas' grava a preferência ao seguir", async () => {
+    await irAteGostos()
+    clicar("Isekai")
+    clicar(/ficam escondidas/)
+    clicar(/Continuar/)
+    await screen.findByText("Obra Um")
+    expect(acoes.setHideAvoidedTags).toHaveBeenCalledWith(true)
   })
 })

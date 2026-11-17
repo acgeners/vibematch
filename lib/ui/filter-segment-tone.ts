@@ -30,6 +30,8 @@
  * digitado por call site é como o "Não" ficaria vermelho de novo no próximo botão adicionado.
  */
 
+import { HIDE_AVOIDED_OFF } from "@/lib/tags/hide-avoided"
+
 /** A base compartilhada — altura, espaçamento e tipografia dos três segmentados. */
 export const FILTER_SEGMENT_BASE =
   "inline-flex h-7 items-center gap-1 whitespace-nowrap rounded px-2.5 text-xs font-medium transition-colors"
@@ -52,9 +54,11 @@ export function filterSegmentClass(active: boolean, role: FilterSegmentRole): st
 /**
  * O papel de um botão a partir do valor que ele grava na URL.
  *
- * `null` é o "não filtra" de todo segmentado deste painel — é ele que LIMPA o parâmetro. Por
- * isso a régua é derivada daqui e não de um booleano por call site.
+ * `null` é o "não filtra" de todo segmentado deste painel — é ele que LIMPA o parâmetro. A exceção
+ * é `hide_avoided=off`, que desliga o filtro numa visita quando a preferência da pessoa é esconder
+ * (`lib/tags/hide-avoided.ts`): também não corta nada. Por isso a régua é derivada daqui e não de um
+ * booleano por call site.
  */
 export function filterSegmentRole(urlValue: string | null | undefined): FilterSegmentRole {
-  return urlValue == null ? "selected" : "cutting"
+  return urlValue == null || urlValue === HIDE_AVOIDED_OFF ? "selected" : "cutting"
 }

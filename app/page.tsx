@@ -6,7 +6,8 @@ import {
   getTopPicksForToday,
 } from "@/server/queries/dashboard"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
-import { getCurrentUserProfile, getSessionUserId } from "@/server/queries/current-user"
+import { getCurrentUserProfile, getHideAvoidedTags, getSessionUserId } from "@/server/queries/current-user"
+import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { getPublicShowcase, getSpotlightWork } from "@/server/queries/public-showcase"
 import { getSiteStats } from "@/server/queries/auth-hero"
 import { PublicHome } from "@/components/home/public-home"
@@ -63,7 +64,7 @@ export default async function HomePage() {
     // query já carrega todas as obras acompanhadas e filtra em memória, então subir o limite
     // não custa ida a mais ao banco.
     getContinueReading(60),
-    getTopPicksForToday(12),
+    hiddenTagSlugs(sessionId).then((hideTagSlugs) => getTopPicksForToday(12, { hideTagSlugs })),
     getCurrentUserProfile(),
     getFirstStepsProgress(),
   ])
@@ -157,4 +158,14 @@ export default async function HomePage() {
       )}
     </div>
   )
+}
+
+/**
+ * As tags evitadas que a prateleira esconde — só quando a pessoa escolheu escondê-las (migration 227).
+ * `userId` explícito: sem ele, `getDeclaredTagPreferences` cairia no dono.
+ */
+async function hiddenTagSlugs(userId: string): Promise<string[]> {
+  if (!(await getHideAvoidedTags())) return []
+  const declared = await getDeclaredTagPreferences(undefined, { userId })
+  return declared.filter((d) => d.stance === "avoid").map((d) => d.slug)
 }

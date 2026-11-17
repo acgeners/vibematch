@@ -5,6 +5,7 @@ import { fetchAllRows } from "@/lib/supabase/paginate"
 import { pickDeckWorks } from "@/lib/onboarding/deck-sampler"
 import type { DeckCandidate } from "@/lib/onboarding/deck-sampler"
 import { coverCandidates } from "@/lib/work-derived"
+import { workIdsWithAnyTag } from "@/server/queries/works-with-tags"
 
 type Linha = Record<string, unknown>
 
@@ -65,7 +66,7 @@ export async function getOnboardingDeck(opts: {
       orderBy: ["user_id", "work_id"],
       label: "getOnboardingDeck(user_work_state)",
     }),
-    loadVetoedWorkIds(supabase, opts.avoidedTagSlugs ?? []),
+    workIdsWithAnyTag(supabase, opts.avoidedTagSlugs ?? []),
   ])
 
   const genreName = new Map(genres.map((g) => [g.id as string, g.name as string]))
@@ -125,24 +126,4 @@ export async function getOnboardingDeck(opts: {
       }
     })
     .filter((w): w is OnboardingDeckWork => w !== null && w.synopsis.length > 0)
-}
-
-/** Lotes de slugs: a lista vai na query string, e grupo inteiro evitado são centenas de tags. */
-const SLUG_CHUNK = 100
-
-/** As obras com ALGUMA das tags evitadas. Paginada: só a Isekai cobre centenas de obras. */
-async function loadVetoedWorkIds(
-  supabase: ReturnType<typeof createAdminClient>,
-  slugs: string[],
-): Promise<Set<string>> {
-  const ids = new Set<string>()
-  for (let i = 0; i < slugs.length; i += SLUG_CHUNK) {
-    const chunk = slugs.slice(i, i + SLUG_CHUNK)
-    const rows = await fetchAllRows<{ work_id: string }>(
-      () => supabase.from("work_tags").select("work_id, tags!inner(slug)").in("tags.slug", chunk),
-      { orderBy: ["work_id", "tag_id"], label: "getOnboardingDeck(work_tags evitadas)" },
-    )
-    for (const r of rows) ids.add(r.work_id)
-  }
-  return ids
 }

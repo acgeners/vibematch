@@ -227,6 +227,15 @@ export async function getHideAdultContent(_admin?: AdminClient): Promise<boolean
   return (row?.hide_adult_content as boolean | undefined) ?? false
 }
 
+/**
+ * "Esconder as obras com tags que evito" (migration 227) da pessoa da SESSÃO. Anônimo e coluna ainda
+ * não migrada ⇒ false. Quem decide o modo de cada visita é `resolveHideAvoided` (`lib/tags/hide-avoided.ts`).
+ */
+export async function getHideAvoidedTags(): Promise<boolean> {
+  const row = await getCurrentUserSettingsRow()
+  return row?.hide_avoided_tags === true
+}
+
 export interface ReviewSynthesisToggles {
   summaryEnabled: boolean
   digestEnabled: boolean
