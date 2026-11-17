@@ -21,7 +21,9 @@ export function FirstStepsCard({ progress }: { progress: FirstStepsProgress }) {
       done: progress.saidTastes,
       title: "Dizer o que você gosta e evita",
       sub: "Gêneros que te atraem e vetos que te poupam tempo.",
-      cta: { label: "Escolher", href: "/preferences" },
+      // As boas-vindas, e não /preferences: é o caminho guiado, e quem pulou a tela 1 só volta a
+      // ela por aqui.
+      cta: { label: "Escolher", href: "/welcome" },
     },
     {
       done: progress.broughtList,
@@ -64,8 +66,14 @@ export function FirstStepsCard({ progress }: { progress: FirstStepsProgress }) {
           <Compass className="size-4 text-primary" />
           Primeiros passos
         </CardTitle>
-        <span className="font-mono text-xs tabular-nums text-primary">
-          {doneCount} de {steps.length}
+        <span className="flex items-center gap-3">
+          {/* A porta de volta às boas-vindas: sem ela, "Pular por agora" não tinha volta. */}
+          <Link href="/welcome" className="text-xs font-semibold text-primary hover:underline">
+            Rever as boas-vindas
+          </Link>
+          <span className="font-mono text-xs tabular-nums text-primary">
+            {doneCount} de {steps.length}
+          </span>
         </span>
       </CardHeader>
       <CardContent className="divide-y divide-border p-0">

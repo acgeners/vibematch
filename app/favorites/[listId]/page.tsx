@@ -12,7 +12,8 @@ import { RecommendDialog } from "@/components/recommendations/recommend-dialog"
 import { ViewRecommendationsButton } from "@/components/recommendations/view-recommendations-button"
 import { GroupDetailActions } from "@/components/favorites/lists/group-detail-actions"
 import { GroupRecommendButton } from "@/components/favorites/lists/group-recommend-button"
-import { canConsumeAi } from "@/server/queries/current-user"
+import { canConsumeAi, getHideAvoidedTags } from "@/server/queries/current-user"
+import { resolveHideAvoided } from "@/lib/tags/hide-avoided"
 import { getRanking, type RankingFilters, type SortLevel } from "@/server/queries/ranking"
 import { getWorksByIds } from "@/server/queries/works"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
@@ -154,9 +155,10 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
   const personalFilter = readStatusFilter(str, "personal")
   const publicationFilter = readStatusFilter(str, "publication")
 
-  // Filtro opt-in "esconder minhas tags evitadas" (mesmo padrão de /ranking, ver
-  // app/ranking/page.tsx) — off | "strong" (só as evitadas com ênfase 2×) | "all".
-  const hideMode = str("hide_avoided") // "strong" | "all" | undefined
+  // "Esconder minhas tags evitadas" (mesmo padrão de /ranking, ver app/ranking/page.tsx) — off |
+  // "strong" (só as evitadas com ênfase 2×) | "all". Sem parâmetro, vale a preferência da pessoa.
+  const preferHideAvoided = await getHideAvoidedTags()
+  const hideMode = resolveHideAvoided(str("hide_avoided"), preferHideAvoided)
   const hideActive = hideMode === "strong" || hideMode === "all"
   const declaredPrefs = hideActive ? await getDeclaredTagPreferences() : []
   const avoided = declaredPrefs.filter((p) => p.stance === "avoid")
@@ -400,6 +402,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         showTopN={false}
         showTierBand={false}
         showHideAvoided
+        preferHideAvoided={preferHideAvoided}
         showArtFilter={artScoresReader.isOwner}
         // A recorrência só é ordenável onde a contagem é carregada — e o painel precisa
         // CONHECER o campo, senão ele lê `sort=groups:desc` como "N. Prevista" e o

@@ -13,6 +13,9 @@ import type { SynopsisQuality } from "@/types/domain"
 import { comixWorkUrl } from "@/lib/external/comix"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
+import { resolveSortBasis } from "@/lib/ranking/sort-basis"
+import { workIdsWithAnyTag } from "@/server/queries/works-with-tags"
+import type { SortBasis } from "@/lib/ranking/sort-basis"
 import { FOLLOWING_PERSONAL_STATUSES, DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 import {
   isFollowingPersonalStatus,
@@ -224,10 +227,10 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 }
 
 /**
- * Melhores obras que você PODE pegar pra ler agora — a prateleira "Pra você hoje". Ordena por
- * Nota Prevista quando há modelo de gosto e por nota da comunidade (`platform_avg`) quando não há.
+ * Melhores obras que você PODE pegar pra ler agora — a prateleira "Pra você hoje". Ordena pela
+ * régua de `lib/ranking/sort-basis.ts`: Nota Prevista, Alinhamento ou nota da comunidade.
  *
- * ⚠️ Devolve `basis` junto, e não é enfeite: quem chama PRECISA saber por qual das duas a lista
+ * ⚠️ Devolve `basis` junto, e não é enfeite: quem chama PRECISA saber por qual delas a lista
  * foi ordenada pra se explicar. A home prometia "as maiores Notas Previstas" num rótulo fixo, e
  * pra conta nova (sem modelo) isso era falso — as capas ali vinham de `platform_avg`. Medido em
  * prod em 2026-08-04. Devolver só o array convida o chamador a adivinhar de novo.
@@ -244,7 +247,14 @@ export async function getDashboardStats(): Promise<DashboardStats> {
  */
 export async function getTopPicksForToday(
   limit = 5,
-): Promise<{ items: TopWorkItem[]; basis: "expected" | "platform" }> {
+  opts: {
+    /**
+     * Slugs das tags que a pessoa evita, quando ela escolheu escondê-las ("esconder as obras com
+     * tags que evito", migration 227). Quem chama resolve a sessão e a preferência; vazio = não esconde.
+     */
+    hideTagSlugs?: string[]
+  } = {},
+): Promise<{ items: TopWorkItem[]; basis: SortBasis }> {
   const supabase = createAdminClient()
 
   // 🔴 Este widget é PESSOAL nas duas pontas — e as duas estavam erradas:
@@ -252,7 +262,13 @@ export async function getTopPicksForToday(
   //   "melhores por Nota Prevista" ordenava por `calculated_scores` (a previsão DELE)
   // Ou seja, a home da Leitora recomendava obras pelo gosto dele, chamando de "pra você".
   // Passou batido na 2b porque eu religei o "Acompanhando" e os KPIs, mas não este.
-  const [personal, scores] = await Promise.all([getPersonalStateReader(), getScoresReader()])
+  // As escondidas entram no mesmo Promise.all: promise solta que rejeita antes de ser aguardada
+  // vira unhandledRejection.
+  const [personal, scores, hidden] = await Promise.all([
+    getPersonalStateReader(),
+    getScoresReader(),
+    workIdsWithAnyTag(supabase, opts.hideTagSlugs ?? []),
+  ])
 
   // 🔴 PAGINADA: o `.limit(2000)` de antes não valia — o PostgREST corta em 1000 sem erro. Medido
   // em 2026-10-05: 1.044 obras ativas, 1.000 chegavam, e as 44 de fora eram TODAS das 100
@@ -265,7 +281,7 @@ export async function getTopPicksForToday(
         .select(`
           id, title, is_archived, publication_status_id, is_adult, edition_state, total_chapters,
           ${HIATUS_SELECT_COLUMNS},
-          calculated_scores(expected_score, platform_avg),
+          calculated_scores(expected_score, platform_avg, personal_fit),
           work_covers(url, is_primary, position)
         `)
         .eq("is_archived", false),
@@ -282,7 +298,11 @@ export async function getTopPicksForToday(
     hiatus_kind?: HiatusKind | null
     hiatus_kind_confidence?: "high" | "low" | null
     publication_status_note?: string | null
-    calculated_scores: { expected_score: number | null; platform_avg: number | null } | null
+    calculated_scores: {
+      expected_score: number | null
+      platform_avg: number | null
+      personal_fit: number | null
+    } | null
     work_covers?: CoverRow[] | null
   }
 
@@ -296,6 +316,7 @@ export async function getTopPicksForToday(
         coverUrls: coverCandidates(w.work_covers),
         expectedScore: calc?.expected_score ?? null,
         platformAvg: calc?.platform_avg ?? null,
+        personalFit: calc?.personal_fit == null ? null : Number(calc.personal_fit),
         publicationStatusId: w.publication_status_id ?? null,
         personalStatusId: state.personalStatusId,
         isAdult: Boolean(w.is_adult),
@@ -309,14 +330,24 @@ export async function getTopPicksForToday(
     // espelho" para o status que a obra APARENTA ("Want to Read") — sem ele a conta nova, que não
     // tem linha nenhuma, veria a prateleira vazia.
     .filter((w) => isPickablePersonalStatus(personalStatusNameOrDefault(w.personalStatusId)))
+    .filter((w) => !hidden.has(w.id))
 
-  // Sem modelo, não há Nota Prevista pra ordenar — cai na nota da COMUNIDADE, como o ranking.
-  const ordenadas = scores.hasModel
-    ? candidatas.filter((w) => w.expectedScore != null).sort((a, b) => (b.expectedScore ?? -1) - (a.expectedScore ?? -1))
-    : candidatas.filter((w) => w.platformAvg != null).sort((a, b) => (b.platformAvg ?? -1) - (a.platformAvg ?? -1))
+  // Mesma régua do /ranking (`lib/ranking/sort-basis.ts`): com modelo, a Nota Prevista; sem modelo
+  // e com tags declaradas, o Alinhamento com a nota da comunidade desempatando; sem nada, a nota da
+  // comunidade.
+  const basis = resolveSortBasis(scores)
+  const desc = (a: number | null, b: number | null) => (b ?? -Infinity) - (a ?? -Infinity)
+  const ordenadas =
+    basis === "expected"
+      ? candidatas.filter((w) => w.expectedScore != null).sort((a, b) => desc(a.expectedScore, b.expectedScore))
+      : basis === "alignment"
+        ? candidatas
+            .filter((w) => w.personalFit != null)
+            .sort((a, b) => desc(a.personalFit, b.personalFit) || desc(a.platformAvg, b.platformAvg))
+        : candidatas.filter((w) => w.platformAvg != null).sort((a, b) => desc(a.platformAvg, b.platformAvg))
 
   return {
-    basis: scores.hasModel ? "expected" : "platform",
+    basis,
     items: ordenadas.slice(0, limit).map((w) => ({
       id: w.id,
       title: w.title,

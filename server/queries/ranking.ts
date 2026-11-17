@@ -21,6 +21,7 @@ import { selectByIdsInChunks, fetchAllRows } from "@/lib/supabase/paginate"
 import { titleTokens, workMatchesQuery } from "@/lib/title-match"
 import { displaySortValue } from "@/lib/ranking/display-sort"
 import { compareWithinTierTieBreak } from "@/lib/ranking/build-tiers"
+import { effectiveSortLevels, resolveSortBasis } from "@/lib/ranking/sort-basis"
 import { artBandFromPercentile, type ArtBand } from "@/lib/art/model"
 import { artFilterMatches } from "@/lib/art/url"
 import { INTEREST_NONE, matchesManualInterest, matchesPredictedInterest } from "@/lib/interest-sentinels"
@@ -1123,31 +1124,12 @@ export async function getRanking(
     ? filters.sortLevels
     : [{ field: filters.sortBy ?? "expected_score", dir: filters.sortDir ?? "desc" }]
 
-  // ⚠️ Sem modelo, não há EIXO PESSOAL — e ordenar por um campo que é null em todas as linhas
-  // não devolve "nada": devolve o catálogo em ordem arbitrária, com cara de ranking. Quem não
-  // tem os 20 rótulos cai na NOTA DA COMUNIDADE, que é o que o MAL faz e é um fato da obra.
-  //
-  // Não é degradação: é a única ordenação honesta que existe para essa pessoa. Assim que ela
-  // avalia 20 obras, o eixo dela acende e o ranking volta a ser ordenado pela previsão DELA.
-  const PERSONAL_SORT_FIELDS = new Set([
-    "expected_score",
-    "recommended",
-    "decision",
-    "personal_fit",
-    // A arte é estimada a partir dos rótulos DO DONO: para quem não é ele, `artPercentile`
-    // vem null pelo overlay, e ordenar por um campo todo-null devolveria o catálogo em ordem
-    // arbitrária com cara de "ordenado por arte".
-    "art",
-    "alignment_score",
-    "chance_score",
-  ])
-  const effectiveLevels: SortLevel[] = scoresReader.hasModel
-    ? levels
-    : levels.map((lvl) =>
-        PERSONAL_SORT_FIELDS.has(lvl.field)
-          ? ({ ...lvl, field: "platform_avg" } as SortLevel)
-          : lvl,
-      )
+  // ⚠️ Sem modelo, não há Nota Prevista — e ordenar por um campo que é null em todas as linhas não
+  // devolve "nada": devolve o catálogo em ordem arbitrária, com cara de ranking. Quem não tem os 20
+  // rótulos mas declarou tags é ordenado pelo Alinhamento (só tags), com a média externa
+  // desempatando; sem tags, pela média externa. A régua é `lib/ranking/sort-basis.ts`, a mesma da
+  // home e do texto do cabeçalho do /ranking.
+  const effectiveLevels: SortLevel[] = effectiveSortLevels(levels, resolveSortBasis(scoresReader))
 
   function compareByField(a: RankingEntry, b: RankingEntry, field: string, dir: "asc" | "desc"): number {
     const m = dir === "asc" ? 1 : -1
@@ -1190,7 +1172,7 @@ export async function getRanking(
       return m * (displayScore(a.expectedScore) - displayScore(b.expectedScore))
     // Sua nota (Real). Pelo valor EXIBIDO, como a Prevista: a badge mostra 1 casa, então
     // 8,44 e 8,37 aparecem iguais e têm que EMPATAR — senão o desempate seguinte nunca
-    // entra. Não vai em PERSONAL_SORT_FIELDS de propósito: quem não avaliou nada não
+    // entra. Não é substituído em `effectiveSortLevels` de propósito: quem não avaliou nada não
     // recebe uma ordenação de outro eixo com cara de "Minha nota" — as vazias vão pro fim
     // (-Infinity) e o desempate final (overlap de tags, título) decide o resto.
     if (field === "user_score") return m * (displayScore(a.userScore) - displayScore(b.userScore))

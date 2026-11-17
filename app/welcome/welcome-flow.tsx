@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { setHideAdultContent } from "@/server/actions/settings"
+import { setHideAdultContent, setHideAvoidedTags } from "@/server/actions/settings"
 import {
   saveOnboardingTastes,
   getOnboardingDeckAction,
@@ -115,17 +115,38 @@ const OUT_CLASS: Record<SwipeKind, string> = {
   read: styles.deckOutRead,
 }
 
-export function WelcomeFlow({ displayName }: { displayName: string | null }) {
+type DeckStatus = "idle" | "loading" | "ready" | "error"
+
+export function WelcomeFlow({
+  displayName,
+  initialLoved,
+  initialVetos,
+  initialHideAdult,
+  initialHideAvoided,
+}: {
+  displayName: string | null
+  /** Os chips como estão gravados (quem volta às boas-vindas). */
+  initialLoved: string[]
+  initialVetos: string[]
+  /** `null` = nunca escolheu: a tela 2 abre sem nada marcado. */
+  initialHideAdult: boolean | null
+  /** "Esconder as obras com tags que evito" como está gravado (migration 227). */
+  initialHideAvoided: boolean
+}) {
   const router = useRouter()
   const [step, setStep] = useState(0)
   const [busy, setBusy] = useState(false)
 
   // tela 2
-  const [hideAdult, setHideAdult] = useState(false)
+  const [hideAdult, setHideAdult] = useState<boolean | null>(initialHideAdult)
   // tela 3
-  const [loved, setLoved] = useState<Set<string>>(new Set())
-  const [vetos, setVetos] = useState<Set<string>>(new Set())
+  const [loved, setLoved] = useState<Set<string>>(() => new Set(initialLoved))
+  const [vetos, setVetos] = useState<Set<string>>(() => new Set(initialVetos))
+  // Escolha EXPLÍCITA da pessoa: nada liga sozinho por ela ter vetado algo.
+  const [hideAvoided, setHideAvoided] = useState(initialHideAvoided)
+  const savedHideAvoided = useRef(initialHideAvoided)
   // tela 4
+  const [deckStatus, setDeckStatus] = useState<DeckStatus>("idle")
   const [deck, setDeck] = useState<OnboardingDeckWork[]>([])
   const [deckPos, setDeckPos] = useState(0)
   const [outClass, setOutClass] = useState("")
@@ -145,6 +166,7 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
 
   // ── transições que gravam ─────────────────────────────────────────────
   const leaveAdult = async () => {
+    if (hideAdult === null) return
     setBusy(true)
     try {
       const res = await setHideAdultContent(hideAdult)
@@ -155,26 +177,51 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
     }
   }
 
+  // O deck carrega em QUALQUER caminho até a tela 4 — salvando os gostos ou pulando a tela 3. Antes
+  // só o "Continuar" o carregava, e o "Pular" deixava "montando o seu deck…" para sempre.
+  const loadDeck = async () => {
+    setDeckStatus("loading")
+    const res = await getOnboardingDeckAction(Array.from(loved))
+    if (res.ok) {
+      setDeck(res.works)
+      setDeckPos(0)
+      setDeckStatus("ready")
+    } else {
+      console.error("[bem-vindo] deck:", res.error)
+      setDeckStatus("error")
+    }
+  }
+
   const leaveTastes = async () => {
     setBusy(true)
     try {
       const save = await saveOnboardingTastes(Array.from(loved), Array.from(vetos))
       if (!save.ok) console.error("[bem-vindo] gostos:", save.error)
+      // Só com veto marcado: a escolha só aparece na tela nesse caso, e o que não se viu não se grava.
+      if (vetos.size > 0 && hideAvoided !== savedHideAvoided.current) {
+        const pref = await setHideAvoidedTags(hideAvoided)
+        if (pref.error) console.error("[bem-vindo] esconder evitadas:", pref.error)
+        else savedHideAvoided.current = hideAvoided
+      }
       goTo(3)
-      const res = await getOnboardingDeckAction(Array.from(loved))
-      if (res.ok) {
-        setDeck(res.works)
-        setDeckPos(0)
-      } else console.error("[bem-vindo] deck:", res.error)
+      // Depois de gravar: o deck tira as obras com tags evitadas, e lê as evitadas do banco.
+      await loadDeck()
     } finally {
       setBusy(false)
     }
   }
 
+  const skipTastes = () => {
+    goTo(3)
+    void loadDeck()
+  }
+
   const enterNotes = async () => {
     setBusy(true)
     try {
-      const res = await getOnboardingProgressAction()
+      // As notas desta tela entram no medidor por `quick`: o servidor conta só as OUTRAS, senão
+      // voltar aqui (ou "Rever o fluxo") somava duas vezes as já dadas.
+      const res = await getOnboardingProgressAction(Array.from(quick.keys()))
       if (res.ok) setBaseRated(res.ratedCount)
       goTo(5)
     } finally {
@@ -255,11 +302,14 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
               Pular por agora
             </button>
           )}
-          {step > 0 && step < 6 && (
+          {/* Sem "Pular" na tela 2: pular ali era mostrar tudo sem a pessoa ter escolhido. */}
+          {step > 1 && step < 6 && (
             <button
               type="button"
               className={styles.skip}
-              onClick={() => (step === 4 ? void enterNotes() : goTo(step + 1))}
+              onClick={() =>
+                step === 2 ? skipTastes() : step === 4 ? void enterNotes() : goTo(step + 1)
+              }
             >
               {step === 4 ? "Não tenho lista" : step === 5 ? "Depois" : "Pular"}
             </button>
@@ -294,7 +344,8 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
                 <li>
                   <span className={styles.n}>02</span>
                   <span>
-                    <b>Umas dez obras</b>: curtir, dispensar ou marcar “já li”.
+                    <b>Algumas obras</b>, uma por vez: curtir, dispensar ou marcar “já li”. Pare
+                    quando quiser.
                   </span>
                 </li>
                 <li>
@@ -307,7 +358,7 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
             </div>
             <div className={styles.foot}>
               <span className={styles.hint}>
-                leva <b>~90s</b> · dá para refazer em Preferências
+                leva <b>poucos minutos</b> · dá para pular e voltar depois pela home
               </span>
               <button
                 type="button"
@@ -326,13 +377,13 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
             <h1 className={styles.title}>Quer ver obras adultas no catálogo?</h1>
             <p className={styles.sub}>
               Perguntamos agora porque é isso que decide o que aparece nas próximas telas. Dá para
-              mudar quando quiser em Configurações.
+              mudar quando quiser em Preferências.
             </p>
             <div className={styles.picks}>
               <button
                 type="button"
                 className={styles.pick}
-                aria-pressed={!hideAdult}
+                aria-pressed={hideAdult === false}
                 onClick={() => setHideAdult(false)}
               >
                 <b>Mostrar tudo</b>
@@ -348,7 +399,7 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
               <button
                 type="button"
                 className={styles.pick}
-                aria-pressed={hideAdult}
+                aria-pressed={hideAdult === true}
                 onClick={() => setHideAdult(true)}
               >
                 <b>Ocultar obras adultas</b>
@@ -363,7 +414,9 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
               </button>
             </div>
             <div className={styles.foot}>
-              <span className={styles.hint}>preferência pessoal · só sua</span>
+              <span className={styles.hint}>
+                {hideAdult === null ? "escolha uma das duas para seguir" : "preferência pessoal · só sua"}
+              </span>
               <div style={{ display: "flex", gap: 9 }}>
                 <button type="button" className={`${styles.btn} ${styles.btnQuiet}`} onClick={() => goTo(0)}>
                   Voltar
@@ -371,7 +424,7 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
                 <button
                   type="button"
                   className={`${styles.btn} ${styles.btnGo}`}
-                  disabled={busy}
+                  disabled={busy || hideAdult === null}
                   onClick={leaveAdult}
                 >
                   Continuar →
@@ -427,7 +480,7 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
               <div className={styles.bandHead}>
                 <span className={`${styles.bandName} ${styles.bandVeto}`}>✕ Eu evito</span>
                 <span className={styles.bandWhy}>
-                  Opcional, mas vale ouro: um veto tira dezenas de obras da sua frente.
+                  Opcional. Obras com essas tags saem do deck logo adiante.
                 </span>
               </div>
               <div className={styles.chips}>
@@ -443,6 +496,27 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
                   </button>
                 ))}
               </div>
+              {vetos.size > 0 && (
+                <div className={styles.vetoChoice} role="group" aria-label="Nas suas listas, obras com essas tags">
+                  <span className={styles.bandWhy}>Nas suas listas, obras com essas tags:</span>
+                  <button
+                    type="button"
+                    className={styles.chip}
+                    aria-pressed={!hideAvoided}
+                    onClick={() => setHideAvoided(false)}
+                  >
+                    aparecem, mais abaixo
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.chip} ${styles.chipVeto}`}
+                    aria-pressed={hideAvoided}
+                    onClick={() => setHideAvoided(true)}
+                  >
+                    ficam escondidas
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className={styles.foot}>
@@ -482,8 +556,20 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
               </span>
             )}
 
-            {deck.length === 0 ? (
+            {deckStatus === "idle" || deckStatus === "loading" ? (
               <div className={styles.loading}>montando o seu deck…</div>
+            ) : deckStatus === "error" ? (
+              <p className={styles.rateEmpty}>
+                Não consegui montar o deck agora.{" "}
+                <button type="button" className={`${styles.btn} ${styles.btnQuiet}`} onClick={() => void loadDeck()}>
+                  Tentar de novo
+                </button>{" "}
+                ou siga em frente: dá para marcar obras depois, no catálogo.
+              </p>
+            ) : deck.length === 0 ? (
+              <p className={styles.rateEmpty}>
+                Nenhuma obra nova para mostrar com essas escolhas. Bora em frente.
+              </p>
             ) : current ? (
               <>
                 <div className={`${styles.deck} ${outClass}`}>
@@ -553,7 +639,13 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
 
             <div className={styles.foot}>
               <span className={styles.hint}>
-                <b>{Math.min(deckPos + 1, deck.length)}</b> de {deck.length || "…"}
+                {deckStatus === "ready" ? (
+                  <>
+                    <b>{Math.min(deckPos + 1, deck.length)}</b> de {deck.length}
+                  </>
+                ) : (
+                  "…"
+                )}
               </span>
               <div style={{ display: "flex", gap: 9 }}>
                 <button type="button" className={`${styles.btn} ${styles.btnQuiet}`} onClick={() => goTo(2)}>
@@ -748,10 +840,13 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
                     <dt>evita</dt>
                     <dd>
                       {vetoList.length ? (
-                        <b>
-                          {vetoList.slice(0, 2).join(", ")}
-                          {vetoList.length > 2 ? ` +${vetoList.length - 2}` : ""}
-                        </b>
+                        <>
+                          <b>
+                            {vetoList.slice(0, 2).join(", ")}
+                            {vetoList.length > 2 ? ` +${vetoList.length - 2}` : ""}
+                          </b>
+                          {hideAvoided ? " · escondidas nas listas" : ""}
+                        </>
                       ) : (
                         <b>nenhum veto</b>
                       )}

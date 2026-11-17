@@ -1,9 +1,11 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
+import { after } from "next/server"
 import { createUserClient } from "@/lib/supabase/user"
-import { ensureSignedIn } from "@/server/queries/current-user"
+import { ensureSignedIn, getOwnerUserId } from "@/server/queries/current-user"
 import { markRecalcPending } from "@/server/recalc/queue"
+import { scheduleUserRecalc } from "@/server/recalc/user-recalc-schedule"
 import type { TagPrefLevel, TagStance } from "@/server/queries/tag-preferences"
 
 const COLUMN_BY_LEVEL: Record<TagPrefLevel, "tag_id" | "tag_subgroup_id" | "tag_group_id"> = {
@@ -35,9 +37,9 @@ function isValid(item: TagStanceItem): boolean {
  * Salva o conjunto COMPLETO de declarações do usuário de uma vez (batch).
  * Replace-all: apaga as linhas do usuário e insere o conjunto atual — o estado
  * do cliente é a fonte da verdade, então um save que falhe é recuperável só
- * clicando "Salvar" de novo. Marca recalc-pendente UMA vez (a Nota Prevista/
- * personal_fit recompõem no próximo "Recalcular"); o filtro "evito" do ranking,
- * query-time, reflete na hora.
+ * clicando "Salvar" de novo. Dono: marca recalc-pendente UMA vez (a Nota Prevista/
+ * personal_fit recompõem no próximo "Recalcular"). Demais: recalcula a pessoa em `after()`.
+ * O filtro "evito" do ranking, query-time, reflete na hora.
  */
 export async function saveTagPreferences(items: TagStanceItem[]): Promise<SaveTagPreferencesResult> {
   if (!Array.isArray(items)) return { ok: false, error: "Payload inválido." }
@@ -67,13 +69,15 @@ export async function saveTagPreferences(items: TagStanceItem[]): Promise<SaveTa
     if (error) return { ok: false, error: error.message }
   }
 
-  // `user_tag_preferences` alimenta os 3 sinais de fit em TODAS as obras — mas os
-  // do DONO: `getDeclaredTagPreferences` cai em `getCurrentUserId()`, que sem
-  // sessão é o singleton. Declaração de outra pessoa não move número na tela dele.
+  // `user_tag_preferences` alimenta os 3 sinais de fit em TODAS as obras. O recálculo global lê
+  // as do DONO (o gate só marca para ele). Para as outras pessoas, o Alinhamento DELAS mora em
+  // `user_calculated_scores` e só existe depois de um recálculo delas: sem este, quem declara as
+  // tags (inclusive nas boas-vindas) continuava com o ranking pela média externa.
   await markRecalcPending("saveTagPreferences", {
     changed: ["tag_preferences"],
     actorId: userId,
   })
+  if (userId !== (await getOwnerUserId())) after(() => scheduleUserRecalc(userId, "saveTagPreferences"))
   revalidatePath("/preferences")
   revalidatePath("/ranking")
   return { ok: true }

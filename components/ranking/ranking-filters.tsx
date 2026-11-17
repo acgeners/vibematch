@@ -56,6 +56,7 @@ import {
   parseArtFilter,
 } from "@/lib/art/url"
 import { filterSegmentClass, filterSegmentRole } from "@/lib/ui/filter-segment-tone"
+import { hideAvoidedOffValue, resolveHideAvoided } from "@/lib/tags/hide-avoided"
 import { VISIBLE_CRITERION_SLUGS } from "@/lib/criteria/visible"
 
 interface SavedFilterPreset {
@@ -645,6 +646,10 @@ interface RankingFiltersProps {
    *  "Aplicar filtros" seguinte reescrevia a URL SEM ele: o filtro que a pessoa
    *  acabara de marcar sumia sem erro, com cara de "não aplicou". */
   showHideAvoided?: boolean
+  /** A preferência da pessoa (Preferências): ligada, a ausência do parâmetro já esconde as
+   *  evitadas, e o "Não" grava `hide_avoided=off` para desligar nesta visita
+   *  (`lib/tags/hide-avoided.ts`). Sem ela, o controle funciona como sempre. */
+  preferHideAvoided?: boolean
   availableTags: Array<{ slug: string; name: string; tag_group_id?: string | null; groupName?: string; subGroupName?: string; subGroupSlug?: string }>
   publicationStatuses?: StatusOption[]
   personalStatuses?: StatusOption[]
@@ -2308,6 +2313,7 @@ export function RankingFilters({
   availableGenres,
   genreCatTypes,
   showHideAvoided,
+  preferHideAvoided = false,
   availableTags,
   publicationStatuses = [],
   personalStatuses = [],
@@ -2437,10 +2443,9 @@ export function RankingFilters({
   const filtersDirty = draftSearch !== appliedSearchString
   const hasFilters = draftSearch !== "" || appliedSearchString !== ""
 
-  // Esconder tags evitadas: lê do RASCUNHO como todo o resto do painel.
-  const hideAvoidedRaw = searchParams.get("hide_avoided")
-  const hideAvoidedMode: "off" | "strong" | "all" =
-    hideAvoidedRaw === "strong" || hideAvoidedRaw === "all" ? hideAvoidedRaw : "off"
+  // Esconder tags evitadas: lê do RASCUNHO como todo o resto do painel. Sem parâmetro, a preferência
+  // da pessoa — a mesma régua do servidor, senão o painel desenharia "Não" sobre uma lista filtrada.
+  const hideAvoidedMode = resolveHideAvoided(searchParams.get("hide_avoided"), preferHideAvoided)
 
   // Estimativa de arte: lê do RASCUNHO como todo o resto do painel — navegar por fora dele
   // apagaria a escolha no Aplicar seguinte.
@@ -3485,11 +3490,15 @@ export function RankingFilters({
                             {/* O `value` é a única fonte: ele grava o parâmetro E decide o tom
                                 (`null` ⇒ não corta nada ⇒ azul). */}
                             <FilterSegment
-                              value={null}
+                              value={hideAvoidedOffValue(preferHideAvoided)}
                               onSelect={(v) => updateParams({ hide_avoided: v })}
                               active={hideAvoidedMode === "off"}
                               label="Não"
-                              tooltip="Não esconde nada; mostra todas as obras."
+                              tooltip={
+                                preferHideAvoided
+                                  ? "Mostra todas as obras nesta visita. Sua preferência (em Preferências) continua escondendo nas próximas."
+                                  : "Não esconde nada; mostra todas as obras."
+                              }
                             />
                             <FilterSegment
                               value="strong"

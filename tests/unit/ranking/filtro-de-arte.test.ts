@@ -215,13 +215,16 @@ describe("a ordenação por arte existe nas DUAS listas", () => {
     }
   })
 
-  it("arte é campo PESSOAL de ordenação — sem modelo, não ordena por ela", () => {
+  it("arte é campo PESSOAL de ordenação — sem modelo, não ordena por ela", async () => {
     // A estimativa vem dos rótulos do dono. Para quem não é ele, `artPercentile` é null em
     // todas as linhas, e ordenar por um campo todo-null devolve o catálogo em ordem
-    // arbitrária com cara de "ordenado por arte".
-    const src = ler("server/queries/ranking.ts")
-    const bloco = src.match(/const PERSONAL_SORT_FIELDS[\s\S]*?\n\s*\]\)/)
-    expect(bloco).toBeTruthy()
-    expect(bloco![0]).toContain('"art"')
+    // arbitrária com cara de "ordenado por arte". Nem o Alinhamento a substitui: ele não
+    // diz nada sobre arte.
+    const { effectiveSortLevels } = await import("@/lib/ranking/sort-basis")
+    for (const basis of ["platform", "alignment"] as const) {
+      const [primeiro] = effectiveSortLevels([{ field: "art", dir: "desc" as const }], basis)
+      expect(primeiro.field, `sem modelo (${basis})`).toBe("platform_avg")
+    }
+    expect(effectiveSortLevels([{ field: "art", dir: "desc" as const }], "expected")[0].field).toBe("art")
   })
 })

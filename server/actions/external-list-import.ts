@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { ensureReadingStateWriter, writeReadingState } from "@/server/queries/user-work-state"
 import { ensurePermission } from "@/server/queries/current-user"
 import { markRecalcPending } from "@/server/recalc/queue"
-import { recalculateForUser } from "@/server/recalc/user-recalc"
+import { scheduleUserRecalc } from "@/server/recalc/user-recalc-schedule"
 import {
   getPersonalStatusIdByName,
   getPublicationStatusIdByName,
@@ -393,13 +393,7 @@ export async function commitExternalListImport(
         // Obra criada muda o CATÁLOGO (recalc global continua devido); as notas
         // importadas mudam o modelo PESSOAL de quem importou.
         if (result.createdCount > 0) await markRecalcPending("external-list-import")
-        after(async () => {
-          try {
-            await recalculateForUser(gate.userId)
-          } catch (err) {
-            console.error("[commitExternalListImport] recalc do usuário falhou:", err)
-          }
-        })
+        after(() => scheduleUserRecalc(gate.userId, "commitExternalListImport"))
       }
     }
 

@@ -5,6 +5,7 @@ import { fetchAllRows } from "@/lib/supabase/paginate"
 import { pickDeckWorks } from "@/lib/onboarding/deck-sampler"
 import type { DeckCandidate } from "@/lib/onboarding/deck-sampler"
 import { coverCandidates } from "@/lib/work-derived"
+import { workIdsWithAnyTag } from "@/server/queries/works-with-tags"
 
 type Linha = Record<string, unknown>
 
@@ -25,6 +26,8 @@ export interface OnboardingDeckWork {
  *   que treina o preditor de Interesse) e não-arquivada;
  * - 18+ fora quando o usuário escolheu ocultar (tela 2 grava `hide_adult_content`);
  * - fora o que o usuário JÁ tem estado (`user_work_state`) — não pergunta o que já sabe;
+ * - fora obra com tag que o usuário EVITA (`avoidedTagSlugs`): quem vetou isekai na tela anterior
+ *   não pode receber isekai na seguinte;
  * - popularidade = soma de votos das plataformas (`platform_ratings.vote_count`).
  *
  * Em DUAS fases de propósito: os candidatos saem SEM a sinopse (id/título/joins — a
@@ -35,12 +38,14 @@ export async function getOnboardingDeck(opts: {
   userId: string
   lovedGenres: string[]
   hideAdult: boolean
+  /** Slugs das tags que o usuário evita (todas as declaradas, com grupo e subgrupo expandidos). */
+  avoidedTagSlugs?: string[]
   limit?: number
 }): Promise<OnboardingDeckWork[]> {
   const supabase = createAdminClient()
   const limit = opts.limit ?? 30
 
-  const [works, workGenres, genres, ratings, mine] = await Promise.all([
+  const [works, workGenres, genres, ratings, mine, vetoed] = await Promise.all([
     fetchAllRows<Linha>(
       () => supabase.from("works").select("id, is_adult").eq("is_archived", false).not("canonical_synopsis", "is", null),
       { orderBy: ["id"], label: "getOnboardingDeck(works)" },
@@ -61,6 +66,7 @@ export async function getOnboardingDeck(opts: {
       orderBy: ["user_id", "work_id"],
       label: "getOnboardingDeck(user_work_state)",
     }),
+    workIdsWithAnyTag(supabase, opts.avoidedTagSlugs ?? []),
   ])
 
   const genreName = new Map(genres.map((g) => [g.id as string, g.name as string]))
@@ -84,6 +90,7 @@ export async function getOnboardingDeck(opts: {
 
   const candidates: DeckCandidate[] = works
     .filter((w) => !knownIds.has(w.id as string))
+    .filter((w) => !vetoed.has(w.id as string))
     .filter((w) => !opts.hideAdult || w.is_adult !== true)
     .map((w) => ({
       id: w.id as string,

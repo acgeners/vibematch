@@ -1,23 +1,33 @@
 "use server"
 
+import { revalidatePath } from "next/cache"
+import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { createUserClient } from "@/lib/supabase/user"
 import { ensureReadingStateWriter, writeReadingState } from "@/server/queries/user-work-state"
 import { getHideAdultContent } from "@/server/queries/current-user"
 import { getOnboardingDeck } from "@/server/queries/onboarding-deck"
 import type { OnboardingDeckWork } from "@/server/queries/onboarding-deck"
+import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
+import { loadChipTasteState } from "@/server/queries/onboarding-tastes"
+import type { ChipTasteState } from "@/server/queries/onboarding-tastes"
+import { markRecalcPending } from "@/server/recalc/queue"
+import { scheduleUserRecalc } from "@/server/recalc/user-recalc-schedule"
 import { getPersonalStatusIdByName, personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
-import { LOVED_CHIPS, VETO_CHIPS } from "@/lib/onboarding/chips"
-import { saveTagPreferences } from "./tag-preferences"
-import type { TagStanceItem } from "./tag-preferences"
+import { LOVED_CHIPS } from "@/lib/onboarding/chips"
+import { planChipTastes } from "@/lib/onboarding/chip-tastes"
+import type { ChipStance } from "@/lib/onboarding/chip-tastes"
+import { MIN_TRAIN_EXPECTED } from "@/lib/calculations/expected"
 
 /**
  * Grava gostos e vetos da tela 3 do onboarding em `user_tag_preferences`.
  *
- * Recebe RÓTULOS dos chips (não ids): a lista válida mora em `lib/onboarding/chips.ts`
- * — rótulo desconhecido é ignorado, e a resolução nome→tag_id acontece AQUI, no
- * servidor. Delega em `saveTagPreferences` (replace-all, cliente de sessão): pra conta
- * recém-criada é o primeiro conjunto; refazer o fluxo substitui — "dá para refazer em
- * Preferências", como a tela 1 promete.
+ * Recebe RÓTULOS dos chips (não ids): a lista válida mora em `lib/onboarding/chips.ts` — rótulo
+ * desconhecido é ignorado, e a resolução nome→tag_id acontece AQUI, no servidor.
+ *
+ * Só mexe nos chips que MUDARAM desde o que está gravado (regra em `lib/onboarding/chip-tastes.ts`).
+ * Até 2026-11 delegava em `saveTagPreferences`, que substitui TUDO: refazer as boas-vindas apagava
+ * as tags ajustadas em Preferências que nenhum chip cobre.
  */
 export async function saveOnboardingTastes(
   lovedLabels: string[],
@@ -25,36 +35,58 @@ export async function saveOnboardingTastes(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const gate = await ensureReadingStateWriter()
   if (!gate.ok) return { ok: false, error: gate.error }
+  if (!Array.isArray(lovedLabels) || !Array.isArray(vetoLabels)) return { ok: false, error: "Payload inválido." }
 
-  const loved = new Set(lovedLabels)
-  const vetos = new Set(vetoLabels)
-
-  const tagNames = new Set<string>()
-  for (const c of LOVED_CHIPS) if (loved.has(c.label) && c.tag) tagNames.add(c.tag)
-  for (const v of VETO_CHIPS) if (vetos.has(v.label)) for (const t of v.tags) tagNames.add(t)
-
-  const supabase = createAdminClient()
-  const { data: tagRows, error } = await supabase
-    .from("tags")
-    .select("id, name")
-    .in("name", Array.from(tagNames))
-  if (error) return { ok: false, error: error.message }
-  const idByName = new Map((tagRows ?? []).map((t) => [t.name as string, t.id as string]))
-
-  const items: TagStanceItem[] = []
-  for (const c of LOVED_CHIPS) {
-    const id = c.tag ? idByName.get(c.tag) : undefined
-    if (loved.has(c.label) && id) items.push({ level: "tag", targetId: id, stance: "love" })
+  let state: ChipTasteState
+  try {
+    state = await loadChipTasteState(gate.userId)
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
-  for (const v of VETO_CHIPS) {
-    if (!vetos.has(v.label)) continue
-    for (const t of v.tags) {
-      const id = idByName.get(t)
-      if (id) items.push({ level: "tag", targetId: id, stance: "avoid" })
-    }
+  const plan = planChipTastes(state.rows, lovedLabels.map(String), vetoLabels.map(String))
+  if (plan.remove.length === 0 && plan.insert.length === 0) return { ok: true }
+
+  const idsOf = (names: string[]) =>
+    names.map((n) => state.idByName.get(n)).filter((id): id is string => id != null)
+
+  // Cliente do USUÁRIO: a RLS (migration 142) garante no banco que as linhas são as dele.
+  const supabase = await createUserClient()
+  for (const stance of ["love", "avoid"] as ChipStance[]) {
+    const ids = idsOf(plan.remove.filter((r) => r.stance === stance).map((r) => r.tagName))
+    if (ids.length === 0) continue
+    const { error } = await supabase
+      .from("user_tag_preferences")
+      .delete()
+      .eq("user_id", gate.userId)
+      .eq("stance", stance)
+      .in("tag_id", ids)
+    if (error) return { ok: false, error: error.message }
   }
 
-  return saveTagPreferences(items)
+  const inserts = plan.insert
+    .map((r) => ({ tagId: state.idByName.get(r.tagName), stance: r.stance }))
+    .filter((r): r is { tagId: string; stance: ChipStance } => r.tagId != null)
+  if (inserts.length > 0) {
+    // Uma stance por tag (índice único `utp_user_tag_uniq`): a linha antiga da mesma tag sai antes.
+    const { error: clearError } = await supabase
+      .from("user_tag_preferences")
+      .delete()
+      .eq("user_id", gate.userId)
+      .in("tag_id", inserts.map((r) => r.tagId))
+    if (clearError) return { ok: false, error: clearError.message }
+    const { error } = await supabase
+      .from("user_tag_preferences")
+      .insert(inserts.map((r) => ({ user_id: gate.userId, tag_id: r.tagId, stance: r.stance, weight: 1 })))
+    if (error) return { ok: false, error: error.message }
+  }
+
+  // Mesmo pós-processamento de `saveTagPreferences`: dono marca o recálculo global; os demais
+  // recalculam já — é o que faz o ranking dela sair pelo Alinhamento antes das 20 notas.
+  await markRecalcPending("saveOnboardingTastes", { changed: ["tag_preferences"], actorId: gate.userId })
+  if (!gate.isOwner) after(() => scheduleUserRecalc(gate.userId, "saveOnboardingTastes"))
+  revalidatePath("/preferences")
+  revalidatePath("/ranking")
+  return { ok: true }
 }
 
 /** Deck da tela 4 — amostra por gênero do usuário logado (regra no sampler). */
@@ -67,10 +99,13 @@ export async function getOnboardingDeckAction(
   const loved = new Set(lovedLabels)
   const genres = LOVED_CHIPS.filter((c) => loved.has(c.label)).map((c) => c.genre)
   try {
+    // As evitadas saem do banco, não da tela: valem as escolhidas agora E as de Preferências.
+    const declared = await getDeclaredTagPreferences(undefined, { userId: gate.userId })
     const works = await getOnboardingDeck({
       userId: gate.userId,
       lovedGenres: genres,
       hideAdult: await getHideAdultContent(),
+      avoidedTagSlugs: declared.filter((d) => d.stance === "avoid").map((d) => d.slug),
     })
     return { ok: true, works }
   } catch (err) {
@@ -109,22 +144,61 @@ export async function deckSwipeAction(
 
   const write = await writeReadingState(gate.userId, [workId], patch)
   if (write.error) return { ok: false, error: write.error }
+
+  // O Interesse (♥) é entrada da Nota Prevista — e só dela: o Alinhamento sai das tags. Sem as 20
+  // notas não há Nota Prevista, então recalcular a cada toque do deck seria ler o catálogo 30
+  // vezes para nada. Quem já tem modelo (refez as boas-vindas) recalcula, agrupado.
+  if (kind !== "read") {
+    if (gate.isOwner) {
+      await markRecalcPending("deckSwipe")
+    } else if ((await countRatedWorks(gate.userId)) >= MIN_TRAIN_EXPECTED) {
+      after(() => scheduleUserRecalc(gate.userId, "deckSwipe"))
+    }
+  }
   return { ok: true }
 }
 
-/** Medidor do ensō (telas 6/7): quantas obras COM nota o usuário já tem. */
-export async function getOnboardingProgressAction(): Promise<
-  { ok: true; ratedCount: number } | { ok: false; error: string }
-> {
+/**
+ * Obras com nota da pessoa, fora `excludeWorkIds`. A exclusão é por SUBTRAÇÃO (o total menos as
+ * excluídas que têm nota), nunca `not work_id in (…)`: lista de ids na query string é a forma que
+ * já derrubou o /catalog com URL gigante (`exclusao-sem-url-gigante.test.ts`).
+ */
+async function countRatedWorks(userId: string, excludeWorkIds: string[] = []): Promise<number> {
+  const supabase = createAdminClient()
+  const rated = () =>
+    supabase
+      .from("user_work_state")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .not("user_score", "is", null)
+  const [all, excluded] = await Promise.all([
+    rated(),
+    excludeWorkIds.length > 0 ? rated().in("work_id", excludeWorkIds) : Promise.resolve({ count: 0, error: null }),
+  ])
+  if (all.error) throw new Error(all.error.message)
+  if (excluded.error) throw new Error(excluded.error.message)
+  return Math.max(0, (all.count ?? 0) - (excluded.count ?? 0))
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Medidor do ensō (telas 6/7): quantas obras COM nota o usuário já tem, FORA as de
+ * `excludeWorkIds` — as que a tela de notas está contando sozinha. Sem a exclusão, voltar à tela
+ * (ou "Rever o fluxo") somava duas vezes as notas já dadas ali.
+ */
+export async function getOnboardingProgressAction(
+  excludeWorkIds: string[] = [],
+): Promise<{ ok: true; ratedCount: number } | { ok: false; error: string }> {
   const gate = await ensureReadingStateWriter()
   if (!gate.ok) return { ok: false, error: gate.error }
-
-  const supabase = createAdminClient()
-  const { count, error } = await supabase
-    .from("user_work_state")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", gate.userId)
-    .not("user_score", "is", null)
-  if (error) return { ok: false, error: error.message }
-  return { ok: true, ratedCount: count ?? 0 }
+  // Endpoint público: só ids bem formados entram no filtro, e com teto (o deck tem 30).
+  const exclude = Array.isArray(excludeWorkIds)
+    ? excludeWorkIds.filter((id) => typeof id === "string" && UUID.test(id)).slice(0, 100)
+    : []
+  try {
+    return { ok: true, ratedCount: await countRatedWorks(gate.userId, exclude) }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
 }

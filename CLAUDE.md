@@ -4943,6 +4943,32 @@ punida por dado faltando. O conserto sem trade-off é COBERTURA de tags, não f�
 Guardado por `tests/unit/ui/alinhamento-materia-prima.test.tsx` (RENDER, com contraprova
 que reprova o texto antigo) e por `estado-da-obra-painel.test.tsx`.
 
+**Sem as 20 notas, o Alinhamento ocupa o lugar da Nota Prevista nas listas pessoais (o `/ranking` e
+o "Pra você hoje"), e a média externa desempata; sem tags declaradas, a média externa.** Dono:
+`lib/ranking/sort-basis.ts` (`resolveSortBasis` + `effectiveSortLevels`), que o `getRanking`, a home
+e o cabeçalho do `/ranking` leem do mesmo `getScoresReader`. O Alinhamento de quem não é o dono só
+existe depois de um recálculo dela: quem grava tag declarada dispara `scheduleUserRecalc`.
+
+## Recálculo de quem não é o dono passa SEMPRE por `scheduleUserRecalc`
+
+**Nunca chame `recalculateForUser` direto: use `scheduleUserRecalc` (`server/recalc/user-recalc-schedule.ts`)
+em `after()`.** Cada recálculo lê o catálogo inteiro; o agendador roda uma execução por vez por pessoa
+e transforma uma rajada de cliques em no máximo duas. Guardado por
+`tests/unit/recalc/recalculo-por-pessoa-agrupado.test.ts`.
+
+## As boas-vindas (`/welcome`) e quem chega nelas
+
+**Conta nova vai para `/welcome` pelos dois cadastros:** email (`signUpAction`) e Google (`/auth/callback`,
+pela IDADE da conta — `lib/onboarding/fresh-account.ts`, nunca pelo botão clicado). A volta é o link
+"Rever as boas-vindas" do card "Primeiros passos". **Os chips gravam só o que mudou**
+(`lib/onboarding/chip-tastes.ts`): refazer o fluxo não pode apagar as tags de Preferências que nenhum
+chip cobre. O deck tira as obras com tags evitadas.
+
+**"Esconder tags evitadas" é PREFERÊNCIA da pessoa** (`user_settings.hide_avoided_tags`, mig 227),
+escolhida nas boas-vindas ou em Preferências — nunca ligada por conta de um veto. Sem parâmetro na URL
+ela decide o `/ranking`, o `/favorites` e o "Pra você hoje"; com ela ligada, o "Não" grava
+`hide_avoided=off`. Dono: `lib/tags/hide-avoided.ts`.
+
 ## O badge "Recalcular notas" só acende com mudança MATERIAL
 
 `markRecalcPending` é chamado de **30 lugares** e o default é MARCAR — e isso está
@@ -6793,7 +6819,7 @@ O import deixou de ser `ensureAdmin`-only: o gate é `ensureReadingStateWriter` 
   `work_external_ids` tinha 6.9k linhas com o índice de match SILENCIOSAMENTE truncado em 1000.
 - **Plano free**: sem gate novo, por decisão (2026-07-31) — o leitor importa igual; a aba
   "Revisar pendentes" só INDICA que o enriquecimento usa IA (assinatura/créditos). Recalc:
-  dono → fila global; demais → `recalculateForUser` em `after()` (+ fila global se criou obra).
+  dono → fila global; demais → `scheduleUserRecalc` em `after()` (+ fila global se criou obra).
 
 ## External data sources
 

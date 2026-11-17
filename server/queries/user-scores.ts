@@ -3,6 +3,7 @@ import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getOwnerUserId, getSessionUserId } from "./current-user"
 import type { ExpectedExplanationColumn } from "@/lib/calculations/expected-explanation"
+import { hasAlignmentSignal } from "@/lib/ranking/sort-basis"
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // Os SCORES DERIVADOS de quem está olhando — FATIA 2b
@@ -112,6 +113,11 @@ export interface ScoresReader {
   /** true quando esta pessoa TEM modelo (≥ MIN_TRAIN rótulos → Nota Prevista de verdade). */
   hasModel: boolean
   /**
+   * true quando o Alinhamento dela separa obras (tags declaradas → `personal_fit` com mais de um
+   * valor). É o que ordena as listas de quem ainda não tem modelo — ver `lib/ranking/sort-basis.ts`.
+   */
+  hasAlignment: boolean
+  /**
    * Sobrepõe os scores PESSOAIS na linha de `calculated_scores` que a página já buscou.
    * Os campos de CATÁLOGO (platform_avg, total_votes, ia_eval) passam intactos — são o que
    * todo mundo vê, inclusive quem não tem modelo.
@@ -149,6 +155,7 @@ export const getScoresReader = cache(async (): Promise<ScoresReader> => {
       userId: null,
       isOwner: false,
       hasModel: false,
+      hasAlignment: false,
       overlay: <T,>(_workId: string, calcRow: T): T =>
         calcRow ? ({ ...(calcRow as object), ...EMPTY_PERSONAL_SCORES } as T) : calcRow,
     }
@@ -163,6 +170,7 @@ export const getScoresReader = cache(async (): Promise<ScoresReader> => {
       userId,
       isOwner: true,
       hasModel: true,
+      hasAlignment: true,
       overlay: (_workId, calcRow) => calcRow,
     }
   }
@@ -171,11 +179,13 @@ export const getScoresReader = cache(async (): Promise<ScoresReader> => {
   const hasModel = [...byWorkId.values()].some(
     (r) => r.expected_score != null && r.expected_is_stub !== true,
   )
+  const hasAlignment = hasAlignmentSignal(Array.from(byWorkId.values(), (r) => r.personal_fit))
 
   return {
     userId,
     isOwner: false,
     hasModel,
+    hasAlignment,
     overlay: <T,>(workId: string, calcRow: T): T => {
       if (!calcRow) return calcRow
       const mine = byWorkId.get(workId)

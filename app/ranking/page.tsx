@@ -1,6 +1,7 @@
 import { getRanking, type RankingFilters, type RankingSortBy, type SortLevel } from "@/server/queries/ranking"
 import { sanitizeInterestSelection } from "@/lib/interest-sentinels"
-import { canConsumeAi, getSessionUserId } from "@/server/queries/current-user"
+import { canConsumeAi, getHideAvoidedTags, getSessionUserId } from "@/server/queries/current-user"
+import { resolveHideAvoided } from "@/lib/tags/hide-avoided"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
 import { getCriterionMomentsSafe } from "@/server/queries/criterion-moments"
@@ -36,6 +37,7 @@ import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 import { readStatusFilter } from "@/lib/status-filter-toggle"
 import { parseArtFilter } from "@/lib/art/url"
 import { getScoresReader } from "@/server/queries/user-scores"
+import { resolveSortBasis } from "@/lib/ranking/sort-basis"
 
 interface RankingPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -171,11 +173,12 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // SQL; o desempate band-aware fino é client-side.
   // `plan` (canAi) é buscado no Promise.all do trio abaixo (junto de prefs/declaredPrefs)
   // pra não pagar um round-trip serial só dele.
-  // Filtro opt-in "esconder minhas tags evitadas", em 3 estados:
-  //   off | "strong" (só as evitadas com ênfase 2×) | "all" (todas as evitadas).
-  // Só busca as declarações quando ligado (custo zero quando off). O efeito SUAVE
-  // do evito (deprioriza via personal_fit) vale sempre, sem este toggle.
-  const hideMode = str("hide_avoided") // "strong" | "all" | undefined
+  // "Esconder minhas tags evitadas", em 3 estados: off | "strong" (só as evitadas com ênfase 2×) |
+  // "all". O parâmetro da URL manda; sem ele, a preferência da pessoa (`lib/tags/hide-avoided.ts`).
+  // Só busca as declarações quando ligado (custo zero quando off). O efeito SUAVE do evito
+  // (deprioriza via personal_fit) vale sempre, sem este filtro.
+  const preferHideAvoided = await getHideAvoidedTags()
+  const hideMode = resolveHideAvoided(str("hide_avoided"), preferHideAvoided)
   const hideActive = hideMode === "strong" || hideMode === "all"
   // Só estas três alimentam `filters` (canAi → sort/plano, prefs → mínimos/topN,
   // declaredPrefs → tags evitadas). O getRanking (a query pesada, ~90% do tempo da página)
@@ -244,6 +247,8 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // não pode aparecer: "Forte" devolveria vazio, indistinguível de "não há obra com arte
   // forte". `cache()` no reader ⇒ sem round-trip extra.
   const artScoresReader = await getScoresReader()
+  // A mesma régua que ordena a lista em `getRanking` — o cabeçalho diz de onde vem a ordem.
+  const sortBasis = resolveSortBasis(artScoresReader)
 
   const filters: RankingFilters = {
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
@@ -371,7 +376,13 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
             <RecalcPendingControl pending={recalcState.pending} variant="indicator" />
           </span>
         }
-        description="Obras ordenadas pela Nota Prevista"
+        description={
+          sortBasis === "expected"
+            ? "Obras ordenadas pela Nota Prevista"
+            : sortBasis === "alignment"
+              ? "A Nota Prevista liga com 20 obras avaliadas. Até lá, o Alinhamento (as tags que você escolheu) ocupa o lugar dela, e a média externa desempata."
+              : "A Nota Prevista liga com 20 obras avaliadas. Até lá, a média externa (a nota da comunidade) ocupa o lugar dela."
+        }
         actions={
           <div className="flex items-center gap-2">
             <FavoritesIconLink href={favoritesUrl} />
@@ -385,6 +396,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         availableGenres={allGenres}
         genreCatTypes={genreCatTypes}
         showHideAvoided
+        preferHideAvoided={preferHideAvoided}
         showArtFilter={artScoresReader.isOwner}
         availableTags={allTags}
         publicationStatuses={statusOptions.publicationStatuses}

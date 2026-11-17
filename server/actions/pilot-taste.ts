@@ -9,7 +9,7 @@ import type { TasteScoreKey } from "@/server/queries/pilot-taste"
 import { ensureReadingStateWriter, writeReadingState } from "@/server/queries/user-work-state"
 import { canRateReadingState } from "@/lib/reading-gate"
 import { markRecalcPending } from "@/server/recalc/queue"
-import { recalculateForUser } from "@/server/recalc/user-recalc"
+import { scheduleUserRecalc } from "@/server/recalc/user-recalc-schedule"
 import { editionContextFrom } from "@/lib/editions/read-edition"
 import type { ReadEditionContext } from "@/lib/editions/read-edition"
 
@@ -134,13 +134,7 @@ async function applyTasteDerivedUserScore(
   if (isOwner) {
     await markRecalcPending("savePilotTaste")
   } else {
-    after(async () => {
-      try {
-        await recalculateForUser(userId)
-      } catch (err) {
-        console.error("[savePilotTaste] recalc do usuário falhou:", err)
-      }
-    })
+    after(() => scheduleUserRecalc(userId, "savePilotTaste"))
   }
   revalidatePath(`/catalog/${workId}`)
 }

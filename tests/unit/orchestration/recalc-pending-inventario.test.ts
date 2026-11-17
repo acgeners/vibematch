@@ -96,6 +96,14 @@ const INVENTARIO: Record<string, boolean> = {
   // estado é entrada da previsão por versão E da inferência estrutural, que roda no recálculo — sem
   // marcar, a obra que vira mixed esperaria outra mudança qualquer. Declara `edition_scores`.
   recordMangaUpdatesEditionEvidence: true,
+
+  // ── Entraram com o conserto das boas-vindas (2026-11-17) ───────────────────
+  // Os gostos e vetos da tela 3 gravam `user_tag_preferences` direto (só os chips que mudaram),
+  // então declaram materialidade como `saveTagPreferences`: o gate só marca para a dona.
+  saveOnboardingTastes: true,
+  // O swipe do deck grava o Interesse (♥), que é feature do Ridge — marca sempre, como
+  // `setSynopsisQuality`. Só a dona chega aqui; os demais recalculam em after().
+  deckSwipe: false,
 }
 
 /**

@@ -6,7 +6,8 @@ import {
   getTopPicksForToday,
 } from "@/server/queries/dashboard"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
-import { getCurrentUserProfile, getSessionUserId } from "@/server/queries/current-user"
+import { getCurrentUserProfile, getHideAvoidedTags, getSessionUserId } from "@/server/queries/current-user"
+import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { getPublicShowcase, getSpotlightWork } from "@/server/queries/public-showcase"
 import { getSiteStats } from "@/server/queries/auth-hero"
 import { PublicHome } from "@/components/home/public-home"
@@ -63,16 +64,16 @@ export default async function HomePage() {
     // query já carrega todas as obras acompanhadas e filtra em memória, então subir o limite
     // não custa ida a mais ao banco.
     getContinueReading(60),
-    getTopPicksForToday(12),
+    hiddenTagSlugs(sessionId).then((hideTagSlugs) => getTopPicksForToday(12, { hideTagSlugs })),
     getCurrentUserProfile(),
     getFirstStepsProgress(),
   ])
 
   const firstName = profile.displayName?.trim().split(/\s+/)[0]
-  // A prateleira cai em `platform_avg` quando não há modelo de gosto — e aí o rótulo tem que
-  // dizer isso. Prometer "maiores Notas Previstas" mostrando nota da comunidade é vender
-  // curadoria que o app não fez; foi o que uma conta nova viu em prod (2026-08-04).
-  const semModelo = topPicks.basis === "platform"
+  // A prateleira só é ordenada pela Nota Prevista com modelo de gosto; sem ele, pelo Alinhamento
+  // ou pela nota da comunidade (`lib/ranking/sort-basis.ts`) — e o rótulo tem que dizer qual.
+  // Prometer "maiores Notas Previstas" mostrando outra coisa é vender curadoria que o app não fez.
+  const semModelo = topPicks.basis !== "expected"
 
   return (
     <div className="flex flex-col gap-7">
@@ -121,9 +122,11 @@ export default async function HomePage() {
         // (Want to Read / Untracked) + Read Again. "que você ainda não leu" descrevia o corte
         // antigo (`user_score` nulo) e mentiria sobre as de releitura.
         why={
-          semModelo
-            ? "as maiores notas da comunidade entre as que você não começou — ou quer reler"
-            : "as maiores Notas Previstas entre as que você não começou — ou quer reler"
+          topPicks.basis === "expected"
+            ? "as maiores Notas Previstas entre as que você não começou — ou quer reler"
+            : topPicks.basis === "alignment"
+              ? "as que mais batem com as tags que você escolheu, entre as que você não começou — ou quer reler"
+              : "as maiores notas da comunidade entre as que você não começou — ou quer reler"
         }
         works={topPicks.items}
         thresholds={thresholds?.expected ?? null}
@@ -139,9 +142,10 @@ export default async function HomePage() {
         <section className="flex flex-col items-start gap-3 rounded-2xl border border-dashed border-border bg-card/40 p-6">
           <p className="text-sm font-semibold">Ainda não dá para prever seu gosto</p>
           <p className="max-w-prose text-sm text-muted-foreground">
-            A Nota Prevista precisa de obras que você já leu e avaliou. Enquanto não houver
-            rótulos suficientes, o catálogo aparece pela nota da comunidade — que é um fato,
-            não um palpite.
+            A Nota Prevista precisa de 20 obras que você já leu e avaliou.{" "}
+            {topPicks.basis === "alignment"
+              ? "Até lá, a ordem vem das tags que você escolheu (o Alinhamento), e a nota da comunidade desempata."
+              : "Até lá, o catálogo aparece pela nota da comunidade — que é um fato, não um palpite."}
           </p>
           <Link
             href="/catalog"
@@ -154,4 +158,14 @@ export default async function HomePage() {
       )}
     </div>
   )
+}
+
+/**
+ * As tags evitadas que a prateleira esconde — só quando a pessoa escolheu escondê-las (migration 227).
+ * `userId` explícito: sem ele, `getDeclaredTagPreferences` cairia no dono.
+ */
+async function hiddenTagSlugs(userId: string): Promise<string[]> {
+  if (!(await getHideAvoidedTags())) return []
+  const declared = await getDeclaredTagPreferences(undefined, { userId })
+  return declared.filter((d) => d.stance === "avoid").map((d) => d.slug)
 }

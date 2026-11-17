@@ -5,7 +5,7 @@ import { after } from "next/server"
 import { createUserClient } from "@/lib/supabase/user"
 import { ensureReadingStateWriter, writeReadingState } from "@/server/queries/user-work-state"
 import { markRecalcPending } from "@/server/recalc/queue"
-import { recalculateForUser } from "@/server/recalc/user-recalc"
+import { scheduleUserRecalc } from "@/server/recalc/user-recalc-schedule"
 
 /** As 8 notas craft pós-leitura — as que a média ponderada do form transforma em `user_score`. */
 const CRAFT_SCORE_COLUMNS = [
@@ -86,13 +86,7 @@ export async function clearUserRating(
   if (gate.isOwner) {
     await markRecalcPending("clearUserRating")
   } else {
-    after(async () => {
-      try {
-        await recalculateForUser(gate.userId)
-      } catch (err) {
-        console.error("[clearUserRating] recalc do usuário falhou:", err)
-      }
-    })
+    after(() => scheduleUserRecalc(gate.userId, "clearUserRating"))
   }
 
   revalidatePath("/catalog/[id]", "page")
