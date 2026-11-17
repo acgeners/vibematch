@@ -4959,7 +4959,9 @@ e o cabeçalho do `/ranking` leem do mesmo `getScoresReader`. O Alinhamento de q
 existe depois de um recálculo dela: quem grava tag declarada dispara `scheduleUserRecalc`.
 **A ordenação PADRÃO do `/ranking` e do `/favorites` passa por `defaultSortForBasis` antes de ir à
 consulta e ao painel de filtros**: sem isso o painel dizia "N. Prevista" sobre uma lista ordenada pelo
-Alinhamento.
+Alinhamento. **E o `sort` que vem da URL também:** painel e tabelas mostram o campo que ordena de fato
+(`effectiveSortLevels`/`activeSortFieldFor`, com o `sortBasis` que a página passa) e não oferecem nem deixam
+clicar campo que ordenaria por outro (`isSortFieldAvailable`).
 
 ## Recálculo de quem não é o dono passa SEMPRE por `scheduleUserRecalc`
 

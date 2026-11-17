@@ -44,6 +44,8 @@ import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 import { STATUS_FILTER_PARAMS, setStatusRule } from "@/lib/status-filter-toggle"
 import type { StatusFilterKind, StatusRule } from "@/lib/status-filter-toggle"
 import { DEFAULT_TIER_BAND_WIDTH } from "@/lib/ranking/tier-config"
+import { effectiveSortLevels, isSortFieldAvailable } from "@/lib/ranking/sort-basis"
+import type { SortBasis } from "@/lib/ranking/sort-basis"
 import { ActiveFilterChips } from "@/components/ranking/active-filter-chips"
 import { CollapseIconTrigger, CollapseTitleTrigger } from "@/components/ui/collapse-trigger"
 import type { ActiveFilterChip, ActiveFilterValue } from "@/components/ranking/active-filter-chips"
@@ -206,7 +208,8 @@ interface SortLevelsSectionProps {
   defaultSort?: string
   /** Habilita "Grupos" (recorrência) como campo de ordenação. Só onde a página carrega a
    *  contagem — ver `GROUPS_SORT_FIELD`. */
-  withGroupsSort?: boolean
+  withGroupsSort?: boolean  /** Quem olha tem modelo? Sem ele, os níveis mostrados são os convertidos (`effectiveSortLevels`). */
+  sortBasis?: SortBasis
 }
 
 /**
@@ -304,13 +307,23 @@ const SORT_CHIP_SCALE: Record<number, {
   },
 }
 
-function SortLevelsSection({ searchParams, updateParams, className, contentClassName, defaultSort, withGroupsSort = false }: SortLevelsSectionProps) {
+function SortLevelsSection({ searchParams, updateParams, className, contentClassName, defaultSort, withGroupsSort = false, sortBasis = "expected" }: SortLevelsSectionProps) {
   // O MESMO conjunto valida a URL e desenha o <Select>: com duas listas, o painel aceitaria
   // no rascunho um campo que não sabe oferecer (ou o contrário).
-  const campos = sortableFields(withGroupsSort)
+  const todosCampos = sortableFields(withGroupsSort)
+  // Sem modelo, "N. Prevista" (e o que depende dele) ordena por outro campo: não é oferecido.
+  const disponivel = (f: { value: string }) => isSortFieldAvailable(f.value, sortBasis)
+  const campos = todosCampos.filter(disponivel)
   const grupos = sortableFieldGroups(withGroupsSort)
+    .map((g) => ({ ...g, fields: g.fields.filter(disponivel) }))
+    .filter((g) => g.fields.length > 0)
   const rawSort = searchParams.get("sort")
-  const levels = parseSortLevels(rawSort, defaultSort, campos)
+  // Os níveis que valem DE FATO — a mesma conversão que a consulta aplica (`getRanking`). Sem
+  // ela, `sort=expected_score` vindo de um link mostrava "N. Prevista" sobre uma lista ordenada
+  // pelo Alinhamento. O parse usa o conjunto inteiro: um campo convertido é válido, só não é
+  // ele que ordena.
+  const levels = effectiveSortLevels(parseSortLevels(rawSort, defaultSort, todosCampos), sortBasis).slice(0, 5)
+  const nivelPadrao = effectiveSortLevels([{ field: "expected_score", dir: "desc" as const }], sortBasis)[0]
 
   const setLevels = (next: SortLevel[]) => {
     updateParams({ sort: encodeSortLevels(next) })
@@ -328,14 +341,14 @@ function SortLevelsSection({ searchParams, updateParams, className, contentClass
 
   const remove = (i: number) => {
     const next = levels.filter((_, idx) => idx !== i)
-    setLevels(next.length ? next : [{ field: "expected_score", dir: "desc" }])
+    setLevels(next.length ? next : [nivelPadrao])
   }
 
   const add = () => {
     if (levels.length >= 5) return
     const used = new Set(levels.map((l) => l.field))
     const next = campos.find((f) => !used.has(f.value))
-    setLevels([...levels, { field: next?.value ?? "expected_score", dir: "desc" }])
+    setLevels([...levels, { field: next?.value ?? nivelPadrao.field, dir: "desc" }])
   }
 
   // `parseSortLevels` já limita a 5; o clamp aqui é contra chave ausente no mapa.
@@ -671,6 +684,9 @@ interface RankingFiltersProps {
    * OPT-IN, não o default — e desde #12 também forma tiers.)
    */
   defaultSort?: string
+  /** De onde vem a ordem de quem olha (`resolveSortBasis`): o painel mostra a ordenação que vale
+   *  de fato e não oferece campo que ordenaria por outro. Ausente = tem modelo. */
+  sortBasis?: SortBasis
   /** Conjuntos de filtros salvos do usuário para esta página (base_path). */
   savedPresets?: SavedFilterPreset[]
   /** Largura de tier padrão (formula_config.tier_band_width) — controle movido pra dentro do filtro. */
@@ -2322,6 +2338,7 @@ export function RankingFilters({
   defaultTopN,
   basePath = "/ranking",
   defaultSort,
+  sortBasis = "expected",
   savedPresets = [],
   // 🔴 Nunca um literal aqui: este default é a MESMA afirmação que a constante medida
   // e que o DEFAULT da coluna. Ele ficou em `0.5` depois que os outros dois foram para
@@ -3603,6 +3620,7 @@ export function RankingFilters({
                 updateParams={updateParams}
                 defaultSort={defaultSort}
                 withGroupsSort={showGroupsSort}
+                sortBasis={sortBasis}
                 className="flex flex-col"
                 contentClassName="flex-1 flex flex-col justify-center"
               />

@@ -144,9 +144,10 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
   // Sem modelo (menos de 20 notas), a mesma conversão que `getRanking` aplica: o painel tem de
   // mostrar o Alinhamento que de fato ordena, não a "N. Prevista" que não existe para a pessoa.
   const artScoresReader = await getScoresReader()
+  const sortBasis = resolveSortBasis(artScoresReader)
   const defaultSort = defaultSortForBasis(
     isMulti ? "groups:desc,expected_score:desc" : "expected_score:desc",
-    resolveSortBasis(artScoresReader),
+    sortBasis,
   )
   const rawSort = str("sort") ?? defaultSort
   const sortLevels: SortLevel[] = rawSort.split(",").map((seg) => {
@@ -397,6 +398,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         defaultPersonalStatus="all"
         // O MESMO default que o `rawSort` acima usa — ver o 🔴 lá.
         defaultSort={defaultSort}
+        sortBasis={sortBasis}
         defaultTopN={null}
         basePath={basePath}
         criterionMoments={criterionMoments}
@@ -430,6 +432,8 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         selectedCompareIds={toArray(params_.compare).slice(0, MAX_COMPARE_WORKS)}
         namespace="favorites"
         basePath={basePath}
+        defaultSort={defaultSort}
+        sortBasis={sortBasis}
         enableSelectAll
         isPaid={isPaid}
         groups={groupOptions}
