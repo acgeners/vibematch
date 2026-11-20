@@ -7,6 +7,7 @@ import {
 } from "@/server/queries/current-user"
 import { loadChipTasteState } from "@/server/queries/onboarding-tastes"
 import { chipStateFromRows } from "@/lib/onboarding/chip-tastes"
+import { getWelcomeAdultCover, getWelcomeCovers } from "@/server/queries/welcome-covers"
 import { WelcomeFlow } from "./welcome-flow"
 
 export const dynamic = "force-dynamic"
@@ -28,11 +29,16 @@ export default async function BemVindoPage() {
   if (!userId) redirect("/login")
 
   // Quem volta às boas-vindas vê os chips como estão gravados: a gravação só mexe no que mudar.
-  const [profile, tastes, hideAdult, hideAvoided] = await Promise.all([
+  // Hora do SERVIDOR em que a página abriu: o que a lista importada aqui gravar depois dela é "desta
+  // vez" (as obras lidas sem nota que vão para a tela de notas — `getWelcomeImportStateAction`).
+  const startedAt = new Date().toISOString()
+  const [profile, tastes, hideAdult, hideAvoided, covers, adultCover] = await Promise.all([
     getCurrentUserProfile(),
     loadChipTasteState(userId),
     getHideAdultContent(),
     getHideAvoidedTags(),
+    getWelcomeCovers(),
+    getWelcomeAdultCover(),
   ])
   const chips = chipStateFromRows(tastes.rows)
   return (
@@ -40,10 +46,12 @@ export default async function BemVindoPage() {
       displayName={profile.displayName}
       initialLoved={chips.loved}
       initialVetos={chips.vetos}
-      // Só "ocultar" é escolha conhecida: "mostrar" é também o padrão de quem nunca escolheu, e a
-      // tela 2 não pode chegar marcada para quem nunca respondeu.
-      initialHideAdult={hideAdult ? true : null}
+      // "Ocultar" vem marcado de partida (mig 228); quem volta às boas-vindas vê a escolha que fez.
+      initialHideAdult={hideAdult}
       initialHideAvoided={hideAvoided}
+      covers={covers}
+      adultCover={adultCover}
+      startedAt={startedAt}
     />
   )
 }

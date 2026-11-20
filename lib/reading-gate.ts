@@ -1,4 +1,8 @@
-import { isTerminalPersonalStatus } from "@/lib/constants/status-lookups"
+import {
+  getPersonalStatusNameById,
+  isTerminalPersonalStatus,
+  readingPersonalStatusName,
+} from "@/lib/constants/status-lookups"
 
 /**
  * A regra "só avalia quem leu": uma obra só pode receber nota pessoal (`user_score`) e as
@@ -37,16 +41,39 @@ export function readProgressPct(state: ReadingStateForRating): number | null {
   return (read / total) * 100
 }
 
+/** Status "estou lendo" (slug `reading`): estoura no carregamento se o slug sumir do Supabase. */
+const READING_STATUS = readingPersonalStatusName()
+
+function isReadingStatus(status: ReadingStateForRating["personalStatus"]): boolean {
+  if (status == null) return false
+  return (typeof status === "number" ? getPersonalStatusNameById(status) : status) === READING_STATUS
+}
+
 /**
  * A obra pode ter nota pessoal? Status terminal (Finished/Dropped — o leitor encerrou, então
- * formou opinião) OU mais de 20% lido.
+ * formou opinião) OU mais de 20% lido OU "Lendo" sem capítulo informado.
  *
  * "Terminal" vem do banco (`personal_status.is_terminal`), nunca de nome escrito à mão.
+ *
+ * "Lendo" com o capítulo EM BRANCO libera (decisão de 2026-11-19): a pessoa declarou que está
+ * lendo, e exigir o número só para a nota contar era atrito. Com o capítulo PREENCHIDO vale o
+ * limiar de 20%. Só "Lendo": On-hold e Stalled sem capítulo continuam barrados — é deles que
+ * vieram as 42 notas sem leitura que criaram esta regra.
  */
 export function canRateReadingState(state: ReadingStateForRating): boolean {
   if (isTerminalPersonalStatus(state.personalStatus)) return true
+  if (isReadingStatus(state.personalStatus) && state.chaptersRead == null) return true
   const pct = readProgressPct(state)
   return pct != null && pct > MIN_READ_PCT_FOR_RATING
+}
+
+/**
+ * O primeiro capítulo que passa do limiar (estrito: 20% exato não passa) — o "a partir do cap. N"
+ * dos avisos. `null` com o total desconhecido: sem ele não há alvo a informar.
+ */
+export function firstRatableChapter(totalChapters: number | null | undefined): number | null {
+  if (totalChapters == null || totalChapters <= 0) return null
+  return Math.floor((totalChapters * MIN_READ_PCT_FOR_RATING) / 100) + 1
 }
 
 /**
@@ -55,8 +82,7 @@ export function canRateReadingState(state: ReadingStateForRating): boolean {
  */
 export function chaptersNeededForRating(state: ReadingStateForRating): number | null {
   if (canRateReadingState(state)) return null
-  const total = state.totalChapters
-  if (total == null || total <= 0) return null
-  const needed = Math.floor((total * MIN_READ_PCT_FOR_RATING) / 100) + 1
+  const needed = firstRatableChapter(state.totalChapters)
+  if (needed == null) return null
   return Math.max(0, needed - (state.chaptersRead ?? 0))
 }

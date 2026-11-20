@@ -62,6 +62,7 @@ const ROTAS = [
   { rota: "/about", status: 200, marca: /<article\b|data-slot="card"/g, min: 3 },
   // gateadas: sem sessão têm que MANDAR pro login, não renderizar
   { rota: "/my-list", status: 307 },
+  { rota: "/rate", status: 307 },
   { rota: "/curation/works", status: 307 },
   // e o nome antigo tem que continuar redirecionando
   { rota: "/titles", status: 308 },

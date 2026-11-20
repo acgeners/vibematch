@@ -1,0 +1,280 @@
+/* O card "Primeiros passos" da home, no visual das boas-vindas (mockup aprovado em 19/11/2026). */
+
+.glass {
+  position: relative;
+  overflow: hidden;
+  color: #e6edf7;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.025));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 24px 70px rgba(0, 0, 0, 0.45);
+}
+.glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(640px 280px at 10% 0%, rgba(46, 127, 240, 0.22), transparent 70%),
+    radial-gradient(560px 300px at 100% 100%, rgba(124, 92, 255, 0.14), transparent 70%);
+}
+.muted {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #9fb0c8;
+}
+.link {
+  font-weight: 500;
+  color: #8fdbff;
+}
+.link:hover {
+  color: #c4ecff;
+}
+.cta {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 20px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2e7ff0, #5aa8ff 60%, #8fdbff);
+  color: #04101f;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ctaLight {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #c7d2e2;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.ctaLight:hover {
+  border-color: rgba(143, 219, 255, 0.45);
+  color: #e6edf7;
+}
+.ghost {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #9fb0c8;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.ghost:hover {
+  color: #e6edf7;
+  border-color: rgba(143, 219, 255, 0.45);
+}
+
+/* ── com 20 notas: um aviso de uma linha ── */
+.ready {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+  padding: 20px 24px;
+  border-radius: 22px;
+}
+.readyText {
+  position: relative;
+  flex: 1 1 320px;
+}
+.readyTitle {
+  font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-weight: 500;
+  font-size: 22px;
+}
+
+/* ── escondido ── */
+.hiddenLine {
+  font-size: 13px;
+  color: var(--muted-foreground, #9fb0c8);
+}
+.hiddenLine button {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: #8fdbff;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* ── o card ── */
+.card {
+  border-radius: 24px;
+}
+.head {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 26px 18px;
+}
+.headTitle {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.lotus {
+  display: inline-grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(46, 127, 240, 0.35), rgba(143, 219, 255, 0.15));
+  border: 1px solid rgba(143, 219, 255, 0.35);
+}
+.eyebrow {
+  margin: 0;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #8fdbff;
+}
+.title {
+  margin: 4px 0 0;
+  font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-weight: 500;
+  font-size: 26px;
+  line-height: 1.1;
+}
+.headActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  font-size: 13px;
+}
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+.seg,
+.segDone,
+.segNow {
+  display: block;
+  width: 8px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+.segDone {
+  background: rgba(143, 219, 255, 0.5);
+}
+.segNow {
+  width: 30px;
+  background: #8fdbff;
+  box-shadow: 0 0 12px rgba(143, 219, 255, 0.8);
+}
+.body {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.meter {
+  /* Largura PRÓPRIA: com `flex: 1 1 300px` a lista de passos (grow 999) levava toda a sobra e o
+     texto do ensō ficava com ~100px, quebrando "Seu ensō" em duas linhas (visto em 20/11/2026). */
+  flex: 0 1 380px;
+  min-width: 0;
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  padding: 24px 26px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+.steps {
+  flex: 999 1 560px;
+  min-width: 0;
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+}
+.step {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 26px;
+}
+.step + .step {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.mark,
+.num,
+.numNow {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+}
+.mark {
+  background: linear-gradient(135deg, #2e7ff0, #8fdbff);
+}
+.num {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #7d8ca3;
+}
+.numNow {
+  border: 1.5px solid #8fdbff;
+  box-shadow: 0 0 12px rgba(143, 219, 255, 0.55);
+  color: #8fdbff;
+}
+.stepText {
+  flex: 1;
+  min-width: 0;
+}
+.stepTitle,
+.stepTitleDone {
+  font-weight: 600;
+  font-size: 15px;
+}
+.stepTitleDone {
+  color: #7d8ca3;
+  text-decoration: line-through;
+}
+.stepSub {
+  margin-top: 3px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #9fb0c8;
+}
+
+@media (max-width: 760px) {
+  .meter {
+    max-width: none;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .step {
+    flex-wrap: wrap;
+    padding: 14px 18px;
+  }
+}

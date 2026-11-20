@@ -173,6 +173,8 @@ export const PAPEIS = [
       { rota: "/dashboard" },
       { rota: "/discover" },
       { rota: "/my-list" },
+      // "Dar notas" (19/11/2026): as peças são do onboarding, sem [data-slot] — o piso é o do chrome.
+      { rota: "/rate", min: 3 },
       // A página de obra NÃO é gateada, então o caminho final não prova sessão nenhuma: quem
       // prova é o texto, que só o curador vê. Medido: 70 slots (contra 46 anônimo).
       { obra: true, texto: /Atualizar dados/, oQue: "as ações de curadoria" },
@@ -187,6 +189,7 @@ export const PAPEIS = [
       { rota: "/dashboard" },
       { rota: "/discover" },
       { rota: "/my-list", min: 3 },
+      { rota: "/rate", min: 3 },
       // 🔴 O painel do #495. É a razão de este smoke existir: ele subiu em 20/08 e nenhum
       // instrumento o tocava, porque só aparece para leitor LOGADO na página de obra.
       { obra: true, texto: /Reportar erro na ficha/, oQue: "o painel de reportar erro" },

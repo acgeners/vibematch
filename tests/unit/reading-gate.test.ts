@@ -22,6 +22,7 @@ import {
   FOLLOWING_PERSONAL_STATUSES,
   DEFAULT_PERSONAL_STATUS,
 } from "@/lib/constants/criteria"
+import { getPersonalStatusIdByName, personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
 
 const [terminal] = TERMINAL_PERSONAL_STATUSES
 const [unread] = UNREAD_PERSONAL_STATUSES
@@ -70,6 +71,29 @@ describe("canRateReadingState", () => {
     expect(
       canRateReadingState({ personalStatus: following, chaptersRead: 10, totalChapters: 174 }),
     ).toBe(false)
+  })
+
+  it("'Lendo' com o capítulo EM BRANCO libera: a pessoa declarou que está lendo (19/11/2026)", () => {
+    const lendo = personalStatusNameBySlugOrThrow("reading")
+    expect(canRateReadingState({ personalStatus: lendo, chaptersRead: null, totalChapters: 247 })).toBe(true)
+    // Pelo id também, e sem o total: o que libera é a declaração, não a conta.
+    expect(
+      canRateReadingState({ personalStatus: getPersonalStatusIdByName(lendo), chaptersRead: null, totalChapters: null }),
+    ).toBe(true)
+    // Preenchido vale o limiar: 30 de 247 é 12%.
+    expect(canRateReadingState({ personalStatus: lendo, chaptersRead: 30, totalChapters: 247 })).toBe(false)
+  })
+
+  it("só 'Lendo': On-hold e Stalled em branco continuam barrados (é deles que vieram as 42)", () => {
+    for (const slug of ["on-hold", "stalled"]) {
+      expect(
+        canRateReadingState({
+          personalStatus: personalStatusNameBySlugOrThrow(slug),
+          chaptersRead: null,
+          totalChapters: 171,
+        }),
+      ).toBe(false)
+    }
   })
 
   it("total desconhecido NÃO libera: 'não sei' não é prova de leitura", () => {

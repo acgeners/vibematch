@@ -16,6 +16,10 @@ export interface OnboardingDeckWork {
   synopsis: string
   coverUrls: string[]
   genres: string[]
+  /** Média das plataformas (nota da comunidade, `calculated_scores.platform_avg`). */
+  platformAvg: number | null
+  /** Votos somados das plataformas (`calculated_scores.total_votes`). */
+  totalVotes: number | null
 }
 
 /**
@@ -105,7 +109,9 @@ export async function getOnboardingDeck(opts: {
   // despenca o plano do PostgREST).
   const { data: hydrated, error } = await supabase
     .from("works")
-    .select("id, title, total_chapters, canonical_synopsis, work_covers(url, is_primary, position)")
+    .select(
+      "id, title, total_chapters, canonical_synopsis, work_covers(url, is_primary, position), calculated_scores(platform_avg, total_votes)",
+    )
     .in("id", pickedIds)
   if (error) throw new Error(`getOnboardingDeck(hidratação): ${error.message}`)
 
@@ -116,7 +122,14 @@ export async function getOnboardingDeck(opts: {
     .map((id) => {
       const w = byId.get(id)
       if (!w) return null
+      // Embed to-one: o PostgREST devolve OBJETO (unique em work_id); aceitar as duas formas.
+      const cs = (Array.isArray(w.calculated_scores) ? w.calculated_scores[0] : w.calculated_scores) as
+        | { platform_avg: number | null; total_votes: number | null }
+        | null
+        | undefined
       return {
+        platformAvg: cs?.platform_avg ?? null,
+        totalVotes: cs?.total_votes ?? null,
         id,
         title: w.title as string,
         totalChapters: (w.total_chapters as number | null) ?? null,
@@ -126,4 +139,49 @@ export async function getOnboardingDeck(opts: {
       }
     })
     .filter((w): w is OnboardingDeckWork => w !== null && w.synopsis.length > 0)
+}
+
+/**
+ * Monta obras pelo id, no mesmo formato do deck: as que a pessoa trouxe da lista importada e
+ * chegaram SEM nota vão para a tela de notas ao lado das marcadas no deck.
+ *
+ * Em fatias de 50: `.in("id")` com embeds degrada o plano do PostgREST quando a lista cresce, e uma
+ * lista importada pode trazer centenas. Sem sinopse a obra entra igual (aqui não há cartão).
+ */
+export async function hydrateOnboardingWorks(ids: string[]): Promise<OnboardingDeckWork[]> {
+  const unique = Array.from(new Set(ids.filter(Boolean)))
+  if (unique.length === 0) return []
+  const supabase = createAdminClient()
+  const byId = new Map<string, OnboardingDeckWork>()
+  for (let i = 0; i < unique.length; i += 50) {
+    const chunk = unique.slice(i, i + 50)
+    const { data, error } = await supabase
+      .from("works")
+      .select(
+        "id, title, total_chapters, canonical_synopsis, work_covers(url, is_primary, position), calculated_scores(platform_avg, total_votes), work_genres(genres(name))",
+      )
+      .in("id", chunk)
+    if (error) throw new Error(`hydrateOnboardingWorks: ${error.message}`)
+    for (const w of (data ?? []) as Record<string, unknown>[]) {
+      const cs = (Array.isArray(w.calculated_scores) ? w.calculated_scores[0] : w.calculated_scores) as
+        | { platform_avg: number | null; total_votes: number | null }
+        | null
+        | undefined
+      const genres = ((w.work_genres as { genres?: { name?: string } | { name?: string }[] | null }[] | null) ?? [])
+        .map((wg) => (Array.isArray(wg.genres) ? wg.genres[0]?.name : wg.genres?.name))
+        .filter((n): n is string => typeof n === "string")
+      byId.set(w.id as string, {
+        id: w.id as string,
+        title: w.title as string,
+        totalChapters: (w.total_chapters as number | null) ?? null,
+        synopsis: ((w.canonical_synopsis as string | null) ?? "").trim(),
+        coverUrls: coverCandidates(w.work_covers as never),
+        genres,
+        platformAvg: cs?.platform_avg ?? null,
+        totalVotes: cs?.total_votes ?? null,
+      })
+    }
+  }
+  // A ordem de entrada (a mais recente primeiro) vale mais que a do banco.
+  return unique.map((id) => byId.get(id)).filter((w): w is OnboardingDeckWork => w != null)
 }

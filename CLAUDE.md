@@ -895,7 +895,7 @@ os RÓTULOS visíveis (aba, top-nav, busca) continuam em português, como o rest
 | rota | o que responde |
 |---|---|
 | `/catalog` · `/ranking` · `/favorites` · `/recommendations` · `/discover` | o catálogo e as formas de percorrê-lo |
-| `/reading` · `/dashboard` · `/import` · `/account` (+`/taste-profile`) · `/preferences` | o que é seu |
+| `/reading` · `/dashboard` · `/import` · `/rate` · `/account` (+`/taste-profile`) · `/preferences` | o que é seu |
 | `/my-ai-scores` | "Suas notas de IA": Veredito IA e Interesse, por obra — per-user |
 | `/curation/*` | a console do curador — ver abaixo |
 | `/login` · `/signup` · `/forgot-password` · `/reset-password` · `/welcome` · `/about` · `/guide` | entrada e institucionais |
@@ -962,7 +962,7 @@ toda rota e, só nesses prefixos, decide:
 | Lista | Prefixos | Exigência |
 |---|---|---|
 | `CONSOLE_PREFIXES` | **`/curation`** (um só) | sem sessão → `/login`; logado não-curador → `/` |
-| `SIGNED_IN_PREFIXES` | `/account`, `/dashboard`, `/discover`, `/my-list` | sem sessão → `/login`. **Papel não importa** |
+| `SIGNED_IN_PREFIXES` | `/account`, `/dashboard`, `/discover`, `/my-list`, `/rate` | sem sessão → `/login`. **Papel não importa** |
 
 🔴 **A primeira lista tinha CINCO prefixos até 2026-08-16, e virar um só foi o ponto da
 renomeação — não o inglês.** `/curadoria`, `/ai-evaluation`, `/settings`, `/ai-usage` e `/admin`
@@ -3380,7 +3380,7 @@ Server Components no render, **zero obras na tela** — enquanto o health respon
 abre a `/ranking`**, e a instrução impressa pelo script mandava conferir exatamente ele. A
 instrução foi seguida, passou, e o defeito ficou no ar até alguém abrir a página num browser.
 
-Hoje o `deploy.sh` termina rodando `scripts/smoke-producao.mjs`, que bate em **11 rotas** e
+Hoje o `deploy.sh` termina rodando `scripts/smoke-producao.mjs`, que bate em **12 rotas** e
 conta o CONTEÚDO de cada uma, e depois o `smoke-browser.mjs` (seção própria abaixo):
 
 ```bash
@@ -3949,7 +3949,7 @@ npm run smoke:logado     # build + sobe + verifica + derruba (~2min)
 ```
 
 🔴 **Os outros dois smokes são ANÔNIMOS, e isso deixava metade do app sem instrumento
-nenhum.** Hoje o app tem **40 rotas**, **13 gateadas** (8 em `/curation`, 5 em
+nenhum.** Hoje o app tem **41 rotas**, **14 gateadas** (8 em `/curation`, 6 em
 `SIGNED_IN_PREFIXES`), e o `smoke-browser.mjs` abre **5** — nenhuma logada.
 
 ⚠️ Era **39/12** em 20/08 e a rede do eixo C acusou a defasagem no mesmo PR que a causou —
@@ -3985,7 +3985,7 @@ no ar; para isso continuam existindo os dois smokes de produção.
 
 | metade | pergunta | hoje |
 |---|---|---|
-| **alcança** | as rotas que o papel DEVE ver renderizam? | 13 (curador) + 5 (leitor) |
+| **alcança** | as rotas que o papel DEVE ver renderizam? | 14 (curador) + 6 (leitor) |
 | **não alcança** | o gate de PAPEL continua de pé? | `/curation` do leitor tem de cair em `/` |
 
 🔴 A negativa é a que pega VAZAMENTO — esta base já pagou 10 per-user. O `smoke-producao.mjs`
