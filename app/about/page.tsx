@@ -190,6 +190,11 @@ export default function SobrePage() {
               Junte os dois e você tem a ideia: uma IA que te leva ao <b>satori</b> sobre o seu próprio
               gosto.
             </p>
+            {/* O mesmo texto do balão "Seu ensō ⓘ" das boas-vindas: o termo não era explicado em lugar nenhum. */}
+            <p className={styles.nameLead}>
+              O círculo aberto da marca é um <b>ensō</b>: no zen, o círculo pintado num só traço, que simboliza o
+              satori. Cada nota que você dá fecha um arco dele; aos 20, o círculo se completa e a Nota Prevista liga.
+            </p>
           </div>
         </section>
 

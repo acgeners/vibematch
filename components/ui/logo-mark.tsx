@@ -14,7 +14,16 @@ import { cn } from "@/lib/utils"
  * Os níveis "Completa" (com o kanji 悟) e "Ícone" vivem como assets em Imagens/Logo/
  * e em app/icon.svg (favicon).
  */
-export function LogoMark({ className, alt = "SatorIA" }: { className?: string; alt?: string }) {
+export function LogoMark({
+  className,
+  alt = "SatorIA",
+  tile = true,
+}: {
+  className?: string
+  alt?: string
+  /** Sem o tile navy: a marca solta sobre o fundo (as boas-vindas usam assim, grande). */
+  tile?: boolean
+}) {
   return (
     <svg
       viewBox="0 0 120 120"
@@ -43,7 +52,7 @@ export function LogoMark({ className, alt = "SatorIA" }: { className?: string; a
           <use href="#satoria-petal" />
         </g>
       </defs>
-      <rect width="120" height="120" fill="#0B1526" />
+      {tile && <rect width="120" height="120" fill="#0B1526" />}
       <circle
         cx="60"
         cy="60"

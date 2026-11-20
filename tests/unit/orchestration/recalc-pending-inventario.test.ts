@@ -104,6 +104,9 @@ const INVENTARIO: Record<string, boolean> = {
   // O swipe do deck grava o Interesse (♥), que é feature do Ridge — marca sempre, como
   // `setSynopsisQuality`. Só a dona chega aqui; os demais recalculam em after().
   deckSwipe: false,
+  // "Desfazer última" do deck e "Remover" da tela de notas (2026-11-19): apagar a linha tira a nota
+  // (rótulo) ou o ♥ (feature) — marca só quando havia um dos dois, como o swipe.
+  removeOnboardingWork: false,
 }
 
 /**

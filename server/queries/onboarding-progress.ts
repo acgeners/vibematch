@@ -2,15 +2,10 @@ import "server-only"
 
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getSessionUserId } from "@/server/queries/current-user"
+import { buildFirstSteps } from "@/lib/onboarding/first-steps"
+import type { FirstStepsInput } from "@/lib/onboarding/first-steps"
 
-export interface FirstStepsProgress {
-  saidTastes: boolean
-  broughtList: boolean
-  interestMarked: number
-  interestGoal: number
-  firstSheet: boolean
-  profileGenerated: boolean
-  ratedCount: number
+export interface FirstStepsProgress extends FirstStepsInput {
   /** Todos os passos concluídos — o card da ponte some sozinho. */
   complete: boolean
 }
@@ -28,7 +23,7 @@ export async function getFirstStepsProgress(): Promise<FirstStepsProgress | null
   const sb = createAdminClient()
   const count = async (q: PromiseLike<{ count: number | null }>) => (await q).count ?? 0
 
-  const [prefs, imports, hearts, sheets, taste, profile, rated] = await Promise.all([
+  const [prefs, imports, hearts, profile, rated] = await Promise.all([
     count(sb.from("user_tag_preferences").select("*", { count: "exact", head: true }).eq("user_id", userId)),
     count(sb.from("imports").select("*", { count: "exact", head: true }).eq("user_id", userId)),
     count(
@@ -38,14 +33,6 @@ export async function getFirstStepsProgress(): Promise<FirstStepsProgress | null
         .eq("user_id", userId)
         .not("synopsis_quality", "is", null),
     ),
-    count(
-      sb
-        .from("user_work_state")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", userId)
-        .not("post_story_score", "is", null),
-    ),
-    count(sb.from("pilot_taste_scores").select("*", { count: "exact", head: true }).eq("user_id", userId)),
     count(
       sb
         .from("taste_profile")
@@ -62,17 +49,13 @@ export async function getFirstStepsProgress(): Promise<FirstStepsProgress | null
     ),
   ])
 
-  const p: FirstStepsProgress = {
+  const input: FirstStepsInput = {
     saidTastes: prefs > 0,
     broughtList: imports > 0,
     interestMarked: hearts,
     interestGoal: 5,
-    firstSheet: sheets > 0 || taste > 0,
     profileGenerated: profile > 0,
     ratedCount: rated,
-    complete: false,
   }
-  p.complete =
-    p.saidTastes && p.broughtList && p.interestMarked >= p.interestGoal && p.firstSheet && p.profileGenerated
-  return p
+  return { ...input, complete: buildFirstSteps(input).current === -1 }
 }

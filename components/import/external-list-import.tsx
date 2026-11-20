@@ -47,7 +47,8 @@ import type {
 import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 
 type Phase = "upload" | "analyzing" | "review" | "committing" | "result"
-type Method = "file" | "anilist" | "titles"
+export type ImportMethod = "file" | "anilist" | "titles"
+type Method = ImportMethod
 
 type ImportInput = {
   filename: string
@@ -92,17 +93,23 @@ function textToBase64(text: string): string {
 
 export function ExternalListImport({
   onReviewBatchComplete,
+  lockedMethod,
+  initialSource,
 }: {
   // Chamado quando o lote de enriquecimento da etapa de revisão termina —
   // o caller (ImportModes) usa pra ir pra aba "Revisar pendentes".
   onReviewBatchComplete?: () => void
+  /** Método já escolhido fora daqui (as boas-vindas escolhem a fonte num quadrado): esconde as pílulas. */
+  lockedMethod?: ImportMethod
+  /** Formato do arquivo já escolhido fora daqui; a pessoa ainda pode trocar no seletor. */
+  initialSource?: ExternalListSource
 } = {}) {
   const [phase, setPhase] = useState<Phase>("upload")
-  const [method, setMethod] = useState<Method>("file")
+  const [method, setMethod] = useState<Method>(lockedMethod ?? "file")
   const [file, setFile] = useState<File | null>(null)
   const [username, setUsername] = useState("")
   const [titlesText, setTitlesText] = useState("")
-  const [sourceOverride, setSourceOverride] = useState<ExternalListSource | "auto">("auto")
+  const [sourceOverride, setSourceOverride] = useState<ExternalListSource | "auto">(initialSource ?? "auto")
   // Input usado no analyze — guardado pra reusar no commit (re-parseado no servidor).
   const [pendingInput, setPendingInput] = useState<ImportInput | null>(null)
   const [analysis, setAnalysis] = useState<AnalyzeExternalListResult | null>(null)
@@ -117,11 +124,11 @@ export function ExternalListImport({
 
   const reset = () => {
     setPhase("upload")
-    setMethod("file")
+    setMethod(lockedMethod ?? "file")
     setFile(null)
     setUsername("")
     setTitlesText("")
-    setSourceOverride("auto")
+    setSourceOverride(initialSource ?? "auto")
     setPendingInput(null)
     setAnalysis(null)
     setError(null)
@@ -232,6 +239,7 @@ export function ExternalListImport({
     return (
       <div className="space-y-4">
         {/* Método (nível 2): pílulas discretas — forma diferente das abas (padrão /reading) */}
+        {!lockedMethod && (
         <div className="space-y-1.5">
           <p className="text-xs font-medium text-muted-foreground">De onde importar</p>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -267,6 +275,7 @@ export function ExternalListImport({
             })}
           </div>
         </div>
+        )}
 
         {method === "file" ? (
           <>

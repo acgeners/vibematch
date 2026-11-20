@@ -468,6 +468,44 @@ export async function writeReadingState(
   return result.error ? result : { error: null, readEditionsWritten: plano.plans.size }
 }
 
+/**
+ * Apaga o estado pessoal de UM usuário em N obras — a linha inteira, como se a obra nunca tivesse
+ * sido tocada. É o "Desfazer última" do deck e o "Remover" da tela de notas das boas-vindas (o deck
+ * só oferece obra SEM linha, então desfazer é voltar exatamente ao antes, e não gravar "Untracked").
+ *
+ * Nota existente sai ANTES por `writeReadingState`, para a medição prospectiva registrar a nota
+ * apagada (lib/server/predictions/label-transition.ts); a linha sai pelo cliente de SESSÃO — a
+ * política `_own_delete` da mig 142 garante no banco que é dela.
+ */
+export async function deleteReadingState(
+  userId: string,
+  workIds: string[],
+): Promise<{ error: string | null; hadLabel: boolean; hadInterest: boolean }> {
+  const ids = Array.from(new Set(workIds.filter(Boolean)))
+  if (ids.length === 0) return { error: null, hadLabel: false, hadInterest: false }
+
+  const supabase = await createUserClient()
+  const { data: rows, error } = await supabase
+    .from("user_work_state")
+    .select("work_id, user_score, synopsis_quality")
+    .eq("user_id", userId)
+    .in("work_id", ids)
+  if (error) return { error: error.message, hadLabel: false, hadInterest: false }
+  const labeled = (rows ?? []).filter((r) => r.user_score != null).map((r) => r.work_id as string)
+  const hadInterest = (rows ?? []).some((r) => r.synopsis_quality != null)
+  if (labeled.length > 0) {
+    const clear = await writeReadingState(userId, labeled, { user_score: null, quick_score: null })
+    if (clear.error) return { error: clear.error, hadLabel: true, hadInterest }
+  }
+  const { error: delError } = await supabase
+    .from("user_work_state")
+    .delete()
+    .eq("user_id", userId)
+    .in("work_id", ids)
+  if (delError) return { error: delError.message, hadLabel: labeled.length > 0, hadInterest }
+  return { error: null, hadLabel: labeled.length > 0, hadInterest }
+}
+
 /** `undefined` = o patch não toca a nota; `null` = a nota está sendo APAGADA. */
 function nextLabel(patch: PersonalStatePatch): number | null | undefined {
   return Object.prototype.hasOwnProperty.call(patch, "user_score") ? (patch.user_score ?? null) : undefined

@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { cookies } from "next/headers"
 import { ArrowRight } from "lucide-react"
 import {
   getDashboardStats,
@@ -13,6 +14,7 @@ import { getSiteStats } from "@/server/queries/auth-hero"
 import { PublicHome } from "@/components/home/public-home"
 import { getFirstStepsProgress } from "@/server/queries/onboarding-progress"
 import { FirstStepsCard } from "@/components/dashboard/first-steps-card"
+import { FIRST_STEPS_HIDDEN_COOKIE } from "@/lib/onboarding/first-steps"
 import { DashboardGreeting } from "@/components/dashboard/dashboard-greeting"
 import { ActivityStrip } from "@/components/home/activity-strip"
 import { ContinueHero } from "@/components/home/continue-hero"
@@ -91,7 +93,13 @@ export default async function HomePage() {
       </header>
 
       {/* Ponte do onboarding: fica até a conta sair do estado inicial, some sozinha. */}
-      {firstSteps && !firstSteps.complete && <FirstStepsCard progress={firstSteps} />}
+      {firstSteps && !firstSteps.complete && (
+        <FirstStepsCard
+          progress={firstSteps}
+          // Lido no servidor: a página já abre com o card escondido, sem piscar.
+          initiallyHidden={(await cookies()).get(FIRST_STEPS_HIDDEN_COOKIE)?.value === "1"}
+        />
+      )}
 
       <ActivityStrip
         items={[
