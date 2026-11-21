@@ -32,7 +32,8 @@ export function EnsoRing({
       {svg}
       <span className={s.ringNum}>
         <b>{rated}</b>
-        <small>de {ENSO_GOAL}</small>
+        {/* "de 20" é a meta; depois dela, "252 de 20" lê como conta errada. */}
+        <small>{rated < ENSO_GOAL ? `de ${ENSO_GOAL}` : "notas"}</small>
       </span>
     </div>
   )

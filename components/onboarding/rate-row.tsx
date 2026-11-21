@@ -1,49 +1,76 @@
 "use client"
 
 import { useState } from "react"
+import { Check, ChevronDown } from "lucide-react"
 import { CoverImage } from "@/components/ui/cover-image"
-import { readingLock } from "@/lib/onboarding/reading-lock"
-import type { ReadingKind } from "@/lib/onboarding/reading-lock"
-import type { OnboardingDeckWork } from "@/server/queries/onboarding-deck"
+import { PersonalStatusBadge } from "@/components/ui/status-badge"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
+import { asksChapter, RATE_MENU_STATUSES, rateLock, WANT_TO_READ_STATUS } from "@/lib/onboarding/rate-status"
+import type { RateListWork } from "@/lib/onboarding/rate-status"
+import { cn, titleToSlug } from "@/lib/utils"
+import type { PersonalStatus } from "@/types/domain"
 import s from "./onboarding.module.css"
 
 const SCALE = [0, 2, 4, 6, 8, 10]
 
-/** Etiqueta ao lado do seletor: de onde a obra veio. */
+const STATUS_INFO_BY_NAME = Object.fromEntries(
+  Object.values(PERSONAL_STATUSES_BY_ID).map((info) => [info.status, info]),
+)
+
+/** Etiqueta ao lado do status: de onde a obra veio. */
 export type RateRowBadge = { kind: "source"; label: string } | { kind: "fresh"; label: string }
 
 /**
- * Uma obra da tela de notas (boas-vindas e "Dar notas"): como foi a leitura, a nota de 0 a 10 e,
- * em "Estou lendo", o capítulo. "Terminei" vem marcado, então quem terminou não clica nada a mais;
- * "Remover" tira a obra (o "Já li" errado de qualquer carta, não só da última).
+ * Uma obra da tela de notas (boas-vindas e "Dar notas"): o status de leitura GRAVADO, com o selo e
+ * o menu do resto do site; o capítulo nos status que acompanham progresso; a nota de 0 a 10, que
+ * trava pela mesma regra do servidor; e a lixeira, no canto do CARD: ao lado da escala ela lia como
+ * "apagar a nota", e o que ela tira é a obra da lista.
  */
 export function RateRow({
   work,
-  score,
-  kind,
+  status,
   chapters,
+  score,
   badge = null,
   onRate,
-  onReading,
-  onRemove,
+  onStatus,
+  onChapters,
+  onTrash,
 }: {
-  work: OnboardingDeckWork
-  score: number | undefined
-  kind: ReadingKind
+  work: RateListWork
+  status: PersonalStatus
   chapters: number | null
+  score: number | undefined
   badge?: RateRowBadge | null
   onRate: (value: number) => void
-  onReading: (kind: ReadingKind, chapters: number | null) => void
-  onRemove: () => void
+  onStatus: (status: PersonalStatus) => void
+  onChapters: (chapters: number | null) => void
+  onTrash: () => void
 }) {
   // O campo de capítulo é rascunho enquanto se digita (a trava acompanha na hora); grava ao sair dele.
   const [draft, setDraft] = useState(chapters == null ? "" : String(chapters))
+  const [synced, setSynced] = useState(chapters)
+  // O capítulo muda por fora (Finished = a obra inteira): o rascunho acompanha. Ajuste durante o
+  // render, semeado com o valor inicial, para não disparar na hidratação.
+  if (chapters !== synced) {
+    setSynced(chapters)
+    setDraft(chapters == null ? "" : String(chapters))
+  }
   const typed = draft.trim() === "" ? null : Number.parseInt(draft, 10)
   const typedChapters = typed != null && Number.isFinite(typed) && typed >= 0 ? typed : null
-  const lock = readingLock(kind, kind === "lendo" ? typedChapters : null, work.totalChapters)
+  const withChapter = asksChapter(status)
+  const lock = rateLock(status, withChapter ? typedChapters : chapters, work.totalChapters)
   const shown = lock.locked ? undefined : score
   const commitChapters = () => {
-    if (typedChapters !== chapters) onReading("lendo", typedChapters)
+    if (typedChapters !== chapters) onChapters(typedChapters)
   }
 
   return (
@@ -52,25 +79,57 @@ export function RateRow({
         {work.coverUrls.length > 0 && <CoverImage urls={work.coverUrls} className="size-full object-cover" />}
       </span>
       <span className={s.name}>
-        <span className={s.nameTitle}>{work.title}</span>
+        {/* Outra aba: aqui a nota fica na tela (boas-vindas no meio do fluxo, "Dar notas" com o deck). */}
+        <a
+          href={`/catalog/${titleToSlug(work.title)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={s.nameTitle}
+          title="Abrir a página da obra em outra aba"
+        >
+          {work.title}
+        </a>
         {work.genres.length > 0 && <span className={s.nameGenres}>{work.genres.slice(0, 3).join(" · ")}</span>}
         <span className={s.meta}>
-          <select
-            className={s.select}
-            aria-label={`Como foi a leitura de ${work.title}`}
-            value={kind}
-            onChange={(e) => {
-              const v = e.target.value
-              if (v === "remover") onRemove()
-              else onReading(v as ReadingKind, v === "lendo" ? typedChapters : null)
-            }}
-          >
-            <option value="terminei">Terminei</option>
-            <option value="larguei">Larguei</option>
-            <option value="lendo">Estou lendo</option>
-            <option value="remover">Remover</option>
-          </select>
-          {kind === "lendo" && (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className={s.statusTrigger}
+              aria-label={`Status de leitura de ${work.title}: ${status}. Mudar`}
+            >
+              <PersonalStatusBadge status={status} />
+              <ChevronDown aria-hidden className={s.statusChevron} />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-64">
+              {RATE_MENU_STATUSES.map((name) => {
+                const info = STATUS_INFO_BY_NAME[name]
+                const active = name === status
+                return (
+                  <DropdownMenuItem
+                    key={name}
+                    onSelect={() => onStatus(name)}
+                    className={cn("gap-2", active && "bg-primary/10 font-semibold")}
+                    title={info?.descriptionPt ?? undefined}
+                  >
+                    <span
+                      aria-hidden
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: info?.color ?? "var(--muted-foreground)" }}
+                    />
+                    <span aria-hidden className="w-4 shrink-0 text-center">
+                      {info?.symbol}
+                    </span>
+                    <span className="min-w-0 truncate">{name}</span>
+                    {active && <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-primary" />}
+                  </DropdownMenuItem>
+                )
+              })}
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs font-normal leading-snug text-muted-foreground">
+                {WANT_TO_READ_STATUS} tira a obra desta lista.
+              </DropdownMenuLabel>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {withChapter && (
             <label className={s.chapter}>
               cap.
               <input
@@ -107,6 +166,20 @@ export function RateRow({
           </button>
         ))}
       </span>
+      <button
+        type="button"
+        className={s.trash}
+        onClick={onTrash}
+        aria-label={`Tirar ${work.title} desta lista`}
+        title="Tirar a obra desta lista"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M3 6h18" />
+          <path d="M8 6V4h8v2" />
+          <path d="M19 6l-1 14H6L5 6" />
+          <path d="M10 11v6M14 11v6" />
+        </svg>
+      </button>
     </div>
   )
 }

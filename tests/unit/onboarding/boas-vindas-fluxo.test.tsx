@@ -14,7 +14,7 @@ const deck = [
   { id: "00000000-0000-4000-8000-000000000001", title: "Obra Um", totalChapters: 80, synopsis: "Sinopse um", coverUrls: [], genres: ["Romance"], platformAvg: 8.5, totalVotes: 51000 },
   { id: "00000000-0000-4000-8000-000000000002", title: "Obra Dois", totalChapters: 247, synopsis: "Sinopse dois", coverUrls: [], genres: ["Fantasy"], platformAvg: null, totalVotes: null },
 ]
-const daLista = { id: "00000000-0000-4000-8000-000000000009", title: "Obra da Lista", totalChapters: 40, synopsis: "", coverUrls: [], genres: [], platformAvg: null, totalVotes: null }
+const daLista = { id: "00000000-0000-4000-8000-000000000009", title: "Obra da Lista", totalChapters: 40, synopsis: "", coverUrls: [], genres: [], platformAvg: null, totalVotes: null, status: "Reading" as const, chaptersRead: null }
 
 const acoes = vi.hoisted(() => ({
   getOnboardingDeckAction: vi.fn(),
@@ -22,7 +22,7 @@ const acoes = vi.hoisted(() => ({
   getWelcomeImportStateAction: vi.fn(),
   saveOnboardingTastes: vi.fn(async () => ({ ok: true })),
   deckSwipeAction: vi.fn(async () => ({ ok: true })),
-  setOnboardingReadingAction: vi.fn(async () => ({ ok: true, canRate: true })),
+  setOnboardingStatusAction: vi.fn(async () => ({ ok: true, canRate: true })),
   removeOnboardingWorkAction: vi.fn(async () => ({ ok: true })),
   searchOnboardingTagsAction: vi.fn(async (q: string) => ({
     ok: true,
@@ -40,7 +40,7 @@ vi.mock("@/server/actions/onboarding", () => ({
   deckSwipeAction: acoes.deckSwipeAction,
   getOnboardingProgressAction: acoes.getOnboardingProgressAction,
   getWelcomeImportStateAction: acoes.getWelcomeImportStateAction,
-  setOnboardingReadingAction: acoes.setOnboardingReadingAction,
+  setOnboardingStatusAction: acoes.setOnboardingStatusAction,
   removeOnboardingWorkAction: acoes.removeOnboardingWorkAction,
   searchOnboardingTagsAction: acoes.searchOnboardingTagsAction,
 }))
@@ -217,7 +217,7 @@ describe("tela de notas", () => {
     await screen.findByText(/Quanto você gostou/)
   }
 
-  it("as do deck e as que a lista trouxe sem nota, estas com a etiqueta da origem", async () => {
+  it("as do deck e as que a lista trouxe sem nota, estas com a etiqueta da origem e o status importado", async () => {
     await irAteNotas()
     expect(screen.getAllByRole("group", { name: /Nota para/ }).map((g) => g.getAttribute("aria-label"))).toEqual([
       "Nota para Obra Um",
@@ -225,6 +225,9 @@ describe("tela de notas", () => {
       "Nota para Obra da Lista",
     ])
     expect(screen.getByText("veio do AniList")).toBeTruthy()
+    // O "Já li" do deck grava Finished; a obra importada como Reading aparece como Reading.
+    expect(screen.getByRole("button", { name: /^Status de leitura de Obra Um: Finished/ })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /^Status de leitura de Obra da Lista: Reading/ })).toBeTruthy()
   })
 
   it("o servidor conta só as notas que a tela NÃO está contando (sem somar duas vezes)", async () => {
@@ -239,26 +242,39 @@ describe("tela de notas", () => {
     expect(screen.getAllByText("de 20")[0].previousElementSibling?.textContent).toBe("4")
   })
 
-  it("'Estou lendo' abaixo de 20% trava a escala; em branco libera; o servidor recebe a nota para reaplicar", async () => {
+  /** Radix abre no `pointerdown`, não no `click`. */
+  function escolherStatus(titulo: string, status: string) {
+    const gatilho = screen.getByRole("button", { name: new RegExp(`^Status de leitura de ${titulo}:`) })
+    fireEvent.pointerDown(gatilho, { pointerType: "mouse", button: 0 })
+    fireEvent.click(gatilho)
+    fireEvent.click(screen.getByRole("menuitem", { name: new RegExp(status) }))
+  }
+
+  it("Reading em branco libera; Started trava abaixo de 20%; o servidor recebe a nota para reaplicar", async () => {
     await irAteNotas()
     const linha = () => screen.getByRole("group", { name: "Nota para Obra Dois" })
     fireEvent.click(within(linha()).getByRole("button", { name: "6" }))
-    fireEvent.change(screen.getByRole("combobox", { name: /leitura de Obra Dois/ }), { target: { value: "lendo" } })
-    expect(acoes.setOnboardingReadingAction).toHaveBeenLastCalledWith(deck[1].id, "lendo", null, 6)
+    escolherStatus("Obra Dois", "Reading")
+    expect(acoes.setOnboardingStatusAction).toHaveBeenLastCalledWith(deck[1].id, "Reading", null, 6)
     expect(within(linha()).getByRole("button", { name: "6" }).getAttribute("aria-disabled")).toBeNull()
+    escolherStatus("Obra Dois", "Started")
+    expect(within(linha()).getByRole("button", { name: "6" }).getAttribute("aria-disabled")).toBe("true")
+    expect(screen.getByText("Diga em que capítulo parou: a nota vale a partir do cap. 50.")).toBeTruthy()
     const cap = screen.getByRole("spinbutton", { name: /Capítulo em que parou em Obra Dois/ })
     fireEvent.change(cap, { target: { value: "30" } })
     fireEvent.blur(cap)
-    expect(within(linha()).getByRole("button", { name: "6" }).getAttribute("aria-disabled")).toBe("true")
-    expect(screen.getByText("Dá para dar nota a partir do cap. 50 (20%).")).toBeTruthy()
-    expect(acoes.setOnboardingReadingAction).toHaveBeenLastCalledWith(deck[1].id, "lendo", 30, 6)
+    expect(screen.getByText("Nota a partir do cap. 50 (20%).")).toBeTruthy()
+    expect(acoes.setOnboardingStatusAction).toHaveBeenLastCalledWith(deck[1].id, "Started", 30, 6)
   })
 
-  it("'Remover' tira a obra da lista e do banco", async () => {
+  it("a lixeira na obra do deck desfaz a marcação; na da lista, grava Untracked", async () => {
     await irAteNotas()
-    fireEvent.change(screen.getByRole("combobox", { name: /leitura de Obra Um/ }), { target: { value: "remover" } })
+    clicar("Tirar Obra Um desta lista")
     expect(screen.queryByRole("group", { name: "Nota para Obra Um" })).toBeNull()
     expect(acoes.removeOnboardingWorkAction).toHaveBeenCalledWith(deck[0].id)
+    clicar("Tirar Obra da Lista desta lista")
+    expect(acoes.setOnboardingStatusAction).toHaveBeenLastCalledWith(daLista.id, "Untracked", null, null)
+    expect(acoes.removeOnboardingWorkAction).toHaveBeenCalledTimes(1)
   })
 
   it("concluir com menos de 20 notas pergunta antes", async () => {
