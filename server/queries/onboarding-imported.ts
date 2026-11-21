@@ -1,14 +1,12 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { PERSONAL_STATUSES } from "@/types/domain"
-import {
-  getPersonalStatusIdByName,
-  isTerminalPersonalStatus,
-  tracksProgressPersonalStatus,
-} from "@/lib/constants/status-lookups"
+import type { PersonalStatus } from "@/types/domain"
+import { getPersonalStatusIdByName, getPersonalStatusNameById } from "@/lib/constants/status-lookups"
+import { isRateListStatus } from "@/lib/onboarding/rate-status"
+import type { RateListWork } from "@/lib/onboarding/rate-status"
 import type { ExternalListSource } from "@/lib/import/external-list/types"
 import { hydrateOnboardingWorks } from "@/server/queries/onboarding-deck"
-import type { OnboardingDeckWork } from "@/server/queries/onboarding-deck"
 
 /** Teto da lista: uma importação grande traz centenas de obras sem nota, e a tela é uma lista só. */
 export const IMPORTED_UNRATED_LIMIT = 200
@@ -23,16 +21,40 @@ const SOURCE_LABEL: Partial<Record<ExternalListSource, string>> = {
 
 /**
  * Status que querem dizer "já li, ao menos em parte": os terminais (terminei, larguei) e os que
- * acompanham progresso. Sai das FLAGS do banco, nunca de uma lista de nomes.
+ * acompanham progresso. Sai das FLAGS do banco, nunca de uma lista de nomes — a mesma régua da tela.
  */
 function readStatusIds(): number[] {
-  return PERSONAL_STATUSES.filter((s) => isTerminalPersonalStatus(s) || tracksProgressPersonalStatus(s))
+  return PERSONAL_STATUSES.filter((s) => isRateListStatus(s))
     .map((s) => getPersonalStatusIdByName(s))
     .filter((id): id is number => id != null)
 }
 
+/** As colunas de `user_work_state` que a tela de notas precisa: a ordem e o estado de leitura. */
+const RATE_ROW_COLUMNS = "work_id, updated_at, personal_status_id, chapters_read"
+
+interface RateRowData {
+  work_id: string
+  personal_status_id: number | null
+  chapters_read: number | null
+}
+
+/**
+ * Hidrata as obras e junta o status e o capítulo GRAVADOS. Sem isto a tela inventava "Terminei"
+ * para todas (ver `lib/onboarding/rate-status.ts`).
+ */
+async function hydrateRateWorks(rows: RateRowData[]): Promise<RateListWork[]> {
+  const byId = new Map(rows.map((r) => [r.work_id, r]))
+  const works = await hydrateOnboardingWorks(rows.map((r) => r.work_id))
+  return works.flatMap((w) => {
+    const row = byId.get(w.id)
+    const status = row?.personal_status_id != null ? getPersonalStatusNameById(row.personal_status_id) : null
+    if (!status) return []
+    return [{ ...w, status: status as PersonalStatus, chaptersRead: row?.chapters_read ?? null }]
+  })
+}
+
 export interface ImportedUnrated {
-  works: OnboardingDeckWork[]
+  works: RateListWork[]
   /** Quantas obras a mesma importação trouxe COM nota (já contam no ensō). */
   ratedCount: number
   /** "AniList", "MyAnimeList"… ou null quando a lista veio colada (ou não houve importação). */
@@ -51,7 +73,7 @@ export async function getImportedUnrated(userId: string, sinceIso: string): Prom
   const [rows, rated, lastImport] = await Promise.all([
     supabase
       .from("user_work_state")
-      .select("work_id, updated_at")
+      .select(RATE_ROW_COLUMNS)
       .eq("user_id", userId)
       .is("user_score", null)
       .in("personal_status_id", readStatusIds())
@@ -78,7 +100,7 @@ export async function getImportedUnrated(userId: string, sinceIso: string): Prom
   if (lastImport.error) throw new Error(`getImportedUnrated(imports): ${lastImport.error.message}`)
 
   const source = (lastImport.data?.[0]?.raw_metadata as { source?: ExternalListSource } | null)?.source
-  const works = await hydrateOnboardingWorks((rows.data ?? []).map((r) => r.work_id as string))
+  const works = await hydrateRateWorks((rows.data ?? []) as RateRowData[])
   return { works, ratedCount: rated.count ?? 0, sourceLabel: source ? (SOURCE_LABEL[source] ?? null) : null }
 }
 
@@ -86,10 +108,10 @@ export async function getImportedUnrated(userId: string, sinceIso: string): Prom
  * TODAS as obras lidas e sem nota da pessoa (a mais recente primeiro) — a lista "Já li, falta a
  * nota" da página "Dar notas": obra marcada como lida em qualquer lugar do app também aparece lá.
  */
-export async function getUnratedRead(userId: string): Promise<OnboardingDeckWork[]> {
+export async function getUnratedRead(userId: string): Promise<RateListWork[]> {
   const { data, error } = await createAdminClient()
     .from("user_work_state")
-    .select("work_id, updated_at")
+    .select(RATE_ROW_COLUMNS)
     .eq("user_id", userId)
     .is("user_score", null)
     .in("personal_status_id", readStatusIds())
@@ -97,7 +119,7 @@ export async function getUnratedRead(userId: string): Promise<OnboardingDeckWork
     .order("work_id", { ascending: true })
     .limit(IMPORTED_UNRATED_LIMIT)
   if (error) throw new Error(`getUnratedRead: ${error.message}`)
-  return hydrateOnboardingWorks((data ?? []).map((r) => r.work_id as string))
+  return hydrateRateWorks((data ?? []) as RateRowData[])
 }
 
 /** Quantas obras COM nota a pessoa tem (o número do ensō). Conta no servidor: zero linhas trafegam. */

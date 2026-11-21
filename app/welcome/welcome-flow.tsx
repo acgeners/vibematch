@@ -9,12 +9,10 @@ import {
   deckSwipeAction,
   getOnboardingProgressAction,
   getWelcomeImportStateAction,
-  setOnboardingReadingAction,
   removeOnboardingWorkAction,
   searchOnboardingTagsAction,
 } from "@/server/actions/onboarding"
 import type { OnboardingTagHit } from "@/server/actions/onboarding"
-import { saveQuickScore } from "@/server/actions/quick-score"
 import { ExternalListImport } from "@/components/import/external-list-import"
 import type { ImportMethod } from "@/components/import/external-list-import"
 import { CoverImage } from "@/components/ui/cover-image"
@@ -22,12 +20,13 @@ import { LogoMark } from "@/components/ui/logo-mark"
 import { DeckStack, SWIPE_OUT_CLASS } from "@/components/onboarding/deck-stack"
 import type { SwipeKind } from "@/components/onboarding/deck-stack"
 import { DeckButtons } from "@/components/onboarding/deck-buttons"
-import { RateRow } from "@/components/onboarding/rate-row"
+import { RateList, useRateList } from "@/components/onboarding/rate-list"
+import type { RateListItem } from "@/components/onboarding/rate-list"
 import { EnsoRing, EnsoTitle } from "@/components/onboarding/enso"
 import { LOVED_CHIPS, VETO_CHIPS, MIN_LOVED } from "@/lib/onboarding/chips"
 import { ENSO_GOAL } from "@/lib/onboarding/enso"
-import { readingLock } from "@/lib/onboarding/reading-lock"
-import type { ReadingKind } from "@/lib/onboarding/reading-lock"
+import { DECK_READ_STATUS } from "@/lib/onboarding/rate-status"
+import type { RateListWork } from "@/lib/onboarding/rate-status"
 import { AGE_CONFIRM } from "@/lib/onboarding/age-confirm"
 import type { ExternalListSource } from "@/lib/import/external-list/types"
 import type { OnboardingDeckWork } from "@/server/queries/onboarding-deck"
@@ -98,7 +97,7 @@ type DeckStatus = "idle" | "loading" | "ready" | "error"
 interface ImportState {
   ratedCount: number
   importedRatedCount: number
-  unrated: OnboardingDeckWork[]
+  unrated: RateListWork[]
   sourceLabel: string | null
 }
 
@@ -169,35 +168,35 @@ export function WelcomeFlow({
   const swiping = useRef(false)
   // tela 6
   const [baseRated, setBaseRated] = useState(0)
-  const [quick, setQuick] = useState<Map<string, number>>(new Map())
-  const [reading, setReading] = useState<Map<string, { kind: ReadingKind; chapters: number | null }>>(new Map())
-  const [removed, setRemoved] = useState<Set<string>>(new Set())
   const [confirmFew, setConfirmFew] = useState(false)
 
   const first = displayName?.trim().split(/\s+/)[0] ?? null
   const goTo = useCallback((i: number) => setStep(Math.max(0, Math.min(TOTAL_STEPS - 1, i))), [])
 
-  // As lidas da tela de notas: as marcadas no deck (frescas na memória) e depois as que a lista trouxe sem nota.
-  const deckRead = useMemo(
-    () => history.filter((h) => h.kind === "read" && !removed.has(h.work.id)).map((h) => h.work),
-    [history, removed],
-  )
-  const toRate = useMemo(() => {
-    const seen = new Set(deckRead.map((w) => w.id))
-    const fromList = (imported?.unrated ?? []).filter((w) => !seen.has(w.id) && !removed.has(w.id))
-    return [...deckRead.map((w) => ({ work: w, fromList: false })), ...fromList.map((w) => ({ work: w, fromList: true }))]
-  }, [deckRead, imported, removed])
-  const readingOf = (id: string) => reading.get(id) ?? { kind: "terminei" as ReadingKind, chapters: null }
+  // As lidas da tela de notas: as marcadas no deck (frescas na memória) e depois as que a lista
+  // trouxe sem nota. O "Já li" do deck grava Finished (`deckSwipeAction`): é com ele que a obra entra.
+  const deckMarked = useMemo(() => history.filter((h) => h.kind === "read").map((h) => h.work), [history])
+  const toRate = useMemo<RateListItem[]>(() => {
+    const seen = new Set(deckMarked.map((w) => w.id))
+    const fromList = (imported?.unrated ?? []).filter((w) => !seen.has(w.id))
+    const listBadge = {
+      kind: "source" as const,
+      label: imported?.sourceLabel ? `veio do ${imported.sourceLabel}` : "veio da sua lista",
+    }
+    return [
+      ...deckMarked.map((w) => ({ work: { ...w, status: DECK_READ_STATUS, chaptersRead: null }, fresh: true, badge: null })),
+      ...fromList.map((w) => ({ work: w, fresh: false, badge: listBadge })),
+    ]
+  }, [deckMarked, imported])
+  const ctl = useRateList(toRate, "bem-vindo")
+  // As do deck que continuam lidas (a lixeira as tira do placar).
+  const deckRead = deckMarked.filter((w) => !ctl.isGone(w.id))
   // Nota que conta: dada aqui e não travada (a travada fica guardada só na tela, para voltar se liberar).
-  const countedHere = toRate.filter(({ work }) => {
-    if (!quick.has(work.id)) return false
-    const r = readingOf(work.id)
-    return !readingLock(r.kind, r.chapters, work.totalChapters).locked
-  }).length
-  const ratedTotal = baseRated + countedHere
+  const ratedTotal = baseRated + ctl.counted
   const lit = ratedTotal >= ENSO_GOAL
   // Placar do deck: "já lidas" = as que já têm nota + as que a lista trouxe sem nota + as marcadas no deck.
-  const readSoFar = (imported?.ratedCount ?? 0) + (imported?.unrated.length ?? 0) + deckRead.length
+  const readSoFar =
+    (imported?.ratedCount ?? 0) + (imported?.unrated ?? []).filter((w) => !ctl.isGone(w.id)).length + deckRead.length
   const importedTotal = (imported?.importedRatedCount ?? 0) + (imported?.unrated.length ?? 0)
   const fromListLabel = imported?.sourceLabel ? `da sua lista do ${imported.sourceLabel}` : "da sua lista"
 
@@ -279,7 +278,7 @@ export function WelcomeFlow({
     try {
       // As notas desta tela entram no medidor por `quick`: o servidor conta só as OUTRAS, senão
       // voltar aqui (ou "Rever o fluxo") somava duas vezes as já dadas.
-      const res = await getOnboardingProgressAction(Array.from(quick.keys()))
+      const res = await getOnboardingProgressAction(Array.from(ctl.quick.keys()))
       if (res.ok) setBaseRated(res.ratedCount)
       goTo(STEP.notes)
     } finally {
@@ -317,21 +316,7 @@ export function WelcomeFlow({
     setHistory((h) => h.slice(0, -1))
     setDeckPos((p) => Math.max(0, p - 1))
     setStamp(null)
-    setQuick((m) => {
-      const next = new Map(m)
-      next.delete(last.work.id)
-      return next
-    })
-    setReading((m) => {
-      const next = new Map(m)
-      next.delete(last.work.id)
-      return next
-    })
-    setRemoved((r) => {
-      const next = new Set(r)
-      next.delete(last.work.id)
-      return next
-    })
+    ctl.forget(last.work.id)
     void removeOnboardingWorkAction(last.work.id).then((r) => {
       if (!r.ok) console.error("[bem-vindo] desfazer:", r.error)
     })
@@ -361,41 +346,6 @@ export function WelcomeFlow({
   }, [step, current, swipe, goTo])
 
   // ── tela de notas ─────────────────────────────────────────────────────
-  const rate = (workId: string, value: number) => {
-    // Efeito FORA do updater: action dentro do setState roda durante o render e o
-    // React reclama ("Cannot update Router while rendering WelcomeFlow").
-    const removing = quick.get(workId) === value
-    setQuick((m) => {
-      const next = new Map(m)
-      if (removing) next.delete(workId)
-      else next.set(workId, value)
-      return next
-    })
-    void saveQuickScore(workId, removing ? null : value).then((r) => {
-      if (!r.ok) console.error("[bem-vindo] nota:", r.error)
-    })
-  }
-
-  // O servidor reaplica a nota depois de trocar o status: travada sai do banco, liberada volta.
-  const changeReading = (workId: string, kind: ReadingKind, chapters: number | null) => {
-    setReading((m) => new Map(m).set(workId, { kind, chapters }))
-    void setOnboardingReadingAction(workId, kind, chapters, quick.get(workId) ?? null).then((r) => {
-      if (!r.ok) console.error("[bem-vindo] leitura:", r.error)
-    })
-  }
-
-  const removeWork = (workId: string) => {
-    setRemoved((r) => new Set(r).add(workId))
-    setQuick((m) => {
-      const next = new Map(m)
-      next.delete(workId)
-      return next
-    })
-    void removeOnboardingWorkAction(workId).then((r) => {
-      if (!r.ok) console.error("[bem-vindo] remover:", r.error)
-    })
-  }
-
   const finishNotes = () => {
     if (!lit) setConfirmFew(true)
     else goTo(STEP.done)
@@ -493,7 +443,7 @@ export function WelcomeFlow({
                   }
                 : { primary: "Já marquei o bastante →", run: () => void enterNotes() }
               : step === STEP.notes
-                ? countedHere === 0
+                ? ctl.counted === 0
                   ? {
                       primary: "Concluir sem notas →",
                       run: finishNotes,
@@ -882,7 +832,7 @@ export function WelcomeFlow({
                 <div className={styles.tallyCol}>
                   <span className={styles.tallyNum} style={{ color: "#8fdbff" }}>
                     {readSoFar}
-                    <small> de {ENSO_GOAL}</small>
+                    {readSoFar < ENSO_GOAL && <small> de {ENSO_GOAL}</small>}
                   </span>
                   <span className={styles.tallyBar} aria-hidden="true">
                     <span style={{ width: `${Math.min(100, Math.round((readSoFar / ENSO_GOAL) * 100))}%` }} />
@@ -963,38 +913,29 @@ export function WelcomeFlow({
             <div className={`${styles.glass} ${styles.ensoBar}`} aria-hidden="true">
               <EnsoRing rated={ratedTotal} size={34} stroke={9} />
               <span>
-                <b>{ratedTotal}</b> de {ENSO_GOAL} notas · com {ENSO_GOAL}, a Nota Prevista liga
+                {lit ? (
+                  <>
+                    <b>{ratedTotal}</b> notas · a Nota Prevista está ligada
+                  </>
+                ) : (
+                  <>
+                    <b>{ratedTotal}</b> de {ENSO_GOAL} notas · com {ENSO_GOAL}, a Nota Prevista liga
+                  </>
+                )}
               </span>
             </div>
             <div className={styles.rateLayout}>
               <div className={`${styles.glass} ${styles.rateList}`}>
-                {toRate.length > 0 ? (
-                  toRate.map(({ work, fromList }) => {
-                    const r = readingOf(work.id)
-                    return (
-                      <RateRow
-                        key={work.id}
-                        work={work}
-                        score={quick.get(work.id)}
-                        kind={r.kind}
-                        chapters={r.chapters}
-                        badge={
-                          fromList
-                            ? { kind: "source", label: imported?.sourceLabel ? `veio do ${imported.sourceLabel}` : "veio da sua lista" }
-                            : null
-                        }
-                        onRate={(v) => rate(work.id, v)}
-                        onReading={(kind, chapters) => changeReading(work.id, kind, chapters)}
-                        onRemove={() => removeWork(work.id)}
-                      />
-                    )
-                  })
-                ) : (
-                  <p className={styles.empty}>
-                    Nada por aqui — volte ao deck e marque <b>“Já li”</b> nas obras que você conhece. As da
-                    sua lista importada que chegaram com nota já estão contando no medidor.
-                  </p>
-                )}
+                <RateList
+                  items={toRate}
+                  ctl={ctl}
+                  empty={
+                    <p className={styles.empty}>
+                      Nada por aqui — volte ao deck e marque <b>“Já li”</b> nas obras que você conhece. As da
+                      sua lista importada que chegaram com nota já estão contando no medidor.
+                    </p>
+                  }
+                />
               </div>
               {/* Preso enquanto a lista rola: o círculo enchendo é a recompensa do passo. */}
               <aside className={`${styles.glass} ${styles.enso} ${lit ? styles.ensoLit : ""}`} aria-label="Progresso da Nota Prevista">

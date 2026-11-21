@@ -2,21 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import {
-  deckSwipeAction,
-  getOnboardingDeckAction,
-  removeOnboardingWorkAction,
-  setOnboardingReadingAction,
-} from "@/server/actions/onboarding"
-import { saveQuickScore } from "@/server/actions/quick-score"
+import { deckSwipeAction, getOnboardingDeckAction, removeOnboardingWorkAction } from "@/server/actions/onboarding"
 import { DeckStack, SWIPE_OUT_CLASS } from "@/components/onboarding/deck-stack"
 import type { SwipeKind } from "@/components/onboarding/deck-stack"
 import { DeckButtons } from "@/components/onboarding/deck-buttons"
-import { RateRow } from "@/components/onboarding/rate-row"
+import { RateList, useRateList } from "@/components/onboarding/rate-list"
+import type { RateListItem } from "@/components/onboarding/rate-list"
 import { EnsoRing, EnsoTitle } from "@/components/onboarding/enso"
 import { ENSO_GOAL } from "@/lib/onboarding/enso"
-import { readingLock } from "@/lib/onboarding/reading-lock"
-import type { ReadingKind } from "@/lib/onboarding/reading-lock"
+import { DECK_READ_STATUS } from "@/lib/onboarding/rate-status"
+import type { RateListWork } from "@/lib/onboarding/rate-status"
 import type { OnboardingDeckWork } from "@/server/queries/onboarding-deck"
 import shared from "./onboarding.module.css"
 import s from "./rate-page.module.css"
@@ -34,7 +29,7 @@ export function RatePage({
   ratedCount,
 }: {
   lovedLabels: string[]
-  initialUnrated: OnboardingDeckWork[]
+  initialUnrated: RateListWork[]
   /** Obras com nota da pessoa ao abrir a página (as desta lista não têm). */
   ratedCount: number
 }) {
@@ -45,9 +40,6 @@ export function RatePage({
   const [stamp, setStamp] = useState<{ kind: SwipeKind; key: number } | null>(null)
   const [history, setHistory] = useState<{ work: OnboardingDeckWork; kind: SwipeKind }[]>([])
   const swiping = useRef(false)
-  const [quick, setQuick] = useState<Map<string, number>>(new Map())
-  const [reading, setReading] = useState<Map<string, { kind: ReadingKind; chapters: number | null }>>(new Map())
-  const [removed, setRemoved] = useState<Set<string>>(new Set())
 
   const loadDeck = useCallback(async () => {
     setDeckStatus("loading")
@@ -81,22 +73,23 @@ export function RatePage({
         .reverse(),
     [history],
   )
-  const list = useMemo(() => {
+  // O "Já li" do deck grava Finished: a obra entra na lista com esse status (`deckSwipeAction`).
+  const list = useMemo<RateListItem[]>(() => {
     const seen = new Set(marked.map((w) => w.id))
     const rest = initialUnrated.filter((w) => !seen.has(w.id))
-    return [...marked.map((w) => ({ work: w, fresh: true })), ...rest.map((w) => ({ work: w, fresh: false }))].filter(
-      ({ work }) => !removed.has(work.id),
-    )
-  }, [marked, initialUnrated, removed])
-  const readingOf = (id: string) => reading.get(id) ?? { kind: "terminei" as ReadingKind, chapters: null }
-  const counted = list.filter(({ work }) => {
-    if (!quick.has(work.id)) return false
-    const r = readingOf(work.id)
-    return !readingLock(r.kind, r.chapters, work.totalChapters).locked
-  }).length
-  const total = ratedCount + counted
+    return [
+      ...marked.map((w) => ({
+        work: { ...w, status: DECK_READ_STATUS, chaptersRead: null },
+        fresh: true,
+        badge: { kind: "fresh" as const, label: "DO DECK, AGORA" },
+      })),
+      ...rest.map((w) => ({ work: w, fresh: false, badge: null })),
+    ]
+  }, [marked, initialUnrated])
+  const ctl = useRateList(list, "dar notas")
+  const total = ratedCount + ctl.counted
   const lit = total >= ENSO_GOAL
-  const withoutScore = list.length - counted
+  const liveCount = list.filter(({ work }) => !ctl.isGone(work.id)).length
 
   const swipe = useCallback(
     (kind: SwipeKind) => {
@@ -117,31 +110,13 @@ export function RatePage({
     [current],
   )
 
-  const forget = (id: string) => {
-    setQuick((m) => {
-      const next = new Map(m)
-      next.delete(id)
-      return next
-    })
-    setReading((m) => {
-      const next = new Map(m)
-      next.delete(id)
-      return next
-    })
-  }
-
   const undo = () => {
     const last = history[history.length - 1]
     if (!last || swiping.current) return
     setHistory((h) => h.slice(0, -1))
     setDeckPos((p) => Math.max(0, p - 1))
     setStamp(null)
-    forget(last.work.id)
-    setRemoved((r) => {
-      const next = new Set(r)
-      next.delete(last.work.id)
-      return next
-    })
+    ctl.forget(last.work.id)
     void removeOnboardingWorkAction(last.work.id).then((r) => {
       if (!r.ok) console.error("[dar notas] desfazer:", r.error)
     })
@@ -162,32 +137,6 @@ export function RatePage({
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [current, swipe])
-
-  const rate = (id: string, value: number) => {
-    const removing = quick.get(id) === value
-    setQuick((m) => {
-      const next = new Map(m)
-      if (removing) next.delete(id)
-      else next.set(id, value)
-      return next
-    })
-    void saveQuickScore(id, removing ? null : value).then((r) => {
-      if (!r.ok) console.error("[dar notas] nota:", r.error)
-    })
-  }
-  const changeReading = (id: string, kind: ReadingKind, chapters: number | null) => {
-    setReading((m) => new Map(m).set(id, { kind, chapters }))
-    void setOnboardingReadingAction(id, kind, chapters, quick.get(id) ?? null).then((r) => {
-      if (!r.ok) console.error("[dar notas] leitura:", r.error)
-    })
-  }
-  const removeWork = (id: string) => {
-    setRemoved((r) => new Set(r).add(id))
-    forget(id)
-    void removeOnboardingWorkAction(id).then((r) => {
-      if (!r.ok) console.error("[dar notas] remover:", r.error)
-    })
-  }
 
   const loved = history.filter((h) => h.kind === "love").length
   const dismissed = history.filter((h) => h.kind === "dismiss").length
@@ -281,32 +230,19 @@ export function RatePage({
                 Já li, falta a nota
               </h2>
               <span className={s.listCount}>
-                {list.length === 0 ? "0" : withoutScore === 0 ? "todas com nota" : `${withoutScore} sem nota`}
+                {liveCount === 0 ? "0" : ctl.withoutScore === 0 ? "todas com nota" : `${ctl.withoutScore} sem nota`}
               </span>
             </div>
-            {list.length === 0 ? (
-              <p className={s.empty}>
-                Nada por enquanto. Marque <b>“Já li”</b> nas obras do deck que você conhece. Obra que você marcar como
-                lida em qualquer lugar do app também aparece aqui.
-              </p>
-            ) : (
-              list.map(({ work, fresh }) => {
-                const r = readingOf(work.id)
-                return (
-                  <RateRow
-                    key={work.id}
-                    work={work}
-                    score={quick.get(work.id)}
-                    kind={r.kind}
-                    chapters={r.chapters}
-                    badge={fresh ? { kind: "fresh", label: "DO DECK, AGORA" } : null}
-                    onRate={(v) => rate(work.id, v)}
-                    onReading={(kind, chapters) => changeReading(work.id, kind, chapters)}
-                    onRemove={() => removeWork(work.id)}
-                  />
-                )
-              })
-            )}
+            <RateList
+              items={list}
+              ctl={ctl}
+              empty={
+                <p className={s.empty}>
+                  Nada por enquanto. Marque <b>“Já li”</b> nas obras do deck que você conhece. Obra que você marcar
+                  como lida em qualquer lugar do app também aparece aqui.
+                </p>
+              }
+            />
           </section>
 
           <p className={s.importLine}>

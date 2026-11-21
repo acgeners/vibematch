@@ -4983,6 +4983,12 @@ escolhida nas boas-vindas ou em Preferências — nunca ligada por conta de um v
 ela decide o `/ranking`, o `/favorites` e o "Pra você hoje"; com ela ligada, o "Não" grava
 `hide_avoided=off`. Dono: `lib/tags/hide-avoided.ts`.
 
+**A lista de notas (boas-vindas e `/rate`) mostra o status GRAVADO, com o selo e o menu do site, e a
+escala trava por `canRateReadingState`** — nunca um vocabulário próprio: o "Terminei" que ela inventava
+liberava a escala em obra Started e a nota não virava rótulo. As travadas ficam num grupo fechado no fim,
+pelo estado de quando a página abriu. A lixeira grava Untracked (guarda ♥ e histórico); só a obra
+marcada no deck agora é apagada. Dono: `lib/onboarding/rate-status.ts` + `components/onboarding/rate-list.tsx`.
+
 ## O badge "Recalcular notas" só acende com mudança MATERIAL
 
 `markRecalcPending` é chamado de **30 lugares** e o default é MARCAR — e isso está

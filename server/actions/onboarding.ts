@@ -17,7 +17,15 @@ import { loadChipTasteState } from "@/server/queries/onboarding-tastes"
 import type { ChipTasteState } from "@/server/queries/onboarding-tastes"
 import { markRecalcPending } from "@/server/recalc/queue"
 import { scheduleUserRecalc } from "@/server/recalc/user-recalc-schedule"
-import { getPersonalStatusIdByName, personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
+import {
+  FULLY_READ_STATUS,
+  getPersonalStatusIdByName,
+  personalStatusNameBySlugOrThrow,
+  UNTRACKED_PERSONAL_STATUS,
+} from "@/lib/constants/status-lookups"
+import { asksChapter, chaptersAfterStatus, RATE_MENU_STATUSES } from "@/lib/onboarding/rate-status"
+import type { RateListWork } from "@/lib/onboarding/rate-status"
+import type { PersonalStatus } from "@/types/domain"
 import { LOVED_CHIPS } from "@/lib/onboarding/chips"
 import { planChipTastes } from "@/lib/onboarding/chip-tastes"
 import type { ChipStance } from "@/lib/onboarding/chip-tastes"
@@ -290,7 +298,7 @@ export async function getWelcomeImportStateAction(
       ratedCount: number
       /** Quantas dessas a lista importada agora trouxe com nota. */
       importedRatedCount: number
-      unrated: OnboardingDeckWork[]
+      unrated: RateListWork[]
       sourceLabel: string | null
     }
   | { ok: false; error: string }
@@ -316,33 +324,35 @@ export async function getWelcomeImportStateAction(
   }
 }
 
-export type OnboardingReadingKind = "terminei" | "larguei" | "lendo"
-const READING_SLUG: Record<OnboardingReadingKind, string> = {
-  terminei: "finished",
-  larguei: "dropped",
-  lendo: "reading",
-}
+/** O que a linha da tela de notas pode gravar: os status do menu e o Untracked da lixeira. */
+const RATE_ROW_STATUSES = new Set<string>([...RATE_MENU_STATUSES, UNTRACKED_PERSONAL_STATUS])
 
 /**
- * "Como foi a leitura" de uma obra da tela de notas (Terminei · Larguei · Estou lendo).
+ * O status de leitura de uma obra da tela de notas (boas-vindas e "Dar notas"): o menu da linha,
+ * o campo de capítulo, a lixeira (Untracked, que guarda ♥, capítulos e datas) e o "Desfazer".
+ *
+ * Capítulos: Finished = a obra inteira (a régua de `setReadingStatusForWorks`); nos status que
+ * pedem capítulo vale o que a tela mandou; nos demais o capítulo gravado fica como está.
  *
  * Reaplica a nota DEPOIS de trocar o status, e não é enfeite: a nota rápida só passa pela régua
- * "só avalia quem leu" na hora em que é gravada. Sem isto, dar 8 com "Terminei" e depois trocar
- * para "Estou lendo, cap. 30 de 247" deixava o 8 contando no banco com a escala travada na tela.
+ * "só avalia quem leu" na hora em que é gravada. Sem isto, dar 8 com Finished e depois trocar
+ * para Started no cap. 30 de 247 deixava o 8 contando no banco com a escala travada na tela.
  * Travada, a nota sai (`saveQuickScore(…, null)`); liberada de novo, a tela a manda de volta.
  *
- * Não carimba `last_read_at`: as boas-vindas não sabem QUANDO foi lido (a mesma régua da importação).
+ * Não carimba `last_read_at`: aqui não se sabe QUANDO foi lido (a mesma régua da importação).
  */
-export async function setOnboardingReadingAction(
+export async function setOnboardingStatusAction(
   workId: string,
-  kind: OnboardingReadingKind,
+  status: string,
   chapters: number | null,
   score: number | null,
 ): Promise<{ ok: true; canRate: boolean } | { ok: false; error: string }> {
   const gate = await ensureReadingStateWriter()
   if (!gate.ok) return { ok: false, error: gate.error }
   if (typeof workId !== "string" || !UUID.test(workId)) return { ok: false, error: "Obra inválida." }
-  if (!(kind in READING_SLUG)) return { ok: false, error: "Status inválido." }
+  if (typeof status !== "string" || !RATE_ROW_STATUSES.has(status)) return { ok: false, error: "Status inválido." }
+  const statusId = getPersonalStatusIdByName(status)
+  if (statusId == null) return { ok: false, error: "Status inválido." }
   const chaptersRead =
     chapters == null ? null : Number.isInteger(chapters) && chapters >= 0 && chapters <= 100000 ? chapters : NaN
   if (Number.isNaN(chaptersRead)) return { ok: false, error: "Capítulo inválido." }
@@ -350,27 +360,30 @@ export async function setOnboardingReadingAction(
     return { ok: false, error: "Nota inválida." }
   }
 
-  const { data: work, error: workError } = await createAdminClient()
-    .from("works")
-    .select("total_chapters")
-    .eq("id", workId)
-    .maybeSingle()
+  const supabase = createAdminClient()
+  const [{ data: work, error: workError }, { data: row, error: rowError }] = await Promise.all([
+    supabase.from("works").select("total_chapters").eq("id", workId).maybeSingle(),
+    supabase
+      .from("user_work_state")
+      .select("chapters_read")
+      .eq("user_id", gate.userId)
+      .eq("work_id", workId)
+      .maybeSingle(),
+  ])
   if (workError) return { ok: false, error: workError.message }
+  if (rowError) return { ok: false, error: rowError.message }
   const total = (work?.total_chapters as number | null | undefined) ?? null
 
-  const statusName = personalStatusNameBySlugOrThrow(READING_SLUG[kind])
-  const patch: PersonalStatePatch = { personal_status_id: getPersonalStatusIdByName(statusName) }
-  // "Terminei" = leu a obra inteira: os capítulos acompanham (a régua de `setReadingStatusForWorks`).
-  if (kind === "terminei" && total != null && total > 0) patch.chapters_read = total
-  if (kind === "lendo") patch.chapters_read = chaptersRead
+  const patch: PersonalStatePatch = { personal_status_id: statusId }
+  let effectiveChapters = (row?.chapters_read as number | null | undefined) ?? null
+  if (status === FULLY_READ_STATUS || asksChapter(status)) {
+    effectiveChapters = chaptersAfterStatus(status as PersonalStatus, chaptersRead, total)
+    patch.chapters_read = effectiveChapters
+  }
   const write = await writeReadingState(gate.userId, [workId], patch)
   if (write.error) return { ok: false, error: write.error }
 
-  const canRate = canRateReadingState({
-    personalStatus: statusName,
-    chaptersRead: kind === "lendo" ? chaptersRead : (patch.chapters_read ?? null),
-    totalChapters: total,
-  })
+  const canRate = canRateReadingState({ personalStatus: status, chaptersRead: effectiveChapters, totalChapters: total })
   if (score != null) {
     const res = await saveQuickScore(workId, canRate ? score : null)
     if (!res.ok) return res
@@ -381,8 +394,9 @@ export async function setOnboardingReadingAction(
 }
 
 /**
- * "Desfazer última" do deck e "Remover" da tela de notas: a obra volta a não ter estado nenhum
- * (a regra e o porquê moram em `deleteReadingState`).
+ * "Desfazer última" do deck e a lixeira da obra marcada no deck AGORA: a obra volta a não ter
+ * estado nenhum e reaparece no deck (a regra e o porquê moram em `deleteReadingState`). A lixeira
+ * da obra que já estava na lista NÃO passa por aqui: grava Untracked e guarda o resto.
  */
 export async function removeOnboardingWorkAction(
   workId: string,
