@@ -4988,6 +4988,9 @@ escala trava por `canRateReadingState`** — nunca um vocabulário próprio: o "
 liberava a escala em obra Started e a nota não virava rótulo. As travadas ficam num grupo fechado no fim,
 pelo estado de quando a página abriu. A lixeira grava Untracked (guarda ♥ e histórico); só a obra
 marcada no deck agora é apagada. Dono: `lib/onboarding/rate-status.ts` + `components/onboarding/rate-list.tsx`.
+**O `/rate` trabalha sobre as props com que ABRIU (`RatePage`): toda ação dele chama `revalidatePath`, e o
+Next reenvia as props do servidor na hora.** Lidas direto, a obra apagada perdia o "Desfazer", a mexida
+pulava para o topo, a que ganhou nota saía da lista e o deck recarregava do zero.
 
 ## O badge "Recalcular notas" só acende com mudança MATERIAL
 
