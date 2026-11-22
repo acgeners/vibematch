@@ -33,6 +33,11 @@ export function RatePage({
   /** Obras com nota da pessoa ao abrir a página (as desta lista não têm). */
   ratedCount: number
 }) {
+  // 🔴 A página trabalha sobre o que ela ABRIU. Toda ação daqui chama `revalidatePath`, e o Next
+  // reenvia na hora as props do servidor desta rota. Lidas direto, a lista voltava reordenada pela
+  // última mudança, a obra apagada perdia o "Desfazer", a obra com nota saía da lista e
+  // `lovedLabels` (array novo a cada envio) recarregava o deck do zero. Recarregar traz o estado novo.
+  const [opened] = useState(() => ({ lovedLabels, initialUnrated, ratedCount }))
   const [deckStatus, setDeckStatus] = useState<DeckStatus>("loading")
   const [deck, setDeck] = useState<OnboardingDeckWork[]>([])
   const [deckPos, setDeckPos] = useState(0)
@@ -43,7 +48,7 @@ export function RatePage({
 
   const loadDeck = useCallback(async () => {
     setDeckStatus("loading")
-    const res = await getOnboardingDeckAction(lovedLabels)
+    const res = await getOnboardingDeckAction(opened.lovedLabels)
     if (res.ok) {
       setDeck(res.works)
       setDeckPos(0)
@@ -53,7 +58,7 @@ export function RatePage({
       console.error("[dar notas] deck:", res.error)
       setDeckStatus("error")
     }
-  }, [lovedLabels])
+  }, [opened])
 
   useEffect(() => {
     // Carga inicial: a ação devolve o deck e o estado é gravado quando ela volta.
@@ -76,7 +81,7 @@ export function RatePage({
   // O "Já li" do deck grava Finished: a obra entra na lista com esse status (`deckSwipeAction`).
   const list = useMemo<RateListItem[]>(() => {
     const seen = new Set(marked.map((w) => w.id))
-    const rest = initialUnrated.filter((w) => !seen.has(w.id))
+    const rest = opened.initialUnrated.filter((w) => !seen.has(w.id))
     return [
       ...marked.map((w) => ({
         work: { ...w, status: DECK_READ_STATUS, chaptersRead: null },
@@ -85,9 +90,9 @@ export function RatePage({
       })),
       ...rest.map((w) => ({ work: w, fresh: false, badge: null })),
     ]
-  }, [marked, initialUnrated])
+  }, [marked, opened])
   const ctl = useRateList(list, "dar notas")
-  const total = ratedCount + ctl.counted
+  const total = opened.ratedCount + ctl.counted
   const lit = total >= ENSO_GOAL
   const liveCount = list.filter(({ work }) => !ctl.isGone(work.id)).length
 

@@ -140,6 +140,45 @@ describe("a linha começa no status GRAVADO", () => {
   })
 })
 
+/**
+ * Toda ação da página chama `revalidatePath`, e o Next reenvia as props do servidor NA HORA: o
+ * `rerender` com props novas é esse reenvio. Antes, ele apagava o "Desfazer" (a obra apagada já
+ * não vem do servidor), punha a obra mexida no topo (a lista vem por `updated_at`), tirava da lista
+ * a obra que ganhou nota e recarregava o deck (`lovedLabels` chega como array novo).
+ */
+describe("a página trabalha sobre o que ABRIU, não sobre o reenvio do servidor", () => {
+  const outra = { ...base, id: "00000000-0000-4000-8000-000000000007", title: "Outra Lida", totalChapters: 30, status: "Dropped" as const, chaptersRead: 12 }
+  const ordem = () => screen.getAllByRole("group", { name: /Nota para/ }).map((g) => g.getAttribute("aria-label"))
+
+  it("o 'Desfazer' da lixeira continua depois do reenvio", async () => {
+    const { rerender } = render(<RatePage lovedLabels={[]} initialUnrated={[jaLida, outra]} ratedCount={4} />)
+    await screen.findByText("Obra Um")
+    fireEvent.click(screen.getByRole("button", { name: "Tirar Lida Antes desta lista" }))
+    // O servidor já não manda a obra apagada (virou Untracked).
+    rerender(<RatePage lovedLabels={[]} initialUnrated={[outra]} ratedCount={4} />)
+    expect(screen.getByRole("button", { name: "Desfazer" })).toBeTruthy()
+  })
+
+  it("a obra mexida não pula para o topo, e a que ganhou nota fica na lista contando uma vez", async () => {
+    const { rerender } = render(<RatePage lovedLabels={[]} initialUnrated={[jaLida, outra]} ratedCount={4} />)
+    await screen.findByText("Obra Um")
+    fireEvent.click(within(linha("Lida Antes")).getByRole("button", { name: "8" }))
+    escolherStatus("Outra Lida", "Finished")
+    // Reenvio: a com nota sai (a lista é "sem nota"), a mexida vem primeiro e o servidor já conta a nota.
+    rerender(<RatePage lovedLabels={[]} initialUnrated={[{ ...outra, status: "Finished" as const, chaptersRead: 30 }]} ratedCount={5} />)
+    expect(ordem()).toEqual(["Nota para Lida Antes", "Nota para Outra Lida"])
+    expect(ensoTexto()).toMatch(/^5de 20/)
+  })
+
+  it("o deck não recarrega quando os gostos chegam como array novo", async () => {
+    const { rerender } = render(<RatePage lovedLabels={["Romance"]} initialUnrated={[jaLida]} ratedCount={4} />)
+    await screen.findByText("Obra Um")
+    rerender(<RatePage lovedLabels={["Romance"]} initialUnrated={[jaLida]} ratedCount={4} />)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(acoes.getOnboardingDeckAction).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe("a lixeira, em toda obra", () => {
   it("na obra que já estava na lista grava Untracked (guarda ♥ e histórico) e o 'Desfazer' devolve o status", async () => {
     render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} />)
