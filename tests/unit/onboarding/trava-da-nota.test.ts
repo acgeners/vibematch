@@ -68,7 +68,7 @@ describe("a trava da escala", () => {
   })
 
   it("abaixo de 20% trava e diz a partir de qual capítulo libera", () => {
-    expect(rateLock(st("started"), 30, 247)).toEqual({ locked: true, text: "Nota a partir do cap. 50 (20%)." })
+    expect(rateLock(st("started"), 30, 247)).toEqual({ locked: true, text: "Nota a partir do cap. 50 (mais de 20% lido)." })
     // 20% exato não passa (o limiar é estrito): 49 de 245 é 20%.
     expect(rateLock(st("on-hold"), 49, 245).locked).toBe(true)
     expect(rateLock(st("stalled"), 60, 247).locked).toBe(false)

@@ -199,6 +199,8 @@ export function PostReadingFlow({
           initialScores={tasteScores}
           endingApplicable={isFullyReadPersonalStatus(liveStatus)}
           activeEdition={edition?.active ?? null}
+          score={statusInitial.user_score ?? null}
+          legacyPresent={craftFilled > 0}
         />
       )}
       {isVisible && (

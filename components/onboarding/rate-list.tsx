@@ -5,8 +5,9 @@ import type { ReactNode } from "react"
 import { removeOnboardingWorkAction, setOnboardingStatusAction } from "@/server/actions/onboarding"
 import { saveQuickScore } from "@/server/actions/quick-score"
 import { RateRow } from "@/components/onboarding/rate-row"
+import { PostTasteAssessment } from "@/components/pilot/post-taste-assessment"
 import type { RateRowBadge } from "@/components/onboarding/rate-row"
-import { UNTRACKED_PERSONAL_STATUS } from "@/lib/constants/status-lookups"
+import { isFullyReadPersonalStatus, UNTRACKED_PERSONAL_STATUS } from "@/lib/constants/status-lookups"
 import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import {
   chaptersAfterStatus,
@@ -17,6 +18,9 @@ import {
 } from "@/lib/onboarding/rate-status"
 import type { RateListWork } from "@/lib/onboarding/rate-status"
 import type { PersonalStatus } from "@/types/domain"
+import { formatRating } from "@/lib/ratings/effective-rating"
+import type { TasteLabelState } from "@/lib/ratings/effective-rating"
+import type { TasteCriterion, TasteScoreKey } from "@/server/queries/pilot-taste"
 import s from "./onboarding.module.css"
 
 /** Uma obra da tela de notas: a obra, se veio do deck AGORA, e a etiqueta de origem. */
@@ -42,11 +46,23 @@ type Gone = { kind: "trash" | "status"; fresh: boolean; status: PersonalStatus; 
  * - **a lixeira não apaga o que já existia**: na obra marcada no deck agora ela desfaz a marcação
  *   (a obra volta ao deck); na que já estava na lista ela grava Untracked, e o ♥ de interesse, os
  *   capítulos e as datas continuam. Apagar a linha inteira levaria isso junto.
+ *
+ * A nota de uma obra vem da escala (direta) ou das 7 categorias de gosto completas, que vencem a
+ * direta como no servidor (`effectiveRating`). Obra que ganha nota ENCOLHE no lugar ("✓ título · nota
+ * 7 · Mudar"): a lista é "falta a nota", e a linha inteira ali parecia pendência.
  */
-export function useRateList(items: RateListItem[], logTag: string) {
+export function useRateList(
+  items: RateListItem[],
+  logTag: string,
+  /** As categorias de gosto já preenchidas ao abrir (só o `/rate` as tem). */
+  initialTaste: Record<string, TasteLabelState> = {},
+) {
   const [quick, setQuick] = useState<Map<string, number>>(new Map())
   const [edits, setEdits] = useState<Map<string, RowState>>(new Map())
   const [gone, setGone] = useState<Map<string, Gone>>(new Map())
+  const [taste, setTasteMap] = useState<Map<string, TasteLabelState>>(() => new Map(Object.entries(initialTaste)))
+  const [open, setOpen] = useState<Set<string>>(new Set())
+  const [done, setDone] = useState<Set<string>>(new Set())
 
   const stateOf = (w: RateListWork): RowState => edits.get(w.id) ?? { status: w.status, chapters: w.chaptersRead }
   const lockedNow = (w: RateListWork) => {
@@ -56,14 +72,21 @@ export function useRateList(items: RateListItem[], logTag: string) {
   /** O grupo pelo estado gravado (ver o comentário acima). */
   const inLockedGroup = (w: RateListWork) => rateLock(w.status, w.chaptersRead, w.totalChapters).locked
 
+  /** A nota que vale na linha: a das categorias completas, senão a direta. */
+  const scoreOf = (id: string): { value: number; byCategories: boolean } | null => {
+    const t = taste.get(id)
+    if (t?.complete && t.average != null) return { value: t.average, byCategories: true }
+    const q = quick.get(id)
+    return q == null ? null : { value: q, byCategories: false }
+  }
   const live = items.filter((i) => !gone.has(i.work.id))
-  const isCounted = (i: RateListItem) => quick.has(i.work.id) && !lockedNow(i.work)
+  const isCounted = (i: RateListItem) => scoreOf(i.work.id) != null && !lockedNow(i.work)
   /** Notas desta tela que contam: dadas aqui, em obra que ficou na lista e com a escala liberada. */
   const counted = live.filter(isCounted).length
   /** As da lista principal ainda sem nota (o "N sem nota" do cabeçalho). */
   const withoutScore = live.filter((i) => !inLockedGroup(i.work) && !isCounted(i)).length
   /** Para o ensō (`rateCoverage`), pelo estado de AGORA: sem nota com a escala liberada, e travadas. */
-  const waiting = live.filter((i) => !lockedNow(i.work) && !quick.has(i.work.id)).length
+  const waiting = live.filter((i) => !lockedNow(i.work) && scoreOf(i.work.id) == null).length
   const early = live.filter((i) => lockedNow(i.work)).length
 
   const log = (what: string) => (r: { ok: boolean; error?: string }) => {
@@ -82,7 +105,38 @@ export function useRateList(items: RateListItem[], logTag: string) {
       else next.set(id, value)
       return next
     })
+    // Com nota, a linha encolhe — menos com o painel de categorias aberto: ali a pessoa ainda mexe.
+    if (!removing && !open.has(id)) setDone((d) => new Set(d).add(id))
     void saveQuickScore(id, removing ? null : value).then(log("nota"))
+  }
+
+  /** As categorias mudaram (o painel avisa a cada estrela). */
+  const setTaste = (id: string, state: TasteLabelState) => {
+    setTasteMap((m) => new Map(m).set(id, state))
+  }
+
+  /** Abre ou fecha o painel de categorias; fechar com nota encolhe a linha. */
+  const toggleCats = (item: RateListItem) => {
+    const id = item.work.id
+    if (open.has(id)) {
+      setOpen((o) => {
+        const next = new Set(o)
+        next.delete(id)
+        return next
+      })
+      if (scoreOf(id) != null && !lockedNow(item.work)) setDone((d) => new Set(d).add(id))
+    } else {
+      setOpen((o) => new Set(o).add(id))
+    }
+  }
+
+  /** "Mudar": a linha encolhida volta inteira. */
+  const reopen = (id: string) => {
+    setDone((d) => {
+      const next = new Set(d)
+      next.delete(id)
+      return next
+    })
   }
 
   const setStatus = (item: RateListItem, status: PersonalStatus) => {
@@ -143,6 +197,15 @@ export function useRateList(items: RateListItem[], logTag: string) {
     setQuick(drop)
     setEdits(drop)
     setGone(drop)
+    setTasteMap(drop)
+    const dropSet = (st: Set<string>) => {
+      if (!st.has(id)) return st
+      const next = new Set(st)
+      next.delete(id)
+      return next
+    }
+    setOpen(dropSet)
+    setDone(dropSet)
   }
 
   return {
@@ -155,7 +218,14 @@ export function useRateList(items: RateListItem[], logTag: string) {
     stateOf,
     inLockedGroup,
     isGone: (id: string) => gone.has(id),
+    scoreOf,
+    tasteOf: (id: string) => taste.get(id) ?? null,
+    isOpen: (id: string) => open.has(id),
+    isDone: (id: string) => done.has(id) && scoreOf(id) != null,
     rate,
+    setTaste,
+    toggleCats,
+    reopen,
     setStatus,
     setChapters,
     trash,
@@ -165,6 +235,11 @@ export function useRateList(items: RateListItem[], logTag: string) {
 }
 
 export type RateListControl = ReturnType<typeof useRateList>
+
+/** Nenhuma estrela: o ponto de partida de uma obra sem linha em `pilot_taste_scores`. */
+function emptyScores(criteria: TasteCriterion[]): Record<TasteScoreKey, number | null> {
+  return Object.fromEntries(criteria.map((c) => [c.key, null])) as Record<TasteScoreKey, number | null>
+}
 
 const STATUS_INFO_BY_NAME = Object.fromEntries(
   Object.values(PERSONAL_STATUSES_BY_ID).map((info) => [info.status, info]),
@@ -186,10 +261,13 @@ export function RateList({
   ctl,
   empty,
   groupByStatus = false,
+  taste,
 }: {
   items: RateListItem[]
   ctl: RateListControl
   empty: ReactNode
+  /** As categorias de gosto (só no `/rate`): sem isto, a linha não oferece "ou por categorias". */
+  taste?: { criteria: TasteCriterion[]; scoresByWork: Record<string, Record<TasteScoreKey, number | null>> }
   /**
    * Separa a lista principal por status, na ordem do menu. O grupo sai do status GRAVADO (o de quando
    * a página abriu), como o grupo das travadas: trocar o status não tira a obra de vista.
@@ -215,19 +293,61 @@ export function RateList({
         </div>
       )
     }
+    const id = item.work.id
+    const scored = ctl.scoreOf(id)
+    if (ctl.isDone(id) && scored) {
+      return (
+        <div key={id} className={s.done}>
+          <span className={s.doneCheck} aria-hidden="true">
+            ✓
+          </span>
+          <b>{item.work.title}</b>
+          <span>
+            · nota <span className={s.doneScore}>{formatRating(scored.value)}</span>
+            {scored.byCategories ? " pelas categorias" : ""}
+          </span>
+          <button type="button" onClick={() => ctl.reopen(id)} aria-label={`Mudar a nota de ${item.work.title}`}>
+            Mudar
+          </button>
+        </div>
+      )
+    }
     const st = ctl.stateOf(item.work)
+    const t = ctl.tasteOf(id)
+    const cats = taste
+      ? {
+          open: ctl.isOpen(id),
+          filled: t?.filled ?? 0,
+          needed: t?.needed ?? 0,
+          onToggle: () => ctl.toggleCats(item),
+          panel: (
+            <PostTasteAssessment
+              workId={id}
+              criteria={taste.criteria}
+              initialScores={taste.scoresByWork[id] ?? emptyScores(taste.criteria)}
+              endingApplicable={isFullyReadPersonalStatus(st.status)}
+              variant="inline"
+              score={ctl.quick.get(id) ?? null}
+              onTasteChange={(next) => ctl.setTaste(id, next)}
+              onClose={() => ctl.toggleCats(item)}
+            />
+          ),
+        }
+      : undefined
     return (
       <RateRow
-        key={item.work.id}
+        key={id}
         work={item.work}
         status={st.status}
         chapters={st.chapters}
-        score={ctl.quick.get(item.work.id)}
+        score={ctl.quick.get(id)}
+        byCategories={scored?.byCategories ? scored.value : null}
         badge={item.badge}
-        onRate={(v) => ctl.rate(item.work.id, v)}
+        onRate={(v) => ctl.rate(id, v)}
         onStatus={(next) => ctl.setStatus(item, next)}
         onChapters={(n) => ctl.setChapters(item, n)}
         onTrash={() => ctl.trash(item)}
+        cats={cats}
       />
     )
   }

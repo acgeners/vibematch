@@ -5,6 +5,7 @@ import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { workFormSchema, workFormBase, workStatusSchema } from "@/lib/validations/work.schema"
 import type { WorkFormValues, WorkStatusValues } from "@/lib/validations/work.schema"
+import { ratingPatchFrom } from "@/lib/ratings/status-form-patch"
 import { CRITERION_SLUGS } from "@/types/domain"
 import {
   getPublicationStatusIdByName,
@@ -2442,20 +2443,6 @@ function notesPatchFrom(data: WorkStatusValues): TasteStatePatch {
     synopsis_quality: data.synopsis_quality ?? null,
     // Proveniência (Plano 3): valor vindo do form = informado/aceito pelo usuário.
     synopsis_quality_source: data.synopsis_quality != null ? "human_manual" : null,
-  }
-}
-
-function ratingPatchFrom(data: WorkStatusValues): TasteStatePatch {
-  return {
-    user_score: data.user_score ?? null,
-    post_story_score: data.post_story_score ?? null,
-    post_fl_score: data.post_fl_score ?? null,
-    post_ml_score: data.post_ml_score ?? null,
-    post_character_development_score: data.post_character_development_score ?? null,
-    post_pacing_score: data.post_pacing_score ?? null,
-    post_art_visual_score: data.post_art_visual_score ?? null,
-    post_impact_immersion_score: data.post_impact_immersion_score ?? null,
-    post_originality_score: data.post_originality_score ?? null,
   }
 }
 

@@ -92,8 +92,9 @@ export function rateLock(
   if (chapters == null) {
     return { locked: true, text: `Diga em que capítulo parou: a nota vale a partir do cap. ${first}.` }
   }
-  return { locked: true, text: `Nota a partir do cap. ${first} (${MIN_READ_PCT_FOR_RATING}%).` }
+  return { locked: true, text: `Nota a partir do cap. ${first} (mais de ${MIN_READ_PCT_FOR_RATING}% lido).` }
 }
 
 /** O subtítulo do grupo recolhido das travadas. */
-export const LOCKED_GROUP_HINT = `A nota vale a partir de ${MIN_READ_PCT_FOR_RATING}% dos capítulos. Diga em que capítulo parou, ou marque ${FULLY_READ_STATUS} ou ${DROPPED_STATUS}.`
+// "Mais de", não "a partir de": a regra é estrita (`MIN_READ_PCT_FOR_RATING`), 20% exato não libera.
+export const LOCKED_GROUP_HINT = `A nota vale com mais de ${MIN_READ_PCT_FOR_RATING}% dos capítulos lidos. Diga em que capítulo parou, ou marque ${FULLY_READ_STATUS} ou ${DROPPED_STATUS}.`

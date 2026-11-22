@@ -10,7 +10,10 @@ import { RateList, useRateList } from "@/components/onboarding/rate-list"
 import type { RateListItem } from "@/components/onboarding/rate-list"
 import { EnsoRing, EnsoTitle } from "@/components/onboarding/enso"
 import { ENSO_GOAL, rateCoverage } from "@/lib/onboarding/enso"
-import { DECK_READ_STATUS } from "@/lib/onboarding/rate-status"
+import { DECK_READ_STATUS, rateLock } from "@/lib/onboarding/rate-status"
+import { tasteLabelState } from "@/lib/ratings/effective-rating"
+import type { TasteCriterion, TasteScoreKey } from "@/server/queries/pilot-taste"
+import { MIN_READ_PCT_FOR_RATING } from "@/lib/reading-gate"
 import type { RateListWork } from "@/lib/onboarding/rate-status"
 import type { OnboardingDeckWork } from "@/server/queries/onboarding-deck"
 import shared from "./onboarding.module.css"
@@ -27,20 +30,25 @@ export function RatePage({
   lovedLabels,
   initialUnrated,
   ratedCount,
-  unratedTotal,
+  unrated,
+  tasteCriteria,
+  tasteByWork,
 }: {
   lovedLabels: string[]
   initialUnrated: RateListWork[]
   /** Obras com nota da pessoa ao abrir a página (as desta lista não têm). */
   ratedCount: number
-  /** Lidas sem nota ao abrir, contadas no servidor sem o teto da lista (o "de N obras" do ensō). */
-  unratedTotal: number
+  /** Lidas sem nota ao abrir, contadas no servidor sem o teto da lista e separadas pela trava (`rateCoverage`). */
+  unrated: { rateable: number; locked: number }
+  /** As categorias de gosto e as estrelas já dadas às obras da lista ("ou por categorias"). */
+  tasteCriteria: TasteCriterion[]
+  tasteByWork: Record<string, Record<TasteScoreKey, number | null>>
 }) {
   // 🔴 A página trabalha sobre o que ela ABRIU. Toda ação daqui chama `revalidatePath`, e o Next
   // reenvia na hora as props do servidor desta rota. Lidas direto, a lista voltava reordenada pela
   // última mudança, a obra apagada perdia o "Desfazer", a obra com nota saía da lista e
   // `lovedLabels` (array novo a cada envio) recarregava o deck do zero. Recarregar traz o estado novo.
-  const [opened] = useState(() => ({ lovedLabels, initialUnrated, ratedCount, unratedTotal }))
+  const [opened] = useState(() => ({ lovedLabels, initialUnrated, ratedCount, unrated, tasteCriteria, tasteByWork }))
   const [deckStatus, setDeckStatus] = useState<DeckStatus>("loading")
   // O deck voltou sem nenhuma obra: a coluna sai e a lista ganha a página. Deck que acabou NESTA
   // visita continua com o cartão "Acabaram as sugestões", que resume o que a pessoa marcou.
@@ -99,7 +107,12 @@ export function RatePage({
       ...rest.map((w) => ({ work: w, fresh: false, badge: null })),
     ]
   }, [marked, opened])
-  const ctl = useRateList(list, "dar notas")
+  const [initialTaste] = useState(() =>
+    Object.fromEntries(
+      Object.entries(opened.tasteByWork).map(([id, scores]) => [id, tasteLabelState(opened.tasteCriteria, scores)]),
+    ),
+  )
+  const ctl = useRateList(list, "dar notas", initialTaste)
   const total = opened.ratedCount + ctl.counted
   const lit = total >= ENSO_GOAL
   // O aviso é do MOMENTO em que a Nota Prevista liga: só na visita em que a pessoa passa de 20.
@@ -109,8 +122,11 @@ export function RatePage({
     ratedHere: ctl.counted,
     waiting: ctl.waiting,
     early: ctl.early,
-    unratedAtOpen: opened.unratedTotal,
-    listedAtOpen: opened.initialUnrated.length,
+    unrated: opened.unrated,
+    listed: {
+      rateable: opened.initialUnrated.filter((w) => !rateLock(w.status, w.chaptersRead, w.totalChapters).locked).length,
+      locked: opened.initialUnrated.filter((w) => rateLock(w.status, w.chaptersRead, w.totalChapters).locked).length,
+    },
   })
   const liveCount = list.filter(({ work }) => !ctl.isGone(work.id)).length
 
@@ -252,7 +268,7 @@ export function RatePage({
               {lit ? (
                 <>
                   <p className={s.coverage}>
-                    <b>{coverage.pct}%</b> das obras que você leu, começou ou avaliou já têm nota.
+                    <b>{coverage.pct}%</b> das obras que você pode avaliar já têm nota.
                   </p>
                   <ul className={s.coverageParts}>
                     <li>
@@ -263,17 +279,18 @@ export function RatePage({
                         <b>{coverage.waiting}</b> esperando nota, na lista abaixo
                       </li>
                     )}
-                    {coverage.early > 0 && (
-                      <li>
-                        <b>{coverage.early}</b> no começo (menos de 20% lido)
-                      </li>
-                    )}
                     {coverage.beyond > 0 && (
                       <li>
                         <b>{coverage.beyond}</b> fora da lista, que mostra as mais recentes
                       </li>
                     )}
                   </ul>
+                  {coverage.early > 0 && (
+                    <p className={s.coverageOut}>
+                      Fora da conta: {coverage.early} em andamento com até {MIN_READ_PCT_FOR_RATING}% lido, que ainda
+                      não podem ter nota.
+                    </p>
+                  )}
                 </>
               ) : (
                 <p className={s.muted}>
@@ -305,6 +322,7 @@ export function RatePage({
               items={list}
               ctl={ctl}
               groupByStatus={grouped}
+              taste={{ criteria: opened.tasteCriteria, scoresByWork: opened.tasteByWork }}
               empty={
                 <p className={s.empty}>
                   Nada por enquanto. Marque <b>“Já li”</b> nas obras do deck que você conhece. Obra que você marcar

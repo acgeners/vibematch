@@ -7,6 +7,8 @@ import { isRateListStatus } from "@/lib/onboarding/rate-status"
 import type { RateListWork } from "@/lib/onboarding/rate-status"
 import type { ExternalListSource } from "@/lib/import/external-list/types"
 import { hydrateOnboardingWorks } from "@/server/queries/onboarding-deck"
+import { fetchAllRows } from "@/lib/supabase/paginate"
+import { canRateReadingState } from "@/lib/reading-gate"
 
 /** Teto da lista: uma importação grande traz centenas de obras sem nota, e a tela é uma lista só. */
 export const IMPORTED_UNRATED_LIMIT = 200
@@ -123,19 +125,43 @@ export async function getUnratedRead(userId: string): Promise<RateListWork[]> {
 }
 
 /**
- * Quantas obras lidas e SEM nota a pessoa tem — o mesmo filtro de `getUnratedRead`, sem o teto de
- * `IMPORTED_UNRATED_LIMIT`. É o que entra no "de N obras" do ensō: contar pela lista erraria em
- * silêncio quem tem mais obras sem nota do que a lista mostra.
+ * As obras lidas e SEM nota da pessoa, separadas pela trava de leitura (`canRateReadingState`): as
+ * que já podem receber nota e as que ainda não podem. O mesmo filtro de `getUnratedRead`, sem o teto
+ * de `IMPORTED_UNRATED_LIMIT` — é daqui que sai o "de N obras" do ensō, e contar pela lista erraria
+ * em silêncio quem tem mais obras sem nota do que a lista mostra.
+ *
+ * Sem embed `user_work_state → works` de propósito: o total de capítulos vem numa segunda leitura,
+ * por id, para não abrir um par novo no contrato do PostgREST só por uma coluna.
  */
-export async function countUnratedReadOf(userId: string): Promise<number> {
-  const { count, error } = await createAdminClient()
-    .from("user_work_state")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .is("user_score", null)
-    .in("personal_status_id", readStatusIds())
-  if (error) throw new Error(`countUnratedReadOf: ${error.message}`)
-  return count ?? 0
+export async function countUnratedReadSplitOf(userId: string): Promise<{ rateable: number; locked: number }> {
+  const supabase = createAdminClient()
+  const rows = await fetchAllRows<{ work_id: string; personal_status_id: number | null; chapters_read: number | null }>(
+    () =>
+      supabase
+        .from("user_work_state")
+        .select("work_id, personal_status_id, chapters_read")
+        .eq("user_id", userId)
+        .is("user_score", null)
+        .in("personal_status_id", readStatusIds()),
+    { orderBy: ["user_id", "work_id"], label: "countUnratedReadSplitOf(user_work_state)" },
+  )
+  const totals = new Map<string, number | null>()
+  const ids = rows.map((r) => r.work_id)
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data, error } = await supabase.from("works").select("id, total_chapters").in("id", ids.slice(i, i + 100))
+    if (error) throw new Error(`countUnratedReadSplitOf(works): ${error.message}`)
+    for (const w of data ?? []) totals.set(w.id as string, (w.total_chapters as number | null) ?? null)
+  }
+  let rateable = 0
+  for (const r of rows) {
+    const ok = canRateReadingState({
+      personalStatus: r.personal_status_id,
+      chaptersRead: r.chapters_read,
+      totalChapters: totals.get(r.work_id) ?? null,
+    })
+    if (ok) rateable++
+  }
+  return { rateable, locked: rows.length - rateable }
 }
 
 /** Quantas obras COM nota a pessoa tem (o número do ensō). Conta no servidor: zero linhas trafegam. */
