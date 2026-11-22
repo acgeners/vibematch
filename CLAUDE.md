@@ -347,12 +347,12 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**113 arquivos, remedidos em 2026-11-16**):
+banco declara um dos dois (**114 arquivos, remedidos em 2026-11-22**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **45** | só LÊ ⇒ vai pro local, de graça |
-| `ALVO: NUVEM` no cabeçalho | **56** | GRAVA ⇒ tem que ir pra nuvem |
+| `ALVO: NUVEM` no cabeçalho | **57** | GRAVA ⇒ tem que ir pra nuvem |
 | (não tocam o banco) | 9 | fora da régua — entrou o `smoke-browser.mjs`, que só abre rota |
 
 🔴 **A régua tem DOIS rótulos e o mundo tem TRÊS casos — `smoke-logado.mjs` é o terceiro.**
@@ -4138,12 +4138,13 @@ faz `relatar()` devolver `false`. É o "declara o que esperava achar" do título
 
 ### Onde vale, e a válvula
 
-Aplicado a **17 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos` · `status-pela-traducao`
+Aplicado a **18 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos` · `status-pela-traducao`
 · `normalizar-titulos-alternativos` · `reverter-calibracao-auto-aplicada` ·
 `backfill-faixa-citada` · `repick-dead-covers` · `seed-art-signal` · `tag-r19-adult` ·
 `push-opening-structure` · `recalcular-vies-da-dona` · `reconciliar-inferencia-estrutural` ·
 `backup-icloud` (não corrige nada, mas o seu "nada a enviar" também prova que olhou) ·
-`limpar-sufixo-legado-mangaupdates` · `conferir-links-comix` · `carregar-classificacao-etaria`.
+`limpar-sufixo-legado-mangaupdates` · `conferir-links-comix` · `carregar-classificacao-etaria` ·
+`restaurar-nota-das-categorias`.
 
 ⚠️ **`funil.nadaAFazer("…")` substitui o `console.log` da frase**, e não é estilo: separados,
 volta a ser possível imprimir a conclusão sem a evidência, que é o estado exato que custou o
@@ -5003,6 +5004,11 @@ completas vencem, a avaliação antiga por critérios (craft) vence, senão vale
 componente só (`PostTasteAssessment`, `variant` card/inline). 🔴 O "Salvar" do formulário de status só grava
 `user_score` quando há craft (`ratingPatchFrom`, `lib/ratings/status-form-patch.ts`): sem craft ele só ecoaria a
 nota de quando a página abriu e apagaria uma nota direta dada depois.
+🔴 **Categorias de gosto completas, com a leitura liberada, SÃO a nota da obra** (regra da Ana, 22/11/2026). Quem
+garante é o escritor do estado de leitura: depois de toda escrita que mexe na nota, no status ou nos capítulos,
+`writeReadingState`/`mirrorOwnerState` gravam a nota das categorias na obra que ficou sem nota
+(`restoreTasteLabels`; regra pura em `lib/ratings/taste-label-restore.ts`). Quem APAGA a nota de propósito
+("Remover minha nota", desfazer do deck) passa `skipTasteRestore`. Passivo: `scripts/restaurar-nota-das-categorias.ts`.
 
 ## O badge "Recalcular notas" só acende com mudança MATERIAL
 

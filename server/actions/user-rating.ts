@@ -57,11 +57,19 @@ export async function clearUserRating(
   // `user_id = auth.uid()`). Aqui as colunas vão explicitamente a `null` — é o oposto do patch
   // de `updateWorkStatus`, que OMITE o bloco pra preservar o gravado.
   const cleared = Object.fromEntries(CRAFT_SCORE_COLUMNS.map((c) => [c, null]))
-  const write = await writeReadingState(gate.userId, [workId], {
-    user_score: null,
-    quick_score: null, // a nota rápida (mig 171) é avaliação — cai junto
-    ...cleared,
-  })
+  const write = await writeReadingState(
+    gate.userId,
+    [workId],
+    {
+      user_score: null,
+      quick_score: null, // a nota rápida (mig 171) é avaliação — cai junto
+      ...cleared,
+    },
+    { kind: "default" },
+    // Apagar é o objetivo: sem isto, a garantia "categorias completas ⇒ nota" devolveria a nota antes de
+    // as categorias saírem, logo abaixo.
+    { skipTasteRestore: true },
+  )
   if (write.error) return { ok: false, error: write.error }
 
   // Eixos de gosto: per-user desde a mig 169 (PK user_id+work_id, RLS `user_id = auth.uid()`).
