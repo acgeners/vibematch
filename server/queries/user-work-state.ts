@@ -10,6 +10,10 @@ import { parseMixedEdition } from "@/lib/editions/mixed-edition"
 import type { MixedEdition } from "@/lib/editions/mixed-edition"
 import type { ReadEditionContext } from "@/lib/editions/read-edition"
 import { groupRowsByPlan, planReadEditionsForWrite } from "./read-edition-plan"
+import { after } from "next/server"
+import { computeTasteUserScore, TASTE_LABEL_KEYS } from "./pilot-taste"
+import { tasteLabelsToRestore, touchesLabelOrGate } from "@/lib/ratings/taste-label-restore"
+import type { UnlabeledState } from "@/lib/ratings/taste-label-restore"
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // Estado de LEITURA per-usuário — FATIA 1 (PLANO-MULTIUSER-FASE2.md §13)
@@ -427,6 +431,8 @@ export async function writeReadingState(
   workIds: string[],
   patch: PersonalStatePatch,
   editionContext: ReadEditionContext = { kind: "default" },
+  /** `skipTasteRestore`: quem APAGA a nota de propósito (remover, desfazer) e a própria restauração. */
+  opts: { skipTasteRestore?: boolean } = {},
 ): Promise<WriteResult> {
   const ids = Array.from(new Set(workIds.filter(Boolean)))
   if (ids.length === 0) return { error: null }
@@ -465,7 +471,97 @@ export async function writeReadingState(
       return { error: null }
     },
   })
-  return result.error ? result : { error: null, readEditionsWritten: plano.plans.size }
+  if (result.error) return result
+  if (!opts.skipTasteRestore && touchesLabelOrGate(patch)) {
+    await restoreTasteLabels(supabase, userId, ids, (labelIds, label) =>
+      writeReadingState(userId, labelIds, { user_score: label }, { kind: "default" }, { skipTasteRestore: true }),
+    )
+  }
+  return { error: null, readEditionsWritten: plano.plans.size }
+}
+
+type StateClient = Awaited<ReturnType<typeof createUserClient>> | ReturnType<typeof createAdminClient>
+
+/**
+ * Categorias de gosto completas + leitura liberada ⇒ a obra TEM nota (`lib/ratings/taste-label-restore.ts`).
+ * Roda depois de toda escrita que mexe na nota, no status ou nos capítulos: lê só as obras que ficaram
+ * SEM nota, e grava a nota das categorias pelo mesmo escritor (com o histórico de notas junto).
+ *
+ * Falha aqui não derruba a escrita que já aconteceu — loga. A pior consequência é a obra seguir sem nota
+ * até a próxima escrita, que é o estado de antes.
+ */
+async function restoreTasteLabels(
+  client: StateClient,
+  userId: string,
+  ids: string[],
+  write: (workIds: string[], label: number) => Promise<WriteResult>,
+): Promise<void> {
+  try {
+    const rows: UnlabeledState[] = []
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data, error } = await client
+        .from("user_work_state")
+        .select("work_id, personal_status_id, chapters_read")
+        .eq("user_id", userId)
+        .is("user_score", null)
+        .in("work_id", ids.slice(i, i + 100))
+      if (error) throw new Error(`estado: ${error.message}`)
+      for (const r of data ?? []) {
+        rows.push({
+          workId: r.work_id as string,
+          personalStatusId: (r.personal_status_id as number | null) ?? null,
+          chaptersRead: (r.chapters_read as number | null) ?? null,
+          totalChapters: null,
+        })
+      }
+    }
+    if (rows.length === 0) return
+
+    const labelByWork = new Map<string, number | null>()
+    const unlabeled = rows.map((r) => r.workId)
+    for (let i = 0; i < unlabeled.length; i += 100) {
+      const { data, error } = await client
+        .from("pilot_taste_scores")
+        .select(["work_id", ...TASTE_LABEL_KEYS].join(", "))
+        .eq("user_id", userId)
+        .in("work_id", unlabeled.slice(i, i + 100))
+      if (error) throw new Error(`categorias: ${error.message}`)
+      for (const t of (data ?? []) as unknown as Record<string, unknown>[]) {
+        labelByWork.set(t.work_id as string, computeTasteUserScore(t as never))
+      }
+    }
+    const withLabel = rows.filter((r) => labelByWork.get(r.workId) != null)
+    if (withLabel.length === 0) return
+
+    // O total de capítulos é catálogo: lido pela service role (o cliente de sessão não lê `works`).
+    const { data: works, error: worksError } = await createAdminClient()
+      .from("works")
+      .select("id, total_chapters")
+      .in("id", withLabel.map((r) => r.workId))
+    if (worksError) throw new Error(`obras: ${worksError.message}`)
+    const totals = new Map((works ?? []).map((w) => [w.id as string, (w.total_chapters as number | null) ?? null]))
+    const groups = tasteLabelsToRestore(
+      withLabel.map((r) => ({ ...r, totalChapters: totals.get(r.workId) ?? null })),
+      labelByWork,
+    )
+    if (groups.size === 0) return
+
+    for (const [label, workIds] of groups) {
+      const r = await write(workIds, label)
+      if (r.error) console.error("[restoreTasteLabels] falha gravando a nota das categorias:", r.error)
+    }
+    // A obra ganhou rótulo: a Nota Prevista precisa ser refeita com ele. Import dinâmico: a fila do
+    // recálculo puxa o cálculo inteiro, e este módulo é lido por quase todo o app.
+    if (userId === (await getOwnerUserId())) {
+      const { markRecalcPending } = await import("@/server/recalc/queue")
+      await markRecalcPending("restoreTasteLabels")
+    } else {
+      const { scheduleUserRecalc } = await import("@/server/recalc/user-recalc-schedule")
+      after(() => scheduleUserRecalc(userId, "restoreTasteLabels"))
+    }
+  } catch (e) {
+    console.error("[restoreTasteLabels]", e instanceof Error ? e.message : e)
+  }
 }
 
 /**
@@ -494,7 +590,13 @@ export async function deleteReadingState(
   const labeled = (rows ?? []).filter((r) => r.user_score != null).map((r) => r.work_id as string)
   const hadInterest = (rows ?? []).some((r) => r.synopsis_quality != null)
   if (labeled.length > 0) {
-    const clear = await writeReadingState(userId, labeled, { user_score: null, quick_score: null })
+    const clear = await writeReadingState(
+      userId,
+      labeled,
+      { user_score: null, quick_score: null },
+      { kind: "default" },
+      { skipTasteRestore: true }, // apagar é o objetivo: a linha sai logo abaixo
+    )
     if (clear.error) return { error: clear.error, hadLabel: true, hadInterest }
   }
   const { error: delError } = await supabase
@@ -531,6 +633,8 @@ export async function mirrorOwnerState(
   workIds: string[],
   patch: PersonalStatePatch,
   editionContext: ReadEditionContext = { kind: "default" },
+  /** Ver `writeReadingState`. */
+  opts: { skipTasteRestore?: boolean } = {},
 ): Promise<WriteResult> {
   const ids = Array.from(new Set(workIds.filter(Boolean)))
   if (ids.length === 0) return { error: null }
@@ -575,7 +679,13 @@ export async function mirrorOwnerState(
       return { error: null }
     },
   })
-  return result.error ? result : { error: null, readEditionsWritten: plano.plans.size }
+  if (result.error) return result
+  if (!opts.skipTasteRestore && touchesLabelOrGate(patch)) {
+    await restoreTasteLabels(supabase, ownerId, ids, (labelIds, label) =>
+      mirrorOwnerState(ownerId, labelIds, { user_score: label }, { kind: "default" }, { skipTasteRestore: true }),
+    )
+  }
+  return { error: null, readEditionsWritten: plano.plans.size }
 }
 
 /**

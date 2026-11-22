@@ -48,6 +48,7 @@ const INVENTARIO: Record<string, boolean> = {
   saveQuickScore: false, // rótulo do Ridge
   clearUserRating: false,
   savePilotTaste: false,
+  restoreTasteLabels: false, // categorias completas + leitura liberada ⇒ a obra ganha o rótulo (22/11/2026)
   "external-list-import": false, // rótulos + obras novas
   createWork: false, // é assim que a obra nova ganha a 1ª Nota Prevista
   createWorksBatch: false,
