@@ -7,7 +7,14 @@ import { saveQuickScore } from "@/server/actions/quick-score"
 import { RateRow } from "@/components/onboarding/rate-row"
 import type { RateRowBadge } from "@/components/onboarding/rate-row"
 import { UNTRACKED_PERSONAL_STATUS } from "@/lib/constants/status-lookups"
-import { chaptersAfterStatus, isRateListStatus, LOCKED_GROUP_HINT, rateLock } from "@/lib/onboarding/rate-status"
+import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
+import {
+  chaptersAfterStatus,
+  isRateListStatus,
+  LOCKED_GROUP_HINT,
+  RATE_MENU_STATUSES,
+  rateLock,
+} from "@/lib/onboarding/rate-status"
 import type { RateListWork } from "@/lib/onboarding/rate-status"
 import type { PersonalStatus } from "@/types/domain"
 import s from "./onboarding.module.css"
@@ -55,6 +62,9 @@ export function useRateList(items: RateListItem[], logTag: string) {
   const counted = live.filter(isCounted).length
   /** As da lista principal ainda sem nota (o "N sem nota" do cabeçalho). */
   const withoutScore = live.filter((i) => !inLockedGroup(i.work) && !isCounted(i)).length
+  /** Para o ensō (`rateCoverage`), pelo estado de AGORA: sem nota com a escala liberada, e travadas. */
+  const waiting = live.filter((i) => !lockedNow(i.work) && !quick.has(i.work.id)).length
+  const early = live.filter((i) => lockedNow(i.work)).length
 
   const log = (what: string) => (r: { ok: boolean; error?: string }) => {
     if (!r.ok) console.error(`[${logTag}] ${what}:`, r.error)
@@ -140,6 +150,8 @@ export function useRateList(items: RateListItem[], logTag: string) {
     gone,
     counted,
     withoutScore,
+    waiting,
+    early,
     stateOf,
     inLockedGroup,
     isGone: (id: string) => gone.has(id),
@@ -153,6 +165,10 @@ export function useRateList(items: RateListItem[], logTag: string) {
 }
 
 export type RateListControl = ReturnType<typeof useRateList>
+
+const STATUS_INFO_BY_NAME = Object.fromEntries(
+  Object.values(PERSONAL_STATUSES_BY_ID).map((info) => [info.status, info]),
+)
 
 function goneText(g: Gone): string {
   if (g.kind === "status") return `agora é ${g.status} e saiu desta lista.`
@@ -169,10 +185,16 @@ export function RateList({
   items,
   ctl,
   empty,
+  groupByStatus = false,
 }: {
   items: RateListItem[]
   ctl: RateListControl
   empty: ReactNode
+  /**
+   * Separa a lista principal por status, na ordem do menu. O grupo sai do status GRAVADO (o de quando
+   * a página abriu), como o grupo das travadas: trocar o status não tira a obra de vista.
+   */
+  groupByStatus?: boolean
 }) {
   const [open, setOpen] = useState(false)
   if (items.length === 0) return <>{empty}</>
@@ -210,9 +232,29 @@ export function RateList({
     )
   }
 
+  const renderMain = () => {
+    if (!groupByStatus) return main.map(renderItem)
+    return RATE_MENU_STATUSES.map((status) => {
+      const inGroup = main.filter((i) => i.work.status === status)
+      if (inGroup.length === 0) return null
+      const info = STATUS_INFO_BY_NAME[status]
+      return (
+        <section key={status} aria-label={status}>
+          <div className={s.statusGroup}>
+            <span style={{ color: info?.color }}>
+              <span aria-hidden="true">{info?.symbol}</span> {status}
+            </span>
+            <span className={s.statusGroupCount}>{inGroup.filter((i) => !ctl.isGone(i.work.id)).length}</span>
+          </div>
+          {inGroup.map(renderItem)}
+        </section>
+      )
+    })
+  }
+
   return (
     <>
-      {main.map(renderItem)}
+      {renderMain()}
       {locked.length > 0 && (
         <div className={s.group} data-open={open}>
           <button

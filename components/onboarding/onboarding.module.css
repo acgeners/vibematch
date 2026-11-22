@@ -348,6 +348,8 @@
 .row {
   /* A lixeira mora no canto do card (absoluta); o padding da direita é o lugar dela. */
   position: relative;
+  /* A escala de 1 a 10 se ajusta à largura do CARD, não da janela (ver @container rateRow). */
+  container: rateRow / inline-size;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -360,9 +362,10 @@
   border-bottom: 0;
 }
 .thumb {
+  /* 60×84: preenche a altura das três linhas de texto ao lado sem a linha crescer. */
   flex: none;
-  width: 44px;
-  height: 62px;
+  width: 60px;
+  height: 84px;
   overflow: hidden;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.05);
@@ -385,10 +388,25 @@
   text-underline-offset: 3px;
 }
 .nameGenres {
-  display: block;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
   margin-top: 3px;
   font-size: 12px;
   color: #9fb0c8;
+}
+.pub {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.pub i {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
 }
 .meta {
   display: flex;
@@ -473,12 +491,12 @@
 }
 .scale {
   display: flex;
-  gap: 6px;
+  gap: 4px;
 }
 .scale button {
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
+  width: 34px;
+  height: 36px;
+  border-radius: 9px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.03);
   color: #c7d2e2;
@@ -488,6 +506,16 @@
   transition:
     background 0.15s,
     transform 0.15s;
+}
+/* Card estreito (a lista ao lado do deck tem ~760px): com botões de 34px o nome ficava em ~220px e o
+   campo de capítulo descia para uma 4ª linha. Com 30px o nome ganha ~50px e a linha de status cabe. */
+@container rateRow (max-width: 820px) {
+  .scale {
+    gap: 3px;
+  }
+  .scale button {
+    width: 30px;
+  }
 }
 .scale button:not([aria-disabled="true"]):hover {
   transform: translateY(-1px);
@@ -611,6 +639,19 @@
   .name {
     padding-right: 34px;
   }
+  /* Dez botões não cabem na linha do celular: a escala ganha a largura toda e eles a dividem. */
+  .scale {
+    width: 100%;
+  }
+  .scale button {
+    flex: 1;
+    width: auto;
+    padding: 0;
+  }
+  .thumb {
+    width: 52px;
+    height: 73px;
+  }
   .trash {
     top: 8px;
     right: 8px;
@@ -719,4 +760,21 @@
   .groupTri {
     transition: none;
   }
+}
+
+/* "Agrupar por status": o cabeçalho de cada grupo da lista principal. */
+.statusGroup {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  /* Sem borda própria: a linha de cima já fecha com a dela (.row tem border-bottom). */
+  padding: 14px 22px 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.statusGroupCount {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  color: #7d8ca3;
 }

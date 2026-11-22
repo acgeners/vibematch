@@ -12,14 +12,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
+import { PERSONAL_STATUSES_BY_ID, PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { asksChapter, RATE_MENU_STATUSES, rateLock, WANT_TO_READ_STATUS } from "@/lib/onboarding/rate-status"
 import type { RateListWork } from "@/lib/onboarding/rate-status"
 import { cn, titleToSlug } from "@/lib/utils"
 import type { PersonalStatus } from "@/types/domain"
 import s from "./onboarding.module.css"
 
-const SCALE = [0, 2, 4, 6, 8, 10]
+/** 1 a 10, a escala do MyAnimeList: com só os pares, quem pensa "7" tinha que escolher entre 6 e 8. */
+const SCALE = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 const STATUS_INFO_BY_NAME = Object.fromEntries(
   Object.values(PERSONAL_STATUSES_BY_ID).map((info) => [info.status, info]),
@@ -69,6 +70,9 @@ export function RateRow({
   const withChapter = asksChapter(status)
   const lock = rateLock(status, withChapter ? typedChapters : chapters, work.totalChapters)
   const shown = lock.locked ? undefined : score
+  // Status de publicação na linha dos gêneros (mockup de 22/11/2026). "Unknown" não diz nada: fica de fora.
+  const pubInfo = work.publicationStatusId != null ? PUBLICATION_STATUSES_BY_ID[work.publicationStatusId] : undefined
+  const pub = pubInfo && pubInfo.slug !== "unknown" ? pubInfo : null
   const commitChapters = () => {
     if (typedChapters !== chapters) onChapters(typedChapters)
   }
@@ -89,7 +93,18 @@ export function RateRow({
         >
           {work.title}
         </a>
-        {work.genres.length > 0 && <span className={s.nameGenres}>{work.genres.slice(0, 3).join(" · ")}</span>}
+        {(work.genres.length > 0 || pub) && (
+          <span className={s.nameGenres}>
+            {work.genres.length > 0 && <span>{work.genres.slice(0, 3).join(" · ")}</span>}
+            {/* Texto, não selo: ao lado do selo de status ele disputaria com o que é seu. */}
+            {pub && (
+              <span className={s.pub}>
+                <i aria-hidden="true" style={{ background: pub.color }} />
+                {pub.status}
+              </span>
+            )}
+          </span>
+        )}
         <span className={s.meta}>
           <DropdownMenu>
             <DropdownMenuTrigger
