@@ -2,9 +2,9 @@ import type { TasteCriterion, TasteScoreKey } from "@/server/queries/pilot-taste
 
 /**
  * Qual nota pessoal VALE numa obra, e de onde ela veio — a régua das duas telas que dão nota (a
- * página da obra e o `/rate`). É a mesma precedência do servidor (`quick-score-precedence.ts` +
- * `applyTasteDerivedUserScore`), escrita do lado da TELA: as 7 categorias de gosto completas vencem;
- * a avaliação antiga por critérios (craft) também vence; sem nenhuma das duas, vale a nota direta.
+ * página da obra e o `/rate`). É a mesma precedência do servidor, escrita do lado da TELA: as 7
+ * categorias de gosto completas vencem tudo (`writeByTasteLabel`, no escritor do estado de leitura);
+ * depois a avaliação antiga por critérios (craft) vence a direta (`quick-score-precedence.ts`).
  *
  * O painel de categorias e a nota direta ficam lado a lado, e cada um sozinho diria "a sua nota é
  * esta" — por isso a tela pergunta AQUI qual vale, em vez de cada controle decidir por conta própria.

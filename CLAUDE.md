@@ -164,7 +164,7 @@ apagada (`.incompleto`/`.sem-schema` são a família `backup-parcial`, nunca pod
 exige `BACKUP_PODAR=1` — e só ligue isso quando a cópia externa estiver conferida: o iCloud guarda
 só as 5 mais recentes, então a cópia local mais antiga pode ser a única. Custo de não podar: ~50 MB/semana.
 
-⚠️ **São 20 hoje**, e esta linha já disse **7**, **11** e **17** — a lista de envs acima cobre 6 delas.
+⚠️ **São 21 hoje**, e esta linha já disse **7**, **11** e **17** — a lista de envs acima cobre 6 delas.
 Contagem em prosa não acusa a própria defasagem: **não a repita aqui, leia o `FAMILIAS`.**
 
 🔴 **E essa frase não bastou: a linha defasou de 11 para 14 com o aviso escrito nela mesma.** É a
@@ -347,12 +347,12 @@ código que muda, é o que ele quer dizer.
 GRAVA (catálogo ou o log de custo em `ai_api_calls`). Mandá-los pro local descartável perde o
 trabalho no próximo `db:pull`, falha mais cara que o egress que o `.env.analysis` evita. Hoje
 cada arquivo `.ts`/`.mjs`/`.js` **rastreado pelo git**, fora do `package.json` e que toca o
-banco declara um dos dois (**114 arquivos, remedidos em 2026-11-22**):
+banco declara um dos dois (**115 arquivos, remedidos em 2026-11-22**):
 
 | declaração | quantos | o que significa |
 |---|---|---|
 | `--env-file=.env.analysis` na linha de uso | **45** | só LÊ ⇒ vai pro local, de graça |
-| `ALVO: NUVEM` no cabeçalho | **57** | GRAVA ⇒ tem que ir pra nuvem |
+| `ALVO: NUVEM` no cabeçalho | **58** | GRAVA ⇒ tem que ir pra nuvem |
 | (não tocam o banco) | 9 | fora da régua — entrou o `smoke-browser.mjs`, que só abre rota |
 
 🔴 **A régua tem DOIS rótulos e o mundo tem TRÊS casos — `smoke-logado.mjs` é o terceiro.**
@@ -4138,13 +4138,13 @@ faz `relatar()` devolver `false`. É o "declara o que esperava achar" do título
 
 ### Onde vale, e a válvula
 
-Aplicado a **18 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos` · `status-pela-traducao`
+Aplicado a **19 scripts** de correção: `adult-content-retroactive-bounds` · `normalizar-titulos` · `status-pela-traducao`
 · `normalizar-titulos-alternativos` · `reverter-calibracao-auto-aplicada` ·
 `backfill-faixa-citada` · `repick-dead-covers` · `seed-art-signal` · `tag-r19-adult` ·
 `push-opening-structure` · `recalcular-vies-da-dona` · `reconciliar-inferencia-estrutural` ·
 `backup-icloud` (não corrige nada, mas o seu "nada a enviar" também prova que olhou) ·
 `limpar-sufixo-legado-mangaupdates` · `conferir-links-comix` · `carregar-classificacao-etaria` ·
-`restaurar-nota-das-categorias`.
+`restaurar-nota-das-categorias` · `desfazer-descarte-2026-11-22`.
 
 ⚠️ **`funil.nadaAFazer("…")` substitui o `console.log` da frase**, e não é estilo: separados,
 volta a ser possível imprimir a conclusão sem a evidência, que é o estado exato que custou o
@@ -5004,11 +5004,13 @@ completas vencem, a avaliação antiga por critérios (craft) vence, senão vale
 componente só (`PostTasteAssessment`, `variant` card/inline). 🔴 O "Salvar" do formulário de status só grava
 `user_score` quando há craft (`ratingPatchFrom`, `lib/ratings/status-form-patch.ts`): sem craft ele só ecoaria a
 nota de quando a página abriu e apagaria uma nota direta dada depois.
-🔴 **Categorias de gosto completas, com a leitura liberada, SÃO a nota da obra** (regra da Ana, 22/11/2026). Quem
-garante é o escritor do estado de leitura: depois de toda escrita que mexe na nota, no status ou nos capítulos,
-`writeReadingState`/`mirrorOwnerState` gravam a nota das categorias na obra que ficou sem nota
-(`restoreTasteLabels`; regra pura em `lib/ratings/taste-label-restore.ts`). Quem APAGA a nota de propósito
-("Remover minha nota", desfazer do deck) passa `skipTasteRestore`. Passivo: `scripts/restaurar-nota-das-categorias.ts`.
+🔴 **Categorias de gosto completas, com a leitura liberada, SÃO a nota da obra, e vencem toda outra fonte, inclusive
+o craft** (regra da Ana, 22/11/2026). Quem garante é o escritor do estado de leitura, que decide ANTES de gravar:
+`writeReadingState`/`mirrorOwnerState` dividem a escrita por `splitByTasteLabel` (`lib/ratings/taste-label-restore.ts`).
+Quem APAGA a nota de propósito ("Remover minha nota", desfazer do deck) passa `skipTasteRestore`.
+**Obra arquivada fica da lista de notas, do ensō e das 20 para fora**: o recálculo a exclui (`fetchRecalcWorks`).
+Script que grava nota copia antes (`scripts/lib/copia-notas.mjs`): devolver nota a obra que já teve uma DESCARTA as
+previsões dela no ledger, e gravar muda o `updated_at`, que a `/reading` usa quando falta `last_read_at`.
 
 ## O badge "Recalcular notas" só acende com mudança MATERIAL
 
