@@ -20,6 +20,8 @@ export interface OnboardingDeckWork {
   platformAvg: number | null
   /** Votos somados das plataformas (`calculated_scores.total_votes`). */
   totalVotes: number | null
+  /** Status de publicação (`works.publication_status_id`): a lista de notas o mostra ao lado dos gêneros. */
+  publicationStatusId: number | null
 }
 
 /**
@@ -110,7 +112,7 @@ export async function getOnboardingDeck(opts: {
   const { data: hydrated, error } = await supabase
     .from("works")
     .select(
-      "id, title, total_chapters, canonical_synopsis, work_covers(url, is_primary, position), calculated_scores(platform_avg, total_votes)",
+      "id, title, total_chapters, publication_status_id, canonical_synopsis, work_covers(url, is_primary, position), calculated_scores(platform_avg, total_votes)",
     )
     .in("id", pickedIds)
   if (error) throw new Error(`getOnboardingDeck(hidratação): ${error.message}`)
@@ -133,6 +135,7 @@ export async function getOnboardingDeck(opts: {
         id,
         title: w.title as string,
         totalChapters: (w.total_chapters as number | null) ?? null,
+        publicationStatusId: (w.publication_status_id as number | null) ?? null,
         synopsis: ((w.canonical_synopsis as string | null) ?? "").trim(),
         coverUrls: coverCandidates(w.work_covers as never),
         genres: genresByWork.get(id) ?? [],
@@ -158,7 +161,7 @@ export async function hydrateOnboardingWorks(ids: string[]): Promise<OnboardingD
     const { data, error } = await supabase
       .from("works")
       .select(
-        "id, title, total_chapters, canonical_synopsis, work_covers(url, is_primary, position), calculated_scores(platform_avg, total_votes), work_genres(genres(name))",
+        "id, title, total_chapters, publication_status_id, canonical_synopsis, work_covers(url, is_primary, position), calculated_scores(platform_avg, total_votes), work_genres(genres(name))",
       )
       .in("id", chunk)
     if (error) throw new Error(`hydrateOnboardingWorks: ${error.message}`)
@@ -174,6 +177,7 @@ export async function hydrateOnboardingWorks(ids: string[]): Promise<OnboardingD
         id: w.id as string,
         title: w.title as string,
         totalChapters: (w.total_chapters as number | null) ?? null,
+        publicationStatusId: (w.publication_status_id as number | null) ?? null,
         synopsis: ((w.canonical_synopsis as string | null) ?? "").trim(),
         coverUrls: coverCandidates(w.work_covers as never),
         genres,

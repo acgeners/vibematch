@@ -7,19 +7,27 @@ import s from "./onboarding.module.css"
 /** Arco do ensō: 270° de um círculo de raio 38 (o círculo aberto da marca). */
 const ENSO_ARC = 185.6
 
-/** O anel que enche até as 20 notas. Com `withNumber`, o número fica no meio (o painel grande). */
+/**
+ * O anel que enche até as 20 notas. Com `withNumber`, o número fica no meio (o painel grande).
+ * Com `of`, depois das 20 ele passa a encher na proporção das obras da pessoa que têm nota
+ * (`rateCoverage`) e diz "de N obras".
+ */
 export function EnsoRing({
   rated,
+  of,
   size = 150,
   stroke = 6,
   withNumber = false,
 }: {
   rated: number
+  of?: number
   size?: number
   stroke?: number
   withNumber?: boolean
 }) {
-  const arc = (Math.min(1, rated / ENSO_GOAL) * ENSO_ARC).toFixed(1)
+  const coverage = rated >= ENSO_GOAL && of != null && of > 0
+  const fill = coverage ? rated / of : rated / ENSO_GOAL
+  const arc = (Math.min(1, fill) * ENSO_ARC).toFixed(1)
   const svg = (
     <svg width={size} height={size} viewBox="0 0 90 90" aria-hidden="true" style={{ flex: "none" }}>
       <circle cx="45" cy="45" r="38" fill="none" stroke="rgba(255,255,255,.08)" strokeWidth={stroke} strokeLinecap="round" strokeDasharray={`${ENSO_ARC} 239`} transform="rotate(126 45 45)" />
@@ -33,7 +41,7 @@ export function EnsoRing({
       <span className={s.ringNum}>
         <b>{rated}</b>
         {/* "de 20" é a meta; depois dela, "252 de 20" lê como conta errada. */}
-        <small>{rated < ENSO_GOAL ? `de ${ENSO_GOAL}` : "notas"}</small>
+        <small>{rated < ENSO_GOAL ? `de ${ENSO_GOAL}` : coverage ? `de ${of} obras` : "notas"}</small>
       </span>
     </div>
   )

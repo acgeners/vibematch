@@ -122,6 +122,22 @@ export async function getUnratedRead(userId: string): Promise<RateListWork[]> {
   return hydrateRateWorks((data ?? []) as RateRowData[])
 }
 
+/**
+ * Quantas obras lidas e SEM nota a pessoa tem — o mesmo filtro de `getUnratedRead`, sem o teto de
+ * `IMPORTED_UNRATED_LIMIT`. É o que entra no "de N obras" do ensō: contar pela lista erraria em
+ * silêncio quem tem mais obras sem nota do que a lista mostra.
+ */
+export async function countUnratedReadOf(userId: string): Promise<number> {
+  const { count, error } = await createAdminClient()
+    .from("user_work_state")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .is("user_score", null)
+    .in("personal_status_id", readStatusIds())
+  if (error) throw new Error(`countUnratedReadOf: ${error.message}`)
+  return count ?? 0
+}
+
 /** Quantas obras COM nota a pessoa tem (o número do ensō). Conta no servidor: zero linhas trafegam. */
 export async function countRatedWorksOf(userId: string): Promise<number> {
   const { count, error } = await createAdminClient()

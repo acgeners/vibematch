@@ -9,7 +9,7 @@ import { DeckButtons } from "@/components/onboarding/deck-buttons"
 import { RateList, useRateList } from "@/components/onboarding/rate-list"
 import type { RateListItem } from "@/components/onboarding/rate-list"
 import { EnsoRing, EnsoTitle } from "@/components/onboarding/enso"
-import { ENSO_GOAL } from "@/lib/onboarding/enso"
+import { ENSO_GOAL, rateCoverage } from "@/lib/onboarding/enso"
 import { DECK_READ_STATUS } from "@/lib/onboarding/rate-status"
 import type { RateListWork } from "@/lib/onboarding/rate-status"
 import type { OnboardingDeckWork } from "@/server/queries/onboarding-deck"
@@ -27,18 +27,25 @@ export function RatePage({
   lovedLabels,
   initialUnrated,
   ratedCount,
+  unratedTotal,
 }: {
   lovedLabels: string[]
   initialUnrated: RateListWork[]
   /** Obras com nota da pessoa ao abrir a página (as desta lista não têm). */
   ratedCount: number
+  /** Lidas sem nota ao abrir, contadas no servidor sem o teto da lista (o "de N obras" do ensō). */
+  unratedTotal: number
 }) {
   // 🔴 A página trabalha sobre o que ela ABRIU. Toda ação daqui chama `revalidatePath`, e o Next
   // reenvia na hora as props do servidor desta rota. Lidas direto, a lista voltava reordenada pela
   // última mudança, a obra apagada perdia o "Desfazer", a obra com nota saía da lista e
   // `lovedLabels` (array novo a cada envio) recarregava o deck do zero. Recarregar traz o estado novo.
-  const [opened] = useState(() => ({ lovedLabels, initialUnrated, ratedCount }))
+  const [opened] = useState(() => ({ lovedLabels, initialUnrated, ratedCount, unratedTotal }))
   const [deckStatus, setDeckStatus] = useState<DeckStatus>("loading")
+  // O deck voltou sem nenhuma obra: a coluna sai e a lista ganha a página. Deck que acabou NESTA
+  // visita continua com o cartão "Acabaram as sugestões", que resume o que a pessoa marcou.
+  const [deckEmpty, setDeckEmpty] = useState(false)
+  const [grouped, setGrouped] = useState(false)
   const [deck, setDeck] = useState<OnboardingDeckWork[]>([])
   const [deckPos, setDeckPos] = useState(0)
   const [outClass, setOutClass] = useState("")
@@ -51,6 +58,7 @@ export function RatePage({
     const res = await getOnboardingDeckAction(opened.lovedLabels)
     if (res.ok) {
       setDeck(res.works)
+      setDeckEmpty(res.works.length === 0)
       setDeckPos(0)
       setHistory([])
       setDeckStatus("ready")
@@ -94,6 +102,16 @@ export function RatePage({
   const ctl = useRateList(list, "dar notas")
   const total = opened.ratedCount + ctl.counted
   const lit = total >= ENSO_GOAL
+  // O aviso é do MOMENTO em que a Nota Prevista liga: só na visita em que a pessoa passa de 20.
+  const crossedHere = lit && opened.ratedCount < ENSO_GOAL
+  const coverage = rateCoverage({
+    ratedAtOpen: opened.ratedCount,
+    ratedHere: ctl.counted,
+    waiting: ctl.waiting,
+    early: ctl.early,
+    unratedAtOpen: opened.unratedTotal,
+    listedAtOpen: opened.initialUnrated.length,
+  })
   const liveCount = list.filter(({ work }) => !ctl.isGone(work.id)).length
 
   const swipe = useCallback(
@@ -161,7 +179,7 @@ export function RatePage({
         guarda o que te interessa.
       </p>
 
-      {lit && (
+      {crossedHere && (
         <div className={`${shared.glass} ${s.ready}`}>
           <div className={s.readyText}>
             <div className={s.readyTitle}>A Nota Prevista ligou.</div>
@@ -176,56 +194,93 @@ export function RatePage({
         </div>
       )}
 
-      <div className={s.layout}>
-        <section aria-labelledby="dn-deck" className={s.deckCol}>
-          <h2 id="dn-deck" className={s.h2}>
-            Você leu alguma destas?
-          </h2>
-          <p className={s.muted}>Marque as que você já leu, inteiras ou em parte: elas recebem nota na lista ao lado.</p>
-          {current && (
-            <p className={s.counter}>
-              obra {deckPos + 1} de {deck.length}
-            </p>
-          )}
-          {deckStatus === "loading" ? (
-            <p className={s.counter}>montando o deck…</p>
-          ) : deckStatus === "error" ? (
-            <div className={`${shared.glass} ${s.note}`}>
-              <p>
-                Não consegui montar o deck agora.{" "}
-                <button type="button" className={s.inlineButton} onClick={() => void loadDeck()}>
-                  Tentar de novo
-                </button>
+      <div className={`${s.layout} ${deckEmpty ? s.solo : ""}`}>
+        {!deckEmpty && (
+          <section aria-labelledby="dn-deck" className={s.deckCol}>
+            <h2 id="dn-deck" className={s.h2}>
+              Você leu alguma destas?
+            </h2>
+            <p className={s.muted}>Marque as que você já leu, inteiras ou em parte: elas recebem nota na lista ao lado.</p>
+            {current && (
+              <p className={s.counter}>
+                obra {deckPos + 1} de {deck.length}
               </p>
-            </div>
-          ) : current ? (
-            <DeckStack current={current} behind={behind} outClass={outClass} stamp={stamp} titleAs="h3" />
-          ) : (
-            <div className={`${shared.glass} ${s.note}`}>
-              <p className={s.noteTitle}>Acabaram as sugestões</p>
-              <p>
-                {marked.length} já lidas, {loved} quero ler, {dismissed} dispensadas.{" "}
-                <button type="button" className={s.inlineButton} onClick={() => void loadDeck()}>
-                  Mostrar mais obras
-                </button>
-              </p>
-            </div>
-          )}
-          {deckStatus === "ready" && deck.length > 0 && (
-            <DeckButtons onSwipe={swipe} onUndo={undo} canUndo={history.length > 0} />
-          )}
-        </section>
+            )}
+            {deckStatus === "loading" ? (
+              <p className={s.counter}>montando o deck…</p>
+            ) : deckStatus === "error" ? (
+              <div className={`${shared.glass} ${s.note}`}>
+                <p>
+                  Não consegui montar o deck agora.{" "}
+                  <button type="button" className={s.inlineButton} onClick={() => void loadDeck()}>
+                    Tentar de novo
+                  </button>
+                </p>
+              </div>
+            ) : current ? (
+              <DeckStack current={current} behind={behind} outClass={outClass} stamp={stamp} titleAs="h3" />
+            ) : (
+              <div className={`${shared.glass} ${s.note}`}>
+                <p className={s.noteTitle}>Acabaram as sugestões</p>
+                <p>
+                  {marked.length} já lidas, {loved} quero ler, {dismissed} dispensadas.{" "}
+                  <button type="button" className={s.inlineButton} onClick={() => void loadDeck()}>
+                    Mostrar mais obras
+                  </button>
+                </p>
+              </div>
+            )}
+            {deckStatus === "ready" && deck.length > 0 && (
+              <DeckButtons onSwipe={swipe} onUndo={undo} canUndo={history.length > 0} />
+            )}
+          </section>
+        )}
 
         <div className={s.rightCol}>
+          {deckEmpty && (
+            <p className={s.deckLine}>
+              O deck não tem sugestões novas: as obras mais lidas nos seus gêneros já estão na sua lista.
+            </p>
+          )}
           <aside aria-label="Progresso da Nota Prevista" className={`${shared.glass} ${s.enso}`}>
-            <EnsoRing rated={total} withNumber />
+            <EnsoRing rated={total} of={coverage.total} withNumber />
             <div className={s.ensoText}>
-              <EnsoTitle align="start" />
-              <p className={s.muted}>
-                {lit
-                  ? "Fechado: a Nota Prevista está ligada. Cada nota a mais deixa a previsão mais precisa."
-                  : `Faltam ${ENSO_GOAL - total}. Até os ${ENSO_GOAL}, o Alinhamento (as tags que você escolheu) ordena suas listas.`}
-              </p>
+              <div className={s.ensoHead}>
+                <EnsoTitle align="start" />
+                {lit && <span className={s.ensoOn}>· Nota Prevista ligada</span>}
+              </div>
+              {lit ? (
+                <>
+                  <p className={s.coverage}>
+                    <b>{coverage.pct}%</b> das obras que você leu, começou ou avaliou já têm nota.
+                  </p>
+                  <ul className={s.coverageParts}>
+                    <li>
+                      <b>{coverage.rated}</b> com nota
+                    </li>
+                    {coverage.waiting > 0 && (
+                      <li>
+                        <b>{coverage.waiting}</b> esperando nota, na lista abaixo
+                      </li>
+                    )}
+                    {coverage.early > 0 && (
+                      <li>
+                        <b>{coverage.early}</b> no começo (menos de 20% lido)
+                      </li>
+                    )}
+                    {coverage.beyond > 0 && (
+                      <li>
+                        <b>{coverage.beyond}</b> fora da lista, que mostra as mais recentes
+                      </li>
+                    )}
+                  </ul>
+                </>
+              ) : (
+                <p className={s.muted}>
+                  Faltam {ENSO_GOAL - total}. Até os {ENSO_GOAL}, o Alinhamento (as tags que você escolheu) ordena suas
+                  listas.
+                </p>
+              )}
             </div>
           </aside>
 
@@ -234,13 +289,22 @@ export function RatePage({
               <h2 id="dn-lidas" className={s.listTitle}>
                 Já li, falta a nota
               </h2>
-              <span className={s.listCount}>
-                {liveCount === 0 ? "0" : ctl.withoutScore === 0 ? "todas com nota" : `${ctl.withoutScore} sem nota`}
-              </span>
+              <div className={s.listHeadRight}>
+                {liveCount > 0 && (
+                  <button type="button" className={s.groupToggle} aria-pressed={grouped} onClick={() => setGrouped((g) => !g)}>
+                    <span className={s.switch} aria-hidden="true" />
+                    Agrupar por status
+                  </button>
+                )}
+                <span className={s.listCount}>
+                  {liveCount === 0 ? "0" : ctl.withoutScore === 0 ? "todas com nota" : `${ctl.withoutScore} sem nota`}
+                </span>
+              </div>
             </div>
             <RateList
               items={list}
               ctl={ctl}
+              groupByStatus={grouped}
               empty={
                 <p className={s.empty}>
                   Nada por enquanto. Marque <b>“Já li”</b> nas obras do deck que você conhece. Obra que você marcar

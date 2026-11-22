@@ -2,7 +2,7 @@ import { notFound } from "next/navigation"
 import { getSessionUserId } from "@/server/queries/current-user"
 import { loadChipTasteState } from "@/server/queries/onboarding-tastes"
 import { chipStateFromRows } from "@/lib/onboarding/chip-tastes"
-import { countRatedWorksOf, getUnratedRead } from "@/server/queries/onboarding-imported"
+import { countRatedWorksOf, countUnratedReadOf, getUnratedRead } from "@/server/queries/onboarding-imported"
 import { RatePage } from "@/components/onboarding/rate-page"
 
 export const metadata = { title: "Dar notas" }
@@ -16,10 +16,18 @@ export const metadata = { title: "Dar notas" }
 export default async function RateRoute() {
   const userId = await getSessionUserId()
   if (!userId) notFound()
-  const [tastes, unrated, ratedCount] = await Promise.all([
+  const [tastes, unrated, ratedCount, unratedTotal] = await Promise.all([
     loadChipTasteState(userId),
     getUnratedRead(userId),
     countRatedWorksOf(userId),
+    countUnratedReadOf(userId),
   ])
-  return <RatePage lovedLabels={chipStateFromRows(tastes.rows).loved} initialUnrated={unrated} ratedCount={ratedCount} />
+  return (
+    <RatePage
+      lovedLabels={chipStateFromRows(tastes.rows).loved}
+      initialUnrated={unrated}
+      ratedCount={ratedCount}
+      unratedTotal={unratedTotal}
+    />
+  )
 }

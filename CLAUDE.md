@@ -4991,6 +4991,10 @@ marcada no deck agora é apagada. Dono: `lib/onboarding/rate-status.ts` + `compo
 **O `/rate` trabalha sobre as props com que ABRIU (`RatePage`): toda ação dele chama `revalidatePath`, e o
 Next reenvia as props do servidor na hora.** Lidas direto, a obra apagada perdia o "Desfazer", a mexida
 pulava para o topo, a que ganhou nota saía da lista e o deck recarregava do zero.
+**Depois das 20 notas o ensō do `/rate` diz "N de M obras", e os dois números são do MESMO conjunto**
+(`rateCoverage`, `lib/onboarding/enso.ts`): toda obra com nota, em qualquer status, mais as lidas ou começadas
+sem nota. O M conta no SERVIDOR (`countUnratedReadOf`), nunca pela lista, que tem teto. O aviso "A Nota
+Prevista ligou" só aparece na visita em que a pessoa passa de 20. A escala vai de 1 a 10.
 
 ## O badge "Recalcular notas" só acende com mudança MATERIAL
 
