@@ -4992,9 +4992,17 @@ marcada no deck agora é apagada. Dono: `lib/onboarding/rate-status.ts` + `compo
 Next reenvia as props do servidor na hora.** Lidas direto, a obra apagada perdia o "Desfazer", a mexida
 pulava para o topo, a que ganhou nota saía da lista e o deck recarregava do zero.
 **Depois das 20 notas o ensō do `/rate` diz "N de M obras", e os dois números são do MESMO conjunto**
-(`rateCoverage`, `lib/onboarding/enso.ts`): toda obra com nota, em qualquer status, mais as lidas ou começadas
-sem nota. O M conta no SERVIDOR (`countUnratedReadOf`), nunca pela lista, que tem teto. O aviso "A Nota
-Prevista ligou" só aparece na visita em que a pessoa passa de 20. A escala vai de 1 a 10.
+(`rateCoverage`, `lib/onboarding/enso.ts`): toda obra com nota, em qualquer status, mais as lidas sem nota que
+JÁ passam na trava de leitura; as travadas ficam fora da conta, só informadas. O M conta no SERVIDOR
+(`countUnratedReadSplitOf`), nunca pela lista, que tem teto. O aviso "A Nota Prevista ligou" só aparece na
+visita em que a pessoa passa de 20. A escala vai de 1 a 10, e a obra que ganha nota encolhe no lugar ("Mudar").
+
+**Nota direta e por categorias convivem nas duas telas (página da obra e `/rate`), e qual vale sai de
+`effectiveRating` (`lib/ratings/effective-rating.ts`)**, a mesma precedência do servidor: as 7 categorias de gosto
+completas vencem, a avaliação antiga por critérios (craft) vence, senão vale a direta. O painel de categorias é um
+componente só (`PostTasteAssessment`, `variant` card/inline). 🔴 O "Salvar" do formulário de status só grava
+`user_score` quando há craft (`ratingPatchFrom`, `lib/ratings/status-form-patch.ts`): sem craft ele só ecoaria a
+nota de quando a página abriu e apagaria uma nota direta dada depois.
 
 ## O badge "Recalcular notas" só acende com mudança MATERIAL
 

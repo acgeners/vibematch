@@ -762,6 +762,90 @@
   }
 }
 
+/* A coluna da nota: a escala e, embaixo, "ou por categorias". */
+.rateCol {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.scaleNote {
+  font-size: 11.5px;
+  color: #9fb0c8;
+}
+.byCats {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: #8fdbff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.byCats:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.byCats:focus-visible {
+  outline: 2px solid #8fdbff;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.byCatsCount {
+  color: #9fb0c8;
+}
+/* O painel de categorias ocupa a linha inteira, embaixo da obra. */
+.catsPanel {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+/* A obra que ganhou nota encolhe no lugar: "✓ título · nota 7 · Mudar". */
+.done {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 12px 22px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 13px;
+  color: #9fb0c8;
+}
+.done b {
+  color: #e6edf7;
+  font-weight: 600;
+}
+.doneCheck {
+  color: #4ade80;
+  font-weight: 700;
+}
+.doneScore {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  color: #e6edf7;
+}
+.done button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #8fdbff;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* No celular a coluna da nota ocupa a linha (a escala divide a largura). Depois das regras-base de
+   propósito: com a mesma especificidade, quem vem depois vence. */
+@media (max-width: 640px) {
+  .rateCol {
+    width: 100%;
+    align-items: stretch;
+  }
+  .byCats {
+    align-self: flex-start;
+  }
+}
+
 /* "Agrupar por status": o cabeçalho de cada grupo da lista principal. */
 .statusGroup {
   display: flex;

@@ -24,6 +24,8 @@ vi.mock("@/server/actions/onboarding", () => ({
   setOnboardingStatusAction: acoes.setOnboardingStatusAction,
 }))
 vi.mock("@/server/actions/quick-score", () => ({ saveQuickScore: acoes.saveQuickScore }))
+const gosto = vi.hoisted(() => ({ savePilotTaste: vi.fn(async () => ({ ok: true })) }))
+vi.mock("@/server/actions/pilot-taste", () => ({ savePilotTaste: gosto.savePilotTaste }))
 vi.mock("@/components/ui/cover-image", () => ({ CoverImage: () => null }))
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a>,
@@ -50,7 +52,7 @@ const ensoTexto = () => screen.getByLabelText("Progresso da Nota Prevista").text
 /** A página "Dar notas": o mesmo deck e a mesma lista de notas das boas-vindas. */
 describe("Dar notas", () => {
   it("'Já li' no deck põe a obra no TOPO da lista, marcada como do deck e como Finished", async () => {
-    render(<RatePage lovedLabels={["Romance"]} initialUnrated={[jaLida]} ratedCount={4} unratedTotal={0} />)
+    render(<RatePage lovedLabels={["Romance"]} initialUnrated={[jaLida]} ratedCount={4} unrated={{ rateable: 0, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     expect(await screen.findByText("Obra Um")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: /Já li/ }))
     await new Promise((r) => setTimeout(r, 250))
@@ -61,7 +63,7 @@ describe("Dar notas", () => {
   })
 
   it("a nota dada aqui soma no ensō; 'Desfazer última' tira a obra da lista", async () => {
-    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unratedTotal={0} />)
+    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unrated={{ rateable: 0, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     fireEvent.click(within(linha("Lida Antes")).getByRole("button", { name: "8" }))
     expect(ensoTexto()).toMatch(/^5de 20/)
@@ -75,7 +77,7 @@ describe("Dar notas", () => {
 
 describe("a linha começa no status GRAVADO", () => {
   it("a travada vai para o grupo FECHADO no fim, com o seu status e o motivo", async () => {
-    render(<RatePage lovedLabels={[]} initialUnrated={[comecada, jaLida]} ratedCount={4} unratedTotal={0} />)
+    render(<RatePage lovedLabels={[]} initialUnrated={[comecada, jaLida]} ratedCount={4} unrated={{ rateable: 0, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     // A ordem do servidor põe a Começada primeiro; travada, ela vai para o fim, fechada.
     expect(screen.getAllByRole("group", { name: /Nota para/ }).map((g) => g.getAttribute("aria-label"))).toEqual([
@@ -86,11 +88,11 @@ describe("a linha começa no status GRAVADO", () => {
     abrirGrupo()
     expect(screen.getByRole("button", { name: /^Status de leitura de Começada: Started/ })).toBeTruthy()
     expect(within(linha("Começada")).getByRole("button", { name: "8" }).getAttribute("aria-disabled")).toBe("true")
-    expect(screen.getByText("Nota a partir do cap. 15 (20%).")).toBeTruthy()
+    expect(screen.getByText("Nota a partir do cap. 15 (mais de 20% lido).")).toBeTruthy()
   })
 
   it("trocar o status grava pela ação, destrava a escala e a linha NÃO pula de lugar", async () => {
-    render(<RatePage lovedLabels={[]} initialUnrated={[comecada, jaLida]} ratedCount={4} unratedTotal={0} />)
+    render(<RatePage lovedLabels={[]} initialUnrated={[comecada, jaLida]} ratedCount={4} unrated={{ rateable: 0, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     abrirGrupo()
     escolherStatus("Começada", "Finished")
@@ -101,12 +103,14 @@ describe("a linha começa no status GRAVADO", () => {
   })
 
   it("só conta no ensō a nota com a escala liberada; o capítulo abaixo de 20% a tira", async () => {
-    render(<RatePage lovedLabels={[]} initialUnrated={[comecada]} ratedCount={4} unratedTotal={0} />)
+    render(<RatePage lovedLabels={[]} initialUnrated={[comecada]} ratedCount={4} unrated={{ rateable: 0, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     abrirGrupo()
     escolherStatus("Começada", "Finished")
     fireEvent.click(within(linha("Começada")).getByRole("button", { name: "8" }))
     expect(ensoTexto()).toMatch(/^5de 20/)
+    // Com nota a linha encolhe; "Mudar" a reabre inteira.
+    fireEvent.click(screen.getByRole("button", { name: "Mudar a nota de Começada" }))
     escolherStatus("Começada", "Started")
     expect(acoes.setOnboardingStatusAction).toHaveBeenLastCalledWith(comecada.id, "Started", 72, 8)
     const cap = screen.getByRole("spinbutton", { name: /Capítulo em que parou em Começada/ })
@@ -117,7 +121,7 @@ describe("a linha começa no status GRAVADO", () => {
   })
 
   it("Want to Read tira a obra da lista, com 'Desfazer'", async () => {
-    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unratedTotal={0} />)
+    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unrated={{ rateable: 0, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     escolherStatus("Lida Antes", "Want to Read")
     expect(acoes.setOnboardingStatusAction).toHaveBeenLastCalledWith(jaLida.id, "Want to Read", 40, null)
@@ -129,7 +133,7 @@ describe("a linha começa no status GRAVADO", () => {
   })
 
   it("o menu não oferece Not Now, Untracked nem Not Interested", async () => {
-    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unratedTotal={0} />)
+    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unrated={{ rateable: 0, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     const gatilho = screen.getByRole("button", { name: /^Status de leitura de Lida Antes:/ })
     fireEvent.pointerDown(gatilho, { pointerType: "mouse", button: 0 })
@@ -151,29 +155,32 @@ describe("a página trabalha sobre o que ABRIU, não sobre o reenvio do servidor
   const ordem = () => screen.getAllByRole("group", { name: /Nota para/ }).map((g) => g.getAttribute("aria-label"))
 
   it("o 'Desfazer' da lixeira continua depois do reenvio", async () => {
-    const { rerender } = render(<RatePage lovedLabels={[]} initialUnrated={[jaLida, outra]} ratedCount={4} unratedTotal={0} />)
+    const { rerender } = render(<RatePage lovedLabels={[]} initialUnrated={[jaLida, outra]} ratedCount={4} unrated={{ rateable: 0, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     fireEvent.click(screen.getByRole("button", { name: "Tirar Lida Antes desta lista" }))
     // O servidor já não manda a obra apagada (virou Untracked).
-    rerender(<RatePage lovedLabels={[]} initialUnrated={[outra]} ratedCount={4} unratedTotal={0} />)
+    rerender(<RatePage lovedLabels={[]} initialUnrated={[outra]} ratedCount={4} unrated={{ rateable: 0, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     expect(screen.getByRole("button", { name: "Desfazer" })).toBeTruthy()
   })
 
   it("a obra mexida não pula para o topo, e a que ganhou nota fica na lista contando uma vez", async () => {
-    const { rerender } = render(<RatePage lovedLabels={[]} initialUnrated={[jaLida, outra]} ratedCount={4} unratedTotal={0} />)
+    const { rerender } = render(<RatePage lovedLabels={[]} initialUnrated={[jaLida, outra]} ratedCount={4} unrated={{ rateable: 0, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     fireEvent.click(within(linha("Lida Antes")).getByRole("button", { name: "8" }))
     escolherStatus("Outra Lida", "Finished")
     // Reenvio: a com nota sai (a lista é "sem nota"), a mexida vem primeiro e o servidor já conta a nota.
-    rerender(<RatePage lovedLabels={[]} initialUnrated={[{ ...outra, status: "Finished" as const, chaptersRead: 30 }]} ratedCount={5} unratedTotal={0} />)
-    expect(ordem()).toEqual(["Nota para Lida Antes", "Nota para Outra Lida"])
+    rerender(<RatePage lovedLabels={[]} initialUnrated={[{ ...outra, status: "Finished" as const, chaptersRead: 30 }]} ratedCount={5} unrated={{ rateable: 0, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
+    // A com nota segue no lugar, encolhida; a mexida segue logo depois.
+    const encolhida = screen.getByRole("button", { name: "Mudar a nota de Lida Antes" })
+    expect(ordem()).toEqual(["Nota para Outra Lida"])
+    expect(encolhida.compareDocumentPosition(linha("Outra Lida")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(ensoTexto()).toMatch(/^5de 20/)
   })
 
   it("o deck não recarrega quando os gostos chegam como array novo", async () => {
-    const { rerender } = render(<RatePage lovedLabels={["Romance"]} initialUnrated={[jaLida]} ratedCount={4} unratedTotal={0} />)
+    const { rerender } = render(<RatePage lovedLabels={["Romance"]} initialUnrated={[jaLida]} ratedCount={4} unrated={{ rateable: 0, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
-    rerender(<RatePage lovedLabels={["Romance"]} initialUnrated={[jaLida]} ratedCount={4} unratedTotal={0} />)
+    rerender(<RatePage lovedLabels={["Romance"]} initialUnrated={[jaLida]} ratedCount={4} unrated={{ rateable: 0, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await new Promise((r) => setTimeout(r, 0))
     expect(acoes.getOnboardingDeckAction).toHaveBeenCalledTimes(1)
   })
@@ -181,7 +188,7 @@ describe("a página trabalha sobre o que ABRIU, não sobre o reenvio do servidor
 
 describe("a lixeira, em toda obra", () => {
   it("na obra que já estava na lista grava Untracked (guarda ♥ e histórico) e o 'Desfazer' devolve o status", async () => {
-    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unratedTotal={0} />)
+    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unrated={{ rateable: 0, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     fireEvent.click(screen.getByRole("button", { name: "Tirar Lida Antes desta lista" }))
     expect(acoes.setOnboardingStatusAction).toHaveBeenLastCalledWith(jaLida.id, "Untracked", 40, null)
@@ -192,7 +199,7 @@ describe("a lixeira, em toda obra", () => {
   })
 
   it("na obra marcada no deck agora desfaz a marcação (a obra volta ao deck)", async () => {
-    render(<RatePage lovedLabels={[]} initialUnrated={[]} ratedCount={4} unratedTotal={0} />)
+    render(<RatePage lovedLabels={[]} initialUnrated={[]} ratedCount={4} unrated={{ rateable: 0, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     fireEvent.click(screen.getByRole("button", { name: /Já li/ }))
     await new Promise((r) => setTimeout(r, 250))
@@ -214,35 +221,36 @@ describe("Dar notas v2", () => {
     publicationStatusId: pub,
   })
 
-  it("depois das 20 o ensō diz 'de N obras' com o mesmo conjunto em cima e embaixo", async () => {
-    // 252 com nota, 2 na lista sem nota (1 liberada, 1 travada) e 3 sem nota fora da lista.
+  it("depois das 20 o ensō diz 'N de M obras' só com as que a pessoa PODE avaliar", async () => {
+    // 252 com nota; sem nota: 4 liberadas (1 na lista, 3 fora dela) e 1 travada (na lista).
     const itens = [lida(1, "Finished", 100), lida(2, "Started", 5)]
-    render(<RatePage lovedLabels={[]} initialUnrated={itens} ratedCount={252} unratedTotal={5} />)
+    render(<RatePage lovedLabels={[]} initialUnrated={itens} ratedCount={252} unrated={{ rateable: 4, locked: 1 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     const enso = screen.getByLabelText("Progresso da Nota Prevista")
-    expect(enso.textContent).toMatch(/^252de 257 obras/)
-    expect(enso.textContent).toContain("98% das obras que você leu, começou ou avaliou já têm nota.")
+    // 252 + 1 esperando + 3 fora da lista = 256; a travada fica FORA da conta.
+    expect(enso.textContent).toMatch(/^252de 256 obras/)
+    expect(enso.textContent).toContain("98% das obras que você pode avaliar já têm nota.")
     expect(enso.textContent).toContain("1 esperando nota, na lista abaixo")
-    expect(enso.textContent).toContain("1 no começo (menos de 20% lido)")
     expect(enso.textContent).toContain("3 fora da lista")
+    expect(enso.textContent).toContain("Fora da conta: 1 em andamento com até 20% lido")
     // Dar nota move a obra de "esperando" para "com nota" sem mudar o total.
     fireEvent.click(within(linha("Lida 1")).getByRole("button", { name: "7" }))
-    expect(enso.textContent).toMatch(/^253de 257 obras/)
+    expect(enso.textContent).toMatch(/^253de 256 obras/)
   })
 
   it("antes das 20 o ensō segue contando até a meta", async () => {
-    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unratedTotal={1} />)
+    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unrated={{ rateable: 1, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     expect(ensoTexto()).toMatch(/^4de 20/)
     expect(ensoTexto()).toContain("Faltam 16.")
   })
 
   it("o aviso 'A Nota Prevista ligou' só aparece na visita em que a pessoa passa de 20", async () => {
-    const { unmount } = render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={252} unratedTotal={1} />)
+    const { unmount } = render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={252} unrated={{ rateable: 1, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     expect(screen.queryByText("A Nota Prevista ligou.")).toBeNull()
     unmount()
-    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={19} unratedTotal={1} />)
+    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={19} unrated={{ rateable: 1, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     expect(screen.queryByText("A Nota Prevista ligou.")).toBeNull()
     fireEvent.click(within(linha("Lida Antes")).getByRole("button", { name: "8" }))
@@ -250,7 +258,7 @@ describe("Dar notas v2", () => {
   })
 
   it("a escala vai de 1 a 10", async () => {
-    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unratedTotal={1} />)
+    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unrated={{ rateable: 1, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     const notas = within(linha("Lida Antes")).getAllByRole("button").map((b) => b.textContent)
     expect(notas).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"])
@@ -258,7 +266,7 @@ describe("Dar notas v2", () => {
 
   it("o status de publicação aparece na linha dos gêneros; Unknown fica de fora", async () => {
     const itens = [lida(1, "Finished", 100, 2), lida(2, "Finished", 100, 5)]
-    render(<RatePage lovedLabels={[]} initialUnrated={itens} ratedCount={4} unratedTotal={2} />)
+    render(<RatePage lovedLabels={[]} initialUnrated={itens} ratedCount={4} unrated={{ rateable: 2, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     expect(screen.getByText("Ongoing")).toBeTruthy()
     expect(screen.queryByText("Unknown")).toBeNull()
@@ -266,7 +274,7 @@ describe("Dar notas v2", () => {
 
   it("'Agrupar por status' separa pelo status GRAVADO: trocar o status não muda a obra de grupo", async () => {
     const itens = [lida(1, "Reading", null), lida(2, "Finished", 100), lida(3, "Reading", 50)]
-    render(<RatePage lovedLabels={[]} initialUnrated={itens} ratedCount={4} unratedTotal={3} />)
+    render(<RatePage lovedLabels={[]} initialUnrated={itens} ratedCount={4} unrated={{ rateable: 3, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     expect(screen.queryByRole("region", { name: "Reading" })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: /Agrupar por status/ }))
@@ -281,13 +289,77 @@ describe("Dar notas v2", () => {
 
   it("deck vazio: a coluna sai e uma linha explica; deck com obras mantém a coluna", async () => {
     acoes.getOnboardingDeckAction.mockImplementationOnce(async () => ({ ok: true, works: [] }))
-    const { unmount } = render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unratedTotal={1} />)
+    const { unmount } = render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unrated={{ rateable: 1, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     expect(await screen.findByText(/O deck não tem sugestões novas/)).toBeTruthy()
     expect(screen.queryByRole("heading", { name: "Você leu alguma destas?" })).toBeNull()
     unmount()
-    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unratedTotal={1} />)
+    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unrated={{ rateable: 1, locked: 0 }} tasteCriteria={[]} tasteByWork={{}} />)
     await screen.findByText("Obra Um")
     expect(screen.getByRole("heading", { name: "Você leu alguma destas?" })).toBeTruthy()
     expect(screen.queryByText(/O deck não tem sugestões novas/)).toBeNull()
+  })
+})
+
+/** As 8 categorias de gosto como `getTasteCriteria` devolve; o "Final" é o único com `allowsNa`. */
+const categorias = [
+  "like_female_lead_score",
+  "like_male_lead_score",
+  "like_couple_score",
+  "like_setting_score",
+  "like_tone_score",
+  "like_art_score",
+  "like_pacing_score",
+  "like_ending_score",
+].map((key, i) => ({
+  slug: `taste_${i}`,
+  key: key as never,
+  name: `Categoria ${i + 1}`,
+  emoji: "•",
+  description: "",
+  hints: ["1", "2", "3", "4", "5"],
+  allowsNa: key === "like_ending_score",
+  isOverall: false,
+}))
+
+/** Nota por categorias no "Dar notas" (mockup v3, aprovado em 22/11/2026). */
+describe("Dar notas: ou por categorias", () => {
+  it("as 7 categorias completas desligam a escala, contam no ensō e a linha encolhe ao fechar", async () => {
+    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unrated={{ rateable: 1, locked: 0 }} tasteCriteria={categorias} tasteByWork={{}} />)
+    await screen.findByText("Obra Um")
+    fireEvent.click(screen.getByRole("button", { name: /ou por categorias/ }))
+    for (const c of categorias.filter((c) => !c.allowsNa)) {
+      fireEvent.click(screen.getByRole("button", { name: `${c.name}: 5 de 5` }))
+    }
+    expect(within(linha("Lida Antes")).getByRole("button", { name: "8" }).getAttribute("aria-disabled")).toBe("true")
+    expect(screen.getByText("vale a nota das categorias: 10")).toBeTruthy()
+    expect(ensoTexto()).toMatch(/^5de 20/)
+    fireEvent.click(screen.getByRole("button", { name: "Fechar" }))
+    expect(screen.getByRole("button", { name: "Mudar a nota de Lida Antes" }).parentElement?.textContent).toContain(
+      "pelas categorias",
+    )
+  })
+
+  it("mostra quantas categorias já foram preenchidas", async () => {
+    const tres = { like_female_lead_score: 8, like_male_lead_score: 8, like_couple_score: 8 } as never
+    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unrated={{ rateable: 1, locked: 0 }} tasteCriteria={categorias} tasteByWork={{ [jaLida.id]: tres }} />)
+    await screen.findByText("Obra Um")
+    expect(screen.getByRole("button", { name: /ou por categorias/ }).textContent).toContain("(3 de 7)")
+  })
+
+  it("obra travada não oferece as categorias (a mesma trava da escala)", async () => {
+    render(<RatePage lovedLabels={[]} initialUnrated={[comecada]} ratedCount={4} unrated={{ rateable: 0, locked: 1 }} tasteCriteria={categorias} tasteByWork={{}} />)
+    await screen.findByText("Obra Um")
+    abrirGrupo()
+    expect(screen.queryByRole("button", { name: /ou por categorias/ })).toBeNull()
+  })
+
+  it("com nota, a linha encolhe; 'Mudar' a reabre com a nota marcada", async () => {
+    render(<RatePage lovedLabels={[]} initialUnrated={[jaLida]} ratedCount={4} unrated={{ rateable: 1, locked: 0 }} tasteCriteria={categorias} tasteByWork={{}} />)
+    await screen.findByText("Obra Um")
+    fireEvent.click(within(linha("Lida Antes")).getByRole("button", { name: "7" }))
+    expect(screen.queryByRole("group", { name: "Nota para Lida Antes" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Mudar a nota de Lida Antes" }).parentElement?.textContent).toContain("nota 7")
+    fireEvent.click(screen.getByRole("button", { name: "Mudar a nota de Lida Antes" }))
+    expect(within(linha("Lida Antes")).getByRole("button", { name: "7" }).getAttribute("aria-pressed")).toBe("true")
   })
 })

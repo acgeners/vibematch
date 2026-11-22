@@ -187,6 +187,12 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
+.coverageOut {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #7d8ca3;
+}
 .coverageParts {
   display: flex;
   flex-wrap: wrap;

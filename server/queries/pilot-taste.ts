@@ -120,6 +120,33 @@ export async function getTasteScoresForWork(
 }
 
 /**
+ * As notas de gosto de VÁRIAS obras de uma pessoa (a lista do `/rate`, até 200 obras). `userId`
+ * explícito: quem chama já resolveu a sessão. Obra sem linha fica de fora do mapa (= nenhuma estrela).
+ */
+export async function getTasteScoresForWorks(
+  userId: string,
+  workIds: string[],
+): Promise<Record<string, Record<TasteScoreKey, number | null>>> {
+  const sb = createAdminClient()
+  const out: Record<string, Record<TasteScoreKey, number | null>> = {}
+  const ids = Array.from(new Set(workIds))
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data, error } = await sb
+      .from("pilot_taste_scores")
+      .select(["work_id", ...TASTE_SCORE_KEYS].join(", "))
+      .eq("user_id", userId)
+      .in("work_id", ids.slice(i, i + 100))
+    if (error) throw new Error(`getTasteScoresForWorks: ${error.message}`)
+    for (const row of (data ?? []) as unknown as Record<string, unknown>[]) {
+      const scores = emptyTasteScores()
+      for (const k of TASTE_SCORE_KEYS) scores[k] = row[k] == null ? null : Number(row[k])
+      out[row.work_id as string] = scores
+    }
+  }
+  return out
+}
+
+/**
  * Os rótulos de ARTE de um usuário — as notas que treinam o estimador de arte.
  *
  * 🔴 `userId` EXPLÍCITO, nunca "o corrente". Isto roda dentro do `recalculateAll`, que é

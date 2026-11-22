@@ -254,6 +254,8 @@ describe("tela de notas", () => {
     await irAteNotas()
     const linha = () => screen.getByRole("group", { name: "Nota para Obra Dois" })
     fireEvent.click(within(linha()).getByRole("button", { name: "6" }))
+    // Com nota a linha encolhe ("✓ … · nota 6 · Mudar"); "Mudar" a reabre.
+    fireEvent.click(screen.getByRole("button", { name: "Mudar a nota de Obra Dois" }))
     escolherStatus("Obra Dois", "Reading")
     expect(acoes.setOnboardingStatusAction).toHaveBeenLastCalledWith(deck[1].id, "Reading", null, 6)
     expect(within(linha()).getByRole("button", { name: "6" }).getAttribute("aria-disabled")).toBeNull()
@@ -263,7 +265,7 @@ describe("tela de notas", () => {
     const cap = screen.getByRole("spinbutton", { name: /Capítulo em que parou em Obra Dois/ })
     fireEvent.change(cap, { target: { value: "30" } })
     fireEvent.blur(cap)
-    expect(screen.getByText("Nota a partir do cap. 50 (20%).")).toBeTruthy()
+    expect(screen.getByText("Nota a partir do cap. 50 (mais de 20% lido).")).toBeTruthy()
     expect(acoes.setOnboardingStatusAction).toHaveBeenLastCalledWith(deck[1].id, "Started", 30, 6)
   })
 

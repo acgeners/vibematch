@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import type { ReactNode } from "react"
 import { Check, ChevronDown } from "lucide-react"
 import { CoverImage } from "@/components/ui/cover-image"
 import { PersonalStatusBadge } from "@/components/ui/status-badge"
@@ -14,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { PERSONAL_STATUSES_BY_ID, PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { asksChapter, RATE_MENU_STATUSES, rateLock, WANT_TO_READ_STATUS } from "@/lib/onboarding/rate-status"
+import { formatRating } from "@/lib/ratings/effective-rating"
 import type { RateListWork } from "@/lib/onboarding/rate-status"
 import { cn, titleToSlug } from "@/lib/utils"
 import type { PersonalStatus } from "@/types/domain"
@@ -40,16 +42,22 @@ export function RateRow({
   status,
   chapters,
   score,
+  byCategories = null,
   badge = null,
   onRate,
   onStatus,
   onChapters,
   onTrash,
+  cats,
 }: {
   work: RateListWork
   status: PersonalStatus
   chapters: number | null
   score: number | undefined
+  /** A nota das 7 categorias completas: vence a direta, e a escala fica desligada (`effectiveRating`). */
+  byCategories?: number | null
+  /** "ou por categorias": o botão embaixo da escala e o painel que ele abre (só no `/rate`). */
+  cats?: { open: boolean; filled: number; needed: number; onToggle: () => void; panel: ReactNode }
   badge?: RateRowBadge | null
   onRate: (value: number) => void
   onStatus: (status: PersonalStatus) => void
@@ -69,7 +77,8 @@ export function RateRow({
   const typedChapters = typed != null && Number.isFinite(typed) && typed >= 0 ? typed : null
   const withChapter = asksChapter(status)
   const lock = rateLock(status, withChapter ? typedChapters : chapters, work.totalChapters)
-  const shown = lock.locked ? undefined : score
+  const scaleOff = lock.locked || byCategories != null
+  const shown = scaleOff ? undefined : score
   // Status de publicação na linha dos gêneros (mockup de 22/11/2026). "Unknown" não diz nada: fica de fora.
   const pubInfo = work.publicationStatusId != null ? PUBLICATION_STATUSES_BY_ID[work.publicationStatusId] : undefined
   const pub = pubInfo && pubInfo.slug !== "unknown" ? pubInfo : null
@@ -167,19 +176,35 @@ export function RateRow({
         </span>
         {lock.text && <span className={s.lock}>{lock.text}</span>}
       </span>
-      <span className={s.scale} role="group" aria-label={`Nota para ${work.title}`}>
-        {SCALE.map((v) => (
-          <button
-            key={v}
-            type="button"
-            className={shown === v ? s.scaleOn : shown != null && v < shown ? s.scaleFill : undefined}
-            aria-pressed={shown === v}
-            aria-disabled={lock.locked || undefined}
-            onClick={() => !lock.locked && onRate(v)}
-          >
-            {v}
+      <span className={s.rateCol}>
+        <span className={s.scale} role="group" aria-label={`Nota para ${work.title}`}>
+          {SCALE.map((v) => (
+            <button
+              key={v}
+              type="button"
+              className={shown === v ? s.scaleOn : shown != null && v < shown ? s.scaleFill : undefined}
+              aria-pressed={shown === v}
+              aria-disabled={scaleOff || undefined}
+              onClick={() => !scaleOff && onRate(v)}
+            >
+              {v}
+            </button>
+          ))}
+        </span>
+        {byCategories != null && !lock.locked && (
+          <span className={s.scaleNote}>vale a nota das categorias: {formatRating(byCategories)}</span>
+        )}
+        {cats && !lock.locked && (
+          <button type="button" className={s.byCats} aria-expanded={cats.open} onClick={cats.onToggle}>
+            {cats.open ? "Fechar categorias ▴" : "ou por categorias ▾"}
+            {!cats.open && cats.filled > 0 && (
+              <span className={s.byCatsCount}>
+                {" "}
+                ({cats.filled} de {cats.needed})
+              </span>
+            )}
           </button>
-        ))}
+        )}
       </span>
       <button
         type="button"
@@ -195,6 +220,7 @@ export function RateRow({
           <path d="M10 11v6M14 11v6" />
         </svg>
       </button>
+      {cats?.open && !lock.locked && <div className={s.catsPanel}>{cats.panel}</div>}
     </div>
   )
 }
