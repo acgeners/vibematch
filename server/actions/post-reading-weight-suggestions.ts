@@ -70,10 +70,9 @@ export async function suggestPostReadingWeights(
 }
 
 /**
- * Aplica novos pesos pós-leitura: recalcula `works.user_score` pra toda obra
+ * Aplica novos pesos pós-leitura: recalcula o `user_score` do dono pra toda obra
  * com pelo menos um `post_*_score` preenchido e dispara `recalculateAll()` pra
- * refrescar Nota.Calc/Pr/Final (que dependem direta ou indiretamente de
- * `user_score`).
+ * refrescar a Nota Prevista (que treina no `user_score`).
  *
  * Espelha a fórmula client-side em work-form.tsx:
  *   user_score = round(Σ(post_i × w_i) / Σ(w_i), 1)
@@ -82,7 +81,7 @@ export async function suggestPostReadingWeights(
 export async function applyPostReadingWeights(
   weights: Record<PostReadingScoreField, number>,
 ): Promise<{ recalculated: number; updatedManualScores: number }> {
-  // Reescreve works.user_score em lote (coluna compartilhada) → gate de admin.
+  // Reescreve em lote a nota do DONO (pelo espelho) → gate de admin.
   // Esta action sinaliza erro via throw; o caller (painel) já trata em try/catch → toast.
   const gate = await ensureAdmin()
   if (!gate.ok) throw new Error(gate.error)
@@ -123,19 +122,11 @@ export async function applyPostReadingWeights(
   }
 
   if (updates.length > 0) {
-    // Parallel individual updates — Supabase JS não tem bulk update por id.
-    // Pra ~100-200 obras é instantâneo.
-    const results = await Promise.all(
-      updates.map((u) =>
-        supabase.from("works_owner").update({ user_score: u.user_score }).eq("id", u.id),
-      ),
-    )
-    const firstError = results.find((r) => r.error)
-    if (firstError?.error) throw new Error(firstError.error.message)
-
-    // 🔴 Este é o writer em LOTE da nota — ele reescreve `user_score` de dezenas de obras de
-    // uma vez, a partir dos pesos pós-leitura. É o que mais rápido faria o espelho do dono
-    // divergir: dezenas de rótulos velhos, e o Ridge da Fase 2 treinando com eles.
+    // 🔴 A nota se grava SÓ pelo espelho. `works_owner` é uma visão com JOIN, e o Postgres não
+    // aceita escrita nela (`is_updatable = NO`, sem trigger INSTEAD OF): o `update` que existia
+    // aqui falhava em toda aplicação que mudasse alguma nota, antes de chegar ao espelho.
+    // O espelho também aplica a regra das categorias de gosto (`writeByTasteLabel`): obra com as
+    // 7 completas e a leitura liberada fica com a nota delas, não com a destes pesos.
     const ownerId = await getOwnerUserId()
     for (const u of updates) {
       const mirror = await mirrorOwnerState(ownerId, [u.id], { user_score: u.user_score })

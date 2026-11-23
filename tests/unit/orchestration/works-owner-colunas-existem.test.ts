@@ -34,7 +34,7 @@ import { join, dirname, resolve as resolvePath } from "node:path"
  * | forma | n | como é resolvida |
  * |---|---|---|
  * | `.from("works_owner").select(…)` | **27** | literal · template com `${}` · variável · ternário (os DOIS ramos) · `[…].join(", ")` com spread · const IMPORTADA de outro arquivo · `Object.keys(obj)` |
- * | `.from("works_owner").update({…})` | **1** | as CHAVES do objeto — escrever coluna que não existe falha igual |
+ * | `.from("works_owner").update({…})` | **0** (era 1) | proibida desde 23/11/2026: a view não aceita escrita (ver `ESCRITAS`). As chaves seguem conferidas, para a mensagem apontar a coluna |
  * | embed `works_owner!fk(…)` a partir de OUTRA tabela | **3** | nunca passa por `.from("works_owner")`; um scanner ancorado no `.from` é cego pros três |
  * | `pageAll("works_owner", "id", …)` | **1** | helper com a tabela no 1º argumento |
  * | **filtro e `.order()`** (`.eq` · `.in` · `.not` · `.is` · `.neq` · `.order`) | **62** | a coluna é o 1º argumento; **20 delas (32%) só existem na cadeia quebrada por variável** |
@@ -118,6 +118,8 @@ interface Varredura {
   cadeias: number
   /** Colunas de tabela EMBUTIDA (`.eq("outra.coluna")`) — fora da régua desta view. */
   embutidas: number
+  /** Escritas na view — o Postgres as recusa (ver `ESCRITAS`). */
+  escritas: Pendencia[]
 }
 
 /**
@@ -545,6 +547,14 @@ const SEM_COLUNA = [
   "finally", "setHeader", "rollback", "maybeSingle",
 ]
 
+/**
+ * 🔴 `works_owner` é uma view com JOIN (`works` LEFT JOIN `user_work_state`), e o Postgres não
+ * aceita escrita nela: conferido na nuvem em 23/11/2026, `is_updatable = NO`, sem trigger
+ * INSTEAD OF. O `update` que `applyPostReadingWeights` fazia nela falhava em toda aplicação
+ * que mudasse alguma nota. Nota do dono se grava pelo espelho (`mirrorOwnerState`).
+ */
+const ESCRITAS = ["update", "insert", "upsert", "delete"]
+
 const linhaDe = (src: string, idx: number) => src.slice(0, idx).split("\n").length
 const resumir = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 70)
 
@@ -561,6 +571,7 @@ export function varrerWorksOwner(arquivos: string[], ler: Ler): Varredura {
   const naoClassificados: Pendencia[] = []
   const declarados: Pendencia[] = []
   const locais = new Set<string>()
+  const escritas: Pendencia[] = []
   let cadeias = 0
   let embutidas = 0
 
@@ -616,6 +627,7 @@ export function varrerWorksOwner(arquivos: string[], ler: Ler): Varredura {
         const linha = linhaDe(src, i)
         const nome = met[1]
         const primeiro = fatiarNivelZero(arg.texto)[0] ?? ""
+        if (ESCRITAS.includes(nome)) escritas.push({ arquivo: f, linha, motivo: `.${nome}()` })
 
         if (inicio && nome === "select") {
           const strings = comoStrings(f, primeiro)
@@ -726,7 +738,7 @@ export function varrerWorksOwner(arquivos: string[], ler: Ler): Varredura {
     }
   }
 
-  return { pedidos, naoResolvidos, naoClassificados, declarados, locais: [...locais].sort(), cadeias, embutidas }
+  return { pedidos, naoResolvidos, naoClassificados, declarados, locais: [...locais].sort(), cadeias, embutidas, escritas }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -785,6 +797,14 @@ describe("contrato de colunas da view works_owner", () => {
         "sendo checada contra a view — foi assim que o embed `works_owner!fk(…)` e o " +
         '`pageAll("works_owner", …)` ficaram fora por meses. Ensine a forma ao parser (balde ' +
         "A, B ou C de `varrerWorksOwner`) em vez de excluir a linha.",
+    ).toEqual([])
+  })
+
+  it("🔴 ninguém ESCREVE na view — o Postgres recusa, e a escrita some antes do espelho", () => {
+    expect(
+      REPO.escritas.map((u) => `${u.arquivo}:${u.linha} → ${u.motivo}`),
+      "`works_owner` não aceita escrita (view com JOIN, sem trigger INSTEAD OF). Grave a nota " +
+        "e o estado do dono pelo espelho (`mirrorOwnerState`) e o catálogo em `works`.",
     ).toEqual([])
   })
 
@@ -878,6 +898,21 @@ describe("a varredura PEGA a coluna dropada em cada forma de leitura", () => {
     expect(pede(v, "genres")).toBe(true)
     expect(v.naoResolvidos).toEqual([])
     expect(v.naoClassificados).toEqual([])
+  })
+})
+
+describe("a varredura enxerga ESCRITA na view (sonda da guarda acima)", () => {
+  it.each([
+    ["update direto", `sb.from("works_owner").update({ user_score: 1 }).eq("id", x)`, ".update()"],
+    ["delete direto", `sb.from("works_owner").delete().eq("id", x)`, ".delete()"],
+    ["upsert direto", `sb.from("works_owner").upsert({ id: x })`, ".upsert()"],
+  ])("%s", (_nome, src, metodo) => {
+    const v = sondar({ "a.ts": src })
+    expect(v.escritas.map((e) => e.motivo)).toEqual([metodo])
+  })
+
+  it("leitura não conta como escrita", () => {
+    expect(sondar({ "a.ts": `sb.from("works_owner").select("id").eq("id", x)` }).escritas).toEqual([])
   })
 })
 
