@@ -4495,7 +4495,7 @@ Três coisas foram medidas no caminho, e as três contradizem o que esta seção
 | forma | n | o que ela exigiu do parser |
 |---|---|---|
 | `.from("works_owner").select(…)` | **27** | literal · template com `${}` · variável · ternário (os DOIS ramos) · `[…].join(", ")` com spread · const IMPORTADA · `Object.keys(obj)` |
-| `.from("works_owner").update({…})` | **1** | as CHAVES do objeto |
+| `.from("works_owner").update({…})` | **0** (era 1) | proibida: a view não aceita escrita (abaixo) |
 | embed `works_owner!fk(…)` a partir de OUTRA tabela | **3** | não passa pelo `.from` — invisível a qualquer scanner ancorado nele |
 | `pageAll("works_owner", "id", …)` | **1** | tabela no 1º argumento de um helper |
 | **filtro e `.order()`** | **62** | a coluna é o 1º argumento — e **20 (32%) só existem na cadeia quebrada por variável** |
@@ -4508,8 +4508,10 @@ media a forma que já se conhecia, então ela só podia confirmar o alcance que 
 isso o universo do teste passou a ser o **TOKEN** `works_owner`: toda ocorrência fora de
 comentário tem que cair num balde conhecido, e o que sobrar REPROVA com `arquivo:linha`.
 
-⚠️ **E "27 leituras" era leitura mesmo: são 28 cadeias `.from()`, das quais 1 é `.update()`.**
-Escrever coluna inexistente falha igual, então ela entra na régua — pelas chaves do objeto.
+🔴 **`works_owner` não aceita escrita** (view com JOIN, sem trigger INSTEAD OF; `is_updatable = NO`
+na nuvem). A única escrita que havia (`applyPostReadingWeights`) falhava em toda aplicação que
+mudasse nota. Estado do dono se grava pelo espelho (`mirrorOwnerState`). O teste reprova
+`update`/`insert`/`upsert`/`delete` numa cadeia da view.
 
 🔴 **A causa de perder 8 literais era o `[^"()]`, NÃO a quebra de linha.** A regex antiga tinha
 `\s*` entre o `.from` e o `.select`, então o Prettier não tirava nada dela; quem rejeitava era

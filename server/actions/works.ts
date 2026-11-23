@@ -2645,6 +2645,18 @@ export async function updateWorkStatus(
   // A checagem é `in personalState` porque o patch é PARCIAL: sem leitura
   // suficiente, `ratingPatchFrom` nem entra (ver `canRate`), a nota gravada
   // continua a de antes — e comparar contra um campo ausente diria "virou null".
+  //
+  // O lado "depois" é o que o ESCRITOR gravou, não o patch: com as 7 categorias de gosto completas e
+  // a leitura liberada, `writeReadingState` troca a nota do patch pela delas (e marca o recálculo ele
+  // mesmo quando ela muda). Comparar com o patch acusava "mudou" toda vez que o formulário mandasse
+  // outra nota. Falha na releitura cai no patch, que marca: na dúvida, marcar.
+  const { data: written, error: writtenError } = await supabase
+    .from("user_work_state")
+    .select("user_score, observation_adjustment, synopsis_quality")
+    .eq("user_id", gate.userId)
+    .eq("work_id", id)
+    .maybeSingle()
+  const gravado = writtenError || !written ? null : (written as Record<string, unknown>)
   const changedInputsFromStatus = changedInputs(
     (
       [
@@ -2659,7 +2671,7 @@ export async function updateWorkStatus(
           [
             input,
             sharedRow?.[column as keyof typeof sharedRow] ?? null,
-            personalState[column as keyof PersonalStatePatch] ?? null,
+            gravado ? (gravado[column] ?? null) : (personalState[column as keyof PersonalStatePatch] ?? null),
           ] as const,
       ),
   )
