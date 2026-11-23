@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { tasteLabelsToRestore, touchesLabelOrGate } from "@/lib/ratings/taste-label-restore"
+import { splitByTasteLabel, tasteLabelsToApply, touchesLabelOrGate } from "@/lib/ratings/taste-label-restore"
 
 /**
  * 🔴 Regra da Ana (22/11/2026): "não é pra acontecer de ter nota das categorias e não ter nota na obra".
@@ -18,6 +18,8 @@ const db = {
   works: [] as Row[],
 }
 const leituras: Record<string, number> = {}
+/** As notas que chegaram ao banco, na ordem: é aqui que uma oscilação apareceria. */
+const notasGravadas: unknown[] = []
 
 function fakeClient() {
   return {
@@ -28,6 +30,7 @@ function fakeClient() {
       const exec = () => {
         if (modo === "upsert") {
           for (const r of lote) {
+            if ("user_score" in r) notasGravadas.push(r.user_score)
             const i = db[table].findIndex((x) => x.user_id === r.user_id && x.work_id === r.work_id)
             if (i >= 0) db[table][i] = { ...db[table][i], ...r }
             else db[table].push({ ...r })
@@ -104,18 +107,35 @@ beforeEach(() => {
   // Started no cap. 5 de 100: travada — as categorias estão completas, mas a nota não vale.
   db.user_work_state = [{ user_id: U, work_id: "w1", personal_status_id: 2, chapters_read: 5, user_score: null }]
   for (const k of Object.keys(leituras)) delete leituras[k]
+  notasGravadas.length = 0
 })
 
 describe("a regra pura", () => {
-  it("só devolve nota a obra com categorias completas E leitura liberada, agrupando por nota", () => {
-    const rows = [
-      { workId: "a", personalStatusId: null, chaptersRead: 50, totalChapters: 100 },
-      { workId: "b", personalStatusId: null, chaptersRead: 5, totalChapters: 100 },
-      { workId: "c", personalStatusId: null, chaptersRead: 50, totalChapters: 100 },
-    ]
-    // status null não é terminal nem Reading: decide o % lido.
-    const out = tasteLabelsToRestore(rows, new Map([["a", 9.4], ["b", 9.4], ["c", null]]))
-    expect([...out]).toEqual([[9.4, ["a"]]])
+  const st = (workId: string, chaptersRead: number, score: number | null) => ({
+    workId,
+    personalStatusId: null, // nem terminal nem Reading: decide o % lido
+    chaptersRead,
+    totalChapters: 100,
+    score,
+  })
+  const labels = new Map<string, number | null>([["vazia", 9.4], ["travada", 9.4], ["craft", 9.4], ["igual", 9.4], ["incompleta", null]])
+  const states = [st("vazia", 50, null), st("travada", 5, null), st("craft", 50, 8.7), st("igual", 50, 9.4), st("incompleta", 50, 7)]
+
+  it("o passivo é a nota vazia OU diferente, com categorias completas e leitura liberada", () => {
+    expect(tasteLabelsToApply(states, labels)).toEqual([
+      { workId: "vazia", label: 9.4, previous: null },
+      { workId: "craft", label: 9.4, previous: 8.7 },
+    ])
+  })
+
+  it("divide a escrita: quem já tem a nota das categorias sai do patch, quem difere a recebe, o resto vai como veio", () => {
+    const out = splitByTasteLabel(["vazia", "travada", "craft", "igual", "fora"], { user_score: 8.7, chapters_read: 50 }, states, labels)
+    expect(out.changed).toEqual(["vazia", "craft"])
+    expect(out.groups).toEqual([
+      { ids: ["vazia", "craft"], patch: { user_score: 9.4, chapters_read: 50 } },
+      { ids: ["travada", "fora"], patch: { user_score: 8.7, chapters_read: 50 } },
+      { ids: ["igual"], patch: { chapters_read: 50 } },
+    ])
   })
 
   it("só reconfere quando a escrita mexe na nota, no status ou nos capítulos", () => {
@@ -131,7 +151,7 @@ describe("o escritor garante: categorias completas + leitura liberada ⇒ nota",
     const { writeReadingState } = await import("@/server/queries/user-work-state")
     expect((await writeReadingState(U, ["w1"], { chapters_read: 50 })).error).toBeNull()
     expect(de("w1")?.user_score).toBe(9.4)
-    expect(recalc.markRecalcPending).toHaveBeenCalledWith("restoreTasteLabels")
+    expect(recalc.markRecalcPending).toHaveBeenCalledWith("tasteLabels")
   })
 
   it("um 'Salvar' que grava nota vazia não apaga: a nota das categorias volta", async () => {
@@ -139,6 +159,31 @@ describe("o escritor garante: categorias completas + leitura liberada ⇒ nota",
     const { writeReadingState } = await import("@/server/queries/user-work-state")
     await writeReadingState(U, ["w1"], { user_score: null, chapters_read: 60 })
     expect(de("w1")?.user_score).toBe(9.4)
+  })
+
+  it("o 'Salvar' com a nota antiga por critérios (craft) não troca a nota, nem por um instante", async () => {
+    db.user_work_state = [{ user_id: U, work_id: "w1", personal_status_id: 2, chapters_read: 50, user_score: 9.4 }]
+    const { writeReadingState } = await import("@/server/queries/user-work-state")
+    await writeReadingState(U, ["w1"], { user_score: 8.7, post_story_score: 8, chapters_read: 60 })
+    expect(de("w1")).toMatchObject({ user_score: 9.4, post_story_score: 8, chapters_read: 60 })
+    expect(notasGravadas).toEqual([]) // a outra nota nunca chegou ao banco
+    expect(recalc.markRecalcPending).not.toHaveBeenCalled()
+  })
+
+  it("a aplicação de pesos em lote (mirrorOwnerState) também não troca", async () => {
+    db.user_work_state = [{ user_id: U, work_id: "w1", personal_status_id: 2, chapters_read: 50, user_score: 9.4 }]
+    const { mirrorOwnerState } = await import("@/server/queries/user-work-state")
+    await mirrorOwnerState(U, ["w1"], { user_score: 8.7 })
+    expect(de("w1")?.user_score).toBe(9.4)
+  })
+
+  it("num lote, a obra sem categorias recebe a nota da escrita e a com categorias, a delas", async () => {
+    db.works.push({ id: "w2", total_chapters: 100 })
+    db.user_work_state = [{ user_id: U, work_id: "w1", personal_status_id: 2, chapters_read: 50, user_score: 5 }]
+    const { writeReadingState } = await import("@/server/queries/user-work-state")
+    await writeReadingState(U, ["w1", "w2"], { user_score: 8 })
+    expect(de("w1")?.user_score).toBe(9.4)
+    expect(de("w2")?.user_score).toBe(8)
   })
 
   it("com a leitura travada, nada é gravado", async () => {

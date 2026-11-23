@@ -43,8 +43,10 @@ export async function getFirstStepsProgress(): Promise<FirstStepsProgress | null
     count(
       sb
         .from("user_work_state")
-        .select("*", { count: "exact", head: true })
+        // Arquivada fora, como no recálculo e no ensō: a nota dela não liga a Nota Prevista.
+        .select("work_id, works!inner(is_archived)", { count: "exact", head: true })
         .eq("user_id", userId)
+        .eq("works.is_archived", false)
         .not("user_score", "is", null),
     ),
   ])

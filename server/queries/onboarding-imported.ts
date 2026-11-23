@@ -31,8 +31,13 @@ function readStatusIds(): number[] {
     .filter((id): id is number => id != null)
 }
 
-/** As colunas de `user_work_state` que a tela de notas precisa: a ordem e o estado de leitura. */
-const RATE_ROW_COLUMNS = "work_id, updated_at, personal_status_id, chapters_read"
+/**
+ * As colunas de `user_work_state` que a tela de notas precisa: a ordem e o estado de leitura. O embed existe
+ * para o filtro de arquivadas: o recálculo as exclui (`fetchRecalcWorks`), então a nota delas não conta para
+ * a Nota Prevista — nem entra na lista, nem no "N de M obras", nem nas 20.
+ */
+const RATE_ROW_COLUMNS = "work_id, updated_at, personal_status_id, chapters_read, works!inner(is_archived)"
+const RATED_COUNT_COLUMNS = "work_id, works!inner(is_archived)"
 
 interface RateRowData {
   work_id: string
@@ -77,6 +82,7 @@ export async function getImportedUnrated(userId: string, sinceIso: string): Prom
       .from("user_work_state")
       .select(RATE_ROW_COLUMNS)
       .eq("user_id", userId)
+      .eq("works.is_archived", false)
       .is("user_score", null)
       .in("personal_status_id", readStatusIds())
       .gte("updated_at", sinceIso)
@@ -85,8 +91,9 @@ export async function getImportedUnrated(userId: string, sinceIso: string): Prom
       .limit(IMPORTED_UNRATED_LIMIT),
     supabase
       .from("user_work_state")
-      .select("*", { count: "exact", head: true })
+      .select(RATED_COUNT_COLUMNS, { count: "exact", head: true })
       .eq("user_id", userId)
+      .eq("works.is_archived", false)
       .not("user_score", "is", null)
       .gte("updated_at", sinceIso),
     supabase
@@ -115,6 +122,7 @@ export async function getUnratedRead(userId: string): Promise<RateListWork[]> {
     .from("user_work_state")
     .select(RATE_ROW_COLUMNS)
     .eq("user_id", userId)
+    .eq("works.is_archived", false)
     .is("user_score", null)
     .in("personal_status_id", readStatusIds())
     .order("updated_at", { ascending: false })
@@ -130,8 +138,7 @@ export async function getUnratedRead(userId: string): Promise<RateListWork[]> {
  * de `IMPORTED_UNRATED_LIMIT` — é daqui que sai o "de N obras" do ensō, e contar pela lista erraria
  * em silêncio quem tem mais obras sem nota do que a lista mostra.
  *
- * Sem embed `user_work_state → works` de propósito: o total de capítulos vem numa segunda leitura,
- * por id, para não abrir um par novo no contrato do PostgREST só por uma coluna.
+ * O total de capítulos vem numa segunda leitura, por id, que também é quem tira as arquivadas.
  */
 export async function countUnratedReadSplitOf(userId: string): Promise<{ rateable: number; locked: number }> {
   const supabase = createAdminClient()
@@ -148,12 +155,13 @@ export async function countUnratedReadSplitOf(userId: string): Promise<{ rateabl
   const totals = new Map<string, number | null>()
   const ids = rows.map((r) => r.work_id)
   for (let i = 0; i < ids.length; i += 100) {
-    const { data, error } = await supabase.from("works").select("id, total_chapters").in("id", ids.slice(i, i + 100))
+    const { data, error } = await supabase.from("works").select("id, total_chapters").eq("is_archived", false).in("id", ids.slice(i, i + 100))
     if (error) throw new Error(`countUnratedReadSplitOf(works): ${error.message}`)
     for (const w of data ?? []) totals.set(w.id as string, (w.total_chapters as number | null) ?? null)
   }
+  const active = rows.filter((r) => totals.has(r.work_id)) // arquivada não volta da leitura de cima
   let rateable = 0
-  for (const r of rows) {
+  for (const r of active) {
     const ok = canRateReadingState({
       personalStatus: r.personal_status_id,
       chaptersRead: r.chapters_read,
@@ -161,15 +169,16 @@ export async function countUnratedReadSplitOf(userId: string): Promise<{ rateabl
     })
     if (ok) rateable++
   }
-  return { rateable, locked: rows.length - rateable }
+  return { rateable, locked: active.length - rateable }
 }
 
 /** Quantas obras COM nota a pessoa tem (o número do ensō). Conta no servidor: zero linhas trafegam. */
 export async function countRatedWorksOf(userId: string): Promise<number> {
   const { count, error } = await createAdminClient()
     .from("user_work_state")
-    .select("*", { count: "exact", head: true })
+    .select(RATED_COUNT_COLUMNS, { count: "exact", head: true })
     .eq("user_id", userId)
+    .eq("works.is_archived", false)
     .not("user_score", "is", null)
   if (error) throw new Error(`countRatedWorksOf: ${error.message}`)
   return count ?? 0

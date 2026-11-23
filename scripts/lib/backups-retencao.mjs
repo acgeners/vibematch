@@ -214,6 +214,18 @@ export const FAMILIAS = [
     env: "NORMALIZAR_TITULOS_KEEP",
   },
   {
+    id: "nota-das-categorias",
+    dono: "lib/copia-notas.mjs",
+    // Datado, um diretório por execução com as linhas anteriores de nota e previsão das obras tocadas.
+    // Alguns KB. É a única forma de desfazer — o banco não tem PITR.
+    oQueE: "notas, categorias e previsões anteriores das obras que os scripts de nota tocaram",
+    casa: (n) => /^nota-das-categorias-\d{4}/.test(n),
+    exemplo: "nota-das-categorias-2026-11-23T05-00-00-000Z",
+    copiaLocal: true, // estado anterior: a única forma de desfazer
+    keepPadrao: 10,
+    env: "NOTA_DAS_CATEGORIAS_KEEP",
+  },
+  {
     id: "status-pela-traducao",
     dono: "status-pela-traducao.ts",
     // Datado, um diretório por execução com o status anterior de cada obra tocada. Alguns KB.
