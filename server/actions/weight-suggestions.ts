@@ -1,6 +1,7 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { ensureAdmin } from "@/server/queries/current-user"
 import { CRITERION_SLUGS, type CategoryScoreMap, type CriterionSlug } from "@/types/domain"
 import {
@@ -22,22 +23,24 @@ export async function suggestScoreWeights(): Promise<WeightInferenceResult> {
   if (!gate.ok) throw new Error(gate.error)
   const supabase = createAdminClient()
 
-  const [worksRes, weightsRes] = await Promise.all([
-    supabase
-      .from("works_owner")
-      .select(
-        `id, user_score, category_scores(criterion_slug, score)`
-      )
-      .not("user_score", "is", null)
-      .eq("is_archived", false)
-      .limit(2000),
+  // Paginada: `.limit(2000)` não passa de 1000 (o PostgREST corta ali sem erro). Hoje as obras com
+  // nota cabem numa página; a régua não pode depender disso continuar verdade.
+  const [works, weightsRes] = await Promise.all([
+    fetchAllRows<Record<string, unknown>>(
+      () =>
+        supabase
+          .from("works_owner")
+          .select(`id, user_score, category_scores(criterion_slug, score)`)
+          .not("user_score", "is", null)
+          .eq("is_archived", false),
+      { orderBy: ["id"], label: "suggestScoreWeights" },
+    ),
     supabase.from("score_weights").select("slug, weight").eq("is_active", true),
   ])
 
-  if (worksRes.error) throw new Error(worksRes.error.message)
   if (weightsRes.error) throw new Error(weightsRes.error.message)
 
-  const inputs: WeightInferenceInput[] = (worksRes.data ?? []).map((row) => {
+  const inputs: WeightInferenceInput[] = works.map((row) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const r = row as any
     const categoryScores: CategoryScoreMap = {}

@@ -415,8 +415,12 @@ export type TasteStatePatch = Partial<{
 
 export type PersonalStatePatch = ReadingStatePatch & TasteStatePatch
 
-/** `readEditionsWritten`: quantas linhas tiveram a versão da avaliação gravada/limpa (mig 216). */
-export type WriteResult = { error: string | null; readEditionsWritten?: number }
+/**
+ * `readEditionsWritten`: quantas linhas tiveram a versão da avaliação gravada/limpa (mig 216).
+ * `categoriesWon`: as obras em que a nota das categorias de gosto decidiu, e o `user_score` do patch não
+ * entrou (`splitByTasteLabel`). Quem conta "notas alteradas" desconta estas.
+ */
+export type WriteResult = { error: string | null; readEditionsWritten?: number; categoriesWon?: string[] }
 
 /**
  * Grava o estado pessoal de UM usuário em N obras. Upsert idempotente.
@@ -503,7 +507,7 @@ async function writeByTasteLabel(
   write: (ids: string[], patch: PersonalStatePatch) => Promise<WriteResult>,
 ): Promise<WriteResult> {
   if (opts.skipTasteRestore || !touchesLabelOrGate(patch)) return write(ids, patch)
-  const { groups, changed } = await planTasteLabels(client, userId, ids, patch)
+  const { groups, changed, won } = await planTasteLabels(client, userId, ids, patch)
   let last: WriteResult = { error: null }
   let editions = 0
   for (const g of groups) {
@@ -512,7 +516,8 @@ async function writeByTasteLabel(
     editions += last.readEditionsWritten ?? 0
   }
   if (changed.length > 0) await markTasteLabelRecalc(userId)
-  return groups.length === 1 ? last : { error: null, readEditionsWritten: editions }
+  const result: WriteResult = groups.length === 1 ? last : { error: null, readEditionsWritten: editions }
+  return won.length > 0 ? { ...result, categoriesWon: won } : result
 }
 
 /** Lê o que `splitByTasteLabel` precisa. Falha de leitura loga e grava o patch como veio, como antes da regra. */
@@ -521,8 +526,8 @@ async function planTasteLabels(
   userId: string,
   ids: string[],
   patch: PersonalStatePatch,
-): Promise<{ groups: { ids: string[]; patch: PersonalStatePatch }[]; changed: string[] }> {
-  const asIs = { groups: [{ ids, patch }], changed: [] }
+): Promise<{ groups: { ids: string[]; patch: PersonalStatePatch }[]; changed: string[]; won: string[] }> {
+  const asIs = { groups: [{ ids, patch }], changed: [], won: [] }
   try {
     const labelByWork = new Map<string, number | null>()
     for (let i = 0; i < ids.length; i += 100) {

@@ -57,10 +57,16 @@ export function splitByTasteLabel<P extends object>(
   patch: P,
   states: LabelState[],
   labelByWork: Map<string, number | null>,
-): { groups: { ids: string[]; patch: P }[]; changed: string[] } {
+): {
+  groups: { ids: string[]; patch: P }[]
+  changed: string[]
+  /** As obras em que a nota das categorias decidiu (mantida ou restaurada): o `user_score` do patch não entrou. */
+  won: string[]
+} {
   const byId = new Map(states.map((s) => [s.workId, s]))
   const groups = new Map<string, { ids: string[]; patch: P }>()
   const changed: string[] = []
+  const won: string[] = []
   const add = (key: string, id: string, make: () => P) => {
     const g = groups.get(key)
     if (g) g.ids.push(id)
@@ -72,6 +78,7 @@ export function splitByTasteLabel<P extends object>(
     if (!state || label == null) {
       add("as-is", id, () => patch)
     } else if (state.score === label) {
+      won.push(id)
       add("keep", id, () => {
         const rest = { ...patch } as Record<string, unknown>
         delete rest.user_score
@@ -79,10 +86,11 @@ export function splitByTasteLabel<P extends object>(
       })
     } else {
       changed.push(id)
+      won.push(id)
       add(`label:${label}`, id, () => ({ ...patch, user_score: label }))
     }
   }
-  return { groups: [...groups.values()], changed }
+  return { groups: [...groups.values()], changed, won }
 }
 
 /** O patch mexe no que decide a nota (ela mesma, o status ou os capítulos)? Só aí vale reconferir. */

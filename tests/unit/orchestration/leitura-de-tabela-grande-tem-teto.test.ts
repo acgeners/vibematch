@@ -90,9 +90,49 @@ function temTeto(l: Leitura, src: string, i: number): boolean {
     /\.eq\("id",|\.eq\("work_id",|\.eq\("slug",|\.in\("id",|\.in\("work_id",|selectByIdsInChunks/.test(
       l.trecho.slice(0, 400),
     ) || // escopada por chave
-    /\.limit\(/.test(l.trecho) // teto EXPLÍCITO — alguém escolheu, e aparece no diff
+    tetoHonrado(l.trecho)
   )
 }
+
+/**
+ * O PostgREST da nuvem corta em 1000 linhas QUALQUER pedido, inclusive com `limit` maior:
+ * `.limit(2000)` devolve 1000 sem erro. Só vale como teto o `.limit(N)` com N ≤ 1000.
+ *
+ * 🔴 Até 2026-11-24 este teste aceitava qualquer `.limit(` como "teto EXPLÍCITO", e era a
+ * porta por onde o corte silencioso passava: o "Aplicar" dos pesos pós-leitura leu 1.000 das
+ * 1.085 obras ativas (`works_owner` com `.limit(2000)`), e 13 obras com pós-leitura ficaram de
+ * fora sem nada acusar. O código já sabia disso desde 2026-09-08 (vários comentários "NÃO é
+ * honrado"); quem não sabia era a régua.
+ */
+const CORTE_DO_POSTGREST = 1000
+
+/**
+ * Um `.limit(...)` cujo argumento não traz número acima do corte. Variável (`.limit(limit)`)
+ * passa: o valor é do chamador e a varredura não o enxerga. Número literal acima de 1000 —
+ * inclusive como padrão (`.limit(opts.limit ?? 5000)`) — reprova.
+ */
+function tetoHonrado(trecho: string): boolean {
+  const m = trecho.match(/\.limit\(([^)]*)\)/)
+  if (!m) return false
+  const numeros = (m[1].match(/\d[\d_]*/g) ?? []).map((n) => Number(n.replace(/_/g, "")))
+  return numeros.every((n) => n <= CORTE_DO_POSTGREST)
+}
+
+describe("`.limit(N)` só conta como teto com N ≤ 1000", () => {
+  // A régua em si, sem depender do source de hoje: se ela voltar a aceitar qualquer `.limit(`,
+  // estes casos reprovam mesmo que nenhuma leitura do app esteja errada no momento.
+  it.each([
+    [".limit(1000)", true],
+    [".limit(60)", true],
+    [".limit(limit)", true], // valor do chamador: a varredura não o enxerga
+    [".limit(limit * 4)", true],
+    [".limit(2000)", false],
+    [".limit(10_000)", false],
+    [".limit(opts.limit ?? 5000)", false], // o padrão é o que vale quando ninguém passa
+  ])("%s → %s", (trecho, esperado) => {
+    expect(tetoHonrado(`.from("works").select("id")${trecho}`)).toBe(esperado)
+  })
+})
 
 describe("leitura de tabela grande nunca depende do corte de 1000", () => {
   const leituras = (() => {

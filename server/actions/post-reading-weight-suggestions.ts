@@ -1,6 +1,7 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { ensureAdmin, getOwnerUserId } from "@/server/queries/current-user"
 import { mirrorOwnerState } from "@/server/queries/user-work-state"
 import type { PostReadingScoreField } from "@/lib/constants/post-reading-criteria"
@@ -35,15 +36,14 @@ export async function suggestPostReadingWeights(
 
   // Lê o dado PESSOAL do DONO (as 8 notas pós-leitura) → vem do espelho via a view
   // `works_owner`, não da linha compartilhada de `works` (que vai perder essas colunas).
-  const { data, error } = await supabase
-    .from("works_owner")
-    .select(selectColumns)
-    .eq("is_archived", false)
-    .limit(2000)
+  // 🔴 Paginada: o `.limit(2000)` de antes devolvia 1000 (o PostgREST corta ali), e a sugestão
+  // treinava num recorte arbitrário do catálogo. Medido em 2026-11-24: 1.000 de 1.085 obras.
+  const data = await fetchAllRows<Record<string, unknown>>(
+    () => supabase.from("works_owner").select(selectColumns).eq("is_archived", false),
+    { orderBy: ["id"], label: "suggestPostReadingWeights" },
+  )
 
-  if (error) throw new Error(error.message)
-
-  const inputs: PostReadingWeightInferenceInput[] = (data ?? [])
+  const inputs: PostReadingWeightInferenceInput[] = data
     .map((row) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const r = row as any
@@ -88,16 +88,15 @@ export async function applyPostReadingWeights(
   const supabase = createAdminClient()
 
   const selectColumns = ["id", "user_score", ...POST_READING_FIELDS].join(", ")
-  const { data, error } = await supabase
-    .from("works_owner")
-    .select(selectColumns)
-    .eq("is_archived", false)
-    .limit(2000)
-
-  if (error) throw new Error(error.message)
+  // 🔴 Paginada: com `.limit(2000)` o PostgREST devolvia 1000 de 1.085 obras e 13 com pós-leitura
+  // ficavam de fora sem nada acusar (medido em 2026-11-24, na 1ª aplicação real depois do #647).
+  const data = await fetchAllRows<Record<string, unknown>>(
+    () => supabase.from("works_owner").select(selectColumns).eq("is_archived", false),
+    { orderBy: ["id"], label: "applyPostReadingWeights" },
+  )
 
   const updates: Array<{ id: string; user_score: number | null }> = []
-  for (const row of data ?? []) {
+  for (const row of data) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const r = row as any
     let scoreSum = 0
@@ -121,6 +120,7 @@ export async function applyPostReadingWeights(
     }
   }
 
+  let updatedManualScores = 0
   if (updates.length > 0) {
     // 🔴 A nota se grava SÓ pelo espelho. `works_owner` é uma visão com JOIN, e o Postgres não
     // aceita escrita nela (`is_updatable = NO`, sem trigger INSTEAD OF): o `update` que existia
@@ -131,9 +131,12 @@ export async function applyPostReadingWeights(
     for (const u of updates) {
       const mirror = await mirrorOwnerState(ownerId, [u.id], { user_score: u.user_score })
       if (mirror.error) throw new Error(mirror.error)
+      // A nota das categorias decidiu: a destes pesos não entrou, então não conta como alterada.
+      // Contar `updates.length` dizia "161 notas recalculadas" quando 2 mudaram (24/11/2026).
+      if (!mirror.categoriesWon?.includes(u.id)) updatedManualScores++
     }
   }
 
   const recalc = await recalculateScoresNowResult()
-  return { recalculated: recalc.recalculated, updatedManualScores: updates.length }
+  return { recalculated: recalc.recalculated, updatedManualScores }
 }

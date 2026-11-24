@@ -4,6 +4,7 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { after } from "next/server"
 import { ensureAdmin, getCurrentUserSettingsId, getOwnerUserId, getSessionUserId } from "@/server/queries/current-user"
 import { markRecalcPending, recalculateScoresInBackground, recalculateScoresNowResult } from "@/server/recalc/queue"
@@ -590,15 +591,20 @@ export interface CalibrationHistoryEntry {
 export async function getCalibrationSnapshot() {
   const supabase = createAdminClient()
 
-  const [worksRes, historyRes] = await Promise.all([
-    supabase
-      .from("works_owner")
-      .select(
-        `id, title, user_score,
-         calculated_scores(total_votes, expected_score, expected_is_stub)`
-      )
-      .eq("is_archived", false)
-      .limit(2000),
+  // 🔴 A leitura das obras é PAGINADA: o `.limit(2000)` de antes devolvia 1000 (o PostgREST corta
+  // ali), e a calibração saía de um recorte arbitrário. Medido em 2026-11-24: 1.000 de 1.085.
+  const [works, historyRes] = await Promise.all([
+    fetchAllRows<{ id: string; title: string; user_score: number | string | null; calculated_scores: unknown }>(
+      () =>
+        supabase
+          .from("works_owner")
+          .select(
+            `id, title, user_score,
+         calculated_scores(total_votes, expected_score, expected_is_stub)`,
+          )
+          .eq("is_archived", false),
+      { orderBy: ["id"], label: "getCalibrationSnapshot" },
+    ),
     supabase
       .from("calibration_history")
       .select(
@@ -608,11 +614,10 @@ export async function getCalibrationSnapshot() {
       .limit(1000),
   ])
 
-  if (worksRes.error) throw new Error(worksRes.error.message)
   // history error é não-fatal: tabela pode estar vazia ou indisponível em ambientes legados.
   const history = (historyRes.data ?? []) as CalibrationHistoryEntry[]
 
-  const items = (worksRes.data ?? []).map((w) => {
+  const items = works.map((w) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cs = (w as any).calculated_scores as any
     return {
