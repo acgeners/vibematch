@@ -683,11 +683,10 @@ export async function getRanking(
   // (embuti-los inflava o payload ~3.9MB). work_synopses idem: vem de primarySynopsisPromise.
   const hideAdult = await hideAdultPromise
 
-  // leitura-limitada: o teto é aplicado nos DOIS call sites (`.limit(2000)`, logo abaixo),
-  // não aqui — a fábrica é reusada por lote de ids. É teto EXPLÍCITO, não o corte silencioso
-  // de 1000 do PostgREST: o catálogo tem 1009 obras ativas em 2026-08-18. Paginá-la mexe no
-  // payload mais pesado do app (a mesma projeção já mediu 8,6 MB numa tacada em outro ponto)
-  // e precisa de medição de latência PRÓPRIA — `fetchAllRows` seria serial.
+  // leitura-limitada: a fábrica não pagina sozinha porque os dois call sites, logo abaixo, a
+  // limitam de outro jeito: lotes de 100 ids (`selectByIdsInChunks`) ou o catálogo inteiro por
+  // `fetchAllRows`, ordenado por `title`. Esta linha já dizia que o teto era um `.limit(2000)`, e
+  // `.limit` acima de 1000 não é teto: o PostgREST corta em 1000 (medido em 2026-09-08 e 2026-11-24).
   // Tira do conjunto COMPLETO as obras excluídas por tag/gênero. Equivale ao `not id in (…)`
   // (id nunca é nulo), sem pôr a lista na URL. O custo é o da leitura sem filtro: as excluídas
   // vêm e são descartadas aqui.
@@ -757,7 +756,7 @@ export async function getRanking(
     ? await selectByIdsInChunks<LinhaWorks>(
         restrictIds,
         (chunk) =>
-          buildWorksQuery().in("id", chunk).limit(2000) as unknown as PromiseLike<{
+          buildWorksQuery().in("id", chunk) as unknown as PromiseLike<{
             data: LinhaWorks[] | null
             error: { message: string } | null
           }>,

@@ -584,7 +584,6 @@ export async function getAlignmentQueueWorks(opts: {
   pubStatusIds?: number[]
   personalStatusIds?: number[]
   synopsisQualities?: string[]
-  limit?: number
   /** Caminho do badge: pula o join de capas/título — só o suficiente pra filtrar
    *  o estado e contar (evita hidratar covers de ~750 obras à toa no fan-out). */
   countOnly?: boolean
@@ -607,25 +606,30 @@ export async function getAlignmentQueueWorks(opts: {
   const selectCols: string = opts.countOnly
     ? "id, calculated_scores(alignment_score, alignment_stale)"
     : "id, title, publication_status_id, synopsis_quality, work_covers(url, is_primary, position), calculated_scores(expected_score, alignment_score, alignment_stale, alignment_at)"
-  let query = supabase
-    .from("works_owner")
-    .select(selectCols)
-    .eq("is_archived", false)
-    .neq("ai_eval_status", "skipped")
-  if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
-    query = query.in("publication_status_id", opts.pubStatusIds)
+  const build = () => {
+    let query = supabase
+      .from("works_owner")
+      .select(selectCols)
+      .eq("is_archived", false)
+      .neq("ai_eval_status", "skipped")
+    if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
+      query = query.in("publication_status_id", opts.pubStatusIds)
+    }
+    if (opts.synopsisQualities && opts.synopsisQualities.length > 0) {
+      query = query.in("synopsis_quality", opts.synopsisQualities)
+    }
+    return query
   }
-  if (opts.synopsisQualities && opts.synopsisQualities.length > 0) {
-    query = query.in("synopsis_quality", opts.synopsisQualities)
-  }
-  // Limite alto: com 500+ obras, um cap de 500 (sem order) descartava obras da
-  // cauda silenciosamente — uma obra stale ali sumia da aba mas aparecia no
-  // badge (que conta todas), gerando divergência aba×badge.
-  const { data, error } = await query.limit(opts.limit ?? 5000)
-  if (error) throw new Error(`Falha listando fila de Veredito IA: ${error.message}`)
+  // 🔴 Paginada. Era `.limit(5000)`, que o PostgREST corta em 1000 sem erro: com 1.085 obras
+  // ativas (24/11/2026) a fila e o badge olhavam um recorte arbitrário, e uma obra stale fora dele
+  // sumia dos dois. O cap de 500 de antes já tinha causado a divergência aba×badge.
+  const data = await fetchAllRows<unknown>(build, {
+    orderBy: ["id"],
+    label: "Falha listando fila de Veredito IA",
+  })
 
   const rows: AlignmentQueueWork[] = []
-  for (const row of (data ?? []) as unknown[]) {
+  for (const row of data) {
     const w = row as Record<string, unknown>
     const calc = reader.overlay(
       w.id as string,
@@ -693,7 +697,6 @@ export interface UntrackedWork extends HiatusFields {
 export async function getUntrackedWorks(opts: {
   pubStatusIds?: number[]
   synopsisQualities?: string[]
-  limit?: number
 }): Promise<UntrackedWork[]> {
   const supabase = createAdminClient()
   // "Untracked" (10) é per-usuário — `works_owner.personal_status_id` é sempre o
@@ -706,23 +709,30 @@ export async function getUntrackedWorks(opts: {
   // `user_id`; sem o overlay a Nota Prevista exibida seria sempre a do dono, como
   // as 3 filas irmãs já corrigiram.
   const [personalReader, scoresReader] = await Promise.all([getPersonalStateReader(), getScoresReader()])
-  let query = supabase
-    .from("works_owner")
-    .select(
-      `id, title, publication_status_id, synopsis_quality, ${HIATUS_SELECT_COLUMNS}, work_covers(url, is_primary, position), calculated_scores(expected_score)`,
-    )
-    .eq("is_archived", false)
-  if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
-    query = query.in("publication_status_id", opts.pubStatusIds)
+  const build = () => {
+    let query = supabase
+      .from("works_owner")
+      .select(
+        `id, title, publication_status_id, synopsis_quality, ${HIATUS_SELECT_COLUMNS}, work_covers(url, is_primary, position), calculated_scores(expected_score)`,
+      )
+      .eq("is_archived", false)
+    if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
+      query = query.in("publication_status_id", opts.pubStatusIds)
+    }
+    if (opts.synopsisQualities && opts.synopsisQualities.length > 0) {
+      query = query.in("synopsis_quality", opts.synopsisQualities)
+    }
+    return query
   }
-  if (opts.synopsisQualities && opts.synopsisQualities.length > 0) {
-    query = query.in("synopsis_quality", opts.synopsisQualities)
-  }
-  const { data, error } = await query.limit(opts.limit ?? 5000)
-  if (error) throw new Error(`Falha listando obras Untracked: ${error.message}`)
+  // 🔴 Paginada: `.limit(5000)` devolvia 1000 de 1.085 (24/11/2026), e obra Untracked fora do
+  // recorte não aparecia na aba.
+  const data = await fetchAllRows<Record<string, unknown>>(build, {
+    orderBy: ["id"],
+    label: "Falha listando obras Untracked",
+  })
 
   const rows: UntrackedWork[] = []
-  for (const row of data ?? []) {
+  for (const row of data) {
     const w = row as Record<string, unknown>
     const personalStatusId = personalReader.get(w.id as string).personalStatusId
     if (personalStatusId !== 10) continue

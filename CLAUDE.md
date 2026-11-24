@@ -4585,7 +4585,7 @@ de hashes, as obras correspondentes pareceriam "nunca embedadas" e seriam **re-e
 re-pagas a cada execução**, com o painel dizendo "N atualizados" e nada acusando.
 
 ⚠️ **A tabela vizinha tinha o problema INVERSO, e o mesmo dono.** `works` era lida com
-`.limit(2000)` — opt-out explícito do corte — numa requisição só, com quatro joins e as colunas
+`.limit(2000)` numa requisição só, com quatro joins e as colunas
 mais gordas da tabela: **8,6 MB crus em 978 linhas**, a maior resposta única do app. É a
 suspeita do `TypeError: terminated` que o painel de embeddings exibia (undici lança isso quando
 o CORPO da resposta morre no meio, o que acontece se o PostgREST estourar o `statement_timeout`
@@ -4663,22 +4663,24 @@ de `/curation/works` (558): não custa nada e tira o julgamento do caminho.
 Guardado por `tests/unit/orchestration/leitura-de-tabela-grande-tem-teto.test.ts`, que **varre
 `server/`, `lib/` e `app/`** e exige que toda leitura de uma das 18 tabelas grandes pagine,
 conte no servidor (`count: "exact", head: true`), seja escopada por chave, ou traga um teto
-explícito. ⚠️ Quando o teto vem de OUTRO lugar, a exceção é declarada **em código**, encostada
+explícito **de até 1000**. ⚠️ Quando o teto vem de OUTRO lugar, a exceção é declarada **em código**, encostada
 na query (`// leitura-limitada: <motivo medido>`) — o mesmo formato do `ALVO: NUVEM` dos
-scripts, nunca uma lista dentro do teste. Hoje há **uma**: a query principal do `/ranking`,
-cujo `.limit(2000)` mora nos dois call sites.
+scripts, nunca uma lista dentro do teste. Hoje há **uma**: a fábrica da query principal do
+`/ranking`, que os dois call sites leem por `fetchAllRows` ou por lotes de 100 ids.
+
+🔴 **`.limit(N)` com N acima de 1000 NÃO é teto: o PostgREST da nuvem corta em 1000 qualquer
+pedido, sem erro.** Medido em 2026-11-24: `works_owner` com `.limit(2000)` devolveu 1.000 de
+1.085 obras ativas. Até então o teste aceitava qualquer `.limit(` como "teto explícito", e por
+essa porta 8 leituras do catálogo inteiro trabalhavam sobre um recorte arbitrário: as duas filas
+de "Suas notas de IA" (Veredito e Untracked) e o badge que as conta, as sugestões e a aplicação
+dos pesos pós-leitura, as sugestões de pesos da IA, o retrato de calibração e a contagem de obras
+pendentes de cálculo. Hoje a régua reprova número literal acima de 1000 no `.limit(...)`,
+inclusive como padrão (`.limit(opts.limit ?? 5000)`).
 
 ⚠️ **`tags` (3.042 linhas) fica FORA da lista de propósito, e é medição:** nenhuma leitura do
 app pega o conjunto todo — a mais larga é por `tag_group_id`, e o **maior grupo tem 394** tags.
 A exclusão é da TABELA, com o número ao lado; entra na lista no dia em que um grupo passar de
 1000.
-
-🔴 **ABERTO, medido e datado:** a query principal do `/ranking` usa `.limit(2000)` com o
-catálogo em 1009 — teto explícito, não o corte silencioso, mas é um penhasco igual, 991 obras
-adiante. Paginá-la mexe no payload mais pesado do app e **precisa de medição de latência
-própria**: `fetchAllRows` é serial (6 idas a ~300ms contra o banco de Ohio), e quem serve pra
-isso é `fetchAllRowsParallel`. Não foi feito aqui porque trocar um penhasco distante por uma
-regressão de latência medida em segundos é pior negócio.
 
 ### Paginar sem `ORDER BY` não é paginação — e o erro se disfarça de trabalho feito
 

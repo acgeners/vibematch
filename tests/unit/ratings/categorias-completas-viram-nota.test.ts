@@ -131,6 +131,8 @@ describe("a regra pura", () => {
   it("divide a escrita: quem já tem a nota das categorias sai do patch, quem difere a recebe, o resto vai como veio", () => {
     const out = splitByTasteLabel(["vazia", "travada", "craft", "igual", "fora"], { user_score: 8.7, chapters_read: 50 }, states, labels)
     expect(out.changed).toEqual(["vazia", "craft"])
+    // Onde as categorias decidiram (restauradas OU mantidas): quem conta "notas alteradas" desconta estas.
+    expect(out.won).toEqual(["vazia", "craft", "igual"])
     expect(out.groups).toEqual([
       { ids: ["vazia", "craft"], patch: { user_score: 9.4, chapters_read: 50 } },
       { ids: ["travada", "fora"], patch: { user_score: 8.7, chapters_read: 50 } },
@@ -173,8 +175,19 @@ describe("o escritor garante: categorias completas + leitura liberada ⇒ nota",
   it("a aplicação de pesos em lote (mirrorOwnerState) também não troca", async () => {
     db.user_work_state = [{ user_id: U, work_id: "w1", personal_status_id: 2, chapters_read: 50, user_score: 9.4 }]
     const { mirrorOwnerState } = await import("@/server/queries/user-work-state")
-    await mirrorOwnerState(U, ["w1"], { user_score: 8.7 })
+    const res = await mirrorOwnerState(U, ["w1"], { user_score: 8.7 })
     expect(de("w1")?.user_score).toBe(9.4)
+    // E o escritor DIZ que a nota da escrita não entrou — é o que impede o aviso de contar w1 como alterada.
+    expect(res.categoriesWon).toEqual(["w1"])
+  })
+
+  it("obra sem categorias: a nota da escrita entra, e o escritor não a dá como decidida pelas categorias", async () => {
+    db.pilot_taste_scores = []
+    db.user_work_state = [{ user_id: U, work_id: "w1", personal_status_id: 2, chapters_read: 50, user_score: 7 }]
+    const { mirrorOwnerState } = await import("@/server/queries/user-work-state")
+    const res = await mirrorOwnerState(U, ["w1"], { user_score: 8.7 })
+    expect(de("w1")?.user_score).toBe(8.7)
+    expect(res.categoriesWon ?? []).toEqual([])
   })
 
   it("num lote, a obra sem categorias recebe a nota da escrita e a com categorias, a delas", async () => {

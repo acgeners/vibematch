@@ -1732,16 +1732,26 @@ export async function createWorksBatch(
  * via createWorkPending e ainda não têm linha em calculated_scores.
  */
 export async function getPendingBatchCount(): Promise<number> {
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
+  const { count, error } = await countWorksWithoutScores(createAdminClient())
+  return error ? 0 : count
+}
+
+/**
+ * Obras ativas sem linha em `calculated_scores`, contadas NO SERVIDOR.
+ *
+ * 🔴 Era `select("id, calculated_scores(id)").limit(2000)` e filtro em JS: o PostgREST corta em
+ * 1000 qualquer pedido, então com 1.085 obras ativas (24/11/2026) a conta olhava um recorte
+ * arbitrário e podia não ver obra pendente nenhuma. Contar aqui não tem teto e não traz linha.
+ */
+async function countWorksWithoutScores(
+  supabase: ReturnType<typeof createAdminClient>,
+): Promise<{ count: number; error: string | null }> {
+  const { count, error } = await supabase
     .from("works")
-    .select("id, calculated_scores(id)")
+    .select("id, calculated_scores!left(id)", { count: "exact", head: true })
     .eq("is_archived", false)
-    .limit(2000)
-  if (error) return 0
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const pending = (data ?? []).filter((w: any) => !w.calculated_scores)
-  return pending.length
+    .is("calculated_scores", null)
+  return { count: count ?? 0, error: error?.message ?? null }
 }
 
 /**
@@ -1750,15 +1760,8 @@ export async function getPendingBatchCount(): Promise<number> {
 export async function finalizePendingBatch() {
   const gate = await ensureAdmin()
   if (!gate.ok) throw new Error(gate.error)
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from("works")
-    .select("id, calculated_scores(id)")
-    .eq("is_archived", false)
-    .limit(2000)
-  if (error) throw new Error(error.message)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const pending = (data ?? []).filter((w: any) => !w.calculated_scores).length
+  const { count: pending, error } = await countWorksWithoutScores(createAdminClient())
+  if (error) throw new Error(error)
 
   const finalizeRecalc = await recalculateScoresNow()
   // `blocked` também lança: o botão só existe para recalcular, e seguir faria o toast dizer
