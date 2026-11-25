@@ -58,7 +58,6 @@ const NAO_AVALIADO = row("not_rated", null)
 
 const fatos = (over: Partial<StructuralFacts> = {}): StructuralFacts => ({
   isMixed: true,
-  r18ExtraChapters: false,
   standardLines: ["Original Webtoon: R15: Ridibooks"],
   tags: [ATO, R19],
   muGenres: [],
@@ -102,6 +101,15 @@ describe("o que confirma a natureza sexual — e o que NÃO", () => {
     expect(confirma({ tags: [tag("Sexual Content", "label", "rating-labels")] })).toBe(true)
     expect(confirma({ muGenres: ["Smut"] })).toBe(true)
     expect(confirma({ externalRatings: ["erotica"] })).toBe(true)
+  })
+
+  it("Erotica conta como tag pelo mesmo motivo que conta como classificação (decisão de 2026-11-24)", () => {
+    // Como o banco a guarda: `label`, sem subgrupo, sem flag forte — nada além do nome a separa de "Adult".
+    const EROTICA = tag("Erotica", "label", null)
+    expect(confirma({ tags: [EROTICA] })).toBe(true)
+    expect(confirma({ externalRatings: ["erotica"] })).toBe(true)
+    // A procedência continua valendo: Erotica que a IA inferiu da prosa não confirma.
+    expect(confirma({ tags: [tag("Erotica", "label", null, { source: "ai_inferred" })] })).toBe(false)
   })
 
   it("rótulo de IDADE sozinho não confirma (Adult, Mature, R19 — tag ou gênero)", () => {
@@ -218,11 +226,6 @@ describe("a procedência do vínculo da tag decide se ela pode confirmar (2026-1
 })
 
 describe("subtipos em que a padrão NÃO recebe base", () => {
-  it("extras: padrão sem base; adulta recebe o piso se sexual", () => {
-    const p = planStructuralInference(fatos({ r18ExtraChapters: true, current: { normal: NAO_AVALIADO, r18: NAO_AVALIADO } }))
-    expect(p.decisions.normal).toMatchObject({ kind: "none", reason: "conteúdo adulto só nos extras" })
-    expect(p.decisions.r18).toMatchObject({ kind: "infer", target: { score: 9 } })
-  })
   it("R12 e R17: padrão sem base (a base legada vira conflito); adulta segue a regra", () => {
     for (const [linha, rotulo] of [["Original Webtoon: R12: Naver", "abaixo de R15"], ["Official Translations: R17: Tapas", "R17"]] as const) {
       const p = planStructuralInference(fatos({ standardLines: [linha] }))
@@ -324,12 +327,6 @@ describe("ciclo de vida: reprocessar, evidência que chega depois, evidência qu
     expect(p.decisions.r18).toMatchObject({ kind: "retract", reason: /não confirmada/ })
   })
 
-  it("a padrão deixa de valer quando a curadoria marca extras; o piso da adulta fica", () => {
-    const p = planStructuralInference(fatos({ r18ExtraChapters: true, current: { normal: PROPRIA_PADRAO, r18: PROPRIO_PISO } }))
-    expect(p.decisions.normal).toMatchObject({ kind: "retract", reason: "conteúdo adulto só nos extras" })
-    expect(p.decisions.r18.kind).toBe("keep")
-  })
-
   it("obra que deixou de ser mixed: retira as próprias e não toca a base legada (conflito)", () => {
     const p = planStructuralInference(fatos({ isMixed: false, current: { normal: BASE_LEGADA, r18: PROPRIO_PISO } }))
     expect(p.decisions.r18).toMatchObject({ kind: "retract", reason: "obra não é mixed" })
@@ -385,9 +382,8 @@ describe("a avaliação de IA atual confirma a natureza sexual da R18 (decisão 
     expect([...AI_EVALUATION_VERSIONS_THAT_CONFIRM]).toContain(PROMPT_VERSION)
   })
 
-  it("I Failed to Oust the Villain! (fatos da nuvem, 2026-11-15): R18 só nos extras, sem tag sexual, IA v32 = 9 ⇒ R18 recebe o piso", () => {
+  it("I Failed to Oust the Villain! (fatos da nuvem, 2026-11-15): R18 só nos extras, sem tag sexual, IA v32 = 9 ⇒ as duas versões recebem nota", () => {
     const sem = fatos({
-      r18ExtraChapters: true,
       tags: [],
       muGenres: ["Mature"],
       current: { normal: NAO_AVALIADO, r18: NAO_AVALIADO },
@@ -397,8 +393,9 @@ describe("a avaliação de IA atual confirma a natureza sexual da R18 (decisão 
     const p = planStructuralInference({ ...sem, aiEvaluation: ia() })
     expect(p.sexualSignals).toEqual(["avaliação de IA (v32): 9.0"])
     expect(p.decisions.r18).toMatchObject({ kind: "infer", target: { score: ADULT_EDITION_SEXUAL_FLOOR, rule: STRUCTURAL_RULES.adultFloor } })
-    // A padrão segue sem base: o conteúdo adulto está só nos extras.
-    expect(p.decisions.normal).toMatchObject({ kind: "none", reason: "conteúdo adulto só nos extras" })
+    // O adulto estar só nos extras não tira a base da padrão R15 (decisão de 2026-11-24): os extras
+    // fazem parte da obra. Até então a padrão desta obra ficava sem nota e sem Nota Prevista.
+    expect(p.decisions.normal).toMatchObject({ kind: "infer", target: { score: STANDARD_EDITION_BASE, rule: STRUCTURAL_RULES.standardBase } })
   })
 
   it("a curadoria usa o mesmo sinal: com a IA confirmando, a R18 não pode ficar abaixo do explícito", () => {

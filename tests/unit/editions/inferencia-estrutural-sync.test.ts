@@ -677,7 +677,9 @@ describe("obras FUTURAS, com o interruptor ligado (os cenários aprovados)", () 
         propriaNormal("reaproveitada"), linha("reaproveitada", "r18", { score: 9.5, source: "reused_existing", status: "rated" }),
         propriaNormal("curadoria"), linha("curadoria", "r18", { score: 9, source: "curator_confirmed", status: "rated", decided_by: "curator" }),
         { ...structuredClone(BASE_LEGADA), work_id: "conflito-r17" }, linha("conflito-r17", "r18", { score: 9, source: "reused_existing", status: "rated" }),
-        linha("extras", "normal", {}), propriaR18("extras"),
+        // A marca de extras fica no estado (informação para o leitor) e não muda a inferência desde
+        // 2026-11-24: convergida, a padrão tem a base própria como qualquer mixed R15.
+        propriaNormal("extras"), propriaR18("extras"),
         linha("lucia", "normal", { score: 6, source: "reused_existing", status: "rated", confidence: "media" }), linha("lucia", "r18", {}),
         { ...structuredClone(BASE_LEGADA), work_id: "sem-sinal" }, linha("sem-sinal", "r18", {}),
       ],
@@ -690,7 +692,7 @@ describe("obras FUTURAS, com o interruptor ligado (os cenários aprovados)", () 
       reaproveitada: ["keep", "preserve"],
       curadoria: ["keep", "preserve"],
       "conflito-r17": ["conflict", "preserve"],
-      extras: ["none", "keep"],
+      extras: ["keep", "keep"],
       lucia: ["preserve", "none"],
       "sem-sinal": ["conflict", "none"],
     })

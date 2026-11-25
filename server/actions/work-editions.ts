@@ -252,7 +252,7 @@ export async function saveWorkEditionCuration(
     }
   }
 
-  // A inferência ESTRUTURAL acompanha a decisão: trocar estado ou extras pode criar ou retirar a base
+  // A inferência ESTRUTURAL acompanha a decisão: trocar o estado pode criar ou retirar a base
   // e o piso inferidos (nunca as notas que a curadoria acabou de gravar — elas são mais fortes).
   const inferencia = await reconcileStructuralInferenceForWork(supabase, workId)
 

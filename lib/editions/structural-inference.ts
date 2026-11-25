@@ -8,8 +8,14 @@
  *
  * | versão  | quando                                                                 | nota                          | regra                |
  * |---------|------------------------------------------------------------------------|-------------------------------|----------------------|
- * | padrão  | mixed, sem extras, rótulo R15/R16, natureza sexual da adulta confirmada | topo da faixa 4–6 (Sugestivo) | `base_padrao_r15`    |
- * | adulta  | mixed, natureza sexual confirmada                                       | início da faixa 9–10 (Smut)   | `piso_adulta_sexual` |
+ * | padrão  | mixed, rótulo R15/R16, natureza sexual da adulta confirmada | topo da faixa 4–6 (Sugestivo) | `base_padrao_r15`    |
+ * | adulta  | mixed, natureza sexual confirmada                           | início da faixa 9–10 (Smut)   | `piso_adulta_sexual` |
+ *
+ * ⚠️ R18 só nos capítulos extras (`work_edition_state.r18_extra_chapters`) NÃO muda nenhuma das duas
+ * (decisão da Ana, 2026-11-24): os extras fazem parte da obra, e o dado é informação para o leitor, não
+ * filtro da nota. Até então a padrão dessas obras ficava sem base — e sem Nota Prevista na versão que a
+ * conta nova vê (ocultar 18+ vem ligado). O conserto de verdade é a avaliação de IA dar uma nota por
+ * versão; esta base é a reserva até lá.
  *
  * 🔴 A fronteira é a REGRA DE PRODUTO das obras mixed (2026-10-16): a versão padrão nunca entra na
  * faixa explícita, e a versão adulta de natureza sexual nunca fica abaixo dela. O limiar é o da régua
@@ -104,11 +110,14 @@ export const STRONGER_EDITION_SOURCES: ReadonlySet<EditionScoreSource> = new Set
 export const SEXUAL_TAG_SUBGROUPS: readonly string[] = ["explicit", "sexual-acts", "sexual-themes"]
 const TIERS_COM_PISO: readonly string[] = ["explicit", "label"]
 /**
- * As duas exceções de `rating-labels` que nomeiam sexo — nenhuma flag do banco as separa de "Adult"
- * (as três são `label`, `adult_indicator`, sem `strong`), daí a lista. Entraram no ensaio aprovado
- * em 2026-10-15 como sinal suficiente.
+ * Tags de RÓTULO que nomeiam sexo — nenhuma flag do banco as separa de "Adult" (todas são `label`,
+ * sem `strong`), daí a lista:
+ *   · "Sexual Content" e "Borderline H" (`rating-labels`): ensaio aprovado em 2026-10-15.
+ *   · "Erotica" (gênero das fontes, como o do MAL, que entra como tag): decisão da Ana, 2026-11-24. A
+ *     classificação "erotica" do MangaDex/ComicK já confirmava (`SEXUAL_EXTERNAL_RATINGS`); a mesma
+ *     palavra vinda como tag não confirmava.
  */
-export const SEXUAL_RATING_LABEL_TAGS: readonly string[] = ["Sexual Content", "Borderline H"]
+export const SEXUAL_RATING_LABEL_TAGS: readonly string[] = ["Sexual Content", "Borderline H", "Erotica"]
 /**
  * Classificações externas (MangaDex/ComicK) que já valem, na régua da avaliação, pelo menos o piso
  * adulto — `erotica` (7) e `pornographic` (9). `suggestive` (5) é faixa 4–6 e não confirma nada.
@@ -269,7 +278,6 @@ export function standardEditionLabel(lines: ReadonlyArray<string>): StandardEdit
 
 export interface StructuralFacts {
   isMixed: boolean
-  r18ExtraChapters: boolean
   standardLines: ReadonlyArray<string>
   tags: ReadonlyArray<StructuralTagFacts>
   muGenres: ReadonlyArray<string>
@@ -324,13 +332,11 @@ export function planStructuralInference(f: StructuralFacts): StructuralPlan {
   const alvo: Record<MixedEdition, { target: StructuralTarget | null; why: string }> = {
     normal: !f.isMixed
       ? { target: null, why: "obra não é mixed" }
-      : f.r18ExtraChapters
-        ? { target: null, why: "conteúdo adulto só nos extras" }
-        : standardLabel !== "R15"
-          ? { target: null, why: `versão padrão ${standardLabel}` }
-          : !sexual
-            ? { target: null, why: naoSexual }
-            : { target: { score: STANDARD_EDITION_BASE, rule: STRUCTURAL_RULES.standardBase }, why: "" },
+      : standardLabel !== "R15"
+        ? { target: null, why: `versão padrão ${standardLabel}` }
+        : !sexual
+          ? { target: null, why: naoSexual }
+          : { target: { score: STANDARD_EDITION_BASE, rule: STRUCTURAL_RULES.standardBase }, why: "" },
     r18: !f.isMixed
       ? { target: null, why: "obra não é mixed" }
       : !sexual
