@@ -27,7 +27,7 @@ import type { EditionScoreSource, MixedEdition } from "@/lib/editions/mixed-edit
  *    mixed gravado pelo MangaUpdates marca recálculo). As linhas inferidas e a Nota Prevista mudam
  *    JUNTAS, na mesma execução — e a guarda de código canônico já protege a escrita.
  * 2. Na CURADORIA de versões ("Versões da obra…"), logo depois de gravar: lá a pessoa vê as linhas na
- *    hora, e trocar extras/estado precisa retirar a inferência que deixou de valer.
+ *    hora, e trocar o estado precisa retirar a inferência que deixou de valer.
  * 3. No script `scripts/reconciliar-inferencia-estrutural.ts` (ensaio por padrão): diagnóstico e
  *    reconciliação controlada, por versão.
  *
@@ -55,7 +55,7 @@ const LOTE = 100
 const CRITERIO = "adult_content"
 
 const STATE_SELECT =
-  "work_id, state, r18_extra_chapters, " +
+  "work_id, state, " +
   "normal_lines:evidence->mangaupdates->normal_lines, linhas_normal:evidence->mangaupdates->linhas_normal, " +
   "genres:evidence->mangaupdates->genres, generos_adultos:evidence->mangaupdates->generos_adultos"
 const SCORE_SELECT = "work_id, edition, criterion_slug, score, source, decided_by, regra:evidence->>regra"
@@ -64,7 +64,6 @@ const ADULT_TAG_FILTER = "adult_score_tier.not.is.null,adult_indicator.eq.true,a
 interface StateRow {
   work_id: string
   state: string | null
-  r18_extra_chapters: boolean | null
   normal_lines: unknown
   linhas_normal: unknown
   genres: unknown
@@ -252,7 +251,6 @@ export async function loadStructuralFacts(sb: Db, scope: { workIds?: string[] } 
       workId,
       facts: {
         isMixed: s?.state === "mixed",
-        r18ExtraChapters: s?.r18_extra_chapters === true,
         // Dois formatos de evidência: o da auditoria (mig 205/214) e o do save pelo MangaUpdates.
         standardLines: [...strings(s?.linhas_normal), ...strings(s?.normal_lines)],
         muGenres: [...strings(s?.generos_adultos), ...strings(s?.genres)],
